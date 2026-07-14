@@ -71,6 +71,18 @@ class PermissionSeeder extends Seeder
             // GIS
             'gis.view',
             'gis.manage',
+
+            // Protected Area Management
+            'protected-areas.view',
+            'protected-areas.create',
+            'protected-areas.update',
+            'protected-areas.delete',
+
+            // Management Plans
+            'management-plans.view',
+            'management-plans.create',
+            'management-plans.update',
+            'management-plans.delete',
         ];
 
         foreach ($permissions as $permission) {
@@ -94,6 +106,12 @@ class PermissionSeeder extends Seeder
             'reports.export',
             'gis.view',
             'gis.manage',
+            'protected-areas.view',
+            'protected-areas.create',
+            'protected-areas.update',
+            'management-plans.view',
+            'management-plans.create',
+            'management-plans.update',
         ]);
 
         Role::findByName('Viewer', 'web')->syncPermissions([
@@ -102,6 +120,8 @@ class PermissionSeeder extends Seeder
             'activities.view',
             'reports.view',
             'gis.view',
+            'protected-areas.view',
+            'management-plans.view',
         ]);
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();

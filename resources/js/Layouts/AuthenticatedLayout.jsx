@@ -3,15 +3,16 @@ import { useEffect, useState } from 'react';
 
 const navigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
+    { label: 'Protected Area Management', href: '/protected-areas', icon: 'map', permission: 'canViewProtectedAreas' },
+    { label: 'Ecotourism Impact Monitoring', icon: 'activity', comingSoon: true },
+    { label: 'Management Plans', href: '/management-plans', icon: 'document', permission: 'canViewManagementPlans' },
+    { label: 'Technical Reports', icon: 'report', comingSoon: true },
+    { label: 'Issues Monitoring', icon: 'activity', comingSoon: true },
+    { label: 'Programs, Projects & Activities', icon: 'folder', comingSoon: true },
+    { label: 'LAWIN Monitoring', icon: 'map', comingSoon: true },
+    { label: 'Reports', icon: 'report', comingSoon: true },
     { label: 'Administration', heading: true },
     { label: 'User Management', href: '/admin/users', icon: 'users', permission: 'canManageUsers' },
-    { label: 'Operations', heading: true },
-    { label: 'Documents', icon: 'document', comingSoon: true },
-    { label: 'Projects', icon: 'folder', comingSoon: true },
-    { label: 'Activities', icon: 'activity', comingSoon: true },
-    { label: 'Monitoring', heading: true },
-    { label: 'GIS', icon: 'map', comingSoon: true },
-    { label: 'Reports', icon: 'report', comingSoon: true },
     { label: 'Audit Logs', icon: 'audit', comingSoon: true },
     { label: 'Settings', icon: 'settings', comingSoon: true },
 ];
