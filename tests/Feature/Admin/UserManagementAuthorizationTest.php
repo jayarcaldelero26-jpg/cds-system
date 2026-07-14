@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\User;
+use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
@@ -49,16 +50,20 @@ test('CDS admin user management pages render with the admin navigation link', fu
     $this->actingAs($admin)
         ->get(route('admin.users.index'))
         ->assertOk()
-        ->assertSee('User Management')
-        ->assertSee($managedUser->email);
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Admin/Users/Index')
+            ->has('users.data', 2)
+            ->where('users.data.1.email', $managedUser->email));
 
     $this->get(route('admin.users.create'))
         ->assertOk()
-        ->assertSee('Create User');
+        ->assertInertia(fn (Assert $page) => $page->component('Admin/Users/Create'));
 
     $this->get(route('admin.users.edit', $managedUser))
         ->assertOk()
-        ->assertSee('Edit User');
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('Admin/Users/Edit')
+            ->where('user.email', $managedUser->email));
 });
 
 test('a CDS admin cannot delete their own account', function () {

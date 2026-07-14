@@ -9,7 +9,8 @@ use App\Models\User;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\View\View;
+use Inertia\Inertia;
+use Inertia\Response;
 use Spatie\Permission\Models\Role;
 
 class UserController extends Controller
@@ -19,24 +20,35 @@ class UserController extends Controller
     /**
      * Display all user accounts.
      */
-    public function index(): View
+    public function index(): Response
     {
         $this->authorize('viewAny', User::class);
 
-        return view('admin.users.index', [
-            'users' => User::query()->with('roles')->latest()->paginate(15),
+        return Inertia::render('Admin/Users/Index', [
+            'users' => User::query()
+                ->with('roles')
+                ->latest()
+                ->paginate(15)
+                ->through(fn (User $user): array => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'role' => $user->roles->first()?->name,
+                    'is_active' => $user->is_active,
+                    'created_at' => $user->created_at?->toDateString(),
+                ]),
         ]);
     }
 
     /**
      * Display the user creation form.
      */
-    public function create(): View
+    public function create(): Response
     {
         $this->authorize('create', User::class);
 
-        return view('admin.users.create', [
-            'roles' => $this->availableRoles(),
+        return Inertia::render('Admin/Users/Create', [
+            'roles' => $this->availableRoles()->pluck('name')->values(),
         ]);
     }
 
@@ -63,13 +75,19 @@ class UserController extends Controller
     /**
      * Display the user edit form.
      */
-    public function edit(User $user): View
+    public function edit(User $user): Response
     {
         $this->authorize('update', $user);
 
-        return view('admin.users.edit', [
-            'user' => $user->load('roles'),
-            'roles' => $this->availableRoles(),
+        return Inertia::render('Admin/Users/Edit', [
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->roles()->first()?->name,
+                'is_active' => $user->is_active,
+            ],
+            'roles' => $this->availableRoles()->pluck('name')->values(),
         ]);
     }
 

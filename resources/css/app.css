@@ -1,3 +1,29 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+    html {
+        @apply bg-gray-100 text-gray-900 antialiased;
+    }
+
+    html.dark {
+        @apply bg-gray-950 text-gray-100;
+    }
+
+    body {
+        @apply min-h-screen bg-gray-100 font-sans text-sm text-gray-900;
+    }
+
+    .dark body {
+        @apply bg-gray-950 text-gray-100;
+    }
+
+    :focus-visible {
+        @apply outline-none ring-2 ring-green-700 ring-offset-2 ring-offset-white;
+    }
+
+    .dark :focus-visible {
+        @apply ring-green-400 ring-offset-gray-900;
+    }
+}

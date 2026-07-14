@@ -1,0 +1,2 @@
+export function Skeleton({ className = '' }) { return <div className={`animate-pulse rounded bg-gray-200 dark:bg-gray-700 ${className}`} aria-hidden="true" />; }
+export function TableSkeleton({ rows = 5, columns = 4 }) { return <div className="space-y-3 p-5" role="status"><span className="sr-only">Loading table</span>{Array.from({ length: rows }, (_, row) => <div key={row} className="grid gap-4" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))` }}>{Array.from({ length: columns }, (_, column) => <Skeleton key={column} className="h-5" />)}</div>)}</div>; }

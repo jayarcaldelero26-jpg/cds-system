@@ -1,0 +1,1 @@
+export default function FormSection({ title, description, children }) { return <section className="space-y-5"><div><h2 className="text-base font-semibold text-gray-900 dark:text-white">{title}</h2>{description && <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{description}</p>}</div>{children}</section>; }

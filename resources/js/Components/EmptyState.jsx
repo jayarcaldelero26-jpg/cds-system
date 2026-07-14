@@ -1,0 +1,3 @@
+export default function EmptyState({ title = 'No records found', description = 'There is no information to display yet.', action }) {
+    return <div className="px-6 py-12 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 text-xl text-green-800 dark:bg-green-950 dark:text-green-300" aria-hidden="true">○</div><h3 className="mt-4 text-sm font-semibold text-gray-900 dark:text-white">{title}</h3><p className="mx-auto mt-1 max-w-sm text-sm text-gray-500 dark:text-gray-400">{description}</p>{action && <div className="mt-5">{action}</div>}</div>;
+}

@@ -1,0 +1,3 @@
+export default function PageHeader({ title, description, actions, eyebrow = 'CDS Information Management System' }) {
+    return <header className="flex flex-col gap-4 border-b border-gray-200 pb-5 dark:border-gray-700 sm:flex-row sm:items-end sm:justify-between"><div>{eyebrow && <p className="text-sm font-medium text-green-700 dark:text-green-400">{eyebrow}</p>}<h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{title}</h1>{description && <p className="mt-1 max-w-2xl text-sm text-gray-600 dark:text-gray-300">{description}</p>}</div>{actions && <div className="flex shrink-0 flex-wrap items-center gap-3">{actions}</div>}</header>;
+}
