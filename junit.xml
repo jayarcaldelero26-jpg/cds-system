@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Feature\ManagementPlanManagementTest" file="tests\Feature\ManagementPlanManagementTest.php" tests="4" assertions="17" errors="0" failures="4" skipped="0" time="4.020879">
+    <testcase name="technical staff can create and update a management plan with audit fields" file="tests\Feature\ManagementPlanManagementTest.php::technical staff can create and update a management plan with audit fields" class="Tests\Feature\ManagementPlanManagementTest" classname="Tests.Feature.ManagementPlanManagementTest" assertions="1" time="3.574299">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">technical staff can create and update a management plan with audit fieldsExpected response status code [201, 301, 302, 303, 307, 308] but received 419.
+Failed asserting that false is true.&#13;
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponseAssert.php:45
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponse.php:201
+at tests\Feature\ManagementPlanManagementTest.php:30</failure>
+    </testcase>
+    <testcase name="viewer can view management plans but cannot create or delete them" file="tests\Feature\ManagementPlanManagementTest.php::viewer can view management plans but cannot create or delete them" class="Tests\Feature\ManagementPlanManagementTest" classname="Tests.Feature.ManagementPlanManagementTest" assertions="12" time="0.208046">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">viewer can view management plans but cannot create or delete themExpected response status code [403] but received 419.
+Failed asserting that 419 is identical to 403.&#13;
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponseAssert.php:45
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponse.php:176
+at vendor\laravel\framework\src\Illuminate\Testing\Concerns\AssertsStatusCodes.php:141
+at tests\Feature\ManagementPlanManagementTest.php:43</failure>
+    </testcase>
+    <testcase name="management plan requires an existing protected area" file="tests\Feature\ManagementPlanManagementTest.php::management plan requires an existing protected area" class="Tests\Feature\ManagementPlanManagementTest" classname="Tests.Feature.ManagementPlanManagementTest" assertions="1" time="0.125446">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">management plan requires an existing protected areaExpected response status code [201, 301, 302, 303, 307, 308] but received 419.
+Failed asserting that false is true.&#13;
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponseAssert.php:45
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponse.php:201
+at tests\Feature\ManagementPlanManagementTest.php:49</failure>
+    </testcase>
+    <testcase name="management plans are soft deleted and plan versions remain separate records" file="tests\Feature\ManagementPlanManagementTest.php::management plans are soft deleted and plan versions remain separate records" class="Tests\Feature\ManagementPlanManagementTest" classname="Tests.Feature.ManagementPlanManagementTest" assertions="3" time="0.113089">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">management plans are soft deleted and plan versions remain separate recordsExpected response status code [201, 301, 302, 303, 307, 308] but received 419.
+Failed asserting that false is true.&#13;
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponseAssert.php:45
+at vendor\laravel\framework\src\Illuminate\Testing\TestResponse.php:201
+at tests\Feature\ManagementPlanManagementTest.php:57</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

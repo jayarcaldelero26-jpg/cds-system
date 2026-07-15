@@ -37,4 +37,8 @@ class ProtectedArea extends Model
     {
         return $this->hasMany(ManagementPlan::class);
     }
+    public function technicalReports(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(TechnicalReport::class);
+    }
 }

@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 const navigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
     { label: 'Protected Area Management', href: '/protected-areas', icon: 'map', permission: 'canViewProtectedAreas' },
-    { label: 'Ecotourism Impact Monitoring', icon: 'activity', comingSoon: true },
+    { label: 'Ecotourism Impact Monitoring', href: '/ecotourism-monitorings', icon: 'activity', permission: 'canViewEcotourismMonitoring' },
     { label: 'Management Plans', href: '/management-plans', icon: 'document', permission: 'canViewManagementPlans' },
-    { label: 'Technical Reports', icon: 'report', comingSoon: true },
+    { label: 'Technical Reports', href: '/technical-reports', icon: 'report', permission: 'canViewTechnicalReports' }, // <-- GI-UPDATE KINI NGA LINYA
     { label: 'Issues Monitoring', icon: 'activity', comingSoon: true },
     { label: 'Programs, Projects & Activities', icon: 'folder', comingSoon: true },
     { label: 'LAWIN Monitoring', icon: 'map', comingSoon: true },

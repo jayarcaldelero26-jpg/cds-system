@@ -58,3 +58,22 @@ test('management plans are soft deleted and plan versions remain separate record
     $this->assertSoftDeleted('management_plans', ['id' => $first->id]);
     expect($area->fresh()->managementPlans()->count())->toBe(1);
 });
+
+test('view-file route displays a file inline if it exists, or returns 404', function () {
+    $this->get('/view-file/non-existent.pdf')->assertStatus(404);
+
+    $filename = 'test_inline_file.pdf';
+    $filePath = storage_path('app/public/' . $filename);
+    
+    @mkdir(dirname($filePath), 0755, true);
+    file_put_contents($filePath, 'dummy pdf content');
+    
+    try {
+        $response = $this->get('/view-file/' . $filename);
+        $response->assertStatus(200);
+        expect($response->baseResponse)->toBeInstanceOf(\Symfony\Component\HttpFoundation\BinaryFileResponse::class);
+        expect($response->baseResponse->getFile()->getPathname())->toBe($filePath);
+    } finally {
+        @unlink($filePath);
+    }
+});

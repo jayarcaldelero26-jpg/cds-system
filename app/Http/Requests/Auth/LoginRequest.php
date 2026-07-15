@@ -42,16 +42,20 @@ class LoginRequest extends FormRequest
     {
         $this->ensureIsNotRateLimited();
 
-        $credentials = [
-            ...$this->only('email', 'password'),
-            'is_active' => true,
-        ];
-
-        if (! Auth::attempt($credentials, $this->boolean('remember'))) {
+        if (! Auth::attempt($this->only('email', 'password'), $this->boolean('remember'))) {
             RateLimiter::hit($this->throttleKey());
 
             throw ValidationException::withMessages([
-                'email' => trans('auth.failed'),
+                'email' => __('auth.failed'),
+            ]);
+        }
+
+        // KINI NGA DUGANG: Gi-usab gikan sa is_approved ngadto sa is_active
+        $user = Auth::user();
+        if (!$user->is_active) {
+            Auth::logout();
+            throw ValidationException::withMessages([
+                'email' => 'Your account is pending administrator approval.',
             ]);
         }
 
@@ -77,8 +81,8 @@ class LoginRequest extends FormRequest
             'email' => trans('auth.throttle', [
                 'seconds' => $seconds,
                 'minutes' => ceil($seconds / 60),
-            ]),
-        ]);
+            ],
+        )]);
     }
 
     /**

@@ -3,7 +3,6 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class StoreManagementPlanRequest extends FormRequest
 {
@@ -14,23 +13,18 @@ class StoreManagementPlanRequest extends FormRequest
 
     public function rules(): array
     {
-        return $this->managementPlanRules();
-    }
-
-    protected function managementPlanRules(): array
-    {
         return [
-            'protected_area_id' => ['required', 'integer', Rule::exists('protected_areas', 'id')->whereNull('deleted_at')],
-            'plan_type' => ['required', Rule::in(['PAMP', 'EMP', 'CEPA', 'ECC', 'CNC', 'Other'])],
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
+            'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
             'title' => ['required', 'string', 'max:255'],
             'version' => ['required', 'string', 'max:100'],
-            'prepared_year' => ['required', 'integer', 'min:1800', 'max:'.(now()->year + 10)],
+            'prepared_year' => ['required', 'integer', 'min:1900', 'max:' . date('Y')],
             'approval_date' => ['nullable', 'date'],
             'valid_from' => ['nullable', 'date'],
             'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
-            'status' => ['required', Rule::in(['Draft', 'Active', 'Expired', 'For Updating', 'Archived'])],
+            'status' => ['required', 'string', 'in:Draft,Active,Expired,For Updating,Archived'],
             'remarks' => ['nullable', 'string'],
-            'attachment' => ['nullable', 'file', 'max:10240'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'], // Max 20MB // Max 20MB
         ];
     }
 }

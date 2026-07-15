@@ -72,18 +72,35 @@ class ManagementPlanController extends Controller
         ]);
     }
 
-    public function update(UpdateManagementPlanRequest $request, ManagementPlan $managementPlan): RedirectResponse
+    public function update(Request $request, ManagementPlan $managementPlan): RedirectResponse
     {
-        $data = $request->validated();
+        // 1. Diri nato i-validate direkta aron luwas sa isyu sa multipart PATCH requests
+        $data = $request->validate([
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
+            'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
+            'title' => ['required', 'string', 'max:255'],
+            'version' => ['required', 'string', 'max:100'],
+            'prepared_year' => ['required', 'integer', 'min:1900', 'max:2100'], // Gi-hardcode ngadto sa 2100 aron luwas sa server-time mismatch
+            'approval_date' => ['nullable', 'date'],
+            'valid_from' => ['nullable', 'date'],
+            'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
+            'status' => ['required', 'string', 'in:Draft,Active,Expired,For Updating,Archived'],
+            'remarks' => ['nullable', 'string'],
+            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'], // Gi-add ang image support
+        ]);
+
+        // 2. I-check ug i-save ang na-upload nga file
         if ($request->hasFile('attachment')) {
             if ($managementPlan->attachment) {
                 Storage::disk('public')->delete($managementPlan->attachment);
             }
             $data['attachment'] = $request->file('attachment')->store('management-plans', 'public');
         } else {
+            // Kung walay gi-upload nga bag-o, pabilin ang karaan o i-null kung gituyo og tangtang
             unset($data['attachment']);
         }
 
+        // 3. I-save na sa database uban ang updated_by tracker
         $managementPlan->update([...$data, 'updated_by' => $request->user()->id]);
 
         return to_route('management-plans.index')->with('status', 'management-plan-updated');

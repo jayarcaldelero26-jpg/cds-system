@@ -34,7 +34,7 @@ class UserController extends Controller
                     'name' => $user->name,
                     'email' => $user->email,
                     'role' => $user->roles->first()?->name,
-                    'is_active' => $user->is_active,
+                    'is_active' => (bool) $user->is_active, // Gi-force nga boolean para sa frontend toggle
                     'created_at' => $user->created_at?->toDateString(),
                 ]),
         ]);
@@ -64,7 +64,10 @@ class UserController extends Controller
         unset($data['role']);
 
         $data['password'] = Hash::make($data['password']);
-        $data['is_active'] = $data['is_active'] ?? true;
+
+        // Kon bag-ong rehistro o hinimo, i-default og false (0) para pending approval pa sila,
+        // gawas kon gi-set nimo sa porma nga active na daan.
+        $data['is_active'] = $data['is_active'] ?? false;
 
         $user = User::create($data);
         $user->syncRoles([$role]);
@@ -85,14 +88,14 @@ class UserController extends Controller
                 'name' => $user->name,
                 'email' => $user->email,
                 'role' => $user->roles()->first()?->name,
-                'is_active' => $user->is_active,
+                'is_active' => (bool) $user->is_active,
             ],
             'roles' => $this->availableRoles()->pluck('name')->values(),
         ]);
     }
 
     /**
-     * Update a user account, status, and role.
+     * Update a user account, status (approval), and role.
      */
     public function update(UpdateUserRequest $request, User $user): RedirectResponse
     {
@@ -107,6 +110,9 @@ class UserController extends Controller
         } else {
             $data['password'] = Hash::make($data['password']);
         }
+
+        // Sigurohon nga ma-save ang toggle status sa is_active (true/false)
+        $data['is_active'] = filter_var($data['is_active'] ?? $user->is_active, FILTER_VALIDATE_BOOLEAN);
 
         $user->update($data);
         $user->syncRoles([$role]);
