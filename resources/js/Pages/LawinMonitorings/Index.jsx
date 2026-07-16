@@ -7,24 +7,18 @@ import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
 
-const ratingVariants = {
-    'Low': 'active',      // Green / Positive
-    'Moderate': 'pending', // Yellow / Warning
-    'High': 'inactive'     // Red / Critical
-};
-
 const statusVariants = {
     'Approved': 'active',
     'Under Review': 'pending'
 };
 
 const messages = {
-    'ecotourism-monitoring-created': 'Ecotourism monitoring record created successfully.',
-    'ecotourism-monitoring-updated': 'Ecotourism monitoring record updated successfully.',
-    'ecotourism-monitoring-deleted': 'Ecotourism monitoring record deleted successfully.'
+    'lawin-monitoring-created': 'LAWIN monitoring record created successfully.',
+    'lawin-monitoring-updated': 'LAWIN monitoring record updated successfully.',
+    'lawin-monitoring-deleted': 'LAWIN monitoring record deleted successfully.'
 };
 
-export default function Index({ monitorings, filters, protectedAreas, impactRatings }) {
+export default function Index({ monitorings, filters, protectedAreas, statuses }) {
     const { status } = usePage().props;
     const [search, setSearch] = useState(filters.search || '');
     const [deleting, setDeleting] = useState(null);
@@ -38,8 +32,8 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
         }
     }, [status]);
 
-    const visit = (params) => router.get('/ecotourism-monitorings', { ...filters, search, ...params }, { preserveState: true, replace: true });
-    const remove = () => router.delete(`/ecotourism-monitorings/${deleting.id}`, { onFinish: () => setDeleting(null) });
+    const visit = (params) => router.get('/lawin-monitorings', { ...filters, search, ...params }, { preserveState: true, replace: true });
+    const remove = () => router.delete(`/lawin-monitorings/${deleting.id}`, { onFinish: () => setDeleting(null) });
 
     const columns = [
         {
@@ -47,21 +41,34 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
             label: 'Protected Area/PAMO',
             render: (item) => <span className="font-medium text-gray-900 dark:text-white">{item.protected_area_name}</span>
         },
-        { key: 'site_name', label: 'Ecotourism Site' },
         {
-            key: 'monitoring_date',
-            label: 'Monitoring Date',
-            render: (item) => item.monitoring_date
+            key: 'patrol_date',
+            label: 'Patrol Date',
+            render: (item) => item.patrol_date
         },
         {
-            key: 'visitors_count',
-            label: 'Visitors Count',
-            render: (item) => Number(item.visitors_count).toLocaleString()
+            key: 'patrol_distance',
+            label: 'Distance (km)',
+            render: (item) => `${Number(item.patrol_distance).toFixed(2)} km`
         },
         {
-            key: 'impact_rating',
-            label: 'Impact Rating',
-            render: (item) => <StatusBadge variant={ratingVariants[item.impact_rating]}>{item.impact_rating}</StatusBadge>
+            key: 'patrol_hours',
+            label: 'Duration (hrs)',
+            render: (item) => `${Number(item.patrol_hours).toFixed(1)} hrs`
+        },
+        {
+            key: 'patrol_members_count',
+            label: 'Patrollers',
+            render: (item) => `${item.patrol_members_count} pax`
+        },
+        {
+            key: 'threats_observed',
+            label: 'Threats Observed',
+            render: (item) => (
+                <div className="max-w-xs truncate text-xs" title={item.threats_observed || 'None'}>
+                    {item.threats_observed || <span className="text-gray-400 italic">No threats logged</span>}
+                </div>
+            )
         },
         {
             key: 'status',
@@ -88,27 +95,16 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
             label: <span className="sr-only">Actions</span>,
             cellClassName: 'text-right',
             render: (item) => {
-                // 🚀 DIRI DIREKTA NGA KUHAON ANG AUTH ARON DILI NA GYUD MO-WHITE SCREEN!
+                // 🚀 DIREKTA NGA TAWGON ANG AUTH DINHI ARON WALAY ERROR O WHITE SCREEN!
                 const { auth } = usePage().props;
 
                 return (
                     <div className="flex justify-end gap-3">
-                        <Link
-                            className="font-medium text-green-800 hover:text-green-950 dark:text-green-400"
-                            href={`/ecotourism-monitorings/${item.id}/edit`}
-                        >
-                            Edit
-                        </Link>
+                        <Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/lawin-monitorings/${item.id}/edit`}>Edit</Link>
 
-                        {/* Ipakita lang ang Delete kon CDS Admin */}
-                        {auth?.canDeleteEcotourismMonitoring && (
-                            <button
-                                type="button"
-                                className="font-medium text-red-700 hover:text-red-900 dark:text-red-300"
-                                onClick={() => setDeleting(item)}
-                            >
-                                Delete
-                            </button>
+                        {/* 🛡️ SECURITY WRAPPER: CDS Admin ra gyud ang makakita sa Delete button */}
+                        {auth?.canDeleteLawinMonitoring && (
+                            <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)}>Delete</button>
                         )}
                     </div>
                 );
@@ -119,13 +115,13 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
     const selectClass = 'mt-1.5 block w-full rounded-lg border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-green-700 focus:ring-green-700 dark:border-gray-600 dark:bg-gray-900 dark:text-white';
 
     return (
-        <AuthenticatedLayout title="Ecotourism Impact Monitoring">
+        <AuthenticatedLayout title="LAWIN Monitoring">
             <PageHeader
-                title="Ecotourism Impact Monitoring"
-                description="Consolidate, review, and maintain assessment results of the Impact Monitoring of Ecotourism Activities."
+                title="LAWIN Monitoring System"
+                description="Manage and track patrol activities, distances covered, hours rendered, and threats detected by forest patrollers."
                 actions={
-                    <Link href="/ecotourism-monitorings/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
-                        Add monitoring record
+                    <Link href="/lawin-monitorings/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
+                        Record patrol activity
                     </Link>
                 }
             />
@@ -134,7 +130,7 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
                 <form onSubmit={(e) => { e.preventDefault(); visit({ page: 1 }); }} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-4">
                     <label className="md:col-span-2">
                         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Search</span>
-                        <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search sites, issues, or PAMOs..." className={selectClass} />
+                        <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search threats, remarks, or PAMOs..." className={selectClass} />
                     </label>
                     <label>
                         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Protected Area</span>
@@ -144,10 +140,10 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
                         </select>
                     </label>
                     <label>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Impact Rating</span>
-                        <select className={selectClass} value={filters.impact_rating || ''} onChange={(e) => visit({ impact_rating: e.target.value, page: 1 })}>
-                            <option value="">All ratings</option>
-                            {impactRatings.map((rating) => <option key={rating} value={rating}>{rating} Impact</option>)}
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Status</span>
+                        <select className={selectClass} value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
+                            <option value="">All statuses</option>
+                            {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
                         </select>
                     </label>
                     <div className="flex items-end md:col-span-4">
@@ -155,7 +151,7 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
                     </div>
                 </form>
 
-                <DataTable columns={columns} rows={monitorings.data} emptyTitle="No monitoring records found" emptyDescription="Input assessment results or adjust your search filters." />
+                <DataTable columns={columns} rows={monitorings.data} emptyTitle="No patrol activities logged" emptyDescription="Input raw patrol reports or adjust your filters." />
             </Card>
 
             <div className="mt-5 flex justify-between text-sm">
@@ -163,7 +159,7 @@ export default function Index({ monitorings, filters, protectedAreas, impactRati
                 {monitorings.next_page_url ? <Link href={monitorings.next_page_url} className="font-semibold text-green-800 dark:text-green-400">Next →</Link> : <span />}
             </div>
 
-            <ConfirmDialog open={Boolean(deleting)} title="Delete monitoring record?" message="Are you sure you want to delete this ecotourism monitoring record? This action cannot be undone." confirmLabel="Delete" onCancel={() => setDeleting(null)} onConfirm={remove} />
+            <ConfirmDialog open={Boolean(deleting)} title="Delete patrol record?" message="Are you sure you want to delete this LAWIN monitoring record? This action cannot be undone." confirmLabel="Delete" onCancel={() => setDeleting(null)} onConfirm={remove} />
 
             {/* SUCCESS MODAL */}
             {showSuccess && (

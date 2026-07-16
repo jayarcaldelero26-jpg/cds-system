@@ -12,5 +12,15 @@ createInertiaApp({
     setup({ el, App, props }) {
         createRoot(el).render(<App {...props} />);
     },
-    progress: { color: '#4B5563' },
+    // 🚀 GI-UPDATE KINI NGA PROGRESS CONFIGURATION 🚀
+    progress: {
+        // Gihimong Green aron motakdo sa imong CDS theme
+        color: '#166534',
+
+        // Mosiga lang kon molapas og 250ms ang loading (hinay nga connection)
+        delay: 250,
+
+        // Gi-off ang loading circle sa upper right aron limpyo tan-awon
+        showSpinner: false
+    },
 });

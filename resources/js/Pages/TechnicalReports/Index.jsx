@@ -20,7 +20,7 @@ const messages = {
 };
 
 export default function Index({ technicalReports, filters, protectedAreas, reportTypes, statuses }) {
-    const { auth, status } = usePage().props;
+    const { status } = usePage().props;
     const [search, setSearch] = useState(filters.search || '');
     const [deleting, setDeleting] = useState(null);
     const [showSuccess, setShowSuccess] = useState(false);
@@ -78,12 +78,21 @@ export default function Index({ technicalReports, filters, protectedAreas, repor
             key: 'actions',
             label: <span className="sr-only">Actions</span>,
             cellClassName: 'text-right',
-            render: (report) => (
-                <div className="flex justify-end gap-3">
-                    <Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/technical-reports/${report.id}/edit`}>Edit</Link>
-                    <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(report)}>Delete</button>
-                </div>
-            )
+            render: (report) => {
+                // 🚀 DIREKTA NGA TAWGON ANG AUTH DINHI ARON WALAY ERROR O WHITE SCREEN!
+                const { auth } = usePage().props;
+
+                return (
+                    <div className="flex justify-end gap-3">
+                        <Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/technical-reports/${report.id}/edit`}>Edit</Link>
+
+                        {/* 🛡️ SECURITY WRAPPER: CDS Admin ra gyud ang makakita sa Delete button */}
+                        {auth?.canDeleteTechnicalReports && (
+                            <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(report)}>Delete</button>
+                        )}
+                    </div>
+                );
+            }
         }
     ];
 

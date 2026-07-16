@@ -2,5 +2,81 @@ import { Head, Link, usePage } from '@inertiajs/react';
 
 export default function Welcome() {
     const { auth } = usePage().props;
-    return <><Head title="Welcome" /><main className="min-h-screen bg-gray-100 p-8 dark:bg-gray-900"><div className="mx-auto max-w-3xl rounded-lg bg-white p-8 shadow dark:bg-gray-800"><h1 className="text-2xl font-bold text-gray-900 dark:text-white">CDS Information Management System</h1><p className="mt-2 text-gray-600 dark:text-gray-300">DENR PENRO Davao Oriental</p><div className="mt-6">{auth.user ? <Link className="text-indigo-600" href="/dashboard">Go to Dashboard</Link> : <Link className="text-indigo-600" href="/login">Log in</Link>}</div></div></main></>;
+
+    return (
+        <>
+            <Head title="DENR PENRO Davao Oriental - CDS IMS Portal" />
+            <main className="relative min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col justify-between overflow-hidden">
+
+                {/* FOREST GRADIENT BACKGROUND EFFECT */}
+                <div className="absolute top-0 right-0 -z-10 h-[500px] w-[500px] rounded-full bg-emerald-500/10 blur-[120px]" />
+                <div className="absolute bottom-0 left-0 -z-10 h-[500px] w-[500px] rounded-full bg-green-700/5 blur-[120px]" />
+
+                {/* HEADER / NAVIGATION BAR (CLEANED - NO REDUNDANT BUTTON) */}
+                <header className="mx-auto max-w-7xl w-full px-6 py-6 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-800 text-white font-bold text-md shadow-md">
+                            CDS
+                        </div>
+                        <div>
+                            <span className="block font-bold text-gray-900 dark:text-white tracking-wide text-sm leading-none">CDS-IMS PORTAL</span>
+                            <span className="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">PENRO Davao Oriental</span>
+                        </div>
+                    </div>
+                </header>
+
+                {/* HERO SECTION */}
+                <section className="mx-auto max-w-5xl px-6 py-12 md:py-20 text-center flex-1 flex flex-col justify-center items-center">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 dark:bg-green-950/40 px-3.5 py-1.5 text-[11px] font-bold text-green-800 dark:text-green-300 tracking-wider uppercase border border-green-100/50 dark:border-green-900/30">
+                        🛡️ Protected Areas Management Portal
+                    </span>
+
+                    <h1 className="mt-6 text-4xl font-extrabold tracking-tight text-gray-900 dark:text-white sm:text-6xl max-w-3xl leading-[1.15]">
+                        Conservation Development <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-700 to-emerald-600 dark:from-green-400 dark:to-emerald-300">Information System</span>
+                    </h1>
+
+                    <p className="mt-6 text-base text-gray-600 dark:text-gray-400 max-w-2xl leading-relaxed">
+                        The centralized security workspace for PENRO Davao Oriental. Log in to access conservation baselines, manage management plans, monitor budgets, and record patrol systems.
+                    </p>
+
+                    <div className="mt-10 flex flex-wrap gap-4 justify-center">
+                        {auth.user ? (
+                            <Link href="/dashboard" className="rounded-xl bg-green-800 px-6 py-3.5 text-sm font-bold text-white shadow-lg shadow-green-800/10 hover:bg-green-900 hover:shadow-xl transition-all duration-200">
+                                Open Interactive Dashboard →
+                            </Link>
+                        ) : (
+                            <Link href="/login" className="rounded-xl bg-green-800 px-8 py-3.5 text-sm font-bold text-white shadow-lg shadow-green-800/15 hover:bg-green-900 hover:shadow-xl transition-all duration-200">
+                                Access Secure Login →
+                            </Link>
+                        )}
+                    </div>
+
+                    {/* FEATURES HIGHLIGHT GRID */}
+                    <div className="mt-16 grid gap-6 sm:grid-cols-3 max-w-4xl text-left">
+                        <div className="p-5 rounded-xl border border-gray-200/60 dark:border-gray-800 bg-white/50 dark:bg-gray-900/40 backdrop-blur-xs">
+                            <span className="text-xl">🌲</span>
+                            <h3 className="font-bold text-gray-900 dark:text-white mt-3">Area Records</h3>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Legally declared boundaries, demographics, and protected area management plans.</p>
+                        </div>
+                        <div className="p-5 rounded-xl border border-gray-200/60 dark:border-gray-800 bg-white/50 dark:bg-gray-900/40 backdrop-blur-xs">
+                            <span className="text-xl">🛡️</span>
+                            <h3 className="font-bold text-gray-900 dark:text-white mt-3">LAWIN & Monitoring</h3>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Real-time track monitoring, patrol distance calculations, and documented threats.</p>
+                        </div>
+                        <div className="p-5 rounded-xl border border-gray-200/60 dark:border-gray-800 bg-white/50 dark:bg-gray-900/40 backdrop-blur-xs">
+                            <span className="text-xl">📂</span>
+                            <h3 className="font-bold text-gray-900 dark:text-white mt-3">PPA & Budgets</h3>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Consolidated tracking of government appropriations, projects, and active budgets.</p>
+                        </div>
+                    </div>
+                </section>
+
+                {/* FOOTER */}
+                <footer className="border-t border-gray-200 dark:border-gray-800 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                    <p>© 2026 Conservation Development Section (CDS) • PENRO Davao Oriental.</p>
+                    <p className="mt-1 text-gray-400">Department of Environment and Natural Resources — Republic of the Philippines</p>
+                </footer>
+            </main>
+        </>
+    );
 }
