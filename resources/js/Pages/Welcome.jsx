@@ -12,11 +12,21 @@ export default function Welcome() {
                 <div className="absolute top-0 right-0 -z-10 h-[500px] w-[500px] rounded-full bg-emerald-500/10 blur-[120px]" />
                 <div className="absolute bottom-0 left-0 -z-10 h-[500px] w-[500px] rounded-full bg-green-700/5 blur-[120px]" />
 
-                {/* HEADER / NAVIGATION BAR (CLEANED - NO REDUNDANT BUTTON) */}
+                {/* HEADER / NAVIGATION BAR WITH BOTH LOGOS */}
                 <header className="mx-auto max-w-7xl w-full px-6 py-6 flex justify-between items-center">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-800 text-white font-bold text-md shadow-md">
-                            CDS
+                        {/* 🚀 TWO LOGOS SIDE-BY-SIDE */}
+                        <div className="flex items-center gap-2">
+                            <img
+                                src="/images/DENR%20LOGO.png"
+                                alt="DENR Logo"
+                                className="h-10 w-10 object-contain"
+                            />
+                            <img
+                                src="/images/CDS Logo.png"
+                                alt="CDS Logo"
+                                className="h-10 w-10 object-contain"
+                            />
                         </div>
                         <div>
                             <span className="block font-bold text-gray-900 dark:text-white tracking-wide text-sm leading-none">CDS-IMS PORTAL</span>

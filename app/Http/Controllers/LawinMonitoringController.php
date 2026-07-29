@@ -3,32 +3,38 @@
 namespace App\Http\Controllers;
 
 use App\Models\LawinMonitoring;
-use App\Models\ProtectedArea;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 
 class LawinMonitoringController extends Controller
 {
+    // Static list sa CENRO Offices (gi-dugang na ang CENRO Mati)
+    private $cenroList = [
+        'CENRO Lupon',
+        'CENRO Mati',
+        'CENRO Manay',
+        'CENRO Baganga',
+        'PENRO Main Office',
+    ];
+
     public function index(Request $request)
     {
-        $query = LawinMonitoring::with('protectedArea');
+        $query = LawinMonitoring::query();
 
         // Search Filters
         if ($request->filled('search')) {
             $search = $request->input('search');
             $query->where(function ($q) use ($search) {
-                $q->where('threats_observed', 'like', "%{$search}%")
+                $q->where('cenro', 'like', "%{$search}%")
+                  ->orWhere('threats_observed', 'like', "%{$search}%")
                   ->orWhere('remarks', 'like', "%{$search}%")
-                  ->orWhere('status', 'like', "%{$search}%")
-                  ->orWhereHas('protectedArea', function ($p) use ($search) {
-                      $p->where('name', 'like', "%{$search}%");
-                  });
+                  ->orWhere('status', 'like', "%{$search}%");
             });
         }
 
-        if ($request->filled('protected_area_id')) {
-            $query->where('protected_area_id', $request->input('protected_area_id'));
+        if ($request->filled('cenro')) {
+            $query->where('cenro', $request->input('cenro'));
         }
 
         if ($request->filled('status')) {
@@ -41,8 +47,7 @@ class LawinMonitoringController extends Controller
         $monitorings->getCollection()->transform(function ($item) {
             return [
                 'id' => $item->id,
-                'protected_area_id' => $item->protected_area_id,
-                'protected_area_name' => $item->protectedArea->name ?? 'Unknown',
+                'cenro' => $item->cenro,
                 'patrol_date' => $item->patrol_date ? $item->patrol_date->format('Y-m-d') : null,
                 'patrol_distance' => $item->patrol_distance,
                 'patrol_hours' => $item->patrol_hours,
@@ -56,8 +61,8 @@ class LawinMonitoringController extends Controller
 
         return Inertia::render('LawinMonitorings/Index', [
             'monitorings' => $monitorings,
-            'filters' => $request->only(['search', 'protected_area_id', 'status']),
-            'protectedAreas' => ProtectedArea::select('id', 'name')->get(),
+            'filters' => $request->only(['search', 'cenro', 'status']),
+            'cenroList' => $this->cenroList,
             'statuses' => ['Under Review', 'Approved'],
         ]);
     }
@@ -65,7 +70,7 @@ class LawinMonitoringController extends Controller
     public function create()
     {
         return Inertia::render('LawinMonitorings/Create', [
-            'protectedAreas' => ProtectedArea::select('id', 'name')->get(),
+            'cenroList' => $this->cenroList,
             'statuses' => ['Under Review', 'Approved'],
         ]);
     }
@@ -73,7 +78,7 @@ class LawinMonitoringController extends Controller
     public function store(Request $request)
     {
         $validated = $request->validate([
-            'protected_area_id' => 'required|exists:protected_areas,id',
+            'cenro' => 'required|string',
             'patrol_date' => 'required|date',
             'patrol_distance' => 'required|numeric|min:0',
             'patrol_hours' => 'required|numeric|min:0',
@@ -100,7 +105,7 @@ class LawinMonitoringController extends Controller
         return Inertia::render('LawinMonitorings/Edit', [
             'monitoring' => [
                 'id' => $lawinMonitoring->id,
-                'protected_area_id' => $lawinMonitoring->protected_area_id,
+                'cenro' => $lawinMonitoring->cenro,
                 'patrol_date' => $lawinMonitoring->patrol_date ? $lawinMonitoring->patrol_date->format('Y-m-d') : null,
                 'patrol_distance' => $lawinMonitoring->patrol_distance,
                 'patrol_hours' => $lawinMonitoring->patrol_hours,
@@ -110,7 +115,7 @@ class LawinMonitoringController extends Controller
                 'status' => $lawinMonitoring->status,
                 'attachment' => $lawinMonitoring->attachment,
             ],
-            'protectedAreas' => ProtectedArea::select('id', 'name')->get(),
+            'cenroList' => $this->cenroList,
             'statuses' => ['Under Review', 'Approved'],
         ]);
     }
@@ -118,7 +123,7 @@ class LawinMonitoringController extends Controller
     public function update(Request $request, LawinMonitoring $lawinMonitoring)
     {
         $validated = $request->validate([
-            'protected_area_id' => 'required|exists:protected_areas,id',
+            'cenro' => 'required|string',
             'patrol_date' => 'required|date',
             'patrol_distance' => 'required|numeric|min:0',
             'patrol_hours' => 'required|numeric|min:0',

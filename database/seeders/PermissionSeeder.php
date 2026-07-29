@@ -83,15 +83,30 @@ class PermissionSeeder extends Seeder
             'management-plans.create',
             'management-plans.update',
             'management-plans.delete',
+
+            // CDS Lawin Monitoring
+            'cds-lawin.view',
+            'cds-lawin.create',
+            'cds-lawin.update',
+            'cds-lawin.delete',
+
+            // Biodiversity Monitoring System (BMS)
+            'bms.view',
+            'bms.create',
+            'bms.update',
+            'bms.delete',
         ];
 
         foreach ($permissions as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
 
-        Role::findByName('CDS Admin', 'web')->syncPermissions($permissions);
+        // 🚀 Gamiton ang firstOrCreate aron awtomatikong mahimo ang role kung wala pa
+        $cdsAdmin = Role::firstOrCreate(['name' => 'CDS Admin', 'guard_name' => 'web']);
+        $cdsAdmin->syncPermissions($permissions);
 
-        Role::findByName('Technical Staff', 'web')->syncPermissions([
+        $technicalStaff = Role::firstOrCreate(['name' => 'Technical Staff', 'guard_name' => 'web']);
+        $technicalStaff->syncPermissions([
             'documents.view',
             'documents.upload',
             'documents.update',
@@ -112,9 +127,16 @@ class PermissionSeeder extends Seeder
             'management-plans.view',
             'management-plans.create',
             'management-plans.update',
+            'cds-lawin.view',
+            'cds-lawin.create',
+            'cds-lawin.update',
+            'bms.view',
+            'bms.create',
+            'bms.update',
         ]);
 
-        Role::findByName('Viewer', 'web')->syncPermissions([
+        $viewer = Role::firstOrCreate(['name' => 'Viewer', 'guard_name' => 'web']);
+        $viewer->syncPermissions([
             'documents.view',
             'projects.view',
             'activities.view',
@@ -122,7 +144,12 @@ class PermissionSeeder extends Seeder
             'gis.view',
             'protected-areas.view',
             'management-plans.view',
+            'cds-lawin.view',
+            'bms.view',
         ]);
+
+        // Gidugang usab nato ang 'no_role' aron dili ma-error ang pag-register sa mga users
+        Role::firstOrCreate(['name' => 'no_role', 'guard_name' => 'web']);
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
     }

@@ -16,37 +16,39 @@ use Inertia\Response;
 
 class RegisteredUserController extends Controller
 {
-    /**
-     * Display the registration view.
-     */
     public function create(): Response
     {
         return Inertia::render('Auth/Register');
     }
 
-    /**
-     * Handle an incoming registration request.
-     *
-     * @throws ValidationException
-     */
     public function store(Request $request): RedirectResponse
     {
         $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
+            'office_designated' => ['required', 'string', 'max:255'],
+            'section' => ['required', 'string', 'in:CDS,MES'],
         ]);
 
+        // Awtomatikong 'no_role' ug inactive pagka-register, lakip ang office ug section
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
+            'office_designated' => $request->office_designated,
+            'section' => $request->section,
+            'is_active' => false,
         ]);
+
+        // I-assign ang 'no_role' gamit ang Spatie roles
+        $user->assignRole('no_role');
 
         event(new Registered($user));
 
-        Auth::login($user);
+        // 🚀 Gitangtang ang Auth::login($user) aron mo-pop up ang success dialog
+        // ug dili mo-diretso og login samtang pending pa sa admin approval.
 
-        return redirect(route('dashboard', absolute: false));
+        return back()->with('status', 'registered-successfully');
     }
 }

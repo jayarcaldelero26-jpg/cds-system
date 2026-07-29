@@ -21,6 +21,8 @@ class StoreUserRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique('users', 'email')],
+            'office_designated' => ['required', 'string', 'max:255'], // 🚀 Gidugang validation
+            'section' => ['required', 'string', 'in:CDS,MES'],         // 🚀 Gidugang validation (CDS o MES ra)
             'password' => ['required', 'string', 'confirmed', Password::defaults()],
             'role' => [
                 'required',

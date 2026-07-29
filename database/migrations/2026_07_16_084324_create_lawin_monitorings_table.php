@@ -10,8 +10,9 @@ return new class extends Migration
     {
         Schema::create('lawin_monitorings', function (Blueprint $table) {
             $table->id();
-            // Relasyon sa Protected Area
-            $table->foreignId('protected_area_id')->constrained()->cascadeOnDelete();
+
+            // CENRO / Office Selection (Gipuli sa protected_area_id)
+            $table->string('cenro'); // E.g., 'CENRO Lupon', 'CENRO Manay', etc.
 
             // Detalye sa Patrol
             $table->date('patrol_date');

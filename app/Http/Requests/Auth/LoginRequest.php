@@ -55,7 +55,8 @@ class LoginRequest extends FormRequest
         if (!$user->is_active) {
             Auth::logout();
             throw ValidationException::withMessages([
-                'email' => 'Your account is pending administrator approval.',
+                // 🚀 GI-UPDATE NGA GRAMMAR DINHI
+                'email' => 'Your account has been deactivated or is currently pending administrator approval.',
             ]);
         }
 

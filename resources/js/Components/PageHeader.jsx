@@ -1,3 +1,24 @@
-export default function PageHeader({ title, description, actions, eyebrow = 'CDS Information Management System' }) {
-    return <header className="flex flex-col gap-4 border-b border-gray-200 pb-5 dark:border-gray-700 sm:flex-row sm:items-end sm:justify-between"><div>{eyebrow && <p className="text-sm font-medium text-green-700 dark:text-green-400">{eyebrow}</p>}<h1 className="mt-1 text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{title}</h1>{description && <p className="mt-1 max-w-2xl text-sm text-gray-600 dark:text-gray-300">{description}</p>}</div>{actions && <div className="flex shrink-0 flex-wrap items-center gap-3">{actions}</div>}</header>;
+export default function PageHeader({ title, description, actions }) {
+    return (
+        <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md">
+            {/* Glowing light circle effect sa kilid */}
+            <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
+
+            <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                    <h1 className="text-2xl font-bold tracking-tight text-white">{title}</h1>
+                    {description && (
+                        <p className="mt-1 text-sm text-green-100">
+                            {description}
+                        </p>
+                    )}
+                </div>
+                {actions && (
+                    <div className="flex items-center gap-3">
+                        {actions}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 }

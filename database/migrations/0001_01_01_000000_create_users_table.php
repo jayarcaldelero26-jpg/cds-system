@@ -17,6 +17,12 @@ return new class extends Migration
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
+            $table->string('role')->default('no_role');
+
+            // 🚀 Gidugang kini nga mga kolum para sa office ug section
+            $table->string('office_designated')->nullable();
+            $table->string('section')->nullable(); // CDS o MES
+
             $table->rememberToken();
             $table->timestamps();
         });

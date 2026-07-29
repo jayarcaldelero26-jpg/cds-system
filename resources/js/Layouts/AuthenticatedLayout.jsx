@@ -1,21 +1,76 @@
-import { Head, Link, router, usePage } from '@inertiajs/react';
+import { Head, Link, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import GlobalSearch from '../Components/GlobalSearch';
 
-const navigation = [
-    { label: 'Dashboard', href: '/dashboard', icon: 'dashboard' },
-    { label: 'Protected Area Management', href: '/protected-areas', icon: 'map', permission: 'canViewProtectedAreas' },
-    { label: 'Ecotourism Impact Monitoring', href: '/ecotourism-monitorings', icon: 'activity', permission: 'canViewEcotourismMonitoring' },
-    { label: 'Management Plans', href: '/management-plans', icon: 'document', permission: 'canViewManagementPlans' },
-    { label: 'Technical Reports', href: '/technical-reports', icon: 'report', permission: 'canViewTechnicalReports' },
-    { label: 'Issues Monitoring', href: '/issue-monitorings', icon: 'shield-alert', permission: 'canViewIssueMonitoring' },
-    { label: 'Programs, Projects & Activities', href: '/program-project-activities', icon: 'folder', permission: 'canViewPPA' },
-    { label: 'LAWIN Monitoring System', href: '/lawin-monitorings', icon: 'shield', permission: 'canViewLawinMonitoring' },
-    { label: 'Reports', href: '/reports', icon: 'report', permission: 'canViewReports' },
-    { label: 'Administration', heading: true },
-    { label: 'User Management', href: '/admin/users', icon: 'users', permission: 'canManageUsers' },
-    { label: 'Audit Logs', icon: 'audit', comingSoon: true },
-    { label: 'Settings', icon: 'settings', comingSoon: true },
+const allNavigation = [
+    { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', section: 'BOTH' },
+
+    // --- MANUAL OPERATION DROPDOWN ---
+    {
+        label: 'Manual Operation',
+        icon: 'map',
+        section: 'CDS',
+        children: [
+            { label: 'PA Profiles & Baselines', href: '/protected-areas', permission: 'canViewProtectedAreas' },
+        ]
+    },
+
+    // --- MANAGEMENT PLAN DROPDOWN ---
+    {
+        label: 'Management Plan',
+        icon: 'document',
+        section: 'CDS',
+        children: [
+            { label: 'PAMP', href: '/management-plans?plan_type=PAMP' },
+            { label: 'EMP', href: '/management-plans?plan_type=EMP' },
+            { label: 'CEPA Plan', href: '/management-plans?plan_type=CEPA' },
+            { label: 'Restoration Plan', href: '/management-plans?plan_type=Other' },
+        ]
+    },
+
+    // --- TECHNICAL REPORTS DROPDOWN ---
+    {
+        label: 'Technical Reports',
+        icon: 'report',
+        section: 'CDS',
+        children: [
+            { label: 'Biodiversity Monitoring System (BMS)', href: '/bms' },
+            { label: 'Biodiversity Assessment (BAMS)', href: '/bams' }, // 🚀 Gihimo nang active link padulong sa /bams!
+            { label: 'IMEA', href: '#', comingSoon: true },
+            { label: 'BDFE', href: '#', comingSoon: true },
+            { label: 'IPAF Collection', href: '#', comingSoon: true },
+            { label: 'All Technical Reports', href: '/technical-reports', permission: 'canViewTechnicalReports' },
+        ]
+    },
+
+    // --- MEETINGS & RESOLUTIONS DROPDOWN ---
+    {
+        label: 'Meetings & Resolutions',
+        icon: 'activity',
+        section: 'CDS',
+        children: [
+            { label: 'PAMB Meeting Minutes', href: '#', comingSoon: true },
+            { label: 'PAMB Meeting Resolution', href: '#', comingSoon: true },
+            { label: 'TWC Meeting Minutes', href: '#', comingSoon: true },
+            { label: 'TWC Resolution', href: '#', comingSoon: true },
+            { label: 'Special PAMB Meeting Minutes', href: '#', comingSoon: true },
+            { label: 'Special PAMB Meeting Resolution', href: '#', comingSoon: true },
+        ]
+    },
+
+    { label: 'Programs, Projects & Activities', href: '#', icon: 'folder', comingSoon: true, permission: 'canViewPPA', section: 'CDS' },
+    { label: 'CDS LAWIN Monitoring', href: '#', icon: 'shield', comingSoon: true, section: 'CDS' },
+
+    // --- MGA MENU PARA SA MES ---
+    { label: 'Issues Monitoring', href: '/issue-monitorings', icon: 'shield-alert', permission: 'canViewIssueMonitoring', section: 'MES' },
+    { label: 'LAWIN Monitoring System (MES)', href: '/lawin-monitorings', icon: 'shield', permission: 'canViewLawinMonitoring', section: 'MES' },
+
+    // --- MGA MENU NGA MAKITA SA DUHA (ADMIN / REPORTS) ---
+    { label: 'Reports', href: '#', icon: 'report', comingSoon: true, permission: 'canViewReports', section: 'BOTH' },
+    { label: 'Administration', heading: true, permission: 'canManageUsers', section: 'BOTH' },
+    { label: 'User Management', href: '/admin/users', icon: 'users', permission: 'canManageUsers', section: 'BOTH' },
+    { label: 'Audit Logs', icon: 'audit', comingSoon: true, permission: 'canManageUsers', section: 'BOTH' },
+    { label: 'Settings', icon: 'settings', comingSoon: true, permission: 'canManageUsers', section: 'BOTH' },
 ];
 
 function Icon({ name, className = 'h-5 w-5' }) {
@@ -23,7 +78,6 @@ function Icon({ name, className = 'h-5 w-5' }) {
         dashboard: 'M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6Z',
         users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m17-9a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7-4a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z',
         document: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6Zm0 0v6h6M8 13h8m-8 4h8',
-        folder: 'M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
         activity: 'M3 12h4l3-8 4 16 3-8h4',
         map: 'm9 18-6-3V5l6 3 6-3 6 3v10l-6-3-6 3Zm0-10v10m6-13v10',
         report: 'M4 19.5V4a2 2 0 0 1 2-2h9l5 5v12.5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2ZM14 2v6h6M8 13h8m-8 4h5',
@@ -43,29 +97,115 @@ function Icon({ name, className = 'h-5 w-5' }) {
 function Sidebar({ open, onClose, auth }) {
     const { url } = usePage();
     const safeAuth = auth || {};
+    const userSection = auth?.user?.section || 'CDS';
+    const isMES = userSection === 'MES';
+
+    const [openDropdowns, setOpenDropdowns] = useState({});
+
+    const toggleDropdown = (label) => {
+        setOpenDropdowns((prev) => ({
+            ...prev,
+            [label]: !prev[label]
+        }));
+    };
+
+    useEffect(() => {
+        allNavigation.forEach(item => {
+            if (item.children) {
+                const isActive = item.children.some(child => url.startsWith(child.href) && child.href !== '#');
+                if (isActive) {
+                    setOpenDropdowns(prev => ({ ...prev, [item.label]: true }));
+                }
+            }
+        });
+    }, [url]);
+
+    const logoSrc = isMES ? "/images/DENR LOGO.png" : "/images/CDS Logo.png";
+    const systemTitle = isMES ? "MES IMS" : "CDS IMS";
+    const systemSubtitle = isMES ? "Monitoring & Enforcement Section" : "Conservation Development Section";
+
+    const filteredNavigation = allNavigation.filter(item =>
+        item.section === 'BOTH' || item.section === userSection
+    );
+
     return (
         <>
             <button type="button" className={`fixed inset-0 z-30 bg-gray-950/40 lg:hidden ${open ? '' : 'hidden'}`} onClick={onClose} aria-label="Close navigation" />
             <aside className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-green-950/20 bg-green-900 text-white transition-transform duration-200 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
                 <div className="flex h-20 items-center gap-3 border-b border-white/10 px-6">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-white text-lg font-bold text-green-800">CDS</div>
+                    <img src={logoSrc} alt="System Logo" className="h-11 w-11 object-contain rounded-full bg-white p-0.5 shadow-sm" />
                     <div>
-                        <p className="text-sm font-semibold tracking-wide">CDS IMS</p>
-                        <p className="text-xs text-green-200">DENR PENRO Davao Oriental</p>
+                        <p className="text-sm font-semibold tracking-wide">{systemTitle}</p>
+                        <p className="text-[10px] text-green-200 uppercase">{systemSubtitle}</p>
                     </div>
-                    <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-green-100 hover:bg-white/10 lg:hidden" aria-label="Close sidebar">×</button>
+                    <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-green-100 hover:bg-white/10 lg:hidden">×</button>
                 </div>
-                <nav className="flex-1 overflow-y-auto px-3 py-5" aria-label="Main navigation">
-                    {navigation.map((item) => {
-                        if (item.heading) return <p key={item.label} className="mt-5 px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-green-300 first:mt-0">{item.label}</p>;
+                <nav className="flex-1 overflow-y-auto px-3 py-5 space-y-1.5" aria-label="Main navigation">
+                    {filteredNavigation.map((item) => {
                         if (item.permission && !safeAuth[item.permission]) return null;
+
+                        if (item.heading) {
+                            return <p key={item.label} className="mt-5 px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-green-300 first:mt-0">{item.label}</p>;
+                        }
+
+                        if (item.children) {
+                            const isOpen = openDropdowns[item.label];
+                            return (
+                                <div key={item.label} className="mt-1">
+                                    <button
+                                        onClick={() => toggleDropdown(item.label)}
+                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition text-green-50 hover:bg-white/10 focus:outline-none"
+                                    >
+                                        <Icon name={item.icon} />
+                                        <span className="flex-1 text-left">{item.label}</span>
+                                        <span className="text-base font-bold text-green-300">{isOpen ? '−' : '+'}</span>
+                                    </button>
+
+                                    {isOpen && (
+                                        <div className="mt-1 space-y-1 pl-3 pr-1">
+                                            {item.children.map((child) => {
+                                                if (child.permission && !safeAuth[child.permission]) return null;
+
+                                                const isChildActive = child.href !== '#' && (url === child.href || url.startsWith(`${child.href}/`));
+
+                                                const childCommon = `block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition ${
+                                                    isChildActive
+                                                        ? 'bg-green-600 text-white shadow-md'
+                                                        : 'text-green-100 hover:bg-white/10 hover:text-white'
+                                                }`;
+
+                                                if (child.comingSoon) return (
+                                                    <div key={child.label} className={`${childCommon} cursor-not-allowed opacity-75 flex justify-between items-center`} title="Coming Soon">
+                                                        <span className="truncate pr-2">{child.label}</span>
+                                                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-bold tracking-wide text-green-100 flex-shrink-0">Coming Soon</span>
+                                                    </div>
+                                                );
+
+                                                return (
+                                                    <Link key={child.label} href={child.href} onClick={onClose} className={childCommon}>
+                                                        {child.label}
+                                                    </Link>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        }
+
                         const active = item.href && (url === item.href || (item.href !== '/dashboard' && url.startsWith(`${item.href}/`)));
-                        const common = `mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition ${active ? 'bg-white text-green-900 shadow-sm' : 'text-green-50 hover:bg-white/10'}`;
+
+                        const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                            active
+                                ? 'bg-green-600 text-white shadow-md font-semibold'
+                                : 'text-green-50 hover:bg-white/10'
+                        }`;
+
                         if (item.comingSoon) return (
                             <div key={item.label} className={`${common} cursor-not-allowed opacity-75`} title="Coming Soon">
                                 <Icon name={item.icon} />
                                 <span className="flex-1 text-left">{item.label}</span>
-                                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-green-100">Coming Soon</span>
+                                <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-green-100">Coming Soon</span>
                             </div>
                         );
                         return (
@@ -76,14 +216,13 @@ function Sidebar({ open, onClose, auth }) {
                         );
                     })}
                 </nav>
-                <div className="border-t border-white/10 p-4 text-xs leading-5 text-green-200">Conservation Development Section<br />Information Management System</div>
+                <div className="border-t border-white/10 p-4 text-xs leading-5 text-green-200">{systemSubtitle}<br />Information Management System</div>
             </aside>
         </>
     );
 }
 
 export default function AuthenticatedLayout({ title, children }) {
-    // 🚀 INERTIA NATIVE URL RESOLVER: Naggamit og usePage hook diritso para makuha ang saktong URL
     const { auth } = usePage().props;
     const { url } = usePage();
     const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -92,12 +231,10 @@ export default function AuthenticatedLayout({ title, children }) {
 
     const userName = auth?.user?.name || 'User';
     const initials = userName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
-
-    // 🛡️ BULLETPROOF DASHBOARD DETECTOR: I-check kon ang url kay exact, naay queries (?page=), o slash
     const isDashboard = url === '/dashboard' || url.startsWith('/dashboard?') || url.startsWith('/dashboard/');
 
     useEffect(() => {
-        const savedTheme = window.localStorage.getItem('cds-theme');
+        const savedTheme = window.localStorage.getItem('theme');
         const shouldUseDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
         setDarkMode(shouldUseDark);
         document.documentElement.classList.toggle('dark', shouldUseDark);
@@ -107,7 +244,7 @@ export default function AuthenticatedLayout({ title, children }) {
         const next = !darkMode;
         setDarkMode(next);
         document.documentElement.classList.toggle('dark', next);
-        window.localStorage.setItem('cds-theme', next ? 'dark' : 'light');
+        window.localStorage.setItem('theme', next ? 'dark' : 'light');
     };
 
     return (
@@ -117,40 +254,34 @@ export default function AuthenticatedLayout({ title, children }) {
                 <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-20 flex h-20 items-center gap-4 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
-                        <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation">
+                        <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden">
                             <span className="text-xl leading-none">☰</span>
                         </button>
 
-                        {/* 🚀 FIXED: Diri mogawas ang GlobalSearch kon anaa ra gyud sa Dashboard! 🚀 */}
                         {isDashboard ? (
-                            <div className="hidden flex-1 md:block">
-                                <GlobalSearch />
-                            </div>
-                        ) : (
-                            <div className="flex-1" /> // Spacer kon dili dashboard (para dili maguba ang layout sa laing pages)
-                        )}
+                            <div className="hidden flex-1 md:block"><GlobalSearch /></div>
+                        ) : (<div className="flex-1" />)}
 
                         <div className="ml-auto flex items-center gap-2 sm:gap-4">
-                            <button type="button" onClick={toggleTheme} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={darkMode ? 'Use light mode' : 'Use dark mode'}>
+                            <button type="button" onClick={toggleTheme} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
                                 <span className="text-lg leading-none">{darkMode ? '☀' : '◐'}</span>
                             </button>
-                            <button type="button" className="relative rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label="Notifications">
-                                <span className="text-xl leading-none">♧</span>
-                                <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-white dark:ring-gray-900" />
-                            </button>
                             <div className="relative">
-                                <button type="button" onClick={() => setProfileOpen((open) => !open)} className="flex items-center gap-3 rounded-lg p-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800" aria-expanded={profileOpen} aria-haspopup="menu">
+                                <button type="button" onClick={() => setProfileOpen((open) => !open)} className="flex items-center gap-3 rounded-lg p-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
                                     <span className="flex h-9 w-9 items-center justify-center rounded-full bg-green-100 text-sm font-bold text-green-800 dark:bg-green-950 dark:text-green-300">{initials}</span>
                                     <span className="hidden sm:block">
                                         <span className="block text-sm font-semibold text-gray-800 dark:text-white">{userName}</span>
                                         <span className="block text-xs text-gray-500 dark:text-gray-400">My account</span>
                                     </span>
-                                    <span className="hidden text-xs text-gray-500 sm:block">⌄</span>
                                 </button>
                                 {profileOpen && (
                                     <div className="absolute right-0 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900" role="menu">
-                                        <Link href="/profile" className="block rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800" role="menuitem" onClick={() => setProfileOpen(false)}>Profile settings</Link>
-                                        <button type="button" onClick={() => router.post('/logout')} className="block w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950" role="menuitem">Log out</button>
+                                        <Link href="/profile" className="block rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">Profile settings</Link>
+                                        <form action="/logout" method="POST" className="w-full">
+                                            <button type="submit" className="block w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">
+                                                Log out
+                                            </button>
+                                        </form>
                                     </div>
                                 )}
                             </div>

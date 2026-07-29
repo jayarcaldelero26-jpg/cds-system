@@ -21,6 +21,18 @@
                             {{ __('User Management') }}
                         </x-nav-link>
                     @endif
+
+                    <!-- Protected Area Management -->
+                    <x-nav-link :href="route('protected-areas.index')" :active="request()->routeIs('protected-areas.*')">
+                        {{ __('Protected Area Management') }}
+                    </x-nav-link>
+
+                    <!-- LAWIN Menu: Matago kung Technical Staff -->
+                    @if (!auth()->user()->hasRole('Technical Staff'))
+                        <x-nav-link :href="route('lawin.index')" :active="request()->routeIs('lawin.*')">
+                            {{ __('LAWIN Monitoring System') }}
+                        </x-nav-link>
+                    @endif
                 </div>
             </div>
 
@@ -80,6 +92,16 @@
             @if (auth()->user()->hasRole('CDS Admin'))
                 <x-responsive-nav-link :href="route('admin.users.index')" :active="request()->routeIs('admin.users.*')">
                     {{ __('User Management') }}
+                </x-responsive-nav-link>
+            @endif
+
+            <x-responsive-nav-link :href="route('protected-areas.index')" :active="request()->routeIs('protected-areas.*')">
+                {{ __('Protected Area Management') }}
+            </x-responsive-nav-link>
+
+            @if (!auth()->user()->hasRole('Technical Staff'))
+                <x-responsive-nav-link :href="route('lawin.index')" :active="request()->routeIs('lawin.*')">
+                    {{ __('LAWIN Monitoring System') }}
                 </x-responsive-nav-link>
             @endif
         </div>

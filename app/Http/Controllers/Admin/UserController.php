@@ -33,8 +33,10 @@ class UserController extends Controller
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
+                    'office_designated' => $user->office_designated, // 🚀 Gidugang para makita sa listahan
+                    'section' => $user->section,                     // 🚀 Gidugang para makita sa listahan (CDS o MES)
                     'role' => $user->roles->first()?->name,
-                    'is_active' => (bool) $user->is_active, // Gi-force nga boolean para sa frontend toggle
+                    'is_active' => (bool) $user->is_active,
                     'created_at' => $user->created_at?->toDateString(),
                 ]),
         ]);
@@ -60,17 +62,18 @@ class UserController extends Controller
         $this->authorize('create', User::class);
 
         $data = $request->validated();
-        $role = $data['role'];
-        unset($data['role']);
+        $role = $data['role'] ?? null;
+        if ($role) {
+            unset($data['role']);
+        }
 
         $data['password'] = Hash::make($data['password']);
-
-        // Kon bag-ong rehistro o hinimo, i-default og false (0) para pending approval pa sila,
-        // gawas kon gi-set nimo sa porma nga active na daan.
         $data['is_active'] = $data['is_active'] ?? false;
 
         $user = User::create($data);
-        $user->syncRoles([$role]);
+        if ($role) {
+            $user->syncRoles([$role]);
+        }
 
         return to_route('admin.users.index')->with('status', 'user-created');
     }
@@ -87,6 +90,8 @@ class UserController extends Controller
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
+                'office_designated' => $user->office_designated, // 🚀 Gidugang para ma-load sa edit form
+                'section' => $user->section,                     // 🚀 Gidugang para ma-load sa edit form
                 'role' => $user->roles()->first()?->name,
                 'is_active' => (bool) $user->is_active,
             ],
@@ -102,8 +107,10 @@ class UserController extends Controller
         $this->authorize('update', $user);
 
         $data = $request->validated();
-        $role = $data['role'];
-        unset($data['role']);
+        $role = $data['role'] ?? null;
+        if ($role) {
+            unset($data['role']);
+        }
 
         if (blank($data['password'] ?? null)) {
             unset($data['password']);
@@ -111,11 +118,15 @@ class UserController extends Controller
             $data['password'] = Hash::make($data['password']);
         }
 
-        // Sigurohon nga ma-save ang toggle status sa is_active (true/false)
-        $data['is_active'] = filter_var($data['is_active'] ?? $user->is_active, FILTER_VALIDATE_BOOLEAN);
+        if (isset($data['is_active'])) {
+            $data['is_active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN);
+        }
 
         $user->update($data);
-        $user->syncRoles([$role]);
+
+        if ($role) {
+            $user->syncRoles([$role]);
+        }
 
         return to_route('admin.users.index')->with('status', 'user-updated');
     }
@@ -139,6 +150,7 @@ class UserController extends Controller
     {
         return Role::query()
             ->where('guard_name', 'web')
+            ->whereIn('name', ['CDS Admin', 'Technical Staff', 'Viewer'])
             ->orderBy('name')
             ->get();
     }

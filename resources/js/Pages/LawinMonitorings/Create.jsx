@@ -3,9 +3,9 @@ import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
 
-export default function Create({ protectedAreas, statuses }) {
+export default function Create({ cenroList = [], statuses = [] }) {
     const { data, setData, post, processing, errors } = useForm({
-        protected_area_id: '',
+        cenro: '',
         patrol_date: '',
         patrol_distance: '',
         patrol_hours: '',
@@ -22,7 +22,6 @@ export default function Create({ protectedAreas, statuses }) {
     };
 
     const labelClass = "block text-sm font-medium text-gray-700 dark:text-gray-300";
-    // Naa nay dark:[color-scheme:dark] para klaro ang date input sa dark mode
     const inputClass = "mt-1 block w-full rounded-lg border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-green-700 focus:ring-green-700 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:[color-scheme:dark]";
     const errorClass = "text-xs text-red-600 dark:text-red-400 mt-1";
 
@@ -42,16 +41,16 @@ export default function Create({ protectedAreas, statuses }) {
                 <Card>
                     <form onSubmit={submit} className="space-y-6">
                         <div className="grid gap-6 md:grid-cols-2">
-                            {/* Protected Area */}
+                            {/* CENRO / Station */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>Protected Area / PAMO</label>
-                                <select required className={inputClass} value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
-                                    <option value="">Select Protected Area</option>
-                                    {protectedAreas.map((area) => (
-                                        <option key={area.id} value={area.id}>{area.name}</option>
+                                <label className={labelClass}>CENRO / Station</label>
+                                <select required className={inputClass} value={data.cenro} onChange={(e) => setData('cenro', e.target.value)}>
+                                    <option value="">Select CENRO / Station</option>
+                                    {cenroList.map((cenro) => (
+                                        <option key={cenro} value={cenro}>{cenro}</option>
                                     ))}
                                 </select>
-                                {errors.protected_area_id && <p className={errorClass}>{errors.protected_area_id}</p>}
+                                {errors.cenro && <p className={errorClass}>{errors.cenro}</p>}
                             </div>
 
                             {/* Patrol Date */}

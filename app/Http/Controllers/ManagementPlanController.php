@@ -59,7 +59,13 @@ class ManagementPlanController extends Controller
             $data['attachment'] = $request->file('attachment')->store('management-plans', 'public');
         }
 
-        ManagementPlan::create([...$data, 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
+        // 🚀 GIDUGANGAN NATO OG 'version' => 'v1' PARA DILI NA MO-ERROR SA DATABASE
+        ManagementPlan::create([
+            ...$data,
+            'version' => 'v1',
+            'created_by' => $request->user()->id,
+            'updated_by' => $request->user()->id
+        ]);
 
         return to_route('management-plans.index')->with('status', 'management-plan-created');
     }
@@ -74,34 +80,34 @@ class ManagementPlanController extends Controller
 
     public function update(Request $request, ManagementPlan $managementPlan): RedirectResponse
     {
-        // 1. Diri nato i-validate direkta aron luwas sa isyu sa multipart PATCH requests
         $data = $request->validate([
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
             'title' => ['required', 'string', 'max:255'],
-            'version' => ['required', 'string', 'max:100'],
-            'prepared_year' => ['required', 'integer', 'min:1900', 'max:2100'], // Gi-hardcode ngadto sa 2100 aron luwas sa server-time mismatch
+            'prepared_year' => ['required', 'integer', 'min:1900', 'max:2100'],
             'approval_date' => ['nullable', 'date'],
             'valid_from' => ['nullable', 'date'],
             'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
-            'status' => ['required', 'string', 'in:Draft,Active,Expired,For Updating,Archived'],
+            'status' => ['required', 'string', 'in:Active,For Update,Under Review'],
             'remarks' => ['nullable', 'string'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'], // Gi-add ang image support
+            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
         ]);
 
-        // 2. I-check ug i-save ang na-upload nga file
         if ($request->hasFile('attachment')) {
             if ($managementPlan->attachment) {
                 Storage::disk('public')->delete($managementPlan->attachment);
             }
             $data['attachment'] = $request->file('attachment')->store('management-plans', 'public');
         } else {
-            // Kung walay gi-upload nga bag-o, pabilin ang karaan o i-null kung gituyo og tangtang
             unset($data['attachment']);
         }
 
-        // 3. I-save na sa database uban ang updated_by tracker
-        $managementPlan->update([...$data, 'updated_by' => $request->user()->id]);
+        // 🚀 APIL SA UPDATE ANG VERSION DILI MAPASABUTAN NGA NULL
+        $managementPlan->update([
+            ...$data,
+            'version' => $managementPlan->version ?? 'v1',
+            'updated_by' => $request->user()->id
+        ]);
 
         return to_route('management-plans.index')->with('status', 'management-plan-updated');
     }
@@ -113,19 +119,46 @@ class ManagementPlanController extends Controller
 
         return to_route('management-plans.index')->with('status', 'management-plan-deleted');
     }
+    public function summary(Request $request): Response
+    {
+        $protectedAreaId = $request->integer('protected_area_id');
+
+        $selectedArea = $protectedAreaId ? ProtectedArea::find($protectedAreaId) : null;
+
+        $plans = ManagementPlan::query()
+            ->when($protectedAreaId, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
+            ->get();
+
+        return Inertia::render('ManagementPlans/Summary', [
+            'protectedAreas' => $this->protectedAreaOptions(),
+            'selectedArea' => $selectedArea,
+            'summaryData' => [
+                'total_plans' => $plans->count(),
+                'by_type' => $plans->groupBy('plan_type')->map->count(),
+                'by_status' => $plans->groupBy('status')->map->count(),
+                'plans' => $plans->map(fn ($plan) => $this->planData($plan)),
+            ],
+            'filters' => ['protected_area_id' => $protectedAreaId],
+        ]);
+    }
 
     /** @return array<string, mixed> */
     private function planData(ManagementPlan $plan): array
     {
         return [
-            'id' => $plan->id, 'protected_area_id' => $plan->protected_area_id,
+            'id' => $plan->id,
+            'protected_area_id' => $plan->protected_area_id,
             'protected_area_name' => $plan->protectedArea?->name,
-            'plan_type' => $plan->plan_type, 'title' => $plan->title, 'version' => $plan->version,
+            'plan_type' => $plan->plan_type,
+            'title' => $plan->title,
+            'version' => $plan->version,
             'prepared_year' => $plan->prepared_year,
             'approval_date' => $plan->approval_date?->toDateString(),
             'valid_from' => $plan->valid_from?->toDateString(),
             'valid_until' => $plan->valid_until?->toDateString(),
-            'status' => $plan->status, 'remarks' => $plan->remarks, 'attachment' => $plan->attachment,
+            'status' => $plan->status,
+            'remarks' => $plan->remarks,
+            'attachment' => $plan->attachment,
         ];
     }
 
@@ -143,6 +176,7 @@ class ManagementPlanController extends Controller
 
     /** @return array<int, string> */
     private function planTypes(): array { return ['PAMP', 'EMP', 'CEPA', 'ECC', 'CNC', 'Other']; }
+
     /** @return array<int, string> */
-    private function statuses(): array { return ['Draft', 'Active', 'Expired', 'For Updating', 'Archived']; }
+    private function statuses(): array { return ['Active', 'For Update', 'Under Review']; }
 }

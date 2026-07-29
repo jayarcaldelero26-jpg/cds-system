@@ -2,65 +2,106 @@
 
 namespace App\Http\Middleware;
 
+use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
 {
     protected $rootView = 'app';
 
+    public function handle(Request $request, Closure $next)
+    {
+        // I-check kung naka-login ang user pero gi-deactivate siya (is_active = false)
+        if (Auth::check() && !Auth::user()->is_active) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return redirect()->route('login')->withErrors([
+                'email' => 'Your account has been deactivated or is currently pending administrator approval.',
+            ]);
+        }
+
+        return parent::handle($request, $next);
+    }
+
     public function share(Request $request): array
     {
+        $user = $request->user();
+
+        // Check kon Admin ba o Staff ba ang user
+        $isAdmin = $user?->hasAnyRole(['Super Admin', 'CDS Admin', 'Admin']) ?? false;
+        $isStaff = $user?->hasAnyRole(['Staff', 'staff']) ?? false;
+
+        // Susiha ang section sa user ('CDS' o 'MES')
+        $userSection = $user?->section ?? '';
+        $isMes = ($userSection === 'MES'); // Monitoring and Enforcement Section
+        $isCds = ($userSection === 'CDS'); // Conservation Development Section
+
+        // Susiha kung Technical Staff ba ang nag-log in
+        $isTechnicalStaff = $user?->hasRole('Technical Staff') ?? false;
+
         return [
             ...parent::share($request),
             'auth' => [
-                'user' => $request->user(),
-                'canManageUsers' => fn (): bool => $request->user()?->hasRole('CDS Admin') ?? false,
+                'user' => $user ? [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'email' => $user->email,
+                    'office_designated' => $user->office_designated,
+                    'section' => $user->section,
+                    'is_active' => $user->is_active,
+                ] : null,
+                'canManageUsers' => $isAdmin,
 
-                // Protected Areas
-                'canViewProtectedAreas' => fn (): bool => $request->user()?->can('protected-areas.view') ?? false,
-                'canCreateProtectedAreas' => fn (): bool => $request->user()?->can('protected-areas.create') ?? false,
-                'canUpdateProtectedAreas' => fn (): bool => $request->user()?->can('protected-areas.update') ?? false,
-                'canDeleteProtectedAreas' => fn (): bool => $request->user()?->can('protected-areas.delete') ?? false,
+                // 🚀 SECTION-BASED PERMISSIONS FILTERING
 
-                // Management Plans
-                'canViewManagementPlans' => fn (): bool => $request->user()?->can('management-plans.view') ?? false,
-                'canCreateManagementPlans' => fn (): bool => $request->user()?->can('management-plans.create') ?? false,
-                'canUpdateManagementPlans' => fn (): bool => $request->user()?->can('management-plans.update') ?? false,
-                'canDeleteManagementPlans' => fn (): bool => $request->user()?->can('management-plans.delete') ?? false,
+                // Protected Areas (CDS ra)
+                'canViewProtectedAreas' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('protected-areas.view') ?? false))),
+                'canCreateProtectedAreas' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('protected-areas.create') ?? false))),
+                'canUpdateProtectedAreas' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('protected-areas.update') ?? false))),
+                'canDeleteProtectedAreas' => $isAdmin,
 
-                // Technical Reports
-                'canViewTechnicalReports' => fn (): bool => $request->user()?->can('technical-reports.view') ?? false,
-                'canCreateTechnicalReports' => fn (): bool => $request->user()?->can('technical-reports.create') ?? false,
-                'canUpdateTechnicalReports' => fn (): bool => $request->user()?->can('technical-reports.update') ?? false,
-                'canDeleteTechnicalReports' => fn (): bool => $request->user()?->can('technical-reports.delete') ?? false,
+                // Management Plans (CDS ra)
+                'canViewManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.view') ?? false))),
+                'canCreateManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.create') ?? false))),
+                'canUpdateManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.update') ?? false))),
+                'canDeleteManagementPlans' => $isAdmin,
 
-                // Ecotourism Impact Monitoring
-                'canViewEcotourismMonitoring' => fn (): bool => $request->user()?->can('ecotourism-monitoring.view') ?? false,
-                'canCreateEcotourismMonitoring' => fn (): bool => $request->user()?->can('ecotourism-monitoring.create') ?? false,
-                'canUpdateEcotourismMonitoring' => fn (): bool => $request->user()?->can('ecotourism-monitoring.update') ?? false,
-                'canDeleteEcotourismMonitoring' => fn (): bool => $request->user()?->can('ecotourism-monitoring.delete') ?? false,
+                // Technical Reports (CDS ra)
+                'canViewTechnicalReports' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('technical-reports.view') ?? false))),
+                'canCreateTechnicalReports' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('technical-reports.create') ?? false))),
+                'canUpdateTechnicalReports' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('technical-reports.update') ?? false))),
+                'canDeleteTechnicalReports' => $isAdmin,
 
-                // Issues Monitoring
-                'canViewIssueMonitoring' => fn (): bool => $request->user()?->can('issue-monitoring.view') ?? false,
-                'canCreateIssueMonitoring' => fn (): bool => $request->user()?->can('issue-monitoring.create') ?? false,
-                'canUpdateIssueMonitoring' => fn (): bool => $request->user()?->can('issue-monitoring.update') ?? false,
-                'canDeleteIssueMonitoring' => fn (): bool => $request->user()?->can('issue-monitoring.delete') ?? false,
+                // Ecotourism Impact Monitoring (CDS ra)
+                'canViewEcotourismMonitoring' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('ecotourism-monitoring.view') ?? false))),
+                'canCreateEcotourismMonitoring' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('ecotourism-monitoring.create') ?? false))),
+                'canUpdateEcotourismMonitoring' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('ecotourism-monitoring.update') ?? false))),
+                'canDeleteEcotourismMonitoring' => $isAdmin,
 
-                // LAWIN Monitoring (GI-CORRECT: Gigamitan og saktong can() check imbes hasRole)
-                'canViewLawinMonitoring' => fn (): bool => $request->user()?->can('lawin-monitoring.view') ?? false,
-                'canCreateLawinMonitoring' => fn (): bool => $request->user()?->can('lawin-monitoring.create') ?? false,
-                'canUpdateLawinMonitoring' => fn (): bool => $request->user()?->can('lawin-monitoring.update') ?? false,
-                'canDeleteLawinMonitoring' => fn (): bool => $request->user()?->can('lawin-monitoring.delete') ?? false,
+                // Issues Monitoring (Pwede sa MES ug CDS)
+                'canViewIssueMonitoring' => $isAdmin || $isStaff || ($user?->can('issue-monitoring.view') ?? false),
+                'canCreateIssueMonitoring' => $isAdmin || $isStaff || ($user?->can('issue-monitoring.create') ?? false),
+                'canUpdateIssueMonitoring' => $isAdmin || $isStaff || ($user?->can('issue-monitoring.update') ?? false),
+                'canDeleteIssueMonitoring' => $isAdmin,
 
-                // PROGRAMS, PROJECTS & ACTIVITIES (PPA) (GI-CORRECT: Saktong can() check aron makita sa Staff)
-                'canViewPPA' => fn (): bool => $request->user()?->can('programs-projects-activities.view') ?? false,
-                'canCreatePPA' => fn (): bool => $request->user()?->can('programs-projects-activities.create') ?? false,
-                'canUpdatePPA' => fn (): bool => $request->user()?->can('programs-projects-activities.update') ?? false,
-                'canDeletePPA' => fn (): bool => $request->user()?->can('programs-projects-activities.delete') ?? false,
+                // LAWIN Monitoring (GI-BLOCK DIRI PARA SA TECHNICAL STAFF)
+                'canViewLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.view') ?? false))),
+                'canCreateLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.create') ?? false))),
+                'canUpdateLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.update') ?? false))),
+                'canDeleteLawinMonitoring' => $isAdmin,
 
-                // Reports View
-                'canViewReports' => fn (): bool => $request->user()?->can('reports.view') ?? false,
+                // PPA (CDS ra)
+                'canViewPPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.view') ?? false))),
+                'canCreatePPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.create') ?? false))),
+                'canUpdatePPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.update') ?? false))),
+                'canDeletePPA' => $isAdmin,
+
+                // Reports (CDS ra)
+                'canViewReports' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
             ],
             'status' => fn (): ?string => $request->session()->get('status'),
         ];

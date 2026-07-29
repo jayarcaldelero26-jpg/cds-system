@@ -8,18 +8,23 @@ use App\Http\Controllers\TechnicalReportController;
 use App\Http\Controllers\EcotourismMonitoringController;
 use App\Http\Controllers\IssueMonitoringController;
 use App\Http\Controllers\LawinMonitoringController;
+use App\Http\Controllers\CdsLawinMonitoringController;
 use App\Http\Controllers\ProgramProjectActivityController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\GlobalSearchController;
+use App\Http\Controllers\BmsController;
+use App\Http\Controllers\BamsAssessmentController; // 🚀 Naa na dinhi ang BAMS Controller import
+
 use App\Models\ProtectedArea;
 use App\Models\ManagementPlan;
 use App\Models\ProgramProjectActivity;
 use App\Models\IssueMonitoring;
 use App\Models\LawinMonitoring;
+use App\Models\CdsLawinMonitoring;
 use App\Models\TechnicalReport;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Auth; // <-- GIDUGANG KINI NGA IMPORT PARA SA AUTHENTICATION
+use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
 Route::get('/', function () {
@@ -27,67 +32,97 @@ Route::get('/', function () {
 });
 
 Route::get('/dashboard', function () {
-    // 1. Pagkuha sa tinuod nga dynamic counts
-    $protectedAreasCount = ProtectedArea::count();
-    $activeManagementPlansCount = ManagementPlan::where('status', 'Active')->count();
-    $expiredManagementPlansCount = ManagementPlan::where('status', 'Expired')->count();
-    $plansForUpdatingCount = ManagementPlan::where('status', 'For Update')->count();
-    $ppaCount = ProgramProjectActivity::count();
-    $issueCount = IssueMonitoring::count();
-    $lawinCount = LawinMonitoring::count();
-    $technicalReportsCount = TechnicalReport::count();
+    $user = request()->user();
 
-    // 2. MAG-GENERATE OG TINUOD NGA RECENT ACTIVITIES GIKAN SA DATABASE
-    $recentPpas = ProgramProjectActivity::latest()->take(2)->get()->map(function ($item) {
-        return [
-            'id' => 'ppa-' . $item->id,
-            'activity' => "New PPA recorded: " . $item->title,
-            'module' => 'PPA Projects',
-            'date' => $item->created_at->diffForHumans(),
-            'status' => 'Completed',
-        ];
-    });
+    if ($user->hasRole('no_role') || !$user->is_active) {
+        return Inertia::render('Auth/WaitingApproval');
+    }
 
-    $recentLawins = LawinMonitoring::latest()->take(2)->get()->map(function ($item) {
-        return [
-            'id' => 'lawin-' . $item->id,
-            'activity' => "Patrol conducted at " . ($item->patrol_area ?? 'Protected Area'),
-            'module' => 'LAWIN',
-            'date' => $item->created_at->diffForHumans(),
-            'status' => 'Completed',
-        ];
-    });
+    if ($user->section === 'MES') {
+        $issueCount = IssueMonitoring::count();
+        $lawinCount = LawinMonitoring::count();
 
-    $recentIssues = IssueMonitoring::latest()->take(2)->get()->map(function ($item) {
-        return [
-            'id' => 'issue-' . $item->id,
-            'activity' => "Threat reported: " . $item->threat_type,
-            'module' => 'Issues',
-            'date' => $item->created_at->diffForHumans(),
-            'status' => $item->status === 'Resolved' ? 'Completed' : 'Pending Review',
-        ];
-    });
+        $recentLawins = LawinMonitoring::latest()->take(2)->get()->map(function ($item) {
+            return [
+                'id' => 'lawin-' . $item->id,
+                'activity' => "Patrol conducted at " . ($item->cenro ?? 'CENRO'),
+                'module' => 'LAWIN (MES)',
+                'date' => $item->created_at->diffForHumans(),
+                'status' => $item->status ?? 'Completed',
+            ];
+        });
 
-    // Isagol ang tanang nakuha nga activities ug i-sort pinaagi sa pinaka-bag-o
-    $dbActivities = collect()
-        ->merge($recentPpas)
-        ->merge($recentLawins)
-        ->merge($recentIssues)
-        ->take(4) // Ipakita lang ang top 4 pinaka-bag-o
-        ->values()
-        ->toArray();
+        $recentIssues = IssueMonitoring::latest()->take(2)->get()->map(function ($item) {
+            return [
+                'id' => 'issue-' . $item->id,
+                'activity' => "Threat reported: " . $item->threat_type,
+                'module' => 'Issues',
+                'date' => $item->created_at->diffForHumans(),
+                'status' => 'Pending Review',
+            ];
+        });
 
-    return Inertia::render('Dashboard', [
-        'protectedAreasCount' => $protectedAreasCount,
-        'activeManagementPlansCount' => $activeManagementPlansCount,
-        'expiredManagementPlansCount' => $expiredManagementPlansCount,
-        'plansForUpdatingCount' => $plansForUpdatingCount,
-        'ppaCount' => $ppaCount,
-        'issueCount' => $issueCount,
-        'lawinCount' => $lawinCount,
-        'technicalReportsCount' => $technicalReportsCount,
-        'dbActivities' => $dbActivities, // dynamic activities gikan sa DB!
-    ]);
+        $dbActivities = collect()
+            ->merge($recentLawins)
+            ->merge($recentIssues)
+            ->take(4)
+            ->values()
+            ->toArray();
+
+        return Inertia::render('MesDashboard', [
+            'issueCount' => $issueCount,
+            'lawinCount' => $lawinCount,
+            'dbActivities' => $dbActivities,
+        ]);
+
+    } else {
+        $protectedAreasCount = ProtectedArea::count();
+        $activeManagementPlansCount = ManagementPlan::where('status', 'Active')->count();
+        $expiredManagementPlansCount = ManagementPlan::where('status', 'Expired')->count();
+        $plansForUpdatingCount = ManagementPlan::where('status', 'For Update')->count();
+        $ppaCount = ProgramProjectActivity::count();
+        $technicalReportsCount = TechnicalReport::count();
+        $cdsLawinCount = CdsLawinMonitoring::count();
+
+        $recentPpas = ProgramProjectActivity::latest()->take(2)->get()->map(function ($item) {
+            return [
+                'id' => 'ppa-' . $item->id,
+                'activity' => "New PPA recorded: " . $item->title,
+                'module' => 'PPA Projects',
+                'date' => $item->created_at->diffForHumans(),
+                'status' => 'Completed',
+            ];
+        });
+
+        $recentCdsLawins = CdsLawinMonitoring::latest()->take(2)->get()->map(function ($item) {
+            return [
+                'id' => 'cds-lawin-' . $item->id,
+                'activity' => "Patrol conducted at " . ($item->patrol_area ?? 'Protected Area'),
+                'module' => 'CDS LAWIN',
+                'date' => $item->created_at->diffForHumans(),
+                'status' => 'Completed',
+            ];
+        });
+
+        $dbActivities = collect()
+            ->merge($recentPpas)
+            ->merge($recentCdsLawins)
+            ->take(4)
+            ->values()
+            ->toArray();
+
+        return Inertia::render('Dashboard', [
+            'protectedAreasCount' => $protectedAreasCount,
+            'activeManagementPlansCount' => $activeManagementPlansCount,
+            'expiredManagementPlansCount' => $expiredManagementPlansCount,
+            'plansForUpdatingCount' => $plansForUpdatingCount,
+            'ppaCount' => $ppaCount,
+            'cdsLawinCount' => $cdsLawinCount,
+            'technicalReportsCount' => $technicalReportsCount,
+            'dbActivities' => $dbActivities,
+        ]);
+    }
+
 })->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
@@ -97,26 +132,15 @@ Route::middleware('auth')->group(function () {
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
 
     // PROTECTED AREAS ROUTES
-    Route::get('protected-areas', [ProtectedAreaController::class, 'index'])
-        ->middleware('can:protected-areas.view')
-        ->name('protected-areas.index');
-    Route::get('protected-areas/create', [ProtectedAreaController::class, 'create'])
-        ->middleware('can:protected-areas.create')
-        ->name('protected-areas.create');
-    Route::post('protected-areas', [ProtectedAreaController::class, 'store'])
-        ->middleware('can:protected-areas.create')
-        ->name('protected-areas.store');
-    Route::get('protected-areas/{protectedArea}/edit', [ProtectedAreaController::class, 'edit'])
-        ->middleware('can:protected-areas.update')
-        ->name('protected-areas.edit');
-    Route::patch('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'update'])
-        ->middleware('can:protected-areas.update')
-        ->name('protected-areas.update');
-    Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])
-        ->middleware('can:protected-areas.delete')
-        ->name('protected-areas.destroy');
-    Route::get('reports', [ReportController::class, 'index'])
-        ->middleware('can:reports.view')->name('reports.index');
+    Route::get('protected-areas', [ProtectedAreaController::class, 'index'])->middleware('can:protected-areas.view')->name('protected-areas.index');
+    Route::get('protected-areas/create', [ProtectedAreaController::class, 'create'])->middleware('can:protected-areas.create')->name('protected-areas.create');
+    Route::post('protected-areas', [ProtectedAreaController::class, 'store'])->middleware('can:protected-areas.create')->name('protected-areas.store');
+    Route::get('protected-areas/{protectedArea}/edit', [ProtectedAreaController::class, 'edit'])->middleware('can:protected-areas.update')->name('protected-areas.edit');
+    Route::patch('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'update'])->middleware('can:protected-areas.update')->name('protected-areas.update');
+    Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])->middleware('can:protected-areas.delete')->name('protected-areas.destroy');
+
+    Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
+
     // ECOTOURISM IMPACT MONITORING ROUTES
     Route::get('ecotourism-monitorings', [EcotourismMonitoringController::class, 'index'])->middleware('can:ecotourism-monitoring.view')->name('ecotourism-monitorings.index');
     Route::get('ecotourism-monitorings/create', [EcotourismMonitoringController::class, 'create'])->middleware('can:ecotourism-monitoring.create')->name('ecotourism-monitorings.create');
@@ -133,7 +157,7 @@ Route::middleware('auth')->group(function () {
     Route::patch('issue-monitorings/{issueMonitoring}', [IssueMonitoringController::class, 'update'])->middleware('can:issue-monitoring.update')->name('issue-monitorings.update');
     Route::delete('issue-monitorings/{issueMonitoring}', [IssueMonitoringController::class, 'destroy'])->middleware('can:issue-monitoring.delete')->name('issue-monitorings.destroy');
 
-    // LAWIN MONITORING ROUTES
+    // MES LAWIN MONITORING ROUTES
     Route::get('lawin-monitorings', [LawinMonitoringController::class, 'index'])->middleware('can:lawin-monitoring.view')->name('lawin-monitorings.index');
     Route::get('lawin-monitorings/create', [LawinMonitoringController::class, 'create'])->middleware('can:lawin-monitoring.create')->name('lawin-monitorings.create');
     Route::post('lawin-monitorings', [LawinMonitoringController::class, 'store'])->middleware('can:lawin-monitoring.create')->name('lawin-monitorings.store');
@@ -141,15 +165,42 @@ Route::middleware('auth')->group(function () {
     Route::patch('lawin-monitorings/{lawinMonitoring}', [LawinMonitoringController::class, 'update'])->middleware('can:lawin-monitoring.update')->name('lawin-monitorings.update');
     Route::delete('lawin-monitorings/{lawinMonitoring}', [LawinMonitoringController::class, 'destroy'])->middleware('can:lawin-monitoring.delete')->name('lawin-monitorings.destroy');
 
+    // CDS LAWIN ROUTES
+    Route::get('cds-lawin', [CdsLawinMonitoringController::class, 'index'])->middleware('can:cds-lawin.view')->name('cds-lawin.index');
+    Route::get('cds-lawin/create', [CdsLawinMonitoringController::class, 'create'])->middleware('can:cds-lawin.create')->name('cds-lawin.create');
+    Route::post('cds-lawin', [CdsLawinMonitoringController::class, 'store'])->middleware('can:cds-lawin.create')->name('cds-lawin.store');
+    Route::get('cds-lawin/{cdsLawinMonitoring}/edit', [CdsLawinMonitoringController::class, 'edit'])->middleware('can:cds-lawin.update')->name('cds-lawin.edit');
+    Route::patch('cds-lawin/{cdsLawinMonitoring}', [CdsLawinMonitoringController::class, 'update'])->middleware('can:cds-lawin.update')->name('cds-lawin.update');
+    Route::delete('cds-lawin/{cdsLawinMonitoring}', [CdsLawinMonitoringController::class, 'destroy'])->middleware('can:cds-lawin.delete')->name('cds-lawin.destroy');
+
+    // BIODIVERSITY MONITORING SYSTEM (BMS) ROUTES
+    Route::get('bms', [BmsController::class, 'index'])->middleware('can:bms.view')->name('bms.index');
+    Route::post('bms', [BmsController::class, 'store'])->middleware('can:bms.create')->name('bms.store');
+    Route::post('bms/import', [BmsController::class, 'importExcel'])->middleware('can:bms.create')->name('bms.import');
+    Route::put('bms/{bmsRecord}', [BmsController::class, 'update'])->middleware('can:bms.update')->name('bms.update');
+    Route::delete('bms/{bmsRecord}', [BmsController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.destroy');
+    Route::post('/bms/bulk-destroy', [BmsController::class, 'bulkDestroy'])->middleware('can:bms.delete')->name('bms.bulk-destroy');
+    Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->name('bms.bulk-update-header');
+    Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->name('bms.semestral-report');
+    Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->name('bms.export-pdf');
+    Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->name('bms.import-geojson');
+
+    // 🚀 BIODIVERSITY ASSESSMENT AND MONITORING SYSTEM (BAMS) ROUTES
+    Route::get('bams', [BamsAssessmentController::class, 'index'])->name('bams.index');
+    Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->name('bams.flora.store');
+    Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->name('bams.fauna.store');
+    Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->name('bams.store-spatial'); // <-- KINI ANG IDUGANG
+    Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->name('bams.calculate');
     // MANAGEMENT PLANS ROUTES
     Route::get('management-plans', [ManagementPlanController::class, 'index'])->middleware('can:management-plans.view')->name('management-plans.index');
+    Route::get('management-plans/summary', [ManagementPlanController::class, 'summary'])->middleware('can:management-plans.view')->name('management-plans.summary');
     Route::get('management-plans/create', [ManagementPlanController::class, 'create'])->middleware('can:management-plans.create')->name('management-plans.create');
     Route::post('management-plans', [ManagementPlanController::class, 'store'])->middleware('can:management-plans.create')->name('management-plans.store');
     Route::get('management-plans/{managementPlan}/edit', [ManagementPlanController::class, 'edit'])->middleware('can:management-plans.update')->name('management-plans.edit');
     Route::patch('management-plans/{managementPlan}', [ManagementPlanController::class, 'update'])->middleware('can:management-plans.update')->name('management-plans.update');
     Route::delete('management-plans/{managementPlan}', [ManagementPlanController::class, 'destroy'])->middleware('can:management-plans.delete')->name('management-plans.destroy');
 
-    // TECHNICAL REPORTS / AWS ROUTES
+    // TECHNICAL REPORTS ROUTES
     Route::get('technical-reports', [TechnicalReportController::class, 'index'])->middleware('can:technical-reports.view')->name('technical-reports.index');
     Route::get('technical-reports/create', [TechnicalReportController::class, 'create'])->middleware('can:technical-reports.create')->name('technical-reports.create');
     Route::post('technical-reports', [TechnicalReportController::class, 'store'])->middleware('can:technical-reports.create')->name('technical-reports.store');
@@ -166,7 +217,19 @@ Route::middleware('auth')->group(function () {
     Route::delete('program-project-activities/{programProjectActivity}', [ProgramProjectActivityController::class, 'destroy'])->middleware('can:programs-projects-activities.delete')->name('program-project-activities.destroy');
 
     Route::get('api/global-search', [GlobalSearchController::class, 'search'])->name('api.global-search');
-    });
+
+    // FILE VIEWER — auth required + path traversal protection
+    Route::get('/view-file/{path}', function ($path) {
+        $baseDir = realpath(storage_path('app/public'));
+        $fullPath = realpath($baseDir . DIRECTORY_SEPARATOR . $path);
+
+        if ($fullPath === false || $baseDir === false || !str_starts_with($fullPath, $baseDir . DIRECTORY_SEPARATOR)) {
+            abort(404);
+        }
+
+        return response()->file($fullPath);
+    })->where('path', '.*')->name('view-file');
+});
 
 Route::middleware(['auth', 'admin'])
     ->prefix('admin')
@@ -176,152 +239,3 @@ Route::middleware(['auth', 'admin'])
     });
 
 require __DIR__.'/auth.php';
-
-// =========================================================================
-// FIX & SEEDER: RECREATE ADMIN, GENERATE PERMISSIONS & ROLES (FOR ALL USERS)
-// =========================================================================
-Route::get('/debug-admin', function () {
-    try {
-        // 1. Siguroha nga naa ang Roles (CDS Admin ug Staff)
-        $adminRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'CDS Admin', 'guard_name' => 'web']);
-        $staffRole = \Spatie\Permission\Models\Role::firstOrCreate(['name' => 'Staff', 'guard_name' => 'web']);
-
-        // 2. I-generate ang tanang permissions (Lakip ang Reports ug PPAs)
-        $permissions = [
-            'protected-areas.view',
-            'protected-areas.create',
-            'protected-areas.update',
-            'protected-areas.delete',
-
-            'management-plans.view',
-            'management-plans.create',
-            'management-plans.update',
-            'management-plans.delete',
-
-            'technical-reports.view',
-            'technical-reports.create',
-            'technical-reports.update',
-            'technical-reports.delete',
-
-            'ecotourism-monitoring.view',
-            'ecotourism-monitoring.create',
-            'ecotourism-monitoring.update',
-            'ecotourism-monitoring.delete',
-
-            'issue-monitoring.view',
-            'issue-monitoring.create',
-            'issue-monitoring.update',
-            'issue-monitoring.delete',
-
-            'lawin-monitoring.view',
-            'lawin-monitoring.create',
-            'lawin-monitoring.update',
-            'lawin-monitoring.delete',
-
-            'programs-projects-activities.view',
-            'programs-projects-activities.create',
-            'programs-projects-activities.update',
-            'programs-projects-activities.delete',
-
-            'reports.view', // <-- GIDUGANG KINI PARA SA REPORTS MODULE!
-        ];
-
-        foreach ($permissions as $permissionName) {
-            \Spatie\Permission\Models\Permission::firstOrCreate([
-                'name' => $permissionName,
-                'guard_name' => 'web'
-            ]);
-        }
-
-        // 3. I-assign ang TIBUOK permissions sa CDS ADMIN (Makahimo og tanan lakip ang DELETE)
-        $adminRole->syncPermissions($permissions);
-
-        // 4. I-assign ang VIEW, CREATE, ug UPDATE LANG sa STAFF (WALAY DELETE PERMISSIONS APIL!)
-        $staffPermissions = [
-            'protected-areas.view',
-            'protected-areas.create',
-            'protected-areas.update',
-
-            'management-plans.view',
-            'management-plans.create',
-            'management-plans.update',
-
-            'technical-reports.view',
-            'technical-reports.create',
-            'technical-reports.update',
-
-            'ecotourism-monitoring.view',
-            'ecotourism-monitoring.create',
-            'ecotourism-monitoring.update',
-
-            'issue-monitoring.view',
-            'issue-monitoring.create',
-            'issue-monitoring.update',
-
-            'lawin-monitoring.view',
-            'lawin-monitoring.create',
-            'lawin-monitoring.update',
-
-            'programs-projects-activities.view',
-            'programs-projects-activities.create',
-            'programs-projects-activities.update',
-        ];
-        // Kani nga code magsiguro nga malimpyo ug ma-override ang karaan nga setup sa Staff
-        $staffRole->syncPermissions($staffPermissions);
-
-        // 5. I-update ang imong Default Admin account ug i-set nga active
-        $user = \App\Models\User::updateOrCreate(
-            ['email' => 'tempcdsims@gmail.com'],
-            [
-                'name' => 'Conservation Development Section',
-                'password' => bcrypt('denrcds2026'),
-                'is_active' => true,
-            ]
-        );
-
-        $user->is_active = true;
-        $user->save();
-
-        $user->syncRoles([]);
-        $user->assignRole($adminRole); // Gi-assign ang CDS Admin sa default system email
-
-        // 6. I-update ang kasamtangang user kon kinsa man ang naka-login karon
-        if (Auth::check()) {
-            $currentUser = \App\Models\User::find(Auth::id());
-            if ($currentUser) {
-                // I-assign ang husto nga role base sa email o default
-                if ($currentUser->email === 'tempcdsims@gmail.com') {
-                    $currentUser->syncRoles([]);
-                    $currentUser->assignRole($adminRole);
-                } else {
-                    // Kon ordinaryong trabahante, i-re-sync iyang permissions isip Staff
-                    $currentUser->syncRoles([]);
-                    $currentUser->assignRole($staffRole);
-                }
-            }
-        }
-
-        // Limpyohan ang tanang cache sa Spatie
-        app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
-
-        return "SUCCESS! Na-update ang tanang roles.<br><br>
-                * Ang <b>CDS Admin</b> makahimo na sa tanan lakip na ang <b>Delete</b> ug <b>Reports View</b>.<br>
-                * Ang <b>Staff</b> makahimo na sa <b>View, Create, ug Update</b> apan gibalibaran sa <b>Delete</b> ug <b>Reports View</b>.<br><br>
-                Tungod niini, dili na makadelete ang Staff!";
-
-    } catch (\Exception $e) {
-        return "Error: " . $e->getMessage();
-    }
-});
-// ==================================================
-// ROUTE PARA MAPUGOS UG VIEW ANG PDF UG PICTURES
-// ==================================================
-Route::get('/view-file/{path}', function ($path) {
-    $fullPath = storage_path('app/public/' . $path);
-
-    if (!file_exists($fullPath)) {
-        abort(404);
-    }
-
-    return response()->file($fullPath);
-})->where('path', '.*');

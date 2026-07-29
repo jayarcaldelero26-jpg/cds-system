@@ -3,10 +3,10 @@ import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
 
-export default function Edit({ monitoring, protectedAreas, statuses }) {
+export default function Edit({ monitoring, cenroList = [], statuses = [] }) {
     const { data, setData, post, processing, errors } = useForm({
-        _method: 'PATCH', // Workaround alang sa file uploads sa update requests
-        protected_area_id: monitoring.protected_area_id || '',
+        _method: 'PATCH',
+        cenro: monitoring.cenro || '',
         patrol_date: monitoring.patrol_date || '',
         patrol_distance: monitoring.patrol_distance || '',
         patrol_hours: monitoring.patrol_hours || '',
@@ -42,16 +42,16 @@ export default function Edit({ monitoring, protectedAreas, statuses }) {
                 <Card>
                     <form onSubmit={submit} className="space-y-6">
                         <div className="grid gap-6 md:grid-cols-2">
-                            {/* Protected Area */}
+                            {/* CENRO / Station */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>Protected Area / PAMO</label>
-                                <select required className={inputClass} value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
-                                    <option value="">Select Protected Area</option>
-                                    {protectedAreas.map((area) => (
-                                        <option key={area.id} value={area.id}>{area.name}</option>
+                                <label className={labelClass}>CENRO / Station</label>
+                                <select required className={inputClass} value={data.cenro} onChange={(e) => setData('cenro', e.target.value)}>
+                                    <option value="">Select CENRO / Station</option>
+                                    {cenroList.map((cenro) => (
+                                        <option key={cenro} value={cenro}>{cenro}</option>
                                     ))}
                                 </select>
-                                {errors.protected_area_id && <p className={errorClass}>{errors.protected_area_id}</p>}
+                                {errors.cenro && <p className={errorClass}>{errors.cenro}</p>}
                             </div>
 
                             {/* Patrol Date */}

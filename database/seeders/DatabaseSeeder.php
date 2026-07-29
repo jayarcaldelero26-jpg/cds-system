@@ -6,23 +6,54 @@ use App\Models\User;
 use App\Models\ProtectedArea;
 use App\Models\ManagementPlan;
 use Illuminate\Database\Seeder;
+use Spatie\Permission\Models\Role;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        // 1. Sigurohon nga naa ang Admin user
+        // 1. Tawgon una ang PermissionSeeder aron mabuhat ang tanang permissions ug roles
+        $this->call([
+            PermissionSeeder::class,
+        ]);
+
+        // 2. Siguraduhon nga naa ang basic roles
+        $adminRole = Role::firstOrCreate(['name' => 'CDS Admin', 'guard_name' => 'web']);
+        $staffRole = Role::firstOrCreate(['name' => 'Technical Staff', 'guard_name' => 'web']);
+        Role::firstOrCreate(['name' => 'Viewer', 'guard_name' => 'web']);
+        Role::firstOrCreate(['name' => 'no_role', 'guard_name' => 'web']);
+
+        // 3. Sigurohon nga naa ang Admin user ug i-assign ang 'CDS Admin' role
         $admin = User::where('email', 'tempcdsims@gmail.com')->first();
         if (!$admin) {
             $admin = User::create([
                 'name' => 'Conservation Development Section',
                 'email' => 'tempcdsims@gmail.com',
                 'password' => bcrypt('denrcds2026'),
+                'office_designated' => 'PENRO Davao Oriental',
+                'section' => 'CDS',
                 'is_active' => true,
             ]);
         }
 
-        // 2. Maghimo og sample Protected Areas (Gidugang ang created_by ug updated_by)
+        if (!$admin->hasRole('CDS Admin')) {
+            $admin->assignRole($adminRole);
+        }
+
+        // 💡 4. ILAGAY DINHI ANG EMAIL SA IMONG MGA STAFF
+        // I-uncomment ug ilisi ang 'staff@gmail.com' sa tinuod nilang gi-register nga email
+        $staffEmails = [
+            // 'ang_staff_email_nimo@gmail.com',
+        ];
+
+        foreach ($staffEmails as $email) {
+            $staffUser = User::where('email', $email)->first();
+            if ($staffUser && !$staffUser->hasRole('Technical Staff')) {
+                $staffUser->assignRole($staffRole);
+            }
+        }
+
+        // 5. Maghimo og sample Protected Areas
         $mpl = ProtectedArea::firstOrCreate(
             ['name' => 'Mati Protected Landscape (MPL)'],
             [
@@ -83,7 +114,7 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        // 3. Maghimo og sample Management Plans para sa MPL
+        // 6. Maghimo og sample Management Plans para sa MPL
         ManagementPlan::create([
             'protected_area_id' => $mpl->id,
             'plan_type' => 'PAMP',
@@ -98,7 +129,7 @@ class DatabaseSeeder extends Seeder
             'updated_by' => $admin->id,
         ]);
 
-        // 4. Maghimo og sample Management Plans para sa MHRWS
+        // 7. Maghimo og sample Management Plans para sa MHRWS
         $plans = ['PAMP', 'EMP', 'CEPA'];
         foreach ($plans as $type) {
             ManagementPlan::create([

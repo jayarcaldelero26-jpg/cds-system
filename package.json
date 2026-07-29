@@ -20,8 +20,11 @@
     "dependencies": {
         "@inertiajs/react": "^3.6.1",
         "@vitejs/plugin-react": "^5.2.0",
+        "leaflet": "^1.9.4",
         "react": "^19.2.7",
         "react-dom": "^19.2.7",
+        "react-leaflet": "^5.0.0",
+        "recharts": "^3.10.1",
         "ziggy-js": "^2.6.3"
     }
 }

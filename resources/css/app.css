@@ -27,3 +27,27 @@
         @apply ring-green-400 ring-offset-gray-900;
     }
 }
+
+/* Modern Slim Green Scrollbar for Sidebar & Entire App */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: #16a34a transparent;
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #16a34a; /* Green scrollbar */
+    border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #15803d; /* Darker green when hovering */
+}

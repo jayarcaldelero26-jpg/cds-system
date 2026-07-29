@@ -17,14 +17,14 @@ class StoreManagementPlanRequest extends FormRequest
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
             'title' => ['required', 'string', 'max:255'],
-            'version' => ['required', 'string', 'max:100'],
-            'prepared_year' => ['required', 'integer', 'min:1900', 'max:' . date('Y')],
+            'version' => ['nullable', 'string', 'max:100'], // Gihimo natong nullable para dili mo-error kung wala sa form
+            'prepared_year' => ['required', 'integer', 'min:1900', 'max:' . (date('Y') + 10)], // Gi-adjust ang max year para mo-allow hangtod 10 ka tuig sa umaabot
             'approval_date' => ['nullable', 'date'],
             'valid_from' => ['nullable', 'date'],
             'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
-            'status' => ['required', 'string', 'in:Draft,Active,Expired,For Updating,Archived'],
+            'status' => ['required', 'string', 'in:Active,For Update,Under Review'], // Gi-update ang allowed statuses
             'remarks' => ['nullable', 'string'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'], // Max 20MB // Max 20MB
+            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'], // Max 20MB
         ];
     }
 }
