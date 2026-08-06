@@ -33,12 +33,12 @@ RUN composer install --no-dev --optimize-autoloader
 # Install Node dependencies and build Vite/React frontend
 RUN npm install && npm run build
 
-# Set permissions
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
+# Set permissions including public/build folder for www-data
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/public
 
 # Change current user to www-data
 USER www-data
 
 # Expose port and start
 EXPOSE 80
-CMD php artisan serve --host=0.0.0.0 --port=$PORT
+CMD php artisan config:clear && php artisan cache:clear && php artisan serve --host=0.0.0.0 --port=$PORT
