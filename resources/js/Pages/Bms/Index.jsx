@@ -245,7 +245,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         file: null,
     });
 
-    // Bag-ong form para sa GeoJSON spatial upload
     const geoJsonForm = useForm({
         protected_area_id: '',
         file: null,
@@ -429,7 +428,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         });
     };
 
-    // Handler para sa GeoJSON Spatial Import
     const submitGeoJsonImport = (e) => {
         e.preventDefault();
         geoJsonForm.post(route('bms.import-geojson'), {
@@ -669,20 +667,25 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             <div className="py-6 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900 min-h-screen">
                 <div className="max-w-7xl mx-auto space-y-6">
 
-                    {/* PAGE HEADER SECTION */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-green-800 to-emerald-700 p-6 rounded-2xl shadow-lg w-full text-white no-print">
-                        <div>
-                            <h1 className="text-2xl font-extrabold tracking-tight">
-                                Biodiversity Monitoring System (BMS)
-                            </h1>
-                            <p className="text-sm text-green-100 mt-1">
-                                Comprehensive Species Database, Transect Observation Records, and Semestral Population Trends.
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
-                                BMS Operations
-                            </span>
+                    {/* MANAGEMENT PLAN STYLE GRADIENT HEADER BANNER */}
+                    <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md no-print">
+                        {/* Glowing light circle effect sa kilid */}
+                        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
+
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+                                    Biodiversity Monitoring System (BMS)
+                                </h1>
+                                <p className="mt-1 text-sm text-green-100">
+                                    Comprehensive Species Database, Transect Observation Records, and Semestral Population Trends.
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
+                                    BMS Operations
+                                </span>
+                            </div>
                         </div>
                     </div>
 
@@ -1091,7 +1094,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     {/* TAB 3: THREATS VIEW */}
                     {activeTab === 'threats' && <Threats />}
 
-                    {/* TAB 4: MAP VIEW (Connected via MapView component) */}
+                    {/* TAB 4: MAP VIEW */}
                     {activeTab === 'map' && (
                         <MapView
                             bmsRecords={bmsRecords}

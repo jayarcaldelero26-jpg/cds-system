@@ -13,7 +13,8 @@ use App\Http\Controllers\ProgramProjectActivityController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\BmsController;
-use App\Http\Controllers\BamsAssessmentController; // 🚀 Naa na dinhi ang BAMS Controller import
+use App\Http\Controllers\BamsAssessmentController;
+use App\Http\Controllers\ImeaAssessmentController; // 🚀 Naa na dinhi ang IMEA Controller import
 
 use App\Models\ProtectedArea;
 use App\Models\ManagementPlan;
@@ -189,8 +190,28 @@ Route::middleware('auth')->group(function () {
     Route::get('bams', [BamsAssessmentController::class, 'index'])->name('bams.index');
     Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->name('bams.flora.store');
     Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->name('bams.fauna.store');
-    Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->name('bams.store-spatial'); // <-- KINI ANG IDUGANG
+    Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->name('bams.store-spatial');
     Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->name('bams.calculate');
+
+    // 🚀 INTEGRATED PROTECTED AREA ECOTOURISM MONITORING (IMEA) ROUTES
+    Route::get('imea', [ImeaAssessmentController::class, 'index'])->name('imea.index');
+    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])
+    ->name('imea.create');
+    Route::post('imea', [ImeaAssessmentController::class, 'store'])->name('imea.store');
+    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])
+    ->name('imea.update');
+    Route::delete('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'destroy'])
+    ->name('imea.destroy');
+    Route::get('/imea/report', [ImeaAssessmentController::class, 'report'])->name('imea.report');
+    Route::post('/imea/facilities', [ImeaAssessmentController::class, 'storeFacility'])->name('imea.facilities.store');
+    Route::put('/imea/facilities/{id}', [ImeaAssessmentController::class, 'updateFacility'])->name('imea.facilities.update');
+    Route::delete('/imea/facilities/{id}', [ImeaAssessmentController::class, 'destroyFacility'])->name('imea.facilities.destroy');
+    Route::get('/imea/facilities-report', [App\Http\Controllers\ImeaAssessmentController::class, 'facilitiesReport'])->name('imea.facilities.report');
+    Route::get('/imea/facilities-export', [App\Http\Controllers\ImeaAssessmentController::class, 'exportFacilitiesExcel'])->name('imea.facilities.export');
+    Route::post('/imea/facilities-import', [App\Http\Controllers\ImeaAssessmentController::class, 'importFacilitiesExcel'])->name('imea.facilities.import');
+    Route::post('/imea/facilities-bulk-delete', [App\Http\Controllers\ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
+    Route::delete('/imea/facilities-bulk-delete', [App\Http\Controllers\ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
+
     // MANAGEMENT PLANS ROUTES
     Route::get('management-plans', [ManagementPlanController::class, 'index'])->middleware('can:management-plans.view')->name('management-plans.index');
     Route::get('management-plans/summary', [ManagementPlanController::class, 'summary'])->middleware('can:management-plans.view')->name('management-plans.summary');
@@ -198,7 +219,7 @@ Route::middleware('auth')->group(function () {
     Route::post('management-plans', [ManagementPlanController::class, 'store'])->middleware('can:management-plans.create')->name('management-plans.store');
     Route::get('management-plans/{managementPlan}/edit', [ManagementPlanController::class, 'edit'])->middleware('can:management-plans.update')->name('management-plans.edit');
     Route::patch('management-plans/{managementPlan}', [ManagementPlanController::class, 'update'])->middleware('can:management-plans.update')->name('management-plans.update');
-    Route::delete('management-plans/{managementPlan}', [ManagementPlanController::class, 'destroy'])->middleware('can:management-plans.delete')->name('management-plans.destroy');
+    Route::delete('management-plans/{managementPlan}', [ManagementPlanController::class, 'destroy'])->middleware('can:management-plans.delete')->name('management-plans.delete');
 
     // TECHNICAL REPORTS ROUTES
     Route::get('technical-reports', [TechnicalReportController::class, 'index'])->middleware('can:technical-reports.view')->name('technical-reports.index');
@@ -206,7 +227,7 @@ Route::middleware('auth')->group(function () {
     Route::post('technical-reports', [TechnicalReportController::class, 'store'])->middleware('can:technical-reports.create')->name('technical-reports.store');
     Route::get('technical-reports/{technicalReport}/edit', [TechnicalReportController::class, 'edit'])->middleware('can:technical-reports.update')->name('technical-reports.edit');
     Route::patch('technical-reports/{technicalReport}', [TechnicalReportController::class, 'update'])->middleware('can:technical-reports.update')->name('technical-reports.update');
-    Route::delete('technical-reports/{technicalReport}', [TechnicalReportController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('technical-reports.destroy');
+    Route::delete('technical-reports/{technicalReport}', [TechnicalReportController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('technical-reports.delete');
 
     // PROGRAMS, PROJECTS & ACTIVITIES (PPA) ROUTES
     Route::get('program-project-activities', [ProgramProjectActivityController::class, 'index'])->middleware('can:programs-projects-activities.view')->name('program-project-activities.index');
@@ -214,7 +235,7 @@ Route::middleware('auth')->group(function () {
     Route::post('program-project-activities', [ProgramProjectActivityController::class, 'store'])->middleware('can:programs-projects-activities.create')->name('program-project-activities.store');
     Route::get('program-project-activities/{programProjectActivity}/edit', [ProgramProjectActivityController::class, 'edit'])->middleware('can:programs-projects-activities.update')->name('program-project-activities.edit');
     Route::post('program-project-activities/{programProjectActivity}', [ProgramProjectActivityController::class, 'update'])->middleware('can:programs-projects-activities.update')->name('program-project-activities.update');
-    Route::delete('program-project-activities/{programProjectActivity}', [ProgramProjectActivityController::class, 'destroy'])->middleware('can:programs-projects-activities.delete')->name('program-project-activities.destroy');
+    Route::delete('program-project-activities/{programProjectActivity}', [ProgramProjectActivityController::class, 'destroy'])->middleware('can:programs-projects-activities.delete')->name('program-project-activities.delete');
 
     Route::get('api/global-search', [GlobalSearchController::class, 'search'])->name('api.global-search');
 

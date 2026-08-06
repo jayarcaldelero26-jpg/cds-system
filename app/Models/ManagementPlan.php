@@ -2,21 +2,38 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[Fillable(['protected_area_id', 'plan_type', 'title', 'version', 'prepared_year', 'approval_date', 'valid_from', 'valid_until', 'status', 'remarks', 'attachment', 'created_by', 'updated_by'])]
 class ManagementPlan extends Model
 {
     use HasFactory, SoftDeletes;
 
-    protected function casts(): array
-    {
-        return ['prepared_year' => 'integer', 'approval_date' => 'date', 'valid_from' => 'date', 'valid_until' => 'date'];
-    }
+    protected $fillable = [
+        'protected_area_id',
+        'plan_type',
+        'title',
+        'version',
+        'prepared_year',
+        'approval_date',
+        'valid_from',
+        'valid_until',
+        'status',
+        'remarks',
+        'attachments', // <--- Gi-update gikan sa attachment ngadto sa attachments
+        'created_by',
+        'updated_by',
+    ];
+
+    protected $casts = [
+        'prepared_year' => 'integer',
+        'approval_date' => 'date',
+        'valid_from' => 'date',
+        'valid_until' => 'date',
+        'attachments' => 'array', // <--- IMPORTANTE: Aronawtomatikong ma-array ang JSON gikan sa DB
+    ];
 
     public function protectedArea(): BelongsTo
     {

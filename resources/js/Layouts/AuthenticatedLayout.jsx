@@ -36,7 +36,7 @@ const allNavigation = [
         children: [
             { label: 'Biodiversity Monitoring System (BMS)', href: '/bms' },
             { label: 'Biodiversity Assessment (BAMS)', href: '/bams' }, // 🚀 Gihimo nang active link padulong sa /bams!
-            { label: 'IMEA', href: '#', comingSoon: true },
+            { label: 'IMEA', href: '/imea' },
             { label: 'BDFE', href: '#', comingSoon: true },
             { label: 'IPAF Collection', href: '#', comingSoon: true },
             { label: 'All Technical Reports', href: '/technical-reports', permission: 'canViewTechnicalReports' },

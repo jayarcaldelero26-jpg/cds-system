@@ -1,0 +1,28 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    public function up(): void
+    {
+        Schema::table('management_plans', function (Blueprint $table) {
+            // Drop daang single string column kung naa pa
+            $table->dropColumn('attachment');
+        });
+        Schema::table('management_plans', function (Blueprint $table) {
+            // I-add ang json attachments column
+            $table->json('attachments')->nullable()->after('remarks');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::table('management_plans', function (Blueprint $table) {
+            $table->dropColumn('attachments');
+            $table->string('attachment')->nullable();
+        });
+    }
+};

@@ -90,7 +90,7 @@
                     <td><strong>{{ $record->station }}</strong></td>
                     <td>{{ $record->time ?? '-' }}</td>
                     <td class="text-left">
-                        {{ $record->species_common_name }} 
+                        {{ $record->species_common_name }}
                         @if($record->species_scientific_name)
                             <span style="font-style: italic;">({{ $record->species_scientific_name }})</span>
                         @endif

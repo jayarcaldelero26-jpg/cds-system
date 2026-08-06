@@ -2,8 +2,6 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Requests\StoreManagementPlanRequest;
-use App\Http\Requests\UpdateManagementPlanRequest;
 use App\Models\ManagementPlan;
 use App\Models\ProtectedArea;
 use Illuminate\Http\RedirectResponse;
@@ -52,19 +50,35 @@ class ManagementPlanController extends Controller
         return Inertia::render('ManagementPlans/Create', $this->formOptions());
     }
 
-    public function store(StoreManagementPlanRequest $request): RedirectResponse
+    public function store(Request $request): RedirectResponse
     {
-        $data = $request->validated();
-        if ($request->hasFile('attachment')) {
-            $data['attachment'] = $request->file('attachment')->store('management-plans', 'public');
+        $data = $request->validate([
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
+            'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
+            'title' => ['required', 'string', 'max:255'],
+            'prepared_year' => ['required', 'integer', 'min:1900', 'max:2100'],
+            'approval_date' => ['nullable', 'date'],
+            'valid_from' => ['nullable', 'date'],
+            'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
+            'status' => ['required', 'string', 'in:Active,For Update,Under Review'],
+            'remarks' => ['nullable', 'string'],
+            'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
+        ]);
+
+        $attachmentPaths = [];
+        if ($request->hasFile('attachments')) {
+            foreach ($request->file('attachments') as $file) {
+                $path = $file->store('management-plans', 'public');
+                $attachmentPaths[] = $path;
+            }
         }
 
-        // 🚀 GIDUGANGAN NATO OG 'version' => 'v1' PARA DILI NA MO-ERROR SA DATABASE
         ManagementPlan::create([
-            ...$data,
+            ...collect($data)->except('attachments')->toArray(),
+            'attachments' => $attachmentPaths,
             'version' => 'v1',
             'created_by' => $request->user()->id,
-            'updated_by' => $request->user()->id
+            'updated_by' => $request->user()->id,
         ]);
 
         return to_route('management-plans.index')->with('status', 'management-plan-created');
@@ -90,23 +104,39 @@ class ManagementPlanController extends Controller
             'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
             'status' => ['required', 'string', 'in:Active,For Update,Under Review'],
             'remarks' => ['nullable', 'string'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
+            'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
+            'removed_attachments' => ['nullable', 'array'],
         ]);
 
-        if ($request->hasFile('attachment')) {
-            if ($managementPlan->attachment) {
-                Storage::disk('public')->delete($managementPlan->attachment);
-            }
-            $data['attachment'] = $request->file('attachment')->store('management-plans', 'public');
-        } else {
-            unset($data['attachment']);
+        $currentAttachments = $managementPlan->attachments ?? [];
+        if (is_string($currentAttachments)) {
+            $currentAttachments = json_decode($currentAttachments, true) ?? [];
         }
 
-        // 🚀 APIL SA UPDATE ANG VERSION DILI MAPASABUTAN NGA NULL
+        // Tangtangon ang mga gipili nga tanggalon nga files
+        if ($request->has('removed_attachments')) {
+            $removed = $request->input('removed_attachments', []);
+            $currentAttachments = array_values(array_filter($currentAttachments, function ($file) use ($removed) {
+                return !in_array($file, $removed);
+            }));
+            foreach ($removed as $remFile) {
+                Storage::disk('public')->delete($remFile);
+            }
+        }
+
+        // I-add ang mga bag-ong gi-upload nga files
+        if ($request->hasFile('attachments')) {
+            foreach ($request->file('attachments') as $file) {
+                $path = $file->store('management-plans', 'public');
+                $currentAttachments[] = $path;
+            }
+        }
+
         $managementPlan->update([
-            ...$data,
+            ...collect($data)->except(['attachments', 'removed_attachments'])->toArray(),
+            'attachments' => $currentAttachments,
             'version' => $managementPlan->version ?? 'v1',
-            'updated_by' => $request->user()->id
+            'updated_by' => $request->user()->id,
         ]);
 
         return to_route('management-plans.index')->with('status', 'management-plan-updated');
@@ -119,10 +149,10 @@ class ManagementPlanController extends Controller
 
         return to_route('management-plans.index')->with('status', 'management-plan-deleted');
     }
+
     public function summary(Request $request): Response
     {
         $protectedAreaId = $request->integer('protected_area_id');
-
         $selectedArea = $protectedAreaId ? ProtectedArea::find($protectedAreaId) : null;
 
         $plans = ManagementPlan::query()
@@ -158,7 +188,7 @@ class ManagementPlanController extends Controller
             'valid_until' => $plan->valid_until?->toDateString(),
             'status' => $plan->status,
             'remarks' => $plan->remarks,
-            'attachment' => $plan->attachment,
+            'attachments' => $plan->attachments,
         ];
     }
 

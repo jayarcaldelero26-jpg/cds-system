@@ -103,6 +103,11 @@ class HandleInertiaRequests extends Middleware
                 // Reports (CDS ra)
                 'canViewReports' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
             ],
+            'flash' => [
+                'status' => fn () => $request->session()->get('status'),
+                'success' => fn () => $request->session()->get('success'),
+                'error' => fn () => $request->session()->get('error'),
+            ],
             'status' => fn (): ?string => $request->session()->get('status'),
         ];
     }

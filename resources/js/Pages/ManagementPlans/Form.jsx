@@ -35,22 +35,103 @@ export default function Form({ title, managementPlan, protectedAreas, planTypes,
         valid_until: managementPlan?.valid_until || '',
         status: managementPlan?.status || 'Active',
         remarks: managementPlan?.remarks || '',
-        attachment: null
+        attachments: [],
+        removed_attachments: [],
     });
 
-    const [previewUrl, setPreviewUrl] = useState(
-        managementPlan?.attachment ? `/view-file/${managementPlan.attachment}` : null
+    // Existing files gikan sa database (kung naa sa edit mode)
+    const [existingFiles, setExistingFiles] = useState(
+        managementPlan?.attachments ? (Array.isArray(managementPlan.attachments) ? managementPlan.attachments : [managementPlan.attachments]) : []
     );
 
+    // Bag-ong gi-upload nga files sa user
+    const [newFiles, setNewFiles] = useState([]);
+
+    // Tracking kung hain ang gi-preview karon ('existing-{index}' o 'new-{index}')
+    const [activePreview, setActivePreview] = useState(() => {
+        const initialExist = managementPlan?.attachments ? (Array.isArray(managementPlan.attachments) ? managementPlan.attachments : [managementPlan.attachments]) : [];
+        if (initialExist.length > 0) return { type: 'existing', index: 0 };
+        return null;
+    });
+
     const handleFileChange = (event) => {
-        const file = event.target.files[0];
-        if (file) {
-            form.setData('attachment', file);
-            setPreviewUrl(URL.createObjectURL(file));
-        } else {
-            form.setData('attachment', null);
-            setPreviewUrl(managementPlan?.attachment ? `/view-file/${managementPlan.attachment}` : null);
+        const files = Array.from(event.target.files);
+        const mappedNewFiles = files.map(file => ({
+            file,
+            name: file.name,
+            url: URL.createObjectURL(file),
+        }));
+
+        const updatedNewFiles = [...newFiles, ...mappedNewFiles];
+        setNewFiles(updatedNewFiles);
+        form.setData('attachments', updatedNewFiles.map(item => item.file));
+
+        // Kung wala pay active preview, i-set sa pinakabag-ong gi-upload
+        if (!activePreview && updatedNewFiles.length > 0) {
+            setActivePreview({ type: 'new', index: updatedNewFiles.length - 1 });
         }
+    };
+
+    const handleRemoveExisting = (indexToRemove) => {
+        const fileToRemove = existingFiles[indexToRemove];
+        const updatedExisting = existingFiles.filter((_, idx) => idx !== indexToRemove);
+        setExistingFiles(updatedExisting);
+
+        // I-record sa removed_attachments aron ma-delete sa server
+        const updatedRemoved = [...form.data.removed_attachments, fileToRemove];
+        form.setData('removed_attachments', updatedRemoved);
+
+        // Adjust active preview kung ang gitangtang mao ang gi-preview karon
+        if (activePreview?.type === 'existing' && activePreview.index === indexToRemove) {
+            if (updatedExisting.length > 0) {
+                setActivePreview({ type: 'existing', index: Math.max(0, indexToRemove - 1) });
+            } else if (newFiles.length > 0) {
+                setActivePreview({ type: 'new', index: 0 });
+            } else {
+                setActivePreview(null);
+            }
+        }
+    };
+
+    const handleRemoveNew = (indexToRemove) => {
+        const updatedNew = newFiles.filter((_, idx) => idx !== indexToRemove);
+        setNewFiles(updatedNew);
+        form.setData('attachments', updatedNew.map(item => item.file));
+
+        if (activePreview?.type === 'new' && activePreview.index === indexToRemove) {
+            if (updatedNew.length > 0) {
+                setActivePreview({ type: 'new', index: Math.max(0, indexToRemove - 1) });
+            } else if (existingFiles.length > 0) {
+                setActivePreview({ type: 'existing', index: 0 });
+            } else {
+                setActivePreview(null);
+            }
+        }
+    };
+
+    // Kuhaa ang URL sa active preview karon para sa iframe
+    const getActivePreviewUrl = () => {
+        if (!activePreview) return null;
+        if (activePreview.type === 'existing') {
+            const filePath = existingFiles[activePreview.index];
+            return filePath ? `/view-file/${filePath}` : null;
+        }
+        if (activePreview.type === 'new') {
+            return newFiles[activePreview.index]?.url || null;
+        }
+        return null;
+    };
+
+    const getActivePreviewName = () => {
+        if (!activePreview) return '';
+        if (activePreview.type === 'existing') {
+            const path = existingFiles[activePreview.index];
+            return path ? path.split('/').pop() : '';
+        }
+        if (activePreview.type === 'new') {
+            return newFiles[activePreview.index]?.name || '';
+        }
+        return '';
     };
 
     const submit = (event) => {
@@ -89,7 +170,7 @@ export default function Form({ title, managementPlan, protectedAreas, planTypes,
         <AuthenticatedLayout title={headerTitle}>
             <PageHeader
                 title={headerTitle}
-                description={isEdit ? 'Update this management plan record and view attached documents.' : 'Register a new management plan version and preview documents.'}
+                description={isEdit ? 'Update this management plan record and review attached documents side-by-side.' : 'Register a new management plan version and preview documents.'}
                 actions={<Link href="/management-plans" className="text-sm font-semibold text-white hover:text-green-200 transition">← Back to management plans</Link>}
             />
 
@@ -136,13 +217,90 @@ export default function Form({ title, managementPlan, protectedAreas, planTypes,
                             </div>
                         </FormSection>
 
-                        <FormSection title="Attachment and Remarks">
+                        <FormSection title="Attachments and Remarks">
                             <div className="grid gap-4">
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200" htmlFor="attachment">
-                                    Attachment (PDF)
-                                    <input id="attachment" type="file" accept=".pdf" className={selectClass} onChange={handleFileChange} />
-                                    {form.errors.attachment && <p className="mt-1.5 text-sm text-red-700 dark:text-red-300">{form.errors.attachment}</p>}
+                                    Attachments (Multiple PDF)
+                                    <input id="attachment" type="file" multiple accept=".pdf" className="block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 cursor-pointer border border-gray-300 dark:border-gray-700 rounded-xl dark:bg-gray-800 shadow-xs mt-1.5" onChange={handleFileChange} />
+                                    {form.errors.attachments && <p className="mt-1.5 text-sm text-red-700 dark:text-red-300">{form.errors.attachments}</p>}
                                 </label>
+
+                                {/* LISTAHAN SA EXISTING FILES NGA NAA NA SA DATABASE */}
+                                {existingFiles.length > 0 && (
+                                    <div>
+                                        <p className="text-xs font-semibold text-gray-500 mb-1.5">Existing Files (Click to Preview):</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {existingFiles.map((file, index) => {
+                                                const fileName = file.split('/').pop();
+                                                const isSelected = activePreview?.type === 'existing' && activePreview?.index === index;
+                                                return (
+                                                    <div
+                                                        key={index}
+                                                        onClick={() => setActivePreview({ type: 'existing', index })}
+                                                        className={`flex items-center gap-2 border px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition shadow-xs ${
+                                                            isSelected
+                                                                ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                                                                : 'bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-100'
+                                                        }`}
+                                                    >
+                                                        <span className="truncate max-w-[160px]" title={fileName}>📄 {fileName}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveExisting(index);
+                                                            }}
+                                                            className={`font-bold ml-1 h-4 w-4 flex items-center justify-center rounded-full transition ${
+                                                                isSelected ? 'text-white hover:bg-green-800' : 'text-red-500 hover:bg-red-100'
+                                                            }`}
+                                                            title="Tangtangon ang file"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* LISTAHAN SA BAG-ONG GI-UPLOAD NGA FILES */}
+                                {newFiles.length > 0 && (
+                                    <div>
+                                        <p className="text-xs font-semibold text-gray-500 mb-1.5">New Uploads (Click to Preview):</p>
+                                        <div className="flex flex-wrap gap-2">
+                                            {newFiles.map((item, index) => {
+                                                const isSelected = activePreview?.type === 'new' && activePreview?.index === index;
+                                                return (
+                                                    <div
+                                                        key={index}
+                                                        onClick={() => setActivePreview({ type: 'new', index })}
+                                                        className={`flex items-center gap-2 border px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition shadow-xs ${
+                                                            isSelected
+                                                                ? 'bg-green-700 text-white border-green-700 shadow-sm'
+                                                                : 'bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-100'
+                                                        }`}
+                                                    >
+                                                        <span className="truncate max-w-[160px]" title={item.name}>📄 {item.name}</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleRemoveNew(index);
+                                                            }}
+                                                            className={`font-bold ml-1 h-4 w-4 flex items-center justify-center rounded-full transition ${
+                                                                isSelected ? 'text-white hover:bg-green-800' : 'text-red-500 hover:bg-red-100'
+                                                            }`}
+                                                            title="Tangtangon ang file"
+                                                        >
+                                                            ✕
+                                                        </button>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
 
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-200" htmlFor="remarks">
                                     Remarks
@@ -159,24 +317,41 @@ export default function Form({ title, managementPlan, protectedAreas, planTypes,
                     </form>
                 </Card>
 
-                <Card className="xl:col-span-5 flex flex-col h-[750px] sticky top-28">
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-white mb-2">Document Live Preview</h3>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Preview of the attached management plan document.</p>
+                {/* RIGHT SIDE: LIVE DOCUMENT PREVIEW SWITCHER */}
+                <Card className="xl:col-span-5 flex flex-col h-[780px] sticky top-6">
+                    <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 flex items-center gap-2">
+                            <span>👁️</span> LIVE DOCUMENT PREVIEW
+                        </h3>
+                        {getActivePreviewUrl() && (
+                            <a
+                                href={getActivePreviewUrl()}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs font-semibold text-green-700 dark:text-green-400 hover:underline"
+                            >
+                                Fullscreen ↗
+                            </a>
+                        )}
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                        {activePreview ? `Viewing: ${getActivePreviewName()}` : 'Preview of attached management plan documents.'}
+                    </p>
 
-                    <div className="flex-1 w-full bg-gray-100 dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center">
-                        {previewUrl ? (
+                    <div className="flex-1 w-full bg-gray-50 dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 flex items-center justify-center">
+                        {getActivePreviewUrl() ? (
                             <iframe
-                                src={previewUrl}
-                                title="Management Plan Preview"
+                                src={getActivePreviewUrl()}
+                                title={getActivePreviewName()}
                                 className="w-full h-full border-0"
                             />
                         ) : (
                             <div className="text-center p-6 text-gray-400 dark:text-gray-500">
-                                <svg className="mx-auto h-12 w-12 stroke-current opacity-40 mb-2" fill="none" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                                </svg>
-                                <p className="text-sm font-medium">No PDF document attached yet.</p>
-                                <p className="text-xs mt-1">Upload a PDF file on the left to preview it here.</p>
+                                <span className="text-4xl mb-3 block">📁</span>
+                                <h4 className="text-sm font-semibold text-gray-800 dark:text-white">No file selected for preview</h4>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xs mx-auto">
+                                    Upload or select PDF files on the left to preview them here live.
+                                </p>
                             </div>
                         )}
                     </div>

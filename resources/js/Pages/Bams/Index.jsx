@@ -144,20 +144,25 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
                         </div>
                     )}
 
-                    {/* GREEN GRADIENT HEADER */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-gradient-to-r from-green-800 to-emerald-700 p-6 rounded-2xl shadow-lg w-full text-white no-print">
-                        <div>
-                            <h1 className="text-2xl font-extrabold tracking-tight">
-                                Field Data Sheet for Permanent Monitoring Plot
-                            </h1>
-                            <p className="text-sm text-green-100 mt-1">
-                                Terrestrial Ecosystems Floristic Survey, Spatial Mapping, and Tree Measurements.
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
-                                BAMS Operations
-                            </span>
+                    {/* MANAGEMENT PLAN STYLE GRADIENT HEADER BANNER */}
+                    <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md">
+                        {/* Glowing light circle effect sa kilid */}
+                        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
+
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+                                    Field Data Sheet for Permanent Monitoring Plot
+                                </h1>
+                                <p className="mt-1 text-sm text-green-100">
+                                    Terrestrial Ecosystems Floristic Survey, Spatial Mapping, and Tree Measurements.
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
+                                    BAMS Operations
+                                </span>
+                            </div>
                         </div>
                     </div>
 
