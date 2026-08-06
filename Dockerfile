@@ -22,15 +22,18 @@ COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy existing application directory contents
+# Copy project files
 COPY . /var/www/html
 
-# Copy existing application directory permissions
-COPY --chown=www-data:www-data . /var/www/html
+# Install Composer dependencies
+RUN composer install --no-dev --optimize-autoloader
+
+# Set permissions
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
 # Change current user to www-data
 USER www-data
 
-# Expose port 80 and start apache server
+# Expose port and start
 EXPOSE 80
 CMD php artisan serve --host=0.0.0.0 --port=$PORT
