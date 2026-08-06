@@ -195,22 +195,18 @@ Route::middleware('auth')->group(function () {
 
     // 🚀 INTEGRATED PROTECTED AREA ECOTOURISM MONITORING (IMEA) ROUTES
     Route::get('imea', [ImeaAssessmentController::class, 'index'])->name('imea.index');
-    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])
-    ->name('imea.create');
+    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])->name('imea.create');
     Route::post('imea', [ImeaAssessmentController::class, 'store'])->name('imea.store');
-    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])
-    ->name('imea.update');
-    Route::delete('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'destroy'])
-    ->name('imea.destroy');
+    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])->name('imea.update');
+    Route::delete('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'destroy'])->name('imea.destroy');
     Route::get('/imea/report', [ImeaAssessmentController::class, 'report'])->name('imea.report');
     Route::post('/imea/facilities', [ImeaAssessmentController::class, 'storeFacility'])->name('imea.facilities.store');
     Route::put('/imea/facilities/{id}', [ImeaAssessmentController::class, 'updateFacility'])->name('imea.facilities.update');
     Route::delete('/imea/facilities/{id}', [ImeaAssessmentController::class, 'destroyFacility'])->name('imea.facilities.destroy');
-    Route::get('/imea/facilities-report', [App\Http\Controllers\ImeaAssessmentController::class, 'facilitiesReport'])->name('imea.facilities.report');
-    Route::get('/imea/facilities-export', [App\Http\Controllers\ImeaAssessmentController::class, 'exportFacilitiesExcel'])->name('imea.facilities.export');
-    Route::post('/imea/facilities-import', [App\Http\Controllers\ImeaAssessmentController::class, 'importFacilitiesExcel'])->name('imea.facilities.import');
-    Route::post('/imea/facilities-bulk-delete', [App\Http\Controllers\ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
-    Route::delete('/imea/facilities-bulk-delete', [App\Http\Controllers\ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
+    Route::get('/imea/facilities-report', [ImeaAssessmentController::class, 'facilitiesReport'])->name('imea.facilities.report');
+    Route::get('/imea/facilities-export', [ImeaAssessmentController::class, 'exportFacilitiesExcel'])->name('imea.facilities.export');
+    Route::post('/imea/facilities-import', [ImeaAssessmentController::class, 'importFacilitiesExcel'])->name('imea.facilities.import');
+    Route::delete('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
 
     // MANAGEMENT PLANS ROUTES
     Route::get('management-plans', [ManagementPlanController::class, 'index'])->middleware('can:management-plans.view')->name('management-plans.index');

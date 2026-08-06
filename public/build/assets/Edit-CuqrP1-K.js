@@ -1,0 +1,1 @@
+import{t as e}from"./app-BHwBCzBf.js";import t from"./Form-ZciA5-RG.js";var n=e();function r(e){return(0,n.jsx)(t,{title:`Edit User`,...e})}export{r as default};

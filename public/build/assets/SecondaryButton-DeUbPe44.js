@@ -1,1 +1,0 @@
-import{t as e}from"./app-CeTzEOMr.js";import{n as t}from"./PrimaryButton-Dfe4w7SV.js";var n=e();function r(e){return(0,n.jsx)(t,{...e,variant:`secondary`})}export{r as t};

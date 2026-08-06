@@ -1,0 +1,1 @@
+import{t as e}from"./app-BHwBCzBf.js";import t from"./Form-DLPqUIxb.js";var n=e();function r(e){return(0,n.jsx)(t,{title:`Edit Protected Area`,...e})}export{r as default};
