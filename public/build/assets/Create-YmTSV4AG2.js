@@ -1,0 +1,1 @@
+import{t as e}from"./app-CeTzEOMr.js";import t from"./Form-B4cT3MYs.js";var n=e();function r(e){return(0,n.jsx)(t,{title:`Add Protected Area`,...e})}export{r as default};
