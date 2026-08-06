@@ -1,6 +1,6 @@
 FROM php:8.3-apache
 
-# Install system dependencies
+# Install system dependencies & Node.js (para ma-build ang React/Vite)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -8,7 +8,9 @@ RUN apt-get update && apt-get install -y \
     libonig-dev \
     libxml2-dev \
     zip \
-    unzip
+    unzip \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs
 
 # Clear cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
@@ -25,8 +27,11 @@ WORKDIR /var/www/html
 # Copy project files
 COPY . /var/www/html
 
-# Install Composer dependencies
+# Install PHP dependencies
 RUN composer install --no-dev --optimize-autoloader
+
+# Install Node dependencies and build Vite/React frontend
+RUN npm install && npm run build
 
 # Set permissions
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
