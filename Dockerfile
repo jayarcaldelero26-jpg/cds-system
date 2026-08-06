@@ -18,15 +18,30 @@ RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 WORKDIR /var/www/html
-COPY . /var/www/html
+
+COPY . .
 
 RUN composer install --no-dev --optimize-autoloader
+
 RUN npm install
 RUN npm run build
 
-# I-redirect ang Apache ngadto sa public folder sa Laravel
-RUN sed -ri -s 's!/var/www/html!/var/www/html/public!g' /etc/apache2/sites-available/000-default.conf
+# Laravel caches
+RUN php artisan optimize:clear || true
+RUN php artisan config:clear || true
+RUN php artisan route:clear || true
+RUN php artisan view:clear || true
+RUN php artisan config:cache || true
 
-RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/public
+# Apache
+RUN a2enmod rewrite
+
+RUN sed -ri -e 's!/var/www/html!/var/www/html/public!g' \
+    /etc/apache2/sites-available/*.conf \
+    /etc/apache2/apache2.conf
+
+RUN chown -R www-data:www-data storage bootstrap/cache public
 
 EXPOSE 80
+
+CMD ["apache2-foreground"]

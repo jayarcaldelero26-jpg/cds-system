@@ -21,13 +21,10 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        // 🛡️ FORCE HTTPS CONFIGURATION PARA SA NGROK / SECURE CONNECTIONS
-        // Aron mawala ang 'Mixed Content' ug mo-load ang tanang styles ug scripts gamit ang HTTPS
-        if (str_contains(request()->headers->get('X-Forwarded-Host') ?? '', 'ngrok-free.dev') || request()->secure()) {
+        if (app()->environment('production')) {
             URL::forceScheme('https');
         }
 
-        // Gi-update gikan sa 'Admin' ngadto sa 'CDS Admin'
         Gate::before(function ($user, $ability) {
             return $user->hasRole('CDS Admin') ? true : null;
         });
