@@ -1,6 +1,6 @@
 FROM php:8.3-apache
 
-# Install system dependencies & Node.js (para ma-build ang React/Vite)
+# 1. I-install ang system dependencies ug Node.js 20
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -12,33 +12,37 @@ RUN apt-get update && apt-get install -y \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs
 
-# Clear cache
+# Clear apt cache
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Install PHP extensions
+# 2. I-install ang kinahanglang PHP extensions
 RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd
 
-# Get latest Composer
+# 3. Kuhaa ang Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
-# Set working directory
+# 4. Ibutang ang working directory
 WORKDIR /var/www/html
 
-# Copy project files
+# 5. Kopyaha una ang package files aron ma-optimize ang caching
+COPY composer.json composer.lock package.json package-lock.json ./
+
+# 6. I-install ang PHP ug Node dependencies
+RUN composer install --no-dev --optimize-autoloader
+RUN npm install
+
+# 7. Kopyaha ang nahabiling source code
 COPY . /var/www/html
 
-# Install PHP dependencies
-RUN composer install --no-dev --optimize-autoloader
+# 8. I-run ang Vite build direkta sulod sa container aron matingob ang manifest.json
+RUN npm run build
 
-# Install Node dependencies and build Vite/React frontend
-RUN npm install && npm run build
-
-# Set permissions including public/build folder for www-data
+# 9. I-set ang saktong permissions sa storage, bootstrap cache, ug public folder
 RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache /var/www/html/public
 
-# Change current user to www-data
+# 10. Gamita ang www-data user para sa security
 USER www-data
 
-# Expose port and start
+# 11. I-expose ang port ug i-clear ang cache inig sugod sa server
 EXPOSE 80
 CMD php artisan config:clear && php artisan cache:clear && php artisan serve --host=0.0.0.0 --port=$PORT
