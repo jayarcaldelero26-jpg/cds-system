@@ -31,7 +31,10 @@ RUN php artisan optimize:clear || true
 RUN php artisan config:clear || true
 RUN php artisan route:clear || true
 RUN php artisan view:clear || true
-RUN php artisan config:cache || true
+
+# IMPORTANT:
+# Do NOT run php artisan config:cache here.
+# Render environment variables are available at runtime.
 
 # Apache
 RUN a2enmod rewrite
