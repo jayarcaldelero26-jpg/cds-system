@@ -1,1 +1,0 @@
-import{t as e}from"./app-BiyM0UkJ.js";import t from"./Form-DtoOLeGm.js";var n=e();function r(e){return(0,n.jsx)(t,{title:`Edit User`,...e})}export{r as default};

@@ -14,117 +14,18 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\BmsController;
 use App\Http\Controllers\BamsAssessmentController;
-use App\Http\Controllers\ImeaAssessmentController; // 🚀 Naa na dinhi ang IMEA Controller import
+use App\Http\Controllers\ImeaAssessmentController;
+use App\Http\Controllers\AwsController; // 🚀 Gi-import na nato dinhi ang AwsController
+use App\Http\Controllers\DashboardController;
 
-use App\Models\ProtectedArea;
-use App\Models\ManagementPlan;
-use App\Models\ProgramProjectActivity;
-use App\Models\IssueMonitoring;
-use App\Models\LawinMonitoring;
-use App\Models\CdsLawinMonitoring;
-use App\Models\TechnicalReport;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Facades\Auth;
 use Inertia\Inertia;
 
 Route::get('/', function () {
     return Inertia::render('Welcome');
 });
 
-Route::get('/dashboard', function () {
-    $user = request()->user();
-
-    if ($user->hasRole('no_role') || !$user->is_active) {
-        return Inertia::render('Auth/WaitingApproval');
-    }
-
-    if ($user->section === 'MES') {
-        $issueCount = IssueMonitoring::count();
-        $lawinCount = LawinMonitoring::count();
-
-        $recentLawins = LawinMonitoring::latest()->take(2)->get()->map(function ($item) {
-            return [
-                'id' => 'lawin-' . $item->id,
-                'activity' => "Patrol conducted at " . ($item->cenro ?? 'CENRO'),
-                'module' => 'LAWIN (MES)',
-                'date' => $item->created_at->diffForHumans(),
-                'status' => $item->status ?? 'Completed',
-            ];
-        });
-
-        $recentIssues = IssueMonitoring::latest()->take(2)->get()->map(function ($item) {
-            return [
-                'id' => 'issue-' . $item->id,
-                'activity' => "Threat reported: " . $item->threat_type,
-                'module' => 'Issues',
-                'date' => $item->created_at->diffForHumans(),
-                'status' => 'Pending Review',
-            ];
-        });
-
-        $dbActivities = collect()
-            ->merge($recentLawins)
-            ->merge($recentIssues)
-            ->take(4)
-            ->values()
-            ->toArray();
-
-        return Inertia::render('MesDashboard', [
-            'issueCount' => $issueCount,
-            'lawinCount' => $lawinCount,
-            'dbActivities' => $dbActivities,
-        ]);
-
-    } else {
-        $protectedAreasCount = ProtectedArea::count();
-        $activeManagementPlansCount = ManagementPlan::where('status', 'Active')->count();
-        $expiredManagementPlansCount = ManagementPlan::where('status', 'Expired')->count();
-        $plansForUpdatingCount = ManagementPlan::where('status', 'For Update')->count();
-        $ppaCount = ProgramProjectActivity::count();
-        $technicalReportsCount = TechnicalReport::count();
-        $cdsLawinCount = CdsLawinMonitoring::count();
-
-        $recentPpas = ProgramProjectActivity::latest()->take(2)->get()->map(function ($item) {
-            return [
-                'id' => 'ppa-' . $item->id,
-                'activity' => "New PPA recorded: " . $item->title,
-                'module' => 'PPA Projects',
-                'date' => $item->created_at->diffForHumans(),
-                'status' => 'Completed',
-            ];
-        });
-
-        $recentCdsLawins = CdsLawinMonitoring::latest()->take(2)->get()->map(function ($item) {
-            return [
-                'id' => 'cds-lawin-' . $item->id,
-                'activity' => "Patrol conducted at " . ($item->patrol_area ?? 'Protected Area'),
-                'module' => 'CDS LAWIN',
-                'date' => $item->created_at->diffForHumans(),
-                'status' => 'Completed',
-            ];
-        });
-
-        $dbActivities = collect()
-            ->merge($recentPpas)
-            ->merge($recentCdsLawins)
-            ->take(4)
-            ->values()
-            ->toArray();
-
-        return Inertia::render('Dashboard', [
-            'protectedAreasCount' => $protectedAreasCount,
-            'activeManagementPlansCount' => $activeManagementPlansCount,
-            'expiredManagementPlansCount' => $expiredManagementPlansCount,
-            'plansForUpdatingCount' => $plansForUpdatingCount,
-            'ppaCount' => $ppaCount,
-            'cdsLawinCount' => $cdsLawinCount,
-            'technicalReportsCount' => $technicalReportsCount,
-            'dbActivities' => $dbActivities,
-        ]);
-    }
-
-})->middleware(['auth', 'verified'])->name('dashboard');
+Route::get('/dashboard', [DashboardController::class, 'index'])->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
     // PROFILE ROUTES
@@ -186,14 +87,14 @@ Route::middleware('auth')->group(function () {
     Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->name('bms.export-pdf');
     Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->name('bms.import-geojson');
 
-    // 🚀 BIODIVERSITY ASSESSMENT AND MONITORING SYSTEM (BAMS) ROUTES
+    // BAMS ROUTES
     Route::get('bams', [BamsAssessmentController::class, 'index'])->name('bams.index');
     Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->name('bams.flora.store');
     Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->name('bams.fauna.store');
     Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->name('bams.store-spatial');
     Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->name('bams.calculate');
 
-    // 🚀 INTEGRATED PROTECTED AREA ECOTOURISM MONITORING (IMEA) ROUTES
+    // IMEA ROUTES
     Route::get('imea', [ImeaAssessmentController::class, 'index'])->name('imea.index');
     Route::get('imea/create', [ImeaAssessmentController::class, 'create'])->name('imea.create');
     Route::post('imea', [ImeaAssessmentController::class, 'store'])->name('imea.store');
@@ -208,6 +109,12 @@ Route::middleware('auth')->group(function () {
     Route::post('/imea/facilities-import', [ImeaAssessmentController::class, 'importFacilitiesExcel'])->name('imea.facilities.import');
     Route::delete('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
 
+    // 🚀 AUTOMATED WEATHER STATION (AWS) ROUTES
+    Route::get('aws', [AwsController::class, 'index'])->name('aws.index');
+    Route::post('aws', [AwsController::class, 'store'])->name('aws.store');
+    Route::put('aws/{aws}', [AwsController::class, 'update'])->name('aws.update');
+    Route::delete('aws/{aws}', [AwsController::class, 'destroy'])->name('aws.destroy');
+
     // MANAGEMENT PLANS ROUTES
     Route::get('management-plans', [ManagementPlanController::class, 'index'])->middleware('can:management-plans.view')->name('management-plans.index');
     Route::get('management-plans/summary', [ManagementPlanController::class, 'summary'])->middleware('can:management-plans.view')->name('management-plans.summary');
@@ -215,7 +122,7 @@ Route::middleware('auth')->group(function () {
     Route::post('management-plans', [ManagementPlanController::class, 'store'])->middleware('can:management-plans.create')->name('management-plans.store');
     Route::get('management-plans/{managementPlan}/edit', [ManagementPlanController::class, 'edit'])->middleware('can:management-plans.update')->name('management-plans.edit');
     Route::patch('management-plans/{managementPlan}', [ManagementPlanController::class, 'update'])->middleware('can:management-plans.update')->name('management-plans.update');
-    Route::delete('management-plans/{managementPlan}', [ManagementPlanController::class, 'destroy'])->middleware('can:management-plans.delete')->name('management-plans.delete');
+    Route::delete('management-plans/{managementPlan}', [ManagementPlanController::class, 'destroy'])->middleware('can:management-plans.delete')->name('management-plans.destroy');
 
     // TECHNICAL REPORTS ROUTES
     Route::get('technical-reports', [TechnicalReportController::class, 'index'])->middleware('can:technical-reports.view')->name('technical-reports.index');
@@ -235,7 +142,7 @@ Route::middleware('auth')->group(function () {
 
     Route::get('api/global-search', [GlobalSearchController::class, 'search'])->name('api.global-search');
 
-    // FILE VIEWER — auth required + path traversal protection
+    // FILE VIEWER
     Route::get('/view-file/{path}', function ($path) {
         $baseDir = realpath(storage_path('app/public'));
         $fullPath = realpath($baseDir . DIRECTORY_SEPARATOR . $path);

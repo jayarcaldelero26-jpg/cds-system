@@ -35,8 +35,9 @@ const allNavigation = [
         section: 'CDS',
         children: [
             { label: 'Biodiversity Monitoring System (BMS)', href: '/bms' },
-            { label: 'Biodiversity Assessment (BAMS)', href: '/bams' }, // 🚀 Gihimo nang active link padulong sa /bams!
+            { label: 'Biodiversity Assessment (BAMS)', href: '/bams' },
             { label: 'IMEA', href: '/imea' },
+            { label: 'Automated Weather Station (AWS)', href: '/aws' },
             { label: 'BDFE', href: '#', comingSoon: true },
             { label: 'IPAF Collection', href: '#', comingSoon: true },
             { label: 'All Technical Reports', href: '/technical-reports', permission: 'canViewTechnicalReports' },
@@ -253,7 +254,7 @@ export default function AuthenticatedLayout({ title, children }) {
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
                 <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} />
                 <div className="lg:pl-72">
-                    <header className="sticky top-0 z-20 flex h-20 items-center gap-4 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
+                    <header className="sticky top-0 z-30 flex h-20 items-center gap-4 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden">
                             <span className="text-xl leading-none">☰</span>
                         </button>
@@ -275,7 +276,7 @@ export default function AuthenticatedLayout({ title, children }) {
                                     </span>
                                 </button>
                                 {profileOpen && (
-                                    <div className="absolute right-0 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-gray-700 dark:bg-gray-900" role="menu">
+                                    <div className="absolute right-0 z-50 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="menu">
                                         <Link href="/profile" className="block rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">Profile settings</Link>
                                         <form action="/logout" method="POST" className="w-full">
                                             <button type="submit" className="block w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">

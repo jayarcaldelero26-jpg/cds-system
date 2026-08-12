@@ -6,7 +6,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Inertia\Inertia;
-use App\Http\Middleware\PreventBackHistory; // 🚀 Gidugang kini
+use App\Http\Middleware\PreventBackHistory;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -23,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsCdsAdmin::class,
+        ]);
+
+        // 🚀 Gidugang kini aron ma-except ang logout sa CSRF check ug malikayan ang 419 error
+        $middleware->validateCsrfTokens(except: [
+            'logout',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
