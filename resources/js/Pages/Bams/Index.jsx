@@ -8,7 +8,7 @@ import { Head, useForm } from '@inertiajs/react';
 export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [], spatialData = null }) {
     const [activeTab, setActiveTab] = useState('list');
 
-    // States para sa Modals (Success, Single Delete, Bulk Delete)
+    // States for Modals (Success, Single Delete, Bulk Delete)
     const [showSuccess, setShowSuccess] = useState(false);
     const [successMessage, setSuccessMessage] = useState('Action completed successfully.');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -16,7 +16,7 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
     const [selectedIds, setSelectedIds] = useState([]);
     const [recordToDelete, setRecordToDelete] = useState(null);
 
-    // Form para sa PMP Single Entry (Annex 6.8 Standards)
+    // Form for PMP Single Entry (Annex 6.8 Standards)
     const form = useForm({
         protected_area_id: '',
         plot_no: '',
@@ -40,13 +40,13 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
         remarks: ''
     });
 
-    // Form para sa Excel / CSV Import
+    // Form for Excel / CSV Import
     const excelForm = useForm({
         protected_area_id: '',
         file: null
     });
 
-    // Form para sa Shapefile / GeoJSON Import
+    // Form for Shapefile / GeoJSON Import
     const spatialForm = useForm({
         protected_area_id: '',
         spatial_file: null
@@ -66,7 +66,7 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
         excelForm.reset();
     };
 
-    // GI-FIX: Tinuod na nga Inertia post request padulong sa backend controller
+    // GI-FIX: Actual Inertia post request to the backend controller
     const submitSpatialImport = (e) => {
         e.preventDefault();
 
@@ -76,7 +76,7 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
                 setSuccessMessage('Spatial boundary file successfully uploaded, converted, and rendered!');
                 setShowSuccess(true);
                 spatialForm.reset();
-                setActiveTab('map'); // Automatic mo-switch sa Map View human ma-upload!
+                setActiveTab('map'); // Automatically switches to Map View after upload!
             },
             onError: (errors) => {
                 console.error("Spatial upload error:", errors);
@@ -227,7 +227,7 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
                                         ) : (
                                             <tr>
                                                 <td colSpan="8" className="text-center py-16 text-gray-500 italic">
-                                                    Wala pa'y natala nga record. Gamita ang "Encode Field Sheet".
+                                                    No records found yet. Use "Encode Field Sheet".
                                                 </td>
                                             </tr>
                                         )}
@@ -242,7 +242,7 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
                         <div className="max-w-5xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
                             <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">Field Data Entry Sheet</h3>
-                                <p className="text-sm text-gray-500">Punuha ang mga metadata headers ug ang detalye sa kahoy subay sa opisyal nga manual sheet.</p>
+                                <p className="text-sm text-gray-500">Enter the metadata headers and tree details according to the official manual sheet.</p>
                             </div>
 
                             <form onSubmit={submitRecord} className="space-y-6">
@@ -428,7 +428,7 @@ export default function BamsIndex({ auth, protectedAreas = [], bamsRecords = [],
                                             {spatialForm.data.spatial_file ? spatialForm.data.spatial_file.name : "No file chosen"}
                                         </span>
                                     </div>
-                                    <p className="text-[11px] text-gray-400 mt-1.5">Supported formats: GeoJSON (.geojson, .json) aron direktang mabasa sa sistema.</p>
+                                    <p className="text-[11px] text-gray-400 mt-1.5">Supported formats: GeoJSON (.geojson, .json) so they can be read directly by the system.</p>
                                 </div>
                                 <button type="submit" disabled={spatialForm.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm">
                                     🌐 Upload and Render Spatial Data

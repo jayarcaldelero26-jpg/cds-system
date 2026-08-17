@@ -15,7 +15,7 @@ use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\BmsController;
 use App\Http\Controllers\BamsAssessmentController;
 use App\Http\Controllers\ImeaAssessmentController;
-use App\Http\Controllers\AwsController; // 🚀 Gi-import na nato dinhi ang AwsController
+use App\Http\Controllers\AwsController;
 use App\Http\Controllers\DashboardController;
 
 use Illuminate\Support\Facades\Route;
@@ -107,13 +107,16 @@ Route::middleware('auth')->group(function () {
     Route::get('/imea/facilities-report', [ImeaAssessmentController::class, 'facilitiesReport'])->name('imea.facilities.report');
     Route::get('/imea/facilities-export', [ImeaAssessmentController::class, 'exportFacilitiesExcel'])->name('imea.facilities.export');
     Route::post('/imea/facilities-import', [ImeaAssessmentController::class, 'importFacilitiesExcel'])->name('imea.facilities.import');
-    Route::delete('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
+    Route::post('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
 
-    // 🚀 AUTOMATED WEATHER STATION (AWS) ROUTES
-    Route::get('aws', [AwsController::class, 'index'])->name('aws.index');
-    Route::post('aws', [AwsController::class, 'store'])->name('aws.store');
-    Route::put('aws/{aws}', [AwsController::class, 'update'])->name('aws.update');
-    Route::delete('aws/{aws}', [AwsController::class, 'destroy'])->name('aws.destroy');
+    // AUTOMATED WEATHER STATION (AWS) ROUTES
+    Route::get('aws', [AwsController::class, 'index'])->middleware('can:aws.view')->name('aws.index');
+    Route::post('aws', [AwsController::class, 'store'])->middleware('can:aws.create')->name('aws.store');
+    Route::put('aws/{aws}', [AwsController::class, 'update'])->middleware('can:aws.update')->name('aws.update');
+    Route::delete('aws/{aws}', [AwsController::class, 'destroy'])->middleware('can:aws.delete')->name('aws.destroy');
+    Route::post('aws/bulk-destroy', [AwsController::class, 'bulkDestroy'])->middleware('can:aws.delete')->name('aws.bulk-destroy');
+    Route::post('aws/import', [AwsController::class, 'import'])->middleware('can:aws.create')->name('aws.import');
+    // Gitangtang na dinhi ang Zentra API route (/aws/zentra-sync)
 
     // MANAGEMENT PLANS ROUTES
     Route::get('management-plans', [ManagementPlanController::class, 'index'])->middleware('can:management-plans.view')->name('management-plans.index');
@@ -130,7 +133,7 @@ Route::middleware('auth')->group(function () {
     Route::post('technical-reports', [TechnicalReportController::class, 'store'])->middleware('can:technical-reports.create')->name('technical-reports.store');
     Route::get('technical-reports/{technicalReport}/edit', [TechnicalReportController::class, 'edit'])->middleware('can:technical-reports.update')->name('technical-reports.edit');
     Route::patch('technical-reports/{technicalReport}', [TechnicalReportController::class, 'update'])->middleware('can:technical-reports.update')->name('technical-reports.update');
-    Route::delete('technical-reports/{technicalReport}', [TechnicalReportController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('technical-reports.delete');
+    Route::delete('technical-reports/{technicalReport}', [TechnicalReportController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('technical-reports.destroy');
 
     // PROGRAMS, PROJECTS & ACTIVITIES (PPA) ROUTES
     Route::get('program-project-activities', [ProgramProjectActivityController::class, 'index'])->middleware('can:programs-projects-activities.view')->name('program-project-activities.index');

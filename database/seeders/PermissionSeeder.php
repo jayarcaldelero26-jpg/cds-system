@@ -95,6 +95,12 @@ class PermissionSeeder extends Seeder
             'bms.create',
             'bms.update',
             'bms.delete',
+
+            // Automated Weather Station (AWS)
+            'aws.view',
+            'aws.create',
+            'aws.update',
+            'aws.delete',
         ];
 
         foreach ($permissions as $permission) {
@@ -133,6 +139,9 @@ class PermissionSeeder extends Seeder
             'bms.view',
             'bms.create',
             'bms.update',
+            'aws.view',
+            'aws.create',
+            'aws.update',
         ]);
 
         $viewer = Role::firstOrCreate(['name' => 'Viewer', 'guard_name' => 'web']);
@@ -146,6 +155,7 @@ class PermissionSeeder extends Seeder
             'management-plans.view',
             'cds-lawin.view',
             'bms.view',
+            'aws.view',
         ]);
 
         // Gidugang usab nato ang 'no_role' aron dili ma-error ang pag-register sa mga users

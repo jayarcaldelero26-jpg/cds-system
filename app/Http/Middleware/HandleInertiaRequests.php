@@ -94,6 +94,12 @@ class HandleInertiaRequests extends Middleware
                 'canUpdateLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.update') ?? false))),
                 'canDeleteLawinMonitoring' => $isAdmin,
 
+                // Automated Weather Station (AWS)
+                'canViewAws' => $isAdmin || ($user?->can('aws.view') ?? false),
+                'canCreateAws' => $isAdmin || ($user?->can('aws.create') ?? false),
+                'canUpdateAws' => $isAdmin || ($user?->can('aws.update') ?? false),
+                'canDeleteAws' => $isAdmin || ($user?->can('aws.delete') ?? false),
+
                 // PPA (CDS ra)
                 'canViewPPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.view') ?? false))),
                 'canCreatePPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.create') ?? false))),
