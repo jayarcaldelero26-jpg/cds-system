@@ -1,4 +1,4 @@
-import { Link, router } from '@inertiajs/react';
+import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
@@ -13,6 +13,7 @@ export default function FacilitiesReport({
     inventoryDates = [], // Lista sa mga na-encode nga inventory dates para sa dropdown
     filters
 }) {
+    const canExportImea = usePage().props.auth?.canExportImea ?? false;
     const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
     const [selectedZone, setSelectedZone] = useState(filters.zone || '');
     const [selectedInventoryDate, setSelectedInventoryDate] = useState(filters.inventory_date || '');
@@ -134,12 +135,14 @@ export default function FacilitiesReport({
                             <p className="mt-1 text-sm text-green-100">Consolidated zoning and infrastructure records ({currentInventoryDateDisplay}).</p>
                         </div>
                         <div className="flex items-center gap-3">
-                            <a
-                                href={`/imea/facilities-export?protected_area_id=${selectedPA}&zone=${selectedZone}&inventory_date=${selectedInventoryDate}`}
-                                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition whitespace-nowrap"
-                            >
-                                📊 Export to Excel
-                            </a>
+                            {canExportImea && (
+                                <a
+                                    href={`/imea/facilities-export?protected_area_id=${selectedPA}&zone=${selectedZone}&inventory_date=${selectedInventoryDate}`}
+                                    className="inline-flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition whitespace-nowrap"
+                                >
+                                    Export to CSV
+                                </a>
+                            )}
                             <button onClick={handlePrint} className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition">
                                 🖨️ Print / Save PDF
                             </button>

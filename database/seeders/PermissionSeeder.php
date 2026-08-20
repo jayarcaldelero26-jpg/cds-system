@@ -104,6 +104,14 @@ class PermissionSeeder extends Seeder
             'bams.manage-spatial',
             'bams.calculate',
 
+            // Integrated Management Effectiveness Assessment (IMEA)
+            'imea.view',
+            'imea.create',
+            'imea.update',
+            'imea.delete',
+            'imea.import',
+            'imea.export',
+
             // Automated Weather Station (AWS)
             'aws.view',
             'aws.create',
@@ -151,6 +159,11 @@ class PermissionSeeder extends Seeder
             'bams.create',
             'bams.update',
             'bams.calculate',
+            'imea.view',
+            'imea.create',
+            'imea.update',
+            'imea.import',
+            'imea.export',
             'aws.view',
             'aws.create',
             'aws.update',
@@ -168,6 +181,7 @@ class PermissionSeeder extends Seeder
             'cds-lawin.view',
             'bms.view',
             'bams.view',
+            'imea.view',
             'aws.view',
         ]);
 

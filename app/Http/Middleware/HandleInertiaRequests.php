@@ -108,6 +108,14 @@ class HandleInertiaRequests extends Middleware
                 'canManageBamsSpatial' => $user?->can('bams.manage-spatial') ?? false,
                 'canCalculateBams' => $user?->can('bams.calculate') ?? false,
 
+                // Integrated Management Effectiveness Assessment (IMEA)
+                'canViewImea' => $user?->can('imea.view') ?? false,
+                'canCreateImea' => $user?->can('imea.create') ?? false,
+                'canUpdateImea' => $user?->can('imea.update') ?? false,
+                'canDeleteImea' => $user?->can('imea.delete') ?? false,
+                'canImportImea' => $user?->can('imea.import') ?? false,
+                'canExportImea' => $user?->can('imea.export') ?? false,
+
                 // PPA (CDS ra)
                 'canViewPPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.view') ?? false))),
                 'canCreatePPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.create') ?? false))),

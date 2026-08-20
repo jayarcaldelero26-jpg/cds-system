@@ -100,19 +100,19 @@ Route::middleware('auth')->group(function () {
     Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->middleware('can:bams.calculate')->name('bams.calculate');
 
     // IMEA ROUTES
-    Route::get('imea', [ImeaAssessmentController::class, 'index'])->name('imea.index');
-    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])->name('imea.create');
-    Route::post('imea', [ImeaAssessmentController::class, 'store'])->name('imea.store');
-    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])->name('imea.update');
-    Route::delete('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'destroy'])->name('imea.destroy');
-    Route::get('/imea/report', [ImeaAssessmentController::class, 'report'])->name('imea.report');
-    Route::post('/imea/facilities', [ImeaAssessmentController::class, 'storeFacility'])->name('imea.facilities.store');
-    Route::put('/imea/facilities/{id}', [ImeaAssessmentController::class, 'updateFacility'])->name('imea.facilities.update');
-    Route::delete('/imea/facilities/{id}', [ImeaAssessmentController::class, 'destroyFacility'])->name('imea.facilities.destroy');
-    Route::get('/imea/facilities-report', [ImeaAssessmentController::class, 'facilitiesReport'])->name('imea.facilities.report');
-    Route::get('/imea/facilities-export', [ImeaAssessmentController::class, 'exportFacilitiesExcel'])->name('imea.facilities.export');
-    Route::post('/imea/facilities-import', [ImeaAssessmentController::class, 'importFacilitiesExcel'])->name('imea.facilities.import');
-    Route::post('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->name('imea.facilities.bulk-delete');
+    Route::get('imea', [ImeaAssessmentController::class, 'index'])->middleware('can:imea.view')->name('imea.index');
+    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])->middleware('can:imea.create')->name('imea.create');
+    Route::post('imea', [ImeaAssessmentController::class, 'store'])->middleware('can:imea.create')->name('imea.store');
+    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])->middleware('can:imea.update')->name('imea.update');
+    Route::delete('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'destroy'])->middleware('can:imea.delete')->name('imea.destroy');
+    Route::get('/imea/report', [ImeaAssessmentController::class, 'report'])->middleware('can:imea.view')->name('imea.report');
+    Route::post('/imea/facilities', [ImeaAssessmentController::class, 'storeFacility'])->middleware('can:imea.create')->name('imea.facilities.store');
+    Route::put('/imea/facilities/{id}', [ImeaAssessmentController::class, 'updateFacility'])->middleware('can:imea.update')->name('imea.facilities.update');
+    Route::delete('/imea/facilities/{id}', [ImeaAssessmentController::class, 'destroyFacility'])->middleware('can:imea.delete')->name('imea.facilities.destroy');
+    Route::get('/imea/facilities-report', [ImeaAssessmentController::class, 'facilitiesReport'])->middleware('can:imea.view')->name('imea.facilities.report');
+    Route::get('/imea/facilities-export', [ImeaAssessmentController::class, 'exportFacilitiesExcel'])->middleware('can:imea.export')->name('imea.facilities.export');
+    Route::post('/imea/facilities-import', [ImeaAssessmentController::class, 'importFacilitiesExcel'])->middleware('can:imea.import')->name('imea.facilities.import');
+    Route::post('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->middleware('can:imea.delete')->name('imea.facilities.bulk-delete');
 
     // AUTOMATED WEATHER STATION (AWS) ROUTES
     Route::get('aws', [AwsController::class, 'index'])->middleware('can:aws.view')->name('aws.index');
