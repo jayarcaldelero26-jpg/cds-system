@@ -6,9 +6,12 @@ use App\Models\ManagementPlan;
 use App\Models\ProtectedArea;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Throwable;
 
 class ManagementPlanController extends Controller
 {
@@ -65,21 +68,27 @@ class ManagementPlanController extends Controller
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
         ]);
 
-        $attachmentPaths = [];
-        if ($request->hasFile('attachments')) {
-            foreach ($request->file('attachments') as $file) {
-                $path = $file->store('management-plans', 'public');
-                $attachmentPaths[] = $path;
-            }
-        }
+        $newAttachmentPaths = [];
 
-        ManagementPlan::create([
-            ...collect($data)->except('attachments')->toArray(),
-            'attachments' => $attachmentPaths,
-            'version' => 'v1',
-            'created_by' => $request->user()->id,
-            'updated_by' => $request->user()->id,
-        ]);
+        try {
+            if ($request->hasFile('attachments')) {
+                foreach ($request->file('attachments') as $file) {
+                    $newAttachmentPaths[] = $file->store('management-plans', 'public');
+                }
+            }
+
+            DB::transaction(fn () => ManagementPlan::create([
+                ...collect($data)->except('attachments')->toArray(),
+                'attachments' => $newAttachmentPaths,
+                'version' => 'v1',
+                'created_by' => $request->user()->id,
+                'updated_by' => $request->user()->id,
+            ]));
+        } catch (Throwable $exception) {
+            $this->deleteAttachments($newAttachmentPaths);
+
+            throw $exception;
+        }
 
         return to_route('management-plans.index')->with('status', 'management-plan-created');
     }
@@ -106,38 +115,48 @@ class ManagementPlanController extends Controller
             'remarks' => ['nullable', 'string'],
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
             'removed_attachments' => ['nullable', 'array'],
+            'removed_attachments.*' => ['string', 'distinct'],
         ]);
 
-        $currentAttachments = $managementPlan->attachments ?? [];
-        if (is_string($currentAttachments)) {
-            $currentAttachments = json_decode($currentAttachments, true) ?? [];
+        $currentAttachments = array_values(array_filter(
+            $managementPlan->attachments ?? [],
+            fn ($attachment) => is_string($attachment) && $attachment !== ''
+        ));
+        $requestedRemovals = array_values($data['removed_attachments'] ?? []);
+        $unownedRemovals = array_values(array_diff($requestedRemovals, $currentAttachments));
+
+        if ($unownedRemovals !== []) {
+            throw ValidationException::withMessages([
+                'removed_attachments' => 'One or more selected attachments do not belong to this management plan.',
+            ]);
         }
 
-        // Tangtangon ang mga gipili nga tanggalon nga files
-        if ($request->has('removed_attachments')) {
-            $removed = $request->input('removed_attachments', []);
-            $currentAttachments = array_values(array_filter($currentAttachments, function ($file) use ($removed) {
-                return !in_array($file, $removed);
-            }));
-            foreach ($removed as $remFile) {
-                Storage::disk('public')->delete($remFile);
+        $retainedAttachments = array_values(array_diff($currentAttachments, $requestedRemovals));
+        $newAttachmentPaths = [];
+
+        try {
+            if ($request->hasFile('attachments')) {
+                foreach ($request->file('attachments') as $file) {
+                    $newAttachmentPaths[] = $file->store('management-plans', 'public');
+                }
             }
+
+            $finalAttachments = [...$retainedAttachments, ...$newAttachmentPaths];
+
+            DB::transaction(fn () => $managementPlan->update([
+                ...collect($data)->except(['attachments', 'removed_attachments'])->toArray(),
+                'attachments' => $finalAttachments,
+                'version' => $managementPlan->version ?? 'v1',
+                'updated_by' => $request->user()->id,
+            ]));
+        } catch (Throwable $exception) {
+            $this->deleteAttachments($newAttachmentPaths);
+
+            throw $exception;
         }
 
-        // I-add ang mga bag-ong gi-upload nga files
-        if ($request->hasFile('attachments')) {
-            foreach ($request->file('attachments') as $file) {
-                $path = $file->store('management-plans', 'public');
-                $currentAttachments[] = $path;
-            }
-        }
-
-        $managementPlan->update([
-            ...collect($data)->except(['attachments', 'removed_attachments'])->toArray(),
-            'attachments' => $currentAttachments,
-            'version' => $managementPlan->version ?? 'v1',
-            'updated_by' => $request->user()->id,
-        ]);
+        // The database no longer references these files, so they can now be removed safely.
+        $this->deleteAttachments($requestedRemovals);
 
         return to_route('management-plans.index')->with('status', 'management-plan-updated');
     }
@@ -209,4 +228,12 @@ class ManagementPlanController extends Controller
 
     /** @return array<int, string> */
     private function statuses(): array { return ['Active', 'For Update', 'Under Review']; }
+
+    /** @param array<int, string> $paths */
+    private function deleteAttachments(array $paths): void
+    {
+        if ($paths !== []) {
+            Storage::disk('public')->delete($paths);
+        }
+    }
 }
