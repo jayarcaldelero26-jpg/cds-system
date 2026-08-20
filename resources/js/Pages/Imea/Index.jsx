@@ -3,11 +3,13 @@ import { useState, useEffect } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import StatusBadge from '@/Components/StatusBadge';
+import PageHeader from '@/Components/PageHeader';
 
-export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas }) {
+export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
     const { props } = usePage();
 
     const [activeTab, setActiveTab] = useState('assessments');
+    const [selectedFacilityPA, setSelectedFacilityPA] = useState(filters.protected_area_id || '');
 
     // IMEA Assessment Modal States
     const [selectedAssessment, setSelectedAssessment] = useState(null);
@@ -257,6 +259,21 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
         });
     };
 
+    // Filter the Facilities & Infrastructures inventory by Protected Area.
+    // This is a backend filter so it also works correctly with pagination.
+    const handleFacilityPAFilter = (value) => {
+        setSelectedFacilityPA(value);
+        setSelectedFacilityIds([]);
+
+        const query = value ? { protected_area_id: value } : {};
+
+        router.get('/imea', query, {
+            preserveState: true,
+            preserveScroll: true,
+            replace: true,
+        });
+    };
+
     const handleBulkDelete = () => { if (selectedFacilityIds.length === 0) return; setShowBulkDeleteConfirm(true); };
     const confirmBulkDelete = () => {
         router.post('/imea/facilities-bulk-delete', { ids: selectedFacilityIds }, {
@@ -296,33 +313,53 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                 .custom-table-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 9999px; }
             `}</style>
 
-            <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md mb-6">
-                <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
-                <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight">Integrated Protected Area Ecotourism Monitoring (IMEA)</h1>
-                        <p className="text-xs sm:text-sm text-green-100 mt-1 opacity-90">Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs.</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                        {activeTab === 'assessments' ? (
-                            <>
-                                <Link href="/imea/report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">📊 View Summary Report</Link>
-                                <Link href="/imea/create" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">+ Add IMEA Assessment</Link>
-                            </>
-                        ) : (
-                            <div className="flex items-center gap-2">
-                                <Link href="/imea/facilities-report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">📊 View Facilities Summary Report</Link>
-                                <button onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center justify-center rounded-xl bg-blue-600/80 hover:bg-blue-600 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">📥 Import CSV</button>
-                                <button onClick={() => openFacilityModal()} className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">+ Add Facility / Infrastructure</button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-            </div>
+            <PageHeader
+                title="Integrated Protected Area Ecotourism Monitoring (IMEA)"
+                description="Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs."
+                actions={
+                    activeTab === 'assessments' ? (
+                        <>
+                            <Link href="/imea/report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📊 View Summary Report</Link>
+                            <Link href="/imea/create" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">+ Add IMEA Assessment</Link>
+                        </>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <Link href="/imea/facilities-report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📊 View Facilities Summary Report</Link>
+                            <button onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center justify-center rounded-xl bg-blue-600/80 hover:bg-blue-600 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📥 Import CSV</button>
+                            <button onClick={() => openFacilityModal()} className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">+ Add Facility / Infrastructure</button>
+                        </div>
+                    )
+                }
+            />
 
-            <div className="flex border-b border-gray-200 dark:border-gray-700 mb-6 gap-6">
-                <button type="button" onClick={() => setActiveTab('assessments')} className={`pb-3 px-4 text-sm font-bold border-b-2 transition flex items-center gap-2 ${activeTab === 'assessments' ? 'border-green-700 text-green-700 dark:text-green-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}>📊 IMEA Assessments</button>
-                <button type="button" onClick={() => setActiveTab('facilities')} className={`pb-3 px-4 text-sm font-bold border-b-2 transition flex items-center gap-2 ${activeTab === 'facilities' ? 'border-green-700 text-green-700 dark:text-green-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'}`}>🏗️ Facilities & Infrastructures Inventory</button>
+            <div className="flex items-center gap-1.5 w-full mt-2 mb-3 overflow-x-auto">
+
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('assessments')}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
+                        activeTab === 'assessments'
+                            ? 'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800'
+                            : 'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'
+                    }`}
+                >
+                    <span>📊</span>
+                    <span>IMEA Assessments</span>
+                </button>
+
+                <button
+                    type="button"
+                    onClick={() => setActiveTab('facilities')}
+                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
+                        activeTab === 'facilities'
+                            ? 'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800'
+                            : 'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'
+                    }`}
+                >
+                    <span>🏗️</span>
+                    <span>Facilities & Infrastructures Inventory</span>
+                </button>
+
             </div>
 
             {/* TAB 1: IMEA ASSESSMENTS */}
@@ -368,7 +405,42 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
             {/* TAB 2: FACILITIES & INFRASTRUCTURES INVENTORY */}
             {activeTab === 'facilities' && (
-                <Card padding="p-0" className="border border-gray-100 dark:border-gray-800 overflow-hidden shadow-xl rounded-2xl">
+                <>
+                    <div className="mb-4">
+                        <Card className="border border-gray-100 dark:border-gray-800 shadow-md rounded-2xl bg-white dark:bg-gray-900 p-4">
+                            <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                                <div className="w-full sm:max-w-md">
+                                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                                        Filter Facilities by Protected Area
+                                    </label>
+                                    <select
+                                        value={selectedFacilityPA}
+                                        onChange={(e) => handleFacilityPAFilter(e.target.value)}
+                                        className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"
+                                    >
+                                        <option value="">All Protected Areas</option>
+                                        {protectedAreas?.map((pa) => (
+                                            <option key={pa.id} value={pa.id}>
+                                                {pa.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                {selectedFacilityPA && (
+                                    <button
+                                        type="button"
+                                        onClick={() => handleFacilityPAFilter('')}
+                                        className="rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition"
+                                    >
+                                        Reset Filter
+                                    </button>
+                                )}
+                            </div>
+                        </Card>
+                    </div>
+
+                    <Card padding="p-0" className="border border-gray-100 dark:border-gray-800 overflow-hidden shadow-xl rounded-2xl">
                     {selectedFacilityIds.length > 0 && (
                         <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900 flex items-center justify-between">
                             <span className="text-xs font-bold text-red-700 dark:text-red-300">{selectedFacilityIds.length} item(s) selected</span>
@@ -419,7 +491,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <p className="text-xs text-gray-500 mt-1">Click "+ Add Facility / Infrastructure" or "📥 Import CSV" to populate records.</p>
                         </div>
                     )}
-                </Card>
+                    </Card>
+                </>
             )}
 
             {/* VIEW ASSESSMENT FULL DETAILS MODAL */}

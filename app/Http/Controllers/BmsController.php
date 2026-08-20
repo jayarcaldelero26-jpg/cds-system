@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\BmsRecord;
+use App\Models\BmsAnnexHeader;
+use App\Models\BmsReportSubmission;
 use App\Models\ProtectedArea;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -75,6 +77,22 @@ class BmsController extends Controller
             'protectedAreas' => ProtectedArea::all(),
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date']),
             'spatialData' => $geoJsonData, // <-- Gi-match na nato sa 'spatialData' prop sa MapView!
+            'annexHeaderMetadata' => $this->annexHeaderFor($request),
+            'reportSubmissions' => BmsReportSubmission::with('protectedArea:id,name,short_name')
+                ->when($request->filled('report_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->report_protected_area_id))
+                ->when($request->filled('report_semester'), fn ($q) => $q->where('semester', $request->report_semester))
+                ->latest('id')
+                ->paginate(10, ['*'], 'report_page')
+                ->withQueryString()
+                ->through(function (BmsReportSubmission $submission) {
+                    $data = $submission->toArray();
+                    $data['mov_url'] = $submission->mov_file_path
+                        ? Storage::disk('public')->url($submission->mov_file_path)
+                        : null;
+
+                    return $data;
+                }),
+            'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
         ]);
     }
 
@@ -163,77 +181,121 @@ class BmsController extends Controller
     public function importExcel(Request $request)
     {
         $request->validate([
-            'file' => 'required|mimes:csv,txt|max:10240',
+            'file' => 'required|mimes:csv,txt|max:51200',
             'protected_area_id' => 'required|exists:protected_areas,id',
+        ], [
+            'file.max' => 'The uploaded CSV file must not exceed 50 MB.',
         ]);
 
         $file = $request->file('file');
         $path = $file->getRealPath();
 
-        $lines = file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        if (empty($lines)) {
+        $handle = fopen($path, 'r');
+        if ($handle === false) {
+            return redirect()->back()->withErrors(['file' => 'The uploaded file could not be read.']);
+        }
+
+        $firstLine = '';
+        while (($line = fgets($handle)) !== false) {
+            if (trim($line) !== '') {
+                $firstLine = $line;
+                break;
+            }
+        }
+
+        if ($firstLine === '') {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
             return redirect()->back()->withErrors(['file' => 'The uploaded file is empty.']);
         }
 
         $delimiter = ',';
-        if (substr_count($lines[0], ';') > substr_count($lines[0], ',')) {
+        if (substr_count($firstLine, ';') > substr_count($firstLine, ',')) {
             $delimiter = ';';
-        } elseif (substr_count($lines[0], "\t") > substr_count($lines[0], ',')) {
+        } elseif (substr_count($firstLine, "\t") > substr_count($firstLine, ',')) {
             $delimiter = "\t";
         }
 
-        $header = str_getcsv(array_shift($lines), $delimiter);
-        $header = array_map(fn($h) => strtolower(trim(preg_replace('/[^\p{L}\p{N}\s]/u', '', $h))), $header);
-
-        $stationIndex = null;
-        $categoryIndex = null;
-        $commonNameIndex = null;
-        $scientificNameIndex = null;
-        $countIndex = null;
-        $latIndex = null;
-        $lonIndex = null;
-        $elevationIndex = null;
-        $timeIndex = null;
-        $dateIndex = null;
-        $remarksIndex = null;
-
-        foreach ($header as $i => $col) {
-            if (str_contains($col, 'station')) $stationIndex = $i;
-            elseif (str_contains($col, 'type') || str_contains($col, 'category')) $categoryIndex = $i;
-            elseif (str_contains($col, 'common')) $commonNameIndex = $i;
-            elseif (str_contains($col, 'scientific') || str_contains($col, 'species')) $scientificNameIndex = $i;
-            elseif (str_contains($col, 'count') || str_contains($col, 'abundance')) $countIndex = $i;
-            elseif (str_contains($col, 'lat')) $latIndex = $i;
-            elseif (str_contains($col, 'lon') || str_contains($col, 'long')) $lonIndex = $i;
-            elseif (str_contains($col, 'elev')) $elevationIndex = $i;
-            elseif (str_contains($col, 'time')) $timeIndex = $i;
-            elseif (str_contains($col, 'date')) $dateIndex = $i;
-            elseif (str_contains($col, 'remark')) $remarksIndex = $i;
+        rewind($handle);
+        $header = fgetcsv($handle, 0, $delimiter, '"', '\\');
+        if ($header === false) {
+            fclose($handle);
+            return redirect()->back()->withErrors(['file' => 'The uploaded file has no header row.']);
         }
+
+        // Normalize BOM-prefixed, spaced, dashed, and underscored headers to one lookup key.
+        $normalizeHeader = static function ($header): string {
+            $header = preg_replace('/^\xEF\xBB\xBF/', '', (string) $header);
+            $header = trim(mb_strtolower($header));
+
+            return preg_replace('/[^\p{L}\p{N}]+/u', '', $header);
+        };
+
+        $headerAliases = [
+            'station' => ['station', 'stationno', 'stationnumber'],
+            'category' => ['category', 'type'],
+            'commonName' => ['commonname', 'speciescommonname'],
+            'scientificName' => ['scientificname', 'speciesscientificname', 'speciesname'],
+            'count' => ['count', 'abundance'],
+            'latitude' => ['latitude', 'lat'],
+            'longitude' => ['longitude', 'long', 'lon'],
+            'elevation' => ['elevation', 'elev'],
+            'time' => ['time', 'monitoringtime'],
+            'date' => ['date', 'monitoringdate', 'daterecorded'],
+            'remarks' => ['remarks', 'remark', 'notes'],
+        ];
+        $indexes = array_fill_keys(array_keys($headerAliases), null);
+
+        foreach ($header as $i => $column) {
+            $normalizedColumn = $normalizeHeader($column);
+            foreach ($headerAliases as $field => $aliases) {
+                if (in_array($normalizedColumn, $aliases, true)) {
+                    $indexes[$field] = $i;
+                    break;
+                }
+            }
+        }
+
+        $valueAt = static function (array $row, ?int $index): ?string {
+            return $index !== null && array_key_exists($index, $row)
+                ? trim((string) $row[$index])
+                : null;
+        };
+
+        $rowsRead = 0;
+        $rowsSkipped = 0;
+        $missingSpeciesRows = 0;
+        $inserted = 0;
+        $updated = 0;
 
         DB::beginTransaction();
 
         try {
-            foreach ($lines as $line) {
-                $row = str_getcsv($line, $delimiter);
+            // fgetcsv keeps quoted commas (and quoted line breaks) within the same field.
+            while (($row = fgetcsv($handle, 0, $delimiter, '"', '\\')) !== false) {
+                $rowsRead++;
 
                 if (count($row) < 2 || empty(array_filter($row, fn($val) => trim($val) !== ''))) {
+                    $rowsSkipped++;
                     continue;
                 }
 
-                $station       = ($stationIndex !== null && isset($row[$stationIndex])) ? trim($row[$stationIndex]) : null;
-                $category      = ($categoryIndex !== null && isset($row[$categoryIndex])) ? trim($row[$categoryIndex]) : 'Flora';
-                $commonName    = ($commonNameIndex !== null && isset($row[$commonNameIndex])) ? trim($row[$commonNameIndex]) : null;
-                $scientificName = ($scientificNameIndex !== null && isset($row[$scientificNameIndex])) ? trim($row[$scientificNameIndex]) : null;
-                $count         = ($countIndex !== null && isset($row[$countIndex])) ? trim($row[$countIndex]) : '1';
-                $latitude      = ($latIndex !== null && isset($row[$latIndex])) ? trim($row[$latIndex]) : null;
-                $longitude     = ($lonIndex !== null && isset($row[$lonIndex])) ? trim($row[$lonIndex]) : null;
-                $elevation     = ($elevationIndex !== null && isset($row[$elevationIndex])) ? trim($row[$elevationIndex]) : null;
-                $time          = ($timeIndex !== null && isset($row[$timeIndex])) ? trim($row[$timeIndex]) : null;
-                $remarks       = ($remarksIndex !== null && isset($row[$remarksIndex])) ? trim($row[$remarksIndex]) : null;
-                $rawDate       = ($dateIndex !== null && isset($row[$dateIndex])) ? trim($row[$dateIndex]) : null;
+                $station = $valueAt($row, $indexes['station']);
+                $category = $valueAt($row, $indexes['category']) ?: 'Flora';
+                $commonName = $valueAt($row, $indexes['commonName']);
+                $scientificName = $valueAt($row, $indexes['scientificName']);
+                $count = $valueAt($row, $indexes['count']) ?: '1';
+                $latitude = $valueAt($row, $indexes['latitude']);
+                $longitude = $valueAt($row, $indexes['longitude']);
+                $elevation = $valueAt($row, $indexes['elevation']);
+                $time = $valueAt($row, $indexes['time']);
+                $remarks = $valueAt($row, $indexes['remarks']);
+                $rawDate = $valueAt($row, $indexes['date']);
 
                 if (empty($scientificName) && empty($commonName)) {
+                    $rowsSkipped++;
+                    $missingSpeciesRows++;
                     continue;
                 }
 
@@ -241,6 +303,7 @@ class BmsController extends Controller
                 $finalCommon = !empty($commonName) ? $commonName : '';
 
                 $parsedDate = now()->format('Y-m-d');
+                $parsedTime = null;
                 if (!empty($rawDate)) {
                     $formats = [
                         'd/m/Y H:i:s', 'd/m/Y H:i', 'd/m/Y',
@@ -253,8 +316,12 @@ class BmsController extends Controller
                     $parsedSuccessfully = false;
                     foreach ($formats as $fmt) {
                         $dt = DateTime::createFromFormat($fmt, trim($rawDate));
-                        if ($dt !== false) {
+                        $dateErrors = DateTime::getLastErrors();
+                        if ($dt !== false && ($dateErrors === false || ($dateErrors['warning_count'] === 0 && $dateErrors['error_count'] === 0))) {
                             $parsedDate = $dt->format('Y-m-d');
+                            if (empty($time) && str_contains($fmt, 'H:i')) {
+                                $parsedTime = $dt->format('H:i:s');
+                            }
                             $parsedSuccessfully = true;
                             break;
                         }
@@ -266,6 +333,9 @@ class BmsController extends Controller
                             $timestamp = strtotime($normalized);
                             if ($timestamp && $timestamp > 0) {
                                 $parsedDate = date('Y-m-d', $timestamp);
+                                if (empty($time) && preg_match('/\d{1,2}:\d{2}/', $rawDate)) {
+                                    $parsedTime = date('H:i:s', $timestamp);
+                                }
                             }
                         } catch (Exception $e) {
                             // Keep default
@@ -273,7 +343,7 @@ class BmsController extends Controller
                     }
                 }
 
-                BmsRecord::updateOrCreate(
+                $record = BmsRecord::updateOrCreate(
                     [
                         'protected_area_id'       => $request->protected_area_id,
                         'monitoring_date'         => $parsedDate,
@@ -287,18 +357,40 @@ class BmsController extends Controller
                         'latitude'                => $latitude ?? '0',
                         'longitude'               => $longitude ?? '0',
                         'elevation'               => $elevation,
-                        'time'                    => $time,
+                        'time'                    => $time ?: $parsedTime,
                         'remarks'                 => $remarks,
                         'taxonomic_group'         => 'General',
                         'observer_name'           => 'Excel Import',
                     ]
                 );
+
+                if ($record->wasRecentlyCreated) {
+                    $inserted++;
+                } else {
+                    $updated++;
+                }
+            }
+
+            fclose($handle);
+
+            if ($inserted + $updated === 0) {
+                DB::rollBack();
+
+                return redirect()->back()->withErrors([
+                    'file' => "No valid BMS rows were processed. {$rowsRead} rows read; {$rowsSkipped} skipped ({$missingSpeciesRows} missing scientific/common name).",
+                ]);
             }
 
             DB::commit();
-            return redirect()->back()->with('success', 'Data successfully imported from CSV without duplicates!');
+            return redirect()->back()->with(
+                'success',
+                "Import completed: {$inserted} inserted, {$updated} updated, {$rowsSkipped} skipped. ({$rowsRead} rows read; {$missingSpeciesRows} skipped for missing scientific/common name.)"
+            );
 
         } catch (Exception $e) {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
             DB::rollBack();
             return redirect()->back()->withErrors(['file' => 'Import failed: ' . $e->getMessage()]);
         }
@@ -358,31 +450,27 @@ class BmsController extends Controller
     public function bulkUpdateHeader(Request $request)
     {
         $request->validate([
-            'ids' => 'required|array',
+            'protected_area_id' => 'nullable|exists:protected_areas,id',
+            'category' => 'nullable|string',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date',
             'location' => 'nullable|string',
-            'monitoring_date' => 'nullable|date',
-            'time' => 'nullable|string',
+            'date_conducted' => 'nullable|date',
+            'start_end_time' => 'nullable|string',
+            'start_gps' => 'nullable|string',
+            'end_gps' => 'nullable|string',
             'length_of_transect' => 'nullable|string',
-            'latitude' => 'nullable|string',
-            'longitude' => 'nullable|string',
             'weather_condition' => 'nullable|string',
             'elevation' => 'nullable|string',
             'ecosystem_type' => 'nullable|string',
-            'observer_name' => 'nullable|string',
+            'species_observed' => 'nullable|string',
+            'observer' => 'nullable|string',
         ]);
 
-        BmsRecord::whereIn('id', $request->ids)->update([
-            'location' => $request->location,
-            'monitoring_date' => $request->monitoring_date,
-            'time' => $request->time,
-            'length_of_transect' => $request->length_of_transect,
-            'latitude' => $request->latitude,
-            'longitude' => $request->longitude,
-            'weather_condition' => $request->weather_condition,
-            'elevation' => $request->elevation,
-            'ecosystem_type' => $request->ecosystem_type,
-            'observer_name' => $request->observer_name,
-        ]);
+        BmsAnnexHeader::updateOrCreate(
+            $request->only(['protected_area_id', 'category', 'start_date', 'end_date']),
+            $request->only(['location', 'date_conducted', 'start_end_time', 'start_gps', 'end_gps', 'length_of_transect', 'weather_condition', 'elevation', 'ecosystem_type', 'species_observed', 'observer'])
+        );
 
         return redirect()->back()->with('success', 'Header details updated successfully.');
     }
@@ -415,12 +503,23 @@ class BmsController extends Controller
         $pdf = Pdf::loadView('bms.pdf-annex', [
             'bmsRecords' => $bmsRecords,
             'protectedArea' => $protectedArea,
+            'annexHeaderMetadata' => $this->annexHeaderFor($request),
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date']),
         ]);
 
         $pdf->setPaper('a4', 'portrait');
 
         return $pdf->stream('BMS_Annex_Summary_Report.pdf');
+    }
+
+    private function annexHeaderFor(Request $request): ?BmsAnnexHeader
+    {
+        return BmsAnnexHeader::query()
+            ->where('protected_area_id', $request->input('protected_area_id'))
+            ->where('category', $request->input('category'))
+            ->where('start_date', $request->input('start_date'))
+            ->where('end_date', $request->input('end_date'))
+            ->first();
     }
 
     public function destroy(BmsRecord $bmsRecord)

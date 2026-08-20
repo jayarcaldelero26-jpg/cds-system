@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useForm, router, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
+import PageHeader from '../../Components/PageHeader';
 import AwsTable from './AwsTable';
 import AwsGraph from './AwsGraph';
 
@@ -243,22 +244,23 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             `}</style>
 
             <div className="space-y-6">
-                <div className="bg-gradient-to-r from-green-800 to-green-700 text-white p-6 rounded-2xl shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div>
-                        <h1 className="text-xl font-bold">Automated Weather Stations (AWS)</h1>
-                        <p className="text-green-100 text-xs sm:text-sm mt-1">Consolidation of meteorological monitoring reports and document attachments.</p>
-                    </div>
-                    <div className="flex items-center gap-3 flex-wrap">
-                        {activeTab !== 'form' && (
+                <PageHeader
+                    title="Automated Weather Stations (AWS)"
+                    description="Consolidation of meteorological monitoring reports and document attachments."
+                    actions={
+                        activeTab !== 'form' ? (
                             <>
                                 <button
+                                    type="button"
                                     onClick={() => setIsImportModalOpen(true)}
                                     className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm"
                                 >
                                     📥 Import CSV
                                 </button>
+
                                 {auth.canCreateAws && (
                                     <button
+                                        type="button"
                                         onClick={openCreateForm}
                                         className="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-xs font-bold text-white transition border border-white/20 shadow-sm"
                                     >
@@ -266,17 +268,22 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                     </button>
                                 )}
                             </>
-                        )}
-                        {activeTab === 'form' && (
+                        ) : (
                             <button
-                                onClick={() => { handleTabChange('reports'); reset(); setPreviewUrl(null); setSelectedRecord(null); }}
+                                type="button"
+                                onClick={() => {
+                                    handleTabChange('reports');
+                                    reset();
+                                    setPreviewUrl(null);
+                                    setSelectedRecord(null);
+                                }}
                                 className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-white transition"
                             >
                                 ← Back to Reports
                             </button>
-                        )}
-                    </div>
-                </div>
+                        )
+                    }
+                />
 
                 <div className="flex border-b border-gray-200 dark:border-gray-800 text-xs font-semibold gap-2">
                     <button

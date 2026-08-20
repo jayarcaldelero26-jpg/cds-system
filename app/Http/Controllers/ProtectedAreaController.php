@@ -88,6 +88,8 @@ class ProtectedAreaController extends Controller
             'province' => $protectedArea->province,
             'region' => $protectedArea->region,
             'area_hectares' => $protectedArea->area_hectares,
+            'core_zone_hectares' => $protectedArea->core_zone_hectares,
+            'buffer_zone_hectares' => $protectedArea->buffer_zone_hectares,
             'pamo' => $protectedArea->pamo,
             'pasu' => $protectedArea->pasu,
             'year_established' => $protectedArea->year_established,

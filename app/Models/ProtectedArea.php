@@ -11,7 +11,8 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'name', 'short_name', 'category', 'municipality', 'province', 'region',
-    'area_hectares', 'pamo', 'pasu', 'year_established', 'legal_basis',
+    'area_hectares', 'core_zone_hectares', 'buffer_zone_hectares',
+    'pamo', 'pasu', 'year_established', 'legal_basis',
     'description', 'status', 'remarks', 'created_by', 'updated_by',
 ])]
 class ProtectedArea extends Model
@@ -20,7 +21,12 @@ class ProtectedArea extends Model
 
     protected function casts(): array
     {
-        return ['area_hectares' => 'decimal:2', 'year_established' => 'integer'];
+        return [
+            'area_hectares' => 'decimal:2',
+            'core_zone_hectares' => 'decimal:2',
+            'buffer_zone_hectares' => 'decimal:2',
+            'year_established' => 'integer',
+        ];
     }
 
     public function creator(): BelongsTo

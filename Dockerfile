@@ -23,6 +23,9 @@ RUN docker-php-ext-install \
     bcmath \
     gd
 
+# Keep PHP request limits above the 50 MB BMS CSV validation limit.
+COPY docker/php/uploads.ini /usr/local/etc/php/conf.d/uploads.ini
+
 # Composer
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 

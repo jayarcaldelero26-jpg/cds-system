@@ -17,6 +17,8 @@ return new class extends Migration
             $table->string('province');
             $table->string('region');
             $table->decimal('area_hectares', 14, 2)->nullable();
+            $table->decimal('core_zone_hectares', 14, 2)->nullable();
+            $table->decimal('buffer_zone_hectares', 14, 2)->nullable();
             $table->string('pamo')->nullable();
             $table->string('pasu')->nullable();
             $table->unsignedSmallInteger('year_established')->nullable();

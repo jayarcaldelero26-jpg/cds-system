@@ -19,14 +19,24 @@ class ImeaAssessmentController extends Controller
             ->orderBy('assessment_year', 'desc')
             ->paginate(15);
 
-        $facilities = ProtectedAreaFacility::with('protectedArea')
-            ->orderBy('year_established', 'desc')
-            ->paginate(15);
+        $protectedAreaId = $request->input('protected_area_id');
+
+        $facilitiesQuery = ProtectedAreaFacility::with('protectedArea')
+            ->orderBy('year_established', 'desc');
+
+        if ($protectedAreaId) {
+            $facilitiesQuery->where('protected_area_id', $protectedAreaId);
+        }
+
+        $facilities = $facilitiesQuery->paginate(15)->withQueryString();
 
         return Inertia::render('Imea/Index', [
             'assessments' => $assessments,
             'facilities' => $facilities,
             'protectedAreas' => ProtectedArea::all(['id', 'name']),
+            'filters' => [
+                'protected_area_id' => $protectedAreaId,
+            ],
         ]);
     }
 

@@ -1,5 +1,4 @@
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import PageHeader from '@/Components/PageHeader';
 import { Head, router, useForm } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
 
@@ -13,7 +12,6 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 // Import Threats Component and MapView Component
 import Threats from './Threats';
 import MapView from './MapView';
-import ReportSubmissionTracker from './ReportSubmissionTracker';
 
 const floraIcon = L.divIcon({
     className: 'custom-marker',
@@ -91,8 +89,8 @@ const calculateTrendStatus = (points) => {
     return { slope, status };
 };
 
-export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata, reportSubmissions, reportFilters }) {
-    const [activeTab, setActiveTab] = useState(reportFilters?.tracker ? 'report-tracker' : 'list');
+export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata }) {
+    const [activeTab, setActiveTab] = useState('list');
     const [viewMode, setViewMode] = useState('table');
     const [semestralViewMode, setSemestralViewMode] = useState('table');
     const [graphYearFilter, setGraphYearFilter] = useState('All');
@@ -353,8 +351,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             category: filters?.category || null,
             start_date: filters?.start_date || null,
             end_date: filters?.end_date || null,
-            ...annexHeaderForm.data,
-            species_observed: annexSpeciesObserved,
+            ...annexHeaderForm.data
         }, {
             preserveScroll: true,
             onSuccess: () => {
@@ -560,15 +557,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
     const headerValue = (field) => annexHeaderMetadata?.[field] || 'N/A';
 
-    // Species Observed in the Annex header follows the active Category filter.
-    // All Categories means the Annex covers both Flora and Fauna.
-    const annexSpeciesObserved =
-        filters?.category === 'Flora'
-            ? 'Flora'
-            : filters?.category === 'Fauna'
-                ? 'Fauna'
-                : 'Flora / Fauna';
-
     const getGraphChartData = () => {
         const aggregates = getSemestralAggregates();
         const periodMap = {};
@@ -695,16 +683,26 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             <div className="py-6 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900 min-h-screen">
                 <div className="max-w-7xl mx-auto space-y-6">
 
-                    <div className="no-print">
-                    <PageHeader
-                        title="Biodiversity Monitoring System (BMS)"
-                        description="Comprehensive Species Database, Transect Observation Records, and Semestral Population Trends."
-                        actions={
-                            <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
-                                BMS Operations
-                            </span>
-                        }
-                    />
+                    {/* MANAGEMENT PLAN STYLE GRADIENT HEADER BANNER */}
+                    <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md no-print">
+                        {/* Glowing light circle effect sa kilid */}
+                        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
+
+                        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div>
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+                                    Biodiversity Monitoring System (BMS)
+                                </h1>
+                                <p className="mt-1 text-sm text-green-100">
+                                    Comprehensive Species Database, Transect Observation Records, and Semestral Population Trends.
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
+                                    BMS Operations
+                                </span>
+                            </div>
+                        </div>
                     </div>
 
                     {/* Navigation Tabs */}
@@ -721,9 +719,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         <button onClick={() => setActiveTab('map')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️ Map View
                         </button>
-                        <button onClick={() => setActiveTab('report-tracker')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'report-tracker' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
-                            📑 Report Submission Tracker
-                        </button>
                         <button onClick={() => setActiveTab('add')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'add' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             ➕ Add Field Observation
                         </button>
@@ -734,10 +729,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                             🗺️📁 Import GeoJSON Spatial File
                         </button>
                     </div>
-
-                    {activeTab === 'report-tracker' && (
-                        <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} filters={reportFilters} />
-                    )}
 
                     {/* TAB 1: SPECIES RECORDS VIEW */}
                     {activeTab === 'list' && (
@@ -764,7 +755,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                                 weather_condition: annexHeaderMetadata?.weather_condition || '',
                                                 elevation: annexHeaderMetadata?.elevation || '',
                                                 ecosystem_type: annexHeaderMetadata?.ecosystem_type || '',
-                                                species_observed: annexSpeciesObserved,
+                                                species_observed: annexHeaderMetadata?.species_observed || '',
                                                 observer: annexHeaderMetadata?.observer || '',
                                             });
                                             setShowEditHeaderModal(true);
@@ -886,7 +877,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Weather Condition</span><span>:</span><span>{headerValue('weather_condition')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Elevation</span><span>:</span><span>{headerValue('elevation') !== 'N/A' ? `${headerValue('elevation')} MASL` : 'N/A'}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Ecosystem Type</span><span>:</span><span>{headerValue('ecosystem_type')}</span></div>
-                                                    <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Species Observed</span><span>:</span><span>{annexSpeciesObserved}</span></div>
+                                                    <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Species Observed</span><span>:</span><span>{headerValue('species_observed')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1 md:col-span-2"><span className="font-bold text-black">Observer</span><span>:</span><span>{headerValue('observer')}</span></div>
                                                 </div>
                                             </div>
@@ -1307,15 +1298,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Weather Condition</label><input type="text" value={annexHeaderForm.data.weather_condition} onChange={e => annexHeaderForm.setData('weather_condition', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Elevation (MASL)</label><input type="text" value={annexHeaderForm.data.elevation} onChange={e => annexHeaderForm.setData('elevation', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Ecosystem Type</label><input type="text" value={annexHeaderForm.data.ecosystem_type} onChange={e => annexHeaderForm.setData('ecosystem_type', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                <div>
-                                    <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Species Observed</label>
-                                    <input
-                                        type="text"
-                                        value={annexSpeciesObserved}
-                                        readOnly
-                                        className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm bg-gray-100 dark:bg-gray-700 cursor-not-allowed"
-                                    />
-                                </div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Species Observed</label><input type="text" value={annexHeaderForm.data.species_observed} onChange={e => annexHeaderForm.setData('species_observed', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Observer</label><input type="text" value={annexHeaderForm.data.observer} onChange={e => annexHeaderForm.setData('observer', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                             </div>
                             <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">

@@ -13,6 +13,7 @@ use App\Http\Controllers\ProgramProjectActivityController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\BmsController;
+use App\Http\Controllers\BmsReportSubmissionController;
 use App\Http\Controllers\BamsAssessmentController;
 use App\Http\Controllers\ImeaAssessmentController;
 use App\Http\Controllers\AwsController;
@@ -86,6 +87,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->name('bms.semestral-report');
     Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->name('bms.export-pdf');
     Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->name('bms.import-geojson');
+    Route::post('/bms/report-submissions', [BmsReportSubmissionController::class, 'store'])->middleware('can:bms.create')->name('bms.report-submissions.store');
+    Route::put('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'update'])->middleware('can:bms.update')->name('bms.report-submissions.update');
+    Route::delete('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.report-submissions.destroy');
+    Route::delete('/bms/report-submissions/{bmsReportSubmission}/mov', [BmsReportSubmissionController::class, 'destroyMov'])->middleware('can:bms.update')->name('bms.report-submissions.mov.destroy');
 
     // BAMS ROUTES
     Route::get('bams', [BamsAssessmentController::class, 'index'])->name('bams.index');

@@ -69,9 +69,17 @@
 
     <div class="details-grid">
         <div class="details-row"><span class="label">Protected Area</span>: {{ $protectedArea->name ?? 'All Protected Areas' }}</div>
-        <div class="details-row"><span class="label">Location</span>: {{ $bmsRecords[0]->location ?? 'N/A' }}</div>
-        <div class="details-row"><span class="label">Date Conducted</span>: {{ $bmsRecords[0]->monitoring_date ?? 'N/A' }}</div>
-        <div class="details-row"><span class="label">Observer</span>: {{ $bmsRecords[0]->observer_name ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Location</span>: {{ $annexHeaderMetadata->location ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Date Conducted</span>: {{ $annexHeaderMetadata->date_conducted ?? ($bmsRecords[0]->monitoring_date ?? 'N/A') }}</div>
+        <div class="details-row"><span class="label">Start/End time</span>: {{ $annexHeaderMetadata->start_end_time ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Length of Transect</span>: {{ $annexHeaderMetadata->length_of_transect ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Start GPS Reading</span>: {{ $annexHeaderMetadata->start_gps ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">End GPS Reading</span>: {{ $annexHeaderMetadata->end_gps ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Weather Condition</span>: {{ $annexHeaderMetadata->weather_condition ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Elevation</span>: {{ $annexHeaderMetadata->elevation ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Ecosystem Type</span>: {{ $annexHeaderMetadata->ecosystem_type ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Species Observed</span>: {{ $annexHeaderMetadata->species_observed ?? 'N/A' }}</div>
+        <div class="details-row"><span class="label">Observer</span>: {{ $annexHeaderMetadata->observer ?? 'N/A' }}</div>
     </div>
 
     <table>
@@ -86,9 +94,16 @@
         </thead>
         <tbody>
             @forelse($bmsRecords as $record)
+                @php
+                    $timeOfArrival = $record->time;
+                    if ($timeOfArrival && preg_match('/^\d{1,2}:\d{2}(?::\d{2})?$/', $timeOfArrival)) {
+                        $format = strlen($timeOfArrival) === 5 ? 'H:i' : 'H:i:s';
+                        $timeOfArrival = \Carbon\Carbon::createFromFormat($format, $timeOfArrival)->format('h:i A');
+                    }
+                @endphp
                 <tr>
                     <td><strong>{{ $record->station }}</strong></td>
-                    <td>{{ $record->time ?? '-' }}</td>
+                    <td>{{ $timeOfArrival ?: '-' }}</td>
                     <td class="text-left">
                         {{ $record->species_common_name }}
                         @if($record->species_scientific_name)
