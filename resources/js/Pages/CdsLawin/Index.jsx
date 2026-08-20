@@ -57,9 +57,9 @@ export default function Index({ monitorings = { data: [] }, filters = {} }) {
             render: (item) => item?.team_leader || 'N/A'
         },
         {
-            key: 'patrol_members_count',
+            key: 'team_members_count',
             label: 'Patrollers',
-            render: (item) => `${item?.patrol_members_count || 0} pax`
+            render: (item) => `${item?.team_members_count || 0} pax`
         },
         {
             key: 'threats_observed',

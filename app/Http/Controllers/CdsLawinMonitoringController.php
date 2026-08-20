@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\CdsLawinMonitoring;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
+use Throwable;
 
 class CdsLawinMonitoringController extends Controller
 {
@@ -61,84 +64,104 @@ class CdsLawinMonitoringController extends Controller
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'patrol_area' => 'required|string|max:255',
-            'patrol_date' => 'required|date',
-            'ecoregion' => 'nullable|string|max:255',
-            'team_leader' => 'nullable|string|max:255',
-            'team_members_count' => 'required|integer|min:1',
-            'threats_observed' => 'nullable|string',
-            'remarks' => 'nullable|string',
-            'status' => 'nullable|string',
-            'attachment' => 'nullable|file|mimes:pdf|max:20480',
-        ]);
+        $validated = $request->validate($this->validationRules());
+        $newAttachment = null;
 
         if ($request->hasFile('attachment')) {
-            $path = $request->file('attachment')->store('cds-lawin-monitorings', 'public');
-            $validated['attachment'] = $path;
+            $newAttachment = $request->file('attachment')->store('cds-lawin-monitorings', 'public');
+            $validated['attachment'] = $newAttachment;
         }
 
-        CdsLawinMonitoring::create($validated);
+        $validated['user_id'] = $request->user()->id;
+
+        try {
+            DB::transaction(fn () => CdsLawinMonitoring::create($validated));
+        } catch (Throwable $exception) {
+            if ($newAttachment) {
+                Storage::disk('public')->delete($newAttachment);
+            }
+
+            throw $exception;
+        }
 
         return redirect()->route('cds-lawin.index')
             ->with('status', 'cds-lawin-created');
     }
 
-    public function edit(CdsLawinMonitoring $cdsLawin)
+    public function edit(CdsLawinMonitoring $cdsLawinMonitoring)
     {
         return Inertia::render('CdsLawin/Edit', [
-            'monitoring' => [
-                'id' => $cdsLawin->id,
-                'patrol_area' => $cdsLawin->patrol_area,
-                'patrol_date' => $cdsLawin->patrol_date ? $cdsLawin->patrol_date->format('Y-m-d') : null,
-                'ecoregion' => $cdsLawin->ecoregion,
-                'team_leader' => $cdsLawin->team_leader,
-                'team_members_count' => $cdsLawin->team_members_count,
-                'threats_observed' => $cdsLawin->threats_observed,
-                'remarks' => $cdsLawin->remarks,
-                'status' => $cdsLawin->status,
-                'attachment' => $cdsLawin->attachment,
+            'lawin' => [
+                'id' => $cdsLawinMonitoring->id,
+                'patrol_area' => $cdsLawinMonitoring->patrol_area,
+                'patrol_date' => $cdsLawinMonitoring->patrol_date?->format('Y-m-d'),
+                'ecoregion' => $cdsLawinMonitoring->ecoregion,
+                'team_leader' => $cdsLawinMonitoring->team_leader,
+                'team_members_count' => $cdsLawinMonitoring->team_members_count,
+                'threats_observed' => $cdsLawinMonitoring->threats_observed,
+                'remarks' => $cdsLawinMonitoring->remarks,
+                'status' => $cdsLawinMonitoring->status,
+                'attachment' => $cdsLawinMonitoring->attachment,
             ],
             'statuses' => ['Under Review', 'Approved'],
         ]);
     }
 
-    public function update(Request $request, CdsLawinMonitoring $cdsLawin)
+    public function update(Request $request, CdsLawinMonitoring $cdsLawinMonitoring)
     {
-        $validated = $request->validate([
-            'patrol_area' => 'required|string|max:255',
-            'patrol_date' => 'required|date',
-            'ecoregion' => 'nullable|string|max:255',
-            'team_leader' => 'nullable|string|max:255',
-            'team_members_count' => 'required|integer|min:1',
-            'threats_observed' => 'nullable|string',
-            'remarks' => 'nullable|string',
-            'status' => 'nullable|string',
-            'attachment' => 'nullable|file|mimes:pdf|max:20480',
-        ]);
+        $validated = $request->validate($this->validationRules());
+        $oldAttachment = $cdsLawinMonitoring->attachment;
+        $newAttachment = null;
 
         if ($request->hasFile('attachment')) {
-            if ($cdsLawin->attachment) {
-                Storage::disk('public')->delete($cdsLawin->attachment);
-            }
-            $path = $request->file('attachment')->store('cds-lawin-monitorings', 'public');
-            $validated['attachment'] = $path;
+            $newAttachment = $request->file('attachment')->store('cds-lawin-monitorings', 'public');
+            $validated['attachment'] = $newAttachment;
         }
 
-        $cdsLawin->update($validated);
+        try {
+            DB::transaction(fn () => $cdsLawinMonitoring->update($validated));
+        } catch (Throwable $exception) {
+            if ($newAttachment) {
+                Storage::disk('public')->delete($newAttachment);
+            }
+
+            throw $exception;
+        }
+
+        if ($newAttachment && $oldAttachment) {
+            Storage::disk('public')->delete($oldAttachment);
+        }
 
         return redirect()->route('cds-lawin.index')
             ->with('status', 'cds-lawin-updated');
     }
 
-    public function destroy(CdsLawinMonitoring $cdsLawin)
+    public function destroy(CdsLawinMonitoring $cdsLawinMonitoring)
     {
-        if ($cdsLawin->attachment) {
-            Storage::disk('public')->delete($cdsLawin->attachment);
+        $attachment = $cdsLawinMonitoring->attachment;
+
+        DB::transaction(fn () => $cdsLawinMonitoring->delete());
+
+        if ($attachment) {
+            Storage::disk('public')->delete($attachment);
         }
-        $cdsLawin->delete();
 
         return redirect()->route('cds-lawin.index')
             ->with('status', 'cds-lawin-deleted');
+    }
+
+    private function validationRules(): array
+    {
+        return [
+            'patrol_area' => ['required', 'string', 'max:255'],
+            'patrol_date' => ['required', 'date'],
+            'ecoregion' => ['nullable', 'string', 'max:255'],
+            'team_leader' => ['nullable', 'string', 'max:255'],
+            'team_members_count' => ['required', 'integer', 'min:1'],
+            'threats_observed' => ['nullable', 'string'],
+            'remarks' => ['nullable', 'string'],
+            'status' => ['nullable', Rule::in(['Under Review', 'Approved'])],
+            'attachment' => ['nullable', 'file', 'mimes:pdf', 'max:20480'],
+        ];
     }
 }
