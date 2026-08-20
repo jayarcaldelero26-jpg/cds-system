@@ -7,6 +7,15 @@ import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 
 const displayValue = (value, fallback = '—') => value === null || value === undefined || value === '' ? fallback : String(value);
+const protectedAreaTableLabel = protectedArea => {
+    const fullName = protectedArea?.name?.trim() || '';
+    const shortName = protectedArea?.short_name?.trim();
+
+    if (shortName) return { label: shortName, fullName: fullName || shortName };
+
+    const parentheticalAcronym = fullName.match(/\(([^()]+)\)\s*$/)?.[1]?.trim();
+    return { label: parentheticalAcronym || fullName || '—', fullName: fullName || '—' };
+};
 
 const metric = (value, unit, fallback = '—') => (
     <span>
@@ -33,15 +42,33 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
     const [selectedMetric, setSelectedMetric] = useState(null);
 
     const columns = [
-        { key: 'protected_area', label: 'Protected Area', cellClassName: 'font-semibold text-gray-900 dark:text-white', render: row => row.protected_area?.name || '—' },
-        { key: 'date', label: 'Date', cellClassName: 'whitespace-nowrap font-medium text-gray-900 dark:text-white', render: row => String(row.timestamps || row.start_date || '—') },
-        { key: 'precipitation', label: 'Precipitation (mm)', render: row => String(row.precipitation ?? '0') },
-        { key: 'wind_direction', label: 'Wind Direction', render: row => String(row.wind_direction ?? '—') },
-        { key: 'wind_speed', label: 'Wind Speed (m/s)', render: row => String(row.wind_speed ?? '—') },
-        { key: 'air_temperature', label: 'Air Temperature (°C)', render: row => String(row.air_temperature ?? '—') },
-        { key: 'relative_humidity', label: 'Relative Humidity (%)', render: row => String(row.relative_humidity ?? '—') },
-        { key: 'atmospheric_pressure', label: 'Atmospheric Pressure (kPa)', render: row => String(row.atmospheric_pressure ?? 'N/A') },
-        { key: 'remarks', label: 'Remarks', render: row => <StatusBadge variant={statusVariant(row.remarks || '')}>{String(row.remarks || 'Normal Weather Conditions')}</StatusBadge> },
+        {
+            key: 'protected_area',
+            label: 'Protected Area',
+            headerClassName: 'w-[8%] whitespace-normal px-3 py-3 text-left text-[10px] leading-tight tracking-normal',
+            cellClassName: 'w-[8%] overflow-hidden px-3 py-3 text-xs',
+            render: row => {
+                const protectedArea = protectedAreaTableLabel(row.protected_area);
+                return <span title={protectedArea.fullName} className="block w-full truncate whitespace-nowrap font-semibold text-gray-900 dark:text-white">{protectedArea.label}</span>;
+            },
+        },
+        { key: 'date', label: 'Date', headerClassName: 'w-[10%] whitespace-normal px-3 py-3 text-left text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-3 py-3 text-xs font-medium text-gray-900 dark:text-white', render: row => String(row.timestamps || row.start_date || '—') },
+        { key: 'precipitation', label: <><span className="block">Precipitation</span><span className="block">(mm)</span></>, headerClassName: 'w-[11%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[11%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.precipitation ?? '0') },
+        { key: 'wind_direction', label: <><span className="block">Wind</span><span className="block">Direction</span></>, headerClassName: 'w-[9%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[9%] whitespace-nowrap px-2 py-3 text-center text-xs', render: row => String(row.wind_direction ?? '—') },
+        { key: 'wind_speed', label: <><span className="block">Wind Speed</span><span className="block">(m/s)</span></>, headerClassName: 'w-[10%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.wind_speed ?? '—') },
+        { key: 'air_temperature', label: <><span className="block">Air Temperature</span><span className="block">(°C)</span></>, headerClassName: 'w-[11%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[11%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.air_temperature ?? '—') },
+        { key: 'relative_humidity', label: <><span className="block">Relative Humidity</span><span className="block">(%)</span></>, headerClassName: 'w-[12%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[12%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.relative_humidity ?? '—') },
+        { key: 'atmospheric_pressure', label: <><span className="block">Atmospheric Pressure</span><span className="block">(kPa)</span></>, headerClassName: 'w-[14%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[14%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.atmospheric_pressure ?? 'N/A') },
+        {
+            key: 'remarks',
+            label: 'Remarks',
+            headerClassName: 'w-[15%] whitespace-normal px-3 py-3 text-left text-[10px] leading-tight tracking-normal',
+            cellClassName: 'w-[15%] overflow-hidden px-3 py-3 text-xs',
+            render: row => {
+                const remarks = String(row.remarks || 'Normal Weather Conditions');
+                return <span title={remarks} className="block w-full min-w-0 overflow-hidden"><StatusBadge variant={statusVariant(row.remarks || '')}><span className="block w-full min-w-0 truncate whitespace-nowrap">{remarks}</span></StatusBadge></span>;
+            },
+        },
     ];
 
     const paginationControls = pagination?.links?.length > 3 ? (
@@ -65,6 +92,7 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
             subtitle={`${pagination?.total ?? list.length} weather record${(pagination?.total ?? list.length) === 1 ? '' : 's'}`}
             helperText="Click any row to view full weather metrics"
             caption="Automated Weather Station raw data records"
+            tableClassName="w-full min-w-0 table-fixed"
             columns={columns}
             rows={list}
             rowKey="id"

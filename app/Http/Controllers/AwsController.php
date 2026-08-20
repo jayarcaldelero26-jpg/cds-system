@@ -112,7 +112,7 @@ class AwsController extends Controller
 
         Aws::create($validated);
 
-        return redirect()->route('aws.index')->with('success', 'AWS monitoring report successfully uploaded.');
+        return redirect()->route('aws.index')->with('success', 'AWS report added successfully.');
     }
 
     public function update(Request $request, Aws $aws)

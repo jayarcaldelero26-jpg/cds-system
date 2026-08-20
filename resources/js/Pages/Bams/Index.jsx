@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
-import SuccessAlert from './Components/SuccessAlert';
-import SuccessModal from './Components/SuccessModal';
 import MapView from './Components/MapView';
 import { Head, useForm } from '@inertiajs/react';
 
@@ -17,11 +15,7 @@ export default function BamsIndex({
     const canDelete = Boolean(auth?.canDeleteBams);
     const canManageSpatial = Boolean(auth?.canManageBamsSpatial);
 
-    // States for Modals (Success, Single Delete, Bulk Delete)
-    const [showSuccess, setShowSuccess] = useState(false);
-    const [successMessage, setSuccessMessage] = useState(
-        'Action completed successfully.'
-    );
+    // States for delete confirmations and selection.
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
@@ -69,8 +63,6 @@ export default function BamsIndex({
         form.post(route('bams.flora.store'), {
             preserveScroll: true,
             onSuccess: () => {
-                setSuccessMessage('Permanent Monitoring Plot record successfully added.');
-                setShowSuccess(true);
                 form.reset();
                 setActiveTab('list');
             }
@@ -80,10 +72,6 @@ export default function BamsIndex({
     const submitExcelImport = (e) => {
         e.preventDefault();
 
-        setSuccessMessage(
-            'Excel / CSV data successfully imported and processed.'
-        );
-        setShowSuccess(true);
         excelForm.reset();
     };
 
@@ -95,11 +83,6 @@ export default function BamsIndex({
             preserveScroll: true,
 
             onSuccess: () => {
-                setSuccessMessage(
-                    'Spatial boundary file successfully uploaded, converted, and rendered!'
-                );
-
-                setShowSuccess(true);
                 spatialForm.reset();
 
                 // Automatically switches to Map View after upload
@@ -116,16 +99,12 @@ export default function BamsIndex({
         setShowDeleteConfirm(false);
         setRecordToDelete(null);
 
-        setSuccessMessage('Record successfully deleted.');
-        setShowSuccess(true);
     };
 
     const confirmBulkDelete = () => {
         setShowBulkDeleteConfirm(false);
         setSelectedIds([]);
 
-        setSuccessMessage('Selected records successfully deleted.');
-        setShowSuccess(true);
     };
 
     return (
@@ -134,17 +113,6 @@ export default function BamsIndex({
 
             <div className="py-6 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900 min-h-screen">
                 <div className="max-w-7xl mx-auto space-y-6">
-
-                    {/* SUCCESS ALERT */}
-                    <SuccessAlert />
-
-                    {/* SUCCESS MODAL */}
-                    <SuccessModal
-                        show={showSuccess}
-                        onClose={() => setShowSuccess(false)}
-                        title="Success!"
-                        message={successMessage}
-                    />
 
                     {/* CUSTOM BULK DELETE CONFIRMATION MODAL */}
                     {canDelete && showBulkDeleteConfirm && (

@@ -1,6 +1,7 @@
 import { Head, Link, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import GlobalSearch from '../Components/GlobalSearch';
+import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 
 const allNavigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', section: 'BOTH' },
@@ -251,6 +252,7 @@ export default function AuthenticatedLayout({ title, children }) {
     return (
         <>
             <Head title={title} />
+            <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
                 <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} />
                 <div className="lg:pl-72">

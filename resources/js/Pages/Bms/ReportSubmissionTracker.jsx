@@ -1,45 +1,145 @@
-import { router, useForm } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
+import CrudTable from '@/Components/Crud/CrudTable';
+import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
+import CrudFormModal from '@/Components/Crud/CrudFormModal';
+import CrudSection from '@/Components/Crud/CrudSection';
+import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
+import FileAttachmentPanel from '@/Components/Crud/FileAttachmentPanel';
+import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 
 const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', date_conducted: '', date_accomplished: '', date_report_released_cenro: '', date_received_penro: '', date_endorsed_regional: '', mov: null, delete_mov: false, remarks: '' };
-const badgeClass = value => ({ Outstanding:'bg-emerald-500 text-white','Very Satisfactory':'bg-green-600 text-white',Satisfactory:'bg-amber-400 text-amber-950',Unsatisfactory:'bg-orange-500 text-white',Poor:'bg-red-600 text-white','Pending Submission by CENRO':'bg-blue-600 text-white','Ongoing Preparation at CENRO Level':'bg-blue-600 text-white','Report Not Yet Submitted':'bg-red-600 text-white','Report Submitted':'bg-green-600 text-white','No Activity Conducted':'bg-gray-500 text-white','No Data':'bg-gray-500 text-white' }[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200');
+const badgeClass = value => ({ Outstanding: 'bg-emerald-500 text-white', 'Very Satisfactory': 'bg-green-600 text-white', Satisfactory: 'bg-amber-400 text-amber-950', Unsatisfactory: 'bg-orange-500 text-white', Poor: 'bg-red-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' }[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200');
 const dateValue = value => value ? String(value).slice(0, 10) : '';
 const display = value => value === null || value === undefined || value === '' ? '—' : value;
+const protectedAreaTableLabel = protectedArea => {
+    const fullName = protectedArea?.name?.trim() || '';
+    const shortName = protectedArea?.short_name?.trim();
+
+    if (shortName) return { label: shortName, fullName: fullName || shortName };
+
+    const parentheticalAcronym = fullName.match(/\(([^()]+)\)\s*$/)?.[1]?.trim();
+    return { label: parentheticalAcronym || fullName || '—', fullName: fullName || '—' };
+};
+const Badge = ({ value }) => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(value)}`}>{display(value)}</span>;
+const Detail = ({ label, children }) => <div><span className="block text-xs text-gray-500">{label}:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{children}</span></div>;
 
 export default function ReportSubmissionTracker({ submissions, protectedAreas, filters }) {
-    const [showForm,setShowForm] = useState(false), [editing,setEditing] = useState(null), [preview,setPreview] = useState(null);
+    const { auth = {} } = usePage().props;
+    const canCreate = Boolean(auth.canCreateBms);
+    const canUpdate = Boolean(auth.canUpdateBms);
+    const canDelete = Boolean(auth.canDeleteBms);
+    const rows = submissions?.data || [];
+    const [modal, setModal] = useState(null);
+    const [selectedReport, setSelectedReport] = useState(null);
+    const [preview, setPreview] = useState(null);
+    const [deleteTarget, setDeleteTarget] = useState(null);
+    const [deleteProcessing, setDeleteProcessing] = useState(false);
     const form = useForm(emptyReport);
+
     useEffect(() => () => { if (preview?.temporary) URL.revokeObjectURL(preview.url); }, [preview]);
-    const close = () => { setShowForm(false); setEditing(null); setPreview(null); form.reset(); form.clearErrors(); };
-    const openCreate = () => { setEditing(null); setPreview(null); form.reset(); form.clearErrors(); form.setData('semester',filters?.report_semester || '1st Semester'); setShowForm(true); };
-    const openEdit = report => { setEditing(report); form.clearErrors(); form.setData({ protected_area_id:report.protected_area_id||'',target_office:report.target_office||'',activity_name:report.activity_name||'',document_type:report.document_type||'',semester:report.semester,date_conducted:report.date_conducted||'',date_accomplished:dateValue(report.date_accomplished),date_report_released_cenro:dateValue(report.date_report_released_cenro),date_received_penro:dateValue(report.date_received_penro),date_endorsed_regional:dateValue(report.date_endorsed_regional),mov:null,delete_mov:false,remarks:report.remarks||'' }); setPreview(report.mov_url ? {url:report.mov_url,name:report.mov_file_name||'Current MOV attachment',type:'',temporary:false}:null); setShowForm(true); };
-    const selectMov = e => { const file=e.target.files?.[0]||null; form.setData('mov',file); setPreview(file?{url:URL.createObjectURL(file),name:file.name,type:file.type,temporary:true}:null); };
-    const submit = e => { e.preventDefault(); const options={forceFormData:true,preserveScroll:true,onSuccess:close}; editing ? form.transform(data=>({...data,_method:'put'})).post(route('bms.report-submissions.update',editing.id),options) : form.post(route('bms.report-submissions.store'),options); };
-    const applyFilters = changes => router.get(route('bms.index'),{report_protected_area_id:filters?.report_protected_area_id||'',report_semester:filters?.report_semester||'',tracker:1,...changes},{preserveState:true,preserveScroll:true,replace:true});
-    const remove = report => window.confirm(`Delete the report submission for “${report.activity_name||'this activity'}”?`) && router.delete(route('bms.report-submissions.destroy',report.id),{preserveScroll:true});
-    const input='mt-1.5 block w-full rounded-xl border-gray-300 text-sm shadow-sm focus:border-green-600 focus:ring-green-600 dark:border-gray-700 dark:bg-gray-800 dark:text-white', label='block text-xs font-semibold text-gray-700 dark:text-gray-300';
+
+    const currentMov = report => report?.mov_url ? { url: report.mov_url, name: report.mov_file_name || 'Current MOV attachment', type: '', temporary: false } : null;
+    const resetFormState = () => { setPreview(null); form.reset(); form.clearErrors(); };
+    const closeAll = () => { setModal(null); setSelectedReport(null); resetFormState(); };
+    const openDetails = report => { setSelectedReport(report); setModal('details'); };
+    const openCreate = () => { setSelectedReport(null); resetFormState(); form.setData('semester', filters?.report_semester || '1st Semester'); setModal('create'); };
+    const openEdit = report => {
+        setSelectedReport(report);
+        form.clearErrors();
+        form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', semester: report.semester, date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), date_report_released_cenro: dateValue(report.date_report_released_cenro), date_received_penro: dateValue(report.date_received_penro), date_endorsed_regional: dateValue(report.date_endorsed_regional), mov: null, delete_mov: false, remarks: report.remarks || '' });
+        setPreview(currentMov(report));
+        setModal('edit');
+    };
+    const backFromForm = () => {
+        resetFormState();
+        setModal(selectedReport ? 'details' : null);
+    };
+    const selectMov = file => {
+        form.setData({ ...form.data, mov: file, delete_mov: false });
+        setPreview(file ? { url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true } : currentMov(selectedReport));
+    };
+    const submit = event => {
+        event.preventDefault();
+        const options = { forceFormData: true, preserveScroll: true, onSuccess: closeAll };
+        modal === 'edit'
+            ? form.transform(data => ({ ...data, _method: 'put' })).post(route('bms.report-submissions.update', selectedReport.id), options)
+            : form.transform(data => data).post(route('bms.report-submissions.store'), options);
+    };
+    const applyFilters = changes => router.get(route('bms.index'), { report_protected_area_id: filters?.report_protected_area_id || '', report_semester: filters?.report_semester || '', tracker: 1, ...changes }, { preserveState: true, preserveScroll: true, replace: true });
+    const requestDelete = report => setDeleteTarget(report);
+    const confirmDelete = () => {
+        if (!deleteTarget || !canDelete || deleteProcessing) return;
+        setDeleteProcessing(true);
+        router.delete(route('bms.report-submissions.destroy', deleteTarget.id), {
+            preserveScroll: true,
+            onSuccess: () => { setDeleteTarget(null); closeAll(); },
+            onFinish: () => setDeleteProcessing(false),
+        });
+    };
+
+    const input = 'mt-1.5 block w-full rounded-xl border-gray-300 text-sm shadow-sm focus:border-green-600 focus:ring-green-600 dark:border-gray-700 dark:bg-gray-800 dark:text-white';
+    const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
     const error = name => form.errors[name] && <span className="mt-1 block text-xs text-red-500">{form.errors[name]}</span>;
-    const change = name => e => form.setData(name,e.target.value);
-    const name=preview?.name?.toLowerCase()||'', isPdf=preview&&(preview.type==='application/pdf'||name.endsWith('.pdf')), isImage=preview&&(preview.type?.startsWith('image/')||/\.(jpe?g|png)$/i.test(name));
-    const calculated=editing?[['Deadline for Submission to PENRO',editing.deadline_submission],['Number of Days Complied',editing.number_days_complied],['Timeliness',editing.timeliness],['Status of Submission',editing.submission_status],['Total Number of Days Delayed at PENRO',editing.total_days_delayed_penro]].filter(([,v])=>v!==null&&v!==undefined&&v!==''):[];
+    const change = name => event => form.setData(name, event.target.value);
+    const calculated = selectedReport ? [['Deadline for Submission to PENRO', selectedReport.deadline_submission], ['Number of Days Complied', selectedReport.number_days_complied], ['Timeliness', selectedReport.timeliness], ['Status of Submission', selectedReport.submission_status], ['Total Number of Days Delayed at PENRO', selectedReport.total_days_delayed_penro]].filter(([, value]) => value !== null && value !== undefined && value !== '') : [];
 
-    if(showForm) return <div className="space-y-6">
-        <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md"><div className="pointer-events-none absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl"/><div className="relative z-10 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="text-xl font-bold tracking-tight text-white sm:text-2xl">{editing?'Edit BMS Report Submission':'Add BMS Report Submission'}</h1><p className="mt-1 text-xs text-green-100 sm:text-sm">{editing?'Update BMS report submission details and supporting documents.':'Record and track BMS report submission compliance and supporting documents.'}</p></div><button type="button" onClick={close} className="rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-white/20 sm:text-sm">← Back to List</button></div></div>
-        <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12"><div className="lg:col-span-7"><div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:p-8"><form onSubmit={submit} className="space-y-8">
-            <section className="rounded-2xl border border-gray-100 bg-gray-50/70 p-5 dark:border-gray-800 dark:bg-gray-800/40"><h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📌 General Information &amp; Report Details</h2><div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                <label className={label}>Target Office<input value={form.data.target_office} onChange={change('target_office')} className={input}/>{error('target_office')}</label>
-                <label className={label}>Name of PA<select value={form.data.protected_area_id} onChange={change('protected_area_id')} className={input}><option value="">Select Protected Area</option>{protectedAreas.map(pa=><option key={pa.id} value={pa.id}>{pa.name}</option>)}</select>{error('protected_area_id')}</label>
-                <label className={label}>Name of Activity<input value={form.data.activity_name} onChange={change('activity_name')} className={input}/>{error('activity_name')}</label><label className={label}>Type of Document<input value={form.data.document_type} onChange={change('document_type')} className={input}/>{error('document_type')}</label>
-                <label className={label}>Semester<select value={form.data.semester} onChange={change('semester')} className={input}><option>1st Semester</option><option>2nd Semester</option></select>{error('semester')}</label><label className={label}>Date Conducted<input value={form.data.date_conducted} onChange={change('date_conducted')} className={input} placeholder="Enter date or coverage period"/>{error('date_conducted')}</label>
-            </div></section>
-            <section className="rounded-2xl border border-gray-100 p-5 dark:border-gray-800"><h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">🗓️ Submission Timeline</h2><div className="grid grid-cols-1 gap-5 sm:grid-cols-2">{[['date_accomplished','Date Accomplished'],['date_report_released_cenro','Date Report Released by CENRO Records'],['date_received_penro','Date Received by PENRO Records'],['date_endorsed_regional','Date Endorsed to Regional Office']].map(([n,l])=><label key={n} className={label}>{l}<input type="date" value={form.data[n]} onChange={change(n)} className={input}/>{error(n)}</label>)}</div>{calculated.length>0&&<div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">{calculated.map(([l,v])=><div key={l} className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900"><p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-gray-500">{l}</p><span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(v)}`}>{display(v)}</span></div>)}</div>}</section>
-            <section className="rounded-2xl border border-gray-100 bg-gray-50/70 p-5 dark:border-gray-800 dark:bg-gray-800/40"><h2 className="mb-4 text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📎 MOV &amp; Remarks</h2><label className={label}>MOV Attachment <span className="font-normal text-gray-500">(PDF, JPG, PNG, DOC, DOCX; max 10 MB)</span><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={selectMov} className="mt-1.5 block w-full cursor-pointer rounded-xl border border-gray-300 bg-white p-2 text-sm file:mr-4 file:rounded-lg file:border-0 file:bg-green-50 file:px-4 file:py-2 file:text-xs file:font-bold file:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"/>{error('mov')}</label>{editing?.mov_url&&<label className="mt-3 flex items-center gap-2 text-xs font-semibold text-red-600"><input type="checkbox" checked={form.data.delete_mov} onChange={e=>form.setData('delete_mov',e.target.checked)}/> Delete current MOV attachment</label>}<label className={`${label} mt-5`}>Remarks<textarea rows="4" value={form.data.remarks} onChange={change('remarks')} className={input}/>{error('remarks')}</label></section>
-            <div className="flex flex-col-reverse justify-end gap-3 border-t border-gray-100 pt-6 sm:flex-row"><button type="button" onClick={close} className="rounded-xl border border-gray-300 px-5 py-2.5 text-xs font-bold text-gray-700 dark:border-gray-700 dark:text-gray-200">Cancel / Back</button><button disabled={form.processing} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-green-800 disabled:opacity-50">{form.processing?'Saving…':editing?'Update Report':'Save Report'}</button></div>
-        </form></div></div>
-        <aside className="lg:sticky lg:top-24 lg:col-span-5"><div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900"><div className="border-b border-gray-100 px-5 py-4 dark:border-gray-800"><h2 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">🗂️ Live Document Preview</h2></div><div className="flex min-h-[520px] items-center justify-center bg-gray-50/70 p-4 dark:bg-gray-950/30">{!preview?<div className="text-center"><div className="mb-3 text-5xl">📁</div><p className="font-semibold text-gray-700 dark:text-gray-200">No file selected for preview</p><p className="mt-1 text-xs text-gray-500">Choose a PDF, image, or document attachment.</p></div>:isPdf?<iframe src={preview.url} title={preview.name} className="h-[600px] w-full rounded-xl border bg-white"/>:isImage?<img src={preview.url} alt={preview.name} className="max-h-[600px] w-full rounded-xl object-contain"/>:<div className="text-center"><div className="mb-3 text-5xl">📄</div><p className="break-all font-semibold text-gray-700 dark:text-gray-200">{preview.name}</p><p className="mt-2 text-xs text-gray-500">Preview not available for this file type</p></div>}</div>{preview&&<div className="flex items-center justify-between gap-3 border-t px-5 py-4 dark:border-gray-800"><p className="min-w-0 truncate text-xs font-semibold">{preview.name}</p><a href={preview.url} target="_blank" rel="noreferrer" className="whitespace-nowrap text-xs font-bold text-green-700 hover:underline">View / Open</a></div>}</div></aside></div>
-    </div>;
+    const columns = [
+        {
+            key: 'protected_area',
+            label: 'Name of PA',
+            render: row => {
+                const protectedArea = protectedAreaTableLabel(row.protected_area);
+                return <span title={protectedArea.fullName} className="block max-w-32 truncate font-semibold text-gray-900 dark:text-white">{protectedArea.label}</span>;
+            },
+        },
+        { key: 'activity_name', label: 'Name of Activity', render: row => <span className="block min-w-40 max-w-72 whitespace-normal leading-5">{display(row.activity_name)}</span> },
+        { key: 'date_conducted', label: 'Date Conducted', render: row => <span className="block min-w-32 max-w-56 whitespace-normal leading-5">{display(row.date_conducted)}</span> },
+        { key: 'document_type', label: 'Type of Report', render: row => display(row.document_type) },
+        { key: 'date_accomplished', label: 'Date Accomplished', render: row => display(dateValue(row.date_accomplished)) },
+        { key: 'timeliness', label: 'Timeliness', render: row => <Badge value={row.timeliness} /> },
+        { key: 'submission_status', label: 'Status of Submission', render: row => <span className="block max-w-52 whitespace-normal leading-5"><Badge value={row.submission_status} /></span> },
+    ];
 
-    return <div className="space-y-4"><div className="flex flex-col gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800 sm:flex-row sm:items-end sm:justify-between"><div className="flex flex-wrap gap-3"><label className="text-xs font-bold text-gray-600 dark:text-gray-300">Semester<select value={filters?.report_semester||''} onChange={e=>applyFilters({report_semester:e.target.value,report_page:1})} className="mt-1 block rounded-xl border-gray-300 text-sm dark:bg-gray-900"><option value="">All Semesters</option><option>1st Semester</option><option>2nd Semester</option></select></label><label className="text-xs font-bold text-gray-600 dark:text-gray-300">Protected Area<select value={filters?.report_protected_area_id||''} onChange={e=>applyFilters({report_protected_area_id:e.target.value,report_page:1})} className="mt-1 block min-w-56 rounded-xl border-gray-300 text-sm dark:bg-gray-900"><option value="">All Protected Areas</option>{protectedAreas.map(pa=><option key={pa.id} value={pa.id}>{pa.name}</option>)}</select></label></div><button onClick={openCreate} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md hover:bg-green-800">+ Add Report</button></div>
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800"><div className="overflow-x-auto"><table className="min-w-[2400px] divide-y divide-gray-200 text-xs"><thead className="bg-gray-50 text-left font-bold uppercase tracking-wide text-gray-600 dark:bg-gray-900"><tr>{['Target Office','Name of PA','Name of Activity','Type of Document','Date Conducted','Date Accomplished','Deadline for Submission to PENRO','Date of Report Released by CENRO Records','Date Received by PENRO Records','Number of Days Complied','Timeliness (At PENRO Level)','Status of Submission','Date Endorsed to Regional Office','Total Number of Days Delayed at PENRO','MOV','Actions'].map(h=><th key={h} className="px-3 py-3">{h}</th>)}</tr></thead><tbody className="divide-y divide-gray-100 text-gray-700 dark:text-gray-200">{submissions.data.map(r=><tr key={r.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/40"><td className="px-3 py-3">{display(r.target_office)}</td><td className="px-3 py-3 font-semibold">{display(r.protected_area?.name)}</td><td className="px-3 py-3">{display(r.activity_name)}</td><td className="px-3 py-3">{display(r.document_type)}</td><td className="px-3 py-3">{display(r.date_conducted)}</td><td className="px-3 py-3">{display(dateValue(r.date_accomplished))}</td><td className="px-3 py-3">{display(r.deadline_submission)}</td><td className="px-3 py-3">{display(dateValue(r.date_report_released_cenro))}</td><td className="px-3 py-3">{display(dateValue(r.date_received_penro))}</td><td className="px-3 py-3">{display(r.number_days_complied)}</td><td className="px-3 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 font-bold ${badgeClass(r.timeliness)}`}>{r.timeliness}</span></td><td className="px-3 py-3"><span className={`inline-flex rounded-full px-2.5 py-1 font-bold ${badgeClass(r.submission_status)}`}>{r.submission_status}</span></td><td className="px-3 py-3">{display(dateValue(r.date_endorsed_regional))}</td><td className="px-3 py-3">{display(r.total_days_delayed_penro)}</td><td className="px-3 py-3">{r.mov_url?<a href={r.mov_url} target="_blank" rel="noreferrer" className="font-bold text-blue-600 hover:underline">View MOV</a>:'—'}</td><td className="px-3 py-3"><div className="flex gap-2"><button onClick={()=>openEdit(r)} className="font-bold text-amber-600">Edit</button><button onClick={()=>remove(r)} className="font-bold text-red-600">Delete</button></div></td></tr>)}{!submissions.data.length&&<tr><td colSpan="16" className="px-4 py-12 text-center text-gray-500">No report submissions found.</td></tr>}</tbody></table></div>{submissions.links?.length>3&&<div className="flex flex-wrap gap-1 border-t p-4">{submissions.links.map((link,i)=><button key={i} disabled={!link.url} onClick={()=>link.url&&router.get(link.url,{},{preserveState:true,preserveScroll:true})} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${link.active?'bg-green-700 text-white':'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-200'} disabled:opacity-40`} dangerouslySetInnerHTML={{__html:link.label}}/>)}</div>}</div>
+    const pagination = submissions?.links?.length > 3 ? <div className="flex flex-wrap gap-1">{submissions.links.map((link, index) => <button key={index} type="button" disabled={!link.url} onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${link.active ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-200'} disabled:opacity-40`} dangerouslySetInnerHTML={{ __html: link.label }} />)}</div> : null;
+    const detailsMov = currentMov(selectedReport);
+
+    return <div className="space-y-4">
+        <div className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex flex-wrap gap-3"><label className="text-xs font-bold text-gray-600 dark:text-gray-300">Semester<select value={filters?.report_semester || ''} onChange={event => applyFilters({ report_semester: event.target.value, report_page: 1 })} className="mt-1 block rounded-xl border-gray-300 text-sm dark:bg-gray-900"><option value="">All Semesters</option><option>1st Semester</option><option>2nd Semester</option></select></label><label className="text-xs font-bold text-gray-600 dark:text-gray-300">Protected Area<select value={filters?.report_protected_area_id || ''} onChange={event => applyFilters({ report_protected_area_id: event.target.value, report_page: 1 })} className="mt-1 block min-w-56 rounded-xl border-gray-300 text-sm dark:bg-gray-900"><option value="">All Protected Areas</option>{protectedAreas.map(pa => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</select></label></div>
+            {canCreate && <button type="button" onClick={openCreate} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800">+ Add Report</button>}
+        </div>
+
+        <CrudTable title="BMS Report Submission Tracker" subtitle={`${submissions?.total ?? rows.length} report submission${(submissions?.total ?? rows.length) === 1 ? '' : 's'}`} helperText="Click any row to view full details" caption="BMS report submission tracker" columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} emptyTitle="No report submissions found" emptyDescription="No BMS report submissions match the selected filters." pagination={pagination} />
+
+        <CrudDetailsModal open={modal === 'details' && Boolean(selectedReport)} title="BMS Report Submission Full Details" subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} · ${selectedReport.semester || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canUpdate} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
+            { label: 'Reporting Period', value: selectedReport.semester || '—' },
+            { label: 'Report Status', render: () => <Badge value={selectedReport.submission_status} /> },
+            { label: 'Deadline', value: selectedReport.deadline_submission || '—' },
+            { label: 'Timeliness Rating', render: () => <Badge value={selectedReport.timeliness} /> },
+        ]} />} attachments={selectedReport && <FilePreviewPanel file={detailsMov} title="MOV / Attachment" heightClass="h-[480px]" />}>
+            {selectedReport && <div className="space-y-6">
+                <CrudSection title="Report Information"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Target Office">{display(selectedReport.target_office)}</Detail><Detail label="Protected Area">{display(selectedReport.protected_area?.name)}</Detail><Detail label="Name of Activity">{display(selectedReport.activity_name)}</Detail><Detail label="Type of Document">{display(selectedReport.document_type)}</Detail><Detail label="Semester">{display(selectedReport.semester)}</Detail><Detail label="Date Conducted">{display(selectedReport.date_conducted)}</Detail></div></CrudSection>
+                <CrudSection title="Submission / Compliance Details"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Date Accomplished">{display(dateValue(selectedReport.date_accomplished))}</Detail><Detail label="Deadline for Submission to PENRO">{display(selectedReport.deadline_submission)}</Detail><Detail label="Date Report Released by CENRO Records">{display(dateValue(selectedReport.date_report_released_cenro))}</Detail><Detail label="Date Received by PENRO Records">{display(dateValue(selectedReport.date_received_penro))}</Detail><Detail label="Date Endorsed to Regional Office">{display(dateValue(selectedReport.date_endorsed_regional))}</Detail><Detail label="Total Number of Days Delayed at PENRO">{display(selectedReport.total_days_delayed_penro)}</Detail></div></CrudSection>
+                <CrudSection title="Timeliness"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-3"><Detail label="Number of Days Complied">{display(selectedReport.number_days_complied)}</Detail><Detail label="Timeliness Rating"><Badge value={selectedReport.timeliness} /></Detail><Detail label="Submission Status"><Badge value={selectedReport.submission_status} /></Detail></div></CrudSection>
+                <CrudSection title="Remarks"><p className="whitespace-pre-wrap text-xs text-gray-800 dark:text-gray-200">{selectedReport.remarks || 'None.'}</p></CrudSection>
+            </div>}
+        </CrudDetailsModal>
+
+        <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} icon="📋" title={modal === 'edit' ? 'Edit BMS Report Submission' : 'Add BMS Report Submission'} subtitle={modal === 'edit' ? 'Update report details and review the MOV side-by-side.' : 'Record report compliance details and supporting MOV.'} onClose={backFromForm} onSubmit={submit} processing={form.processing} errors={form.errors} canDelete={modal === 'edit' && canDelete} onDelete={() => requestDelete(selectedReport)} saveLabel={modal === 'edit' ? 'Save Changes' : 'Save Report'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}>
+            <CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <label className={label}>Target Office<input value={form.data.target_office} onChange={change('target_office')} className={input} />{error('target_office')}</label>
+                <label className={label}>Name of PA<select value={form.data.protected_area_id} onChange={change('protected_area_id')} className={input}><option value="">Select Protected Area</option>{protectedAreas.map(pa => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</select>{error('protected_area_id')}</label>
+                <label className={label}>Name of Activity<input value={form.data.activity_name} onChange={change('activity_name')} className={input} />{error('activity_name')}</label>
+                <label className={label}>Type of Document<input value={form.data.document_type} onChange={change('document_type')} className={input} />{error('document_type')}</label>
+                <label className={label}>Semester<select value={form.data.semester} onChange={change('semester')} className={input}><option>1st Semester</option><option>2nd Semester</option></select>{error('semester')}</label>
+                <label className={label}>Date Conducted<input value={form.data.date_conducted} onChange={change('date_conducted')} className={input} placeholder="Enter date or coverage period" />{error('date_conducted')}</label>
+            </div></CrudSection>
+            <CrudSection title="Submission Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['date_accomplished', 'Date Accomplished'], ['date_report_released_cenro', 'Date Report Released by CENRO Records'], ['date_received_penro', 'Date Received by PENRO Records'], ['date_endorsed_regional', 'Date Endorsed to Regional Office']].map(([name, text]) => <label key={name} className={label}>{text}<input type="date" value={form.data[name]} onChange={change(name)} className={input} />{error(name)}</label>)}</div>{calculated.length > 0 && <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">{calculated.map(([text, value]) => <div key={text} className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900"><p className="mb-2 text-[11px] font-bold uppercase tracking-wide text-gray-500">{text}</p><Badge value={value} /></div>)}</div>}</CrudSection>
+            <CrudSection title="Attachment / MOV & Remarks"><div className="space-y-5"><FileAttachmentPanel id="bms-report-mov" label="MOV Attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" existingFiles={selectedReport?.mov_url && !form.data.delete_mov ? [currentMov(selectedReport)] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} onRemoveExisting={() => { form.setData('delete_mov', true); setPreview(null); }} error={form.errors.mov} disabled={form.processing} canManage={modal === 'create' ? canCreate : canUpdate} /><label className={label}>Remarks<textarea rows="4" value={form.data.remarks} onChange={change('remarks')} className={input} />{error('remarks')}</label></div></CrudSection>
+        </CrudFormModal>
+
+        <ConfirmDialog open={Boolean(deleteTarget) && canDelete} variant="danger" title="Delete Report Submission?" message={`Delete the report submission for “${deleteTarget?.activity_name || 'this activity'}”? This cannot be undone.`} confirmLabel="Delete Record" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} processing={deleteProcessing} />
     </div>;
 }

@@ -36,9 +36,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
     const [bulkDeleteProcessing, setBulkDeleteProcessing] = useState(false);
-    const [showSuccess, setShowSuccess] = useState(false);
-    const [successMessage, setSuccessMessage] = useState('Record created successfully.');
-
     const [deletingId, setDeletingId] = useState(null);
     const [selectedIds, setSelectedIds] = useState([]);
 
@@ -168,8 +165,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     setExistingFile(null);
                     setSelectedRecord(null);
                     setIsEditModalOpen(false);
-                    setSuccessMessage('Record updated successfully.');
-                    setShowSuccess(true);
                 }
             });
         } else {
@@ -180,8 +175,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     setPreviewUrl(null);
                     setExistingFile(null);
                     handleTabChange('reports');
-                    setSuccessMessage('Record created successfully.');
-                    setShowSuccess(true);
                 }
             });
         }
@@ -194,8 +187,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                 importForm.reset();
                 setIsImportModalOpen(false);
                 setActiveTab('raw-data');
-                setSuccessMessage('Meteorological Data successfully imported.');
-                setShowSuccess(true);
             },
         });
     };
@@ -214,8 +205,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                 setIsViewModalOpen(false);
                 setDeletingId(null);
                 setSelectedRecord(null);
-                setSuccessMessage('Record deleted successfully.');
-                setShowSuccess(true);
             }
         });
     };
@@ -227,8 +216,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             onSuccess: () => {
                 setShowBulkDeleteConfirm(false);
                 setSelectedIds([]);
-                setSuccessMessage('Selected records deleted successfully.');
-                setShowSuccess(true);
             },
             onFinish: () => setBulkDeleteProcessing(false),
         });
@@ -289,33 +276,33 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     }
                 />
 
-                <div className="flex border-b border-gray-200 dark:border-gray-800 text-xs font-semibold gap-2">
+                <div className="mt-2 mb-3 flex items-center gap-2 overflow-x-auto">
                     <button
                         onClick={() => handleTabChange('reports')}
-                        className={`pb-3 pt-2 px-4 font-bold border-b-2 transition flex items-center gap-2 ${
+                        className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
                             activeTab === 'reports' || activeTab === 'form'
-                                ? 'border-green-600 text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-950/20 rounded-t-xl'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-t-xl'
+                                ? 'bg-green-700 text-white shadow-md'
+                                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
                         }`}
                     >
                         <span className="text-sm">📊</span> AWS Reports List
                     </button>
                     <button
                         onClick={() => handleTabChange('raw-data')}
-                        className={`pb-3 pt-2 px-4 font-bold border-b-2 transition flex items-center gap-2 ${
+                        className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
                             activeTab === 'raw-data'
-                                ? 'border-green-600 text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-950/20 rounded-t-xl'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-t-xl'
+                                ? 'bg-green-700 text-white shadow-md'
+                                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
                         }`}
                     >
                         <span className="text-sm">🏗️</span> AWS Raw Data Table
                     </button>
                     <button
                         onClick={() => handleTabChange('analytics')}
-                        className={`pb-3 pt-2 px-4 font-bold border-b-2 transition flex items-center gap-2 ${
+                        className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
                             activeTab === 'analytics'
-                                ? 'border-green-600 text-green-600 dark:text-green-400 bg-green-50/50 dark:bg-green-950/20 rounded-t-xl'
-                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded-t-xl'
+                                ? 'bg-green-700 text-white shadow-md'
+                                : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'
                         }`}
                     >
                         <span className="text-sm">📈</span> Weather Analytics & Graph
@@ -984,27 +971,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                 </div>
             )}
 
-            {/* SUCCESS MODAL */}
-            {showSuccess && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-emerald-100 dark:border-emerald-900 text-center animate-pop-in">
-                        <div className="checkmark-circle mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-emerald-100 dark:bg-emerald-950 mb-4 shadow-sm">
-                            <svg className="h-8 w-8 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                                <path className="checkmark-check" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-sans">Success!</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">{successMessage}</p>
-                        <button
-                            type="button"
-                            onClick={() => { setShowSuccess(false); }}
-                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition text-sm"
-                        >
-                            Continue
-                        </button>
-                    </div>
-                </div>
-            )}
         </AuthenticatedLayout>
     );
 }

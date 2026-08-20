@@ -14,6 +14,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\BmsController;
 use App\Http\Controllers\BmsReportSubmissionController;
+use App\Http\Controllers\BmsThreatController;
 use App\Http\Controllers\BamsAssessmentController;
 use App\Http\Controllers\ImeaAssessmentController;
 use App\Http\Controllers\AwsController;
@@ -88,6 +89,9 @@ Route::middleware('auth')->group(function () {
     Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->middleware('can:bms.view')->name('bms.semestral-report');
     Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->middleware(['can:bms.view', 'can:reports.export'])->name('bms.export-pdf');
     Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->middleware(['can:bms.view', 'can:gis.manage'])->name('bms.import-geojson');
+    Route::post('/bms/threats', [BmsThreatController::class, 'store'])->middleware('can:bms.create')->name('bms.threats.store');
+    Route::put('/bms/threats/{bmsThreat}', [BmsThreatController::class, 'update'])->middleware('can:bms.update')->name('bms.threats.update');
+    Route::delete('/bms/threats/{bmsThreat}', [BmsThreatController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.threats.destroy');
     Route::post('/bms/report-submissions', [BmsReportSubmissionController::class, 'store'])->middleware('can:bms.create')->name('bms.report-submissions.store');
     Route::put('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'update'])->middleware('can:bms.update')->name('bms.report-submissions.update');
     Route::delete('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.report-submissions.destroy');

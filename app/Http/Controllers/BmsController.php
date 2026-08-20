@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BmsRecord;
 use App\Models\BmsAnnexHeader;
 use App\Models\BmsReportSubmission;
+use App\Models\BmsThreat;
 use App\Models\ProtectedArea;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -105,6 +106,7 @@ class BmsController extends Controller
                     return $data;
                 }),
             'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
+            'bmsThreats' => BmsThreat::with('protectedArea:id,name,short_name')->latest('date')->latest('id')->get(),
             'initialTab' => $request->input('tab') === 'semestral' ? 'semestral' : null,
         ]);
     }

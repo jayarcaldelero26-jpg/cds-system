@@ -238,7 +238,7 @@ class ImeaAssessmentController extends Controller
             'updated_by' => $request->user()->id,
         ]);
 
-        return to_route('imea.index');
+        return to_route('imea.index')->with('status', 'imea-assessment-updated');
     }
 
     public function destroy(ImeaAssessment $imeaAssessment): RedirectResponse

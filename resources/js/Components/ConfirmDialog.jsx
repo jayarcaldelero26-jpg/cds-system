@@ -1,47 +1,11 @@
-export default function ConfirmDialog({
-    open,
-    title = "Are you sure you want to change the data?",
-    message = "Once update, you will not be able to revert it!",
-    confirmLabel = "OK",
-    cancelLabel = "Cancel",
-    onConfirm,
-    onCancel,
-    processing = false,
-    variant = 'default'
-}) {
+export default function ConfirmDialog({ open, title = 'Are you sure you want to change the data?', message = 'Once updated, you will not be able to revert it.', confirmLabel = 'OK', cancelLabel = 'Cancel', onConfirm, onCancel, processing = false, variant = 'default' }) {
     if (!open) return null;
-
-    return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs" role="presentation">
-            <style>{`
-                @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-                .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
-            `}</style>
-            <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-md w-full shadow-2xl border border-gray-200 dark:border-gray-700 text-center animate-pop-in">
-                <div className={`mx-auto flex items-center justify-center h-14 w-14 rounded-full mb-4 shadow-sm text-2xl font-bold ${variant === 'danger' ? 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-300' : 'bg-teal-100 text-teal-600 dark:bg-teal-950 dark:text-teal-400'}`}>
-                    {variant === 'danger' ? '!' : '?'}
-                </div>
-                <h3 id="confirm-dialog-title" className="text-xl font-bold text-gray-900 dark:text-white mb-2">{title}</h3>
-                <p id="confirm-dialog-message" className="text-sm text-gray-500 dark:text-gray-400 mb-6">{message}</p>
-                <div className="flex justify-center gap-3">
-                    <button
-                        type="button"
-                        onClick={onCancel}
-                        disabled={processing}
-                        className="flex-1 rounded-xl bg-gray-200 dark:bg-gray-700 px-4 py-2.5 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600 transition"
-                    >
-                        {cancelLabel}
-                    </button>
-                    <button
-                        type="button"
-                        onClick={onConfirm}
-                        disabled={processing}
-                        className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition shadow-md disabled:cursor-not-allowed disabled:opacity-60 ${variant === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-teal-600 hover:bg-teal-700'}`}
-                    >
-                        {processing ? 'Processing…' : confirmLabel}
-                    </button>
-                </div>
-            </div>
+    return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
+        <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" className={`w-full max-w-sm animate-pop-in rounded-2xl border bg-white p-6 text-center shadow-2xl dark:bg-gray-900 ${variant === 'danger' ? 'border-red-100 dark:border-red-950' : 'border-gray-200 dark:border-gray-800'}`}>
+            <div className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full text-2xl font-bold shadow-sm ${variant === 'danger' ? 'bg-red-100 text-red-600 dark:bg-red-950 dark:text-red-300' : 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'}`}>{variant === 'danger' ? '!' : '?'}</div>
+            <h3 id="confirm-dialog-title" className="mb-2 text-lg font-bold text-gray-900 dark:text-white">{title}</h3>
+            <p id="confirm-dialog-message" className="mb-6 text-sm text-gray-600 dark:text-gray-300">{message}</p>
+            <div className="flex gap-3"><button type="button" onClick={onCancel} disabled={processing} className="flex-1 rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-200 disabled:opacity-50 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">{cancelLabel}</button><button type="button" onClick={onConfirm} disabled={processing} className={`flex-1 rounded-xl px-4 py-2 text-sm font-semibold text-white shadow-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${variant === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-700 hover:bg-green-800'}`}>{processing ? 'Processing…' : confirmLabel}</button></div>
         </div>
-    );
+    </div>;
 }

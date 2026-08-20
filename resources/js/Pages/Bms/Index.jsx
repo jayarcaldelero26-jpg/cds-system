@@ -20,8 +20,6 @@ import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
-import FileAttachmentPanel from '@/Components/Crud/FileAttachmentPanel';
-import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 
 const floraIcon = L.divIcon({
     className: 'custom-marker',
@@ -99,7 +97,7 @@ const calculateTrendStatus = (points) => {
     return { slope, status };
 };
 
-export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata, reportSubmissions, reportFilters, initialTab }) {
+export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata, reportSubmissions, reportFilters, bmsThreats = [], initialTab }) {
     const canCreateBms = Boolean(auth?.canCreateBms);
     const canUpdateBms = Boolean(auth?.canUpdateBms);
     const canDeleteBms = Boolean(auth?.canDeleteBms);
@@ -169,17 +167,12 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
     const [coordType, setCoordType] = useState('DD');
     const [editCoordType, setEditCoordType] = useState('DD');
-    const [showSuccess, setShowSuccess] = useState(false);
-    const [successMessage, setSuccessMessage] = useState('Action completed successfully.');
-
     const [isSelectionMode, setIsSelectionMode] = useState(false);
     const [selectedIds, setSelectedIds] = useState([]);
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
     const [editingRecord, setEditingRecord] = useState(null);
     const [isEditingRecord, setIsEditingRecord] = useState(false);
-    const [addAttachmentPreview, setAddAttachmentPreview] = useState(null);
-    const [editAttachmentPreview, setEditAttachmentPreview] = useState(null);
     const [actionError, setActionError] = useState('');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deleteProcessing, setDeleteProcessing] = useState(false);
@@ -228,13 +221,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         latitude: '',
         longitude: '',
         elevation: '',
-        attachment: null,
         remarks: '',
         mode_of_observation: 'Seen',
         location: '',
-        length_of_transect: '',
-        weather_condition: '',
-        ecosystem_type: '',
     });
 
     const editForm = useForm({
@@ -254,10 +243,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         remarks: '',
         mode_of_observation: 'Seen',
         location: '',
-        length_of_transect: '',
-        weather_condition: '',
-        ecosystem_type: '',
-        attachment: null,
     });
 
     const annexHeaderForm = useForm({
@@ -316,10 +301,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             forceFormData: true,
             onSuccess: () => {
                 form.reset();
-                if (addAttachmentPreview?.temporary) URL.revokeObjectURL(addAttachmentPreview.url);
-                setAddAttachmentPreview(null);
-                setSuccessMessage('Field record successfully added.');
-                setShowSuccess(true);
                 setActiveTab('list');
             },
         });
@@ -331,11 +312,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         setActionError('');
         setEditingRecord(record);
         setIsEditingRecord(false);
-        setEditAttachmentPreview(record.attachment_url ? {
-            url: record.attachment_url,
-            name: record.attachment_name || 'Current attachment',
-            temporary: false,
-        } : null);
     };
 
     const beginEditingRecord = () => {
@@ -361,44 +337,18 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             remarks: editingRecord.remarks || '',
             mode_of_observation: editingRecord.mode_of_observation || 'Seen',
             location: editingRecord.location || '',
-            length_of_transect: editingRecord.length_of_transect || '',
-            weather_condition: editingRecord.weather_condition || '',
-            ecosystem_type: editingRecord.ecosystem_type || '',
-            attachment: null,
         });
         setIsEditingRecord(true);
     };
 
     const closeRecordModal = () => {
-        if (editAttachmentPreview?.temporary) URL.revokeObjectURL(editAttachmentPreview.url);
         setEditingRecord(null);
         setIsEditingRecord(false);
-        setEditAttachmentPreview(null);
         setActionError('');
         editForm.clearErrors();
     };
 
-    const selectAttachment = (file, target) => {
-        const setter = target === 'edit' ? setEditAttachmentPreview : setAddAttachmentPreview;
-        const current = target === 'edit' ? editAttachmentPreview : addAttachmentPreview;
-        if (current?.temporary) URL.revokeObjectURL(current.url);
-
-        if (!file) {
-            setter(target === 'edit' && editingRecord?.attachment_url ? {
-                url: editingRecord.attachment_url,
-                name: editingRecord.attachment_name || 'Current attachment',
-                temporary: false,
-            } : null);
-            return;
-        }
-
-        setter({ url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true });
-    };
-
     const closeAddForm = () => {
-        if (addAttachmentPreview?.temporary) URL.revokeObjectURL(addAttachmentPreview.url);
-        setAddAttachmentPreview(null);
-        form.setData('attachment', null);
         form.clearErrors();
         setActiveTab('list');
     };
@@ -429,10 +379,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         editForm.post(route('bms.update', editingRecord.id), {
             forceFormData: true,
             preserveScroll: true,
-            onSuccess: (page) => {
+            onSuccess: () => {
                 closeRecordModal();
-                setSuccessMessage(page.props.flash?.success || 'Record updated successfully.');
-                setShowSuccess(true);
             },
             onError: () => setActionError('Please correct the highlighted fields and try again.'),
         });
@@ -451,7 +399,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             preserveScroll: true,
             onSuccess: () => {
                 setShowEditHeaderModal(false);
-                setShowSuccess(true);
             },
             onError: (err) => {
                 console.error("Header update error:", err);
@@ -468,8 +415,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             onSuccess: () => {
                 setShowDeleteConfirm(false);
                 closeRecordModal();
-                setSuccessMessage('Record deleted successfully.');
-                setShowSuccess(true);
             },
             onError: (errors) => {
                 console.error("Delete Error:", errors);
@@ -489,7 +434,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                 setSelectedIds([]);
                 setIsSelectionMode(false);
                 setShowBulkDeleteConfirm(false);
-                setShowSuccess(true);
             },
             onError: (errors) => {
                 console.error("Bulk Delete Error:", errors);
@@ -502,10 +446,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     const submitImport = (e) => {
         e.preventDefault();
         importForm.post(route('bms.import'), {
-            onSuccess: (page) => {
+            onSuccess: () => {
                 importForm.reset();
-                setSuccessMessage(page.props.flash?.success || 'Import completed successfully.');
-                setShowSuccess(true);
                 setActiveTab('list');
             },
         });
@@ -516,7 +458,6 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         geoJsonForm.post(route('bms.import-geojson'), {
             onSuccess: () => {
                 geoJsonForm.reset();
-                setShowSuccess(true);
                 setActiveTab('map');
             },
         });
@@ -789,7 +730,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             `}</style>
 
             <div className="py-6 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900 min-h-screen">
-                <div className="max-w-7xl mx-auto space-y-6">
+                <div className="max-w-7xl mx-auto space-y-3">
 
                     <div className="no-print">
                     <PageHeader
@@ -804,31 +745,32 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     </div>
 
                     {/* Navigation Tabs */}
-                    <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-3 no-print">
-                        <button onClick={() => setActiveTab('list')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                    <div className="no-print flex flex-col gap-2 border-b border-gray-200 pb-3 dark:border-gray-700 xl:flex-row xl:items-center xl:justify-between">
+                        <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 xl:pb-0">
+                        <button onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📄 Species Records
                         </button>
-                        <button onClick={() => setActiveTab('semestral')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('semestral')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📊 Semestral Population Trends
                         </button>
-                        <button onClick={() => setActiveTab('threats')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'bg-red-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('threats')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'bg-red-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             ⚠️ Threats
                         </button>
-                        <button onClick={() => setActiveTab('map')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️ Map View
                         </button>
-                        <button onClick={() => setActiveTab('report-tracker')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'report-tracker' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('report-tracker')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'report-tracker' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📑 Report Submission Tracker
                         </button>
-                        {canCreateBms && <button onClick={() => setActiveTab('add')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'add' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
-                            ➕ Add Field Observation
-                        </button>}
-                        {canCreateBms && <button onClick={() => setActiveTab('import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        </div>
+                        {(canCreateBms || canManageBmsSpatial) && <div className="flex shrink-0 items-center gap-2 overflow-x-auto xl:justify-end">
+                        {canCreateBms && <button onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📁 Excel / CSV Bulk Import
                         </button>}
-                        {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️📁 Import GeoJSON Spatial File
                         </button>}
+                        </div>}
                     </div>
 
                     {activeTab === 'report-tracker' && (
@@ -913,7 +855,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
                             <div>
                                 {viewMode === 'table' && (
-                                    <CrudTable title="BMS Species Observations" subtitle={`${bmsRecords.length} record${bmsRecords.length === 1 ? '' : 's'} in the current filter`} helperText="Click any row to view complete details" columns={speciesColumns} rows={bmsRecords} onRowClick={openRecordDetails} isRowDisabled={() => isSelectionMode} selectable={isSelectionMode} selectedKeys={selectedIds} onSelectRow={(id, checked) => setSelectedIds(current => checked ? [...new Set([...current, id])] : current.filter(item => item !== id))} onSelectAll={(checked, rows) => setSelectedIds(checked ? rows.map(record => record.id) : [])} emptyTitle="No BMS species records found" emptyDescription="Add or import an observation to populate the species table." caption="BMS species observations" />
+                                    <CrudTable title="BMS Species Observations" subtitle={`${bmsRecords.length} record${bmsRecords.length === 1 ? '' : 's'} in the current filter`} helperText="Click any row to view complete details" headerActions={canCreateBms ? <button type="button" onClick={() => setActiveTab('add')} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 dark:focus:ring-offset-gray-900">+ Add Field Observation</button> : null} columns={speciesColumns} rows={bmsRecords} onRowClick={openRecordDetails} isRowDisabled={() => isSelectionMode} selectable={isSelectionMode} selectedKeys={selectedIds} onSelectRow={(id, checked) => setSelectedIds(current => checked ? [...new Set([...current, id])] : current.filter(item => item !== id))} onSelectAll={(checked, rows) => setSelectedIds(checked ? rows.map(record => record.id) : [])} emptyTitle="No BMS species records found" emptyDescription="Add or import an observation to populate the species table." caption="BMS species observations" />
                                 )}
 
                                 {viewMode === 'pdf' && (
@@ -1177,7 +1119,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     )}
 
                     {/* TAB 3: THREATS VIEW */}
-                    {activeTab === 'threats' && <Threats />}
+                    {activeTab === 'threats' && <Threats threats={bmsThreats} protectedAreas={protectedAreas} />}
 
                     {/* TAB 4: MAP VIEW */}
                     {activeTab === 'map' && (
@@ -1195,7 +1137,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
                     {/* TAB 5: ADD SINGLE FORM */}
                     {activeTab === 'add' && (
-                        <CrudFormModal open mode="create" icon="🌿" title="Add Field Observation Data" subtitle="Create a BMS species observation from the Transect Data Summary." onClose={closeAddForm} onSubmit={submitRecord} processing={form.processing} errors={form.errors} saveLabel="Save Field Record" preview={addAttachmentPreview ? <FilePreviewPanel file={addAttachmentPreview} title="New Attachment Preview" /> : null}>
+                        <CrudFormModal open mode="create" icon="🌿" title="Add Field Observation Data" subtitle="Create a BMS species observation from the Transect Data Summary." onClose={closeAddForm} onSubmit={submitRecord} processing={form.processing} errors={form.errors} saveLabel="Save Field Record" maxWidth="max-w-4xl">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Protected Area *</label>
@@ -1312,11 +1254,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Location</label><input type="text" value={form.data.location} onChange={e => form.setData('location', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                     <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Observer</label><input type="text" value={form.data.observer_name} onChange={e => form.setData('observer_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Length of Transect</label><input type="text" value={form.data.length_of_transect} onChange={e => form.setData('length_of_transect', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Weather Condition</label><input type="text" value={form.data.weather_condition} onChange={e => form.setData('weather_condition', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Ecosystem Type</label><input type="text" value={form.data.ecosystem_type} onChange={e => form.setData('ecosystem_type', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 </div>
-                                <FileAttachmentPanel id="bms-create-attachment" label="Attach File" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, JPEG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" selectedFiles={form.data.attachment ? [form.data.attachment] : []} onChange={file => { form.setData('attachment', file); selectAttachment(file, 'add'); }} error={form.errors.attachment} disabled={form.processing} canManage={canCreateBms} />
                         </CrudFormModal>
                     )}
 
@@ -1409,17 +1347,17 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                 </div>
             )}
 
-            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || '—' }, { label: 'Category', value: editingRecord.category || '—' }, { label: 'Station', value: editingRecord.station || '—' }, { label: 'Count', value: editingRecord.count ?? '—' }]} />} attachments={editingRecord && <FilePreviewPanel file={editAttachmentPreview} title="Species Attachment" />}>
+            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || '—' }, { label: 'Category', value: editingRecord.category || '—' }, { label: 'Station', value: editingRecord.station || '—' }, { label: 'Count', value: editingRecord.count ?? '—' }]} />}>
                 {editingRecord && <div className="space-y-4">
-                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Observer', editingRecord.observer_name], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || '—'}</dd></div>)}</dl></CrudSection>
-                    <CrudSection title="Site & Transect"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude], ['Elevation', editingRecord.elevation], ['Length of Transect', editingRecord.length_of_transect], ['Weather Condition', editingRecord.weather_condition], ['Ecosystem Type', editingRecord.ecosystem_type]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl></CrudSection>
-                    <CrudSection title="Remarks"><p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
+                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || '—'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="GPS Coordinates"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="Additional Observation Notes"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Observer', editingRecord.observer_name], ['Elevation', editingRecord.elevation]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl><p className="mt-4 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
                 </div>}
             </CrudDetailsModal>
 
             {/* SPECIES EDIT MODAL */}
             {editingRecord && isEditingRecord && (
-                <CrudFormModal open mode="edit" icon="✏️" title="Edit Species Record" subtitle={editingRecord.species_scientific_name} onClose={() => { editForm.clearErrors(); setActionError(''); setIsEditingRecord(false); if (editAttachmentPreview?.temporary) URL.revokeObjectURL(editAttachmentPreview.url); setEditAttachmentPreview(editingRecord.attachment_url ? { url: editingRecord.attachment_url, name: editingRecord.attachment_name || 'Current attachment', temporary: false } : null); }} onSubmit={submitEdit} processing={editForm.processing} errors={editForm.errors} canDelete={canDeleteBms} onDelete={() => setShowDeleteConfirm(true)} preview={editAttachmentPreview ? <FilePreviewPanel file={editAttachmentPreview} title="Current / Replacement Preview" /> : null}>
+                <CrudFormModal open mode="edit" icon="✏️" title="Edit Species Record" subtitle={editingRecord.species_scientific_name} onClose={() => { editForm.clearErrors(); setActionError(''); setIsEditingRecord(false); }} onSubmit={submitEdit} processing={editForm.processing} errors={editForm.errors} canDelete={canDeleteBms} onDelete={() => setShowDeleteConfirm(true)} maxWidth="max-w-4xl">
                             {actionError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{actionError}</div>}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Protected Area *</label><select value={editForm.data.protected_area_id} onChange={e => editForm.setData('protected_area_id', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required><option value="">Select Protected Area</option>{protectedAreas.map(pa => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</select>{fieldError(editForm.errors, 'protected_area_id')}</div>
@@ -1494,33 +1432,14 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Elevation (masl)</label><input type="text" value={editForm.data.elevation} onChange={e => editForm.setData('elevation', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Observer</label><input type="text" value={editForm.data.observer_name} onChange={e => editForm.setData('observer_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Location</label><input type="text" value={editForm.data.location} onChange={e => editForm.setData('location', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Length of Transect</label><input type="text" value={editForm.data.length_of_transect} onChange={e => editForm.setData('length_of_transect', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Weather Condition</label><input type="text" value={editForm.data.weather_condition} onChange={e => editForm.setData('weather_condition', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
-                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Ecosystem Type</label><input type="text" value={editForm.data.ecosystem_type} onChange={e => editForm.setData('ecosystem_type', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                             </div>
                             <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Remarks</label><textarea rows="3" value={editForm.data.remarks} onChange={e => editForm.setData('remarks', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" />{fieldError(editForm.errors, 'remarks')}</div>
-                            <FileAttachmentPanel id="bms-edit-attachment" label="Replace Attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="Leave empty to preserve the current file. PDF, JPG, JPEG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" existingFiles={!editAttachmentPreview?.temporary && editAttachmentPreview ? [editAttachmentPreview] : []} selectedFiles={editForm.data.attachment ? [editForm.data.attachment] : []} onChange={file => { editForm.setData('attachment', file); selectAttachment(file, 'edit'); }} error={editForm.errors.attachment} disabled={editForm.processing} canManage={canUpdateBms} />
                 </CrudFormModal>
             )}
 
             <ConfirmDialog open={canDeleteBms && showBulkDeleteConfirm} variant="danger" title="Delete Selected Records?" message={`Delete ${selectedIds.length} selected record(s)? This cannot be undone.`} confirmLabel="Yes, Delete All" onConfirm={confirmBulkDelete} onCancel={() => setShowBulkDeleteConfirm(false)} processing={bulkDeleteProcessing} />
-            <ConfirmDialog open={canDeleteBms && showDeleteConfirm} variant="danger" title="Delete Species Record?" message="This record and its attachment will be deleted. This cannot be undone." confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} processing={deleteProcessing} />
+            <ConfirmDialog open={canDeleteBms && showDeleteConfirm} variant="danger" title="Delete Species Record?" message="This observation record will be deleted. This cannot be undone." confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} processing={deleteProcessing} />
 
-            {/* SUCCESS MODAL POPUP */}
-            {showSuccess && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-emerald-100 dark:border-emerald-900 text-center animate-pop-in">
-                        <div className="checkmark-circle mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-emerald-100 dark:bg-emerald-950 mb-4 shadow-sm">
-                            <svg className="h-8 w-8 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                                <path className="checkmark-check" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-sans">Success!</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">{successMessage}</p>
-                        <button onClick={() => { setShowSuccess(false); setSuccessMessage('Action completed successfully.'); }} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition text-sm">Continue</button>
-                    </div>
-                </div>
-            )}
         </AuthenticatedLayout>
     );
 }
