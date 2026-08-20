@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use DateTime;
 use Exception;
+use Throwable;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 class BmsController extends Controller
@@ -46,6 +47,10 @@ class BmsController extends Controller
             $query->where('category', $request->category);
         }
 
+        if ($request->input('tab') === 'semestral' && $request->filled('year')) {
+            $query->whereYear('monitoring_date', $request->integer('year'));
+        }
+
         if ($request->filled('start_date') && $request->filled('end_date')) {
             $query->whereBetween('monitoring_date', [$request->start_date, $request->end_date]);
         } elseif ($request->filled('start_date')) {
@@ -72,10 +77,17 @@ class BmsController extends Controller
             }
         }
 
+        $bmsRecords = $query->get()->each(function (BmsRecord $record): void {
+            $record->setAttribute('attachment_name', $record->attachment ? basename($record->attachment) : null);
+            $record->setAttribute('attachment_url', $record->attachment
+                ? route('bms.attachment.show', $record)
+                : null);
+        });
+
         return Inertia::render('Bms/Index', [
-            'bmsRecords' => $query->get(),
+            'bmsRecords' => $bmsRecords,
             'protectedAreas' => ProtectedArea::all(),
-            'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date']),
+            'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date', 'year']),
             'spatialData' => $geoJsonData, // <-- Gi-match na nato sa 'spatialData' prop sa MapView!
             'annexHeaderMetadata' => $this->annexHeaderFor($request),
             'reportSubmissions' => BmsReportSubmission::with('protectedArea:id,name,short_name')
@@ -99,8 +111,11 @@ class BmsController extends Controller
 
     public function semestralReport(Request $request)
     {
+        $selectedYear = $request->integer('year', now()->year);
+
         return redirect()->route('bms.index', array_filter([
             'tab' => 'semestral',
+            'year' => $selectedYear,
             'protected_area_id' => $request->input('protected_area_id'),
         ], fn ($value) => $value !== null && $value !== ''));
     }
@@ -121,7 +136,7 @@ class BmsController extends Controller
             'latitude' => 'nullable|string',
             'longitude' => 'nullable|string',
             'elevation' => 'nullable|string',
-            'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png|max:10240',
+            'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
             'remarks' => 'nullable|string',
             'location' => 'nullable|string',
             'length_of_transect' => 'nullable|string',
@@ -130,11 +145,22 @@ class BmsController extends Controller
             'mode_of_observation' => 'nullable|string',
         ]);
 
-        if ($request->hasFile('attachment')) {
-            $validated['attachment'] = $request->file('attachment')->store('bms-attachments', 'public');
-        }
+        $newAttachment = null;
 
-        BmsRecord::create($validated);
+        try {
+            if ($request->hasFile('attachment')) {
+                $newAttachment = $request->file('attachment')->store('bms-attachments', 'public');
+                $validated['attachment'] = $newAttachment;
+            }
+
+            DB::transaction(fn () => BmsRecord::create($validated));
+        } catch (Throwable $exception) {
+            if ($newAttachment) {
+                Storage::disk('public')->delete($newAttachment);
+            }
+
+            throw $exception;
+        }
 
         return redirect()->back()->with('success', 'Field record successfully added!');
     }
@@ -429,6 +455,7 @@ class BmsController extends Controller
             'latitude' => 'nullable|string',
             'longitude' => 'nullable|string',
             'elevation' => 'nullable|string',
+            'attachment' => 'nullable|file|mimes:pdf,jpg,jpeg,png,doc,docx|max:10240',
             'remarks' => 'nullable|string',
             'location' => 'nullable|string',
             'length_of_transect' => 'nullable|string',
@@ -437,7 +464,29 @@ class BmsController extends Controller
             'mode_of_observation' => 'nullable|string',
         ]);
 
-        $bmsRecord->update($validated);
+        $oldAttachment = $bmsRecord->attachment;
+        $newAttachment = null;
+
+        try {
+            if ($request->hasFile('attachment')) {
+                $newAttachment = $request->file('attachment')->store('bms-attachments', 'public');
+                $validated['attachment'] = $newAttachment;
+            } else {
+                unset($validated['attachment']);
+            }
+
+            DB::transaction(fn () => $bmsRecord->update($validated));
+        } catch (Throwable $exception) {
+            if ($newAttachment) {
+                Storage::disk('public')->delete($newAttachment);
+            }
+
+            throw $exception;
+        }
+
+        if ($newAttachment && $oldAttachment && $oldAttachment !== $newAttachment) {
+            Storage::disk('public')->delete($oldAttachment);
+        }
 
         return redirect()->back()->with('success', 'Record updated successfully!');
     }
@@ -519,18 +568,41 @@ class BmsController extends Controller
 
     public function destroy(BmsRecord $bmsRecord)
     {
-        $bmsRecord->delete();
+        $attachment = $bmsRecord->attachment;
+
+        DB::transaction(fn () => $bmsRecord->delete());
+
+        if ($attachment) {
+            Storage::disk('public')->delete($attachment);
+        }
 
         return redirect()->back()->with('success', 'Record deleted successfully!');
+    }
+
+    public function showAttachment(BmsRecord $bmsRecord)
+    {
+        abort_unless($bmsRecord->attachment && Storage::disk('public')->exists($bmsRecord->attachment), 404);
+
+        return response()->file(Storage::disk('public')->path($bmsRecord->attachment), [
+            'Content-Disposition' => 'inline; filename="'.basename($bmsRecord->attachment).'"',
+        ]);
     }
 
     public function bulkDestroy(Request $request)
     {
         $request->validate([
             'ids' => 'required|array',
+            'ids.*' => 'integer|exists:bms_records,id',
         ]);
 
-        BmsRecord::whereIn('id', $request->ids)->delete();
+        $records = BmsRecord::whereIn('id', $request->ids)->get(['id', 'attachment']);
+
+        DB::transaction(fn () => BmsRecord::whereKey($records->modelKeys())->delete());
+
+        $attachments = $records->pluck('attachment')->filter()->all();
+        if ($attachments !== []) {
+            Storage::disk('public')->delete($attachments);
+        }
 
         return redirect()->back()->with('success', 'Selected records deleted successfully!');
     }

@@ -14,6 +14,14 @@ import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tool
 import Threats from './Threats';
 import MapView from './MapView';
 import ReportSubmissionTracker from './ReportSubmissionTracker';
+import ConfirmDialog from '@/Components/ConfirmDialog';
+import CrudTable from '@/Components/Crud/CrudTable';
+import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
+import CrudFormModal from '@/Components/Crud/CrudFormModal';
+import CrudSection from '@/Components/Crud/CrudSection';
+import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
+import FileAttachmentPanel from '@/Components/Crud/FileAttachmentPanel';
+import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 
 const floraIcon = L.divIcon({
     className: 'custom-marker',
@@ -100,7 +108,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     const [activeTab, setActiveTab] = useState(reportFilters?.tracker ? 'report-tracker' : (initialTab || 'list'));
     const [viewMode, setViewMode] = useState('table');
     const [semestralViewMode, setSemestralViewMode] = useState('table');
-    const [graphYearFilter, setGraphYearFilter] = useState('All');
+    const [graphYearFilter, setGraphYearFilter] = useState(filters?.year ? String(filters.year) : 'All');
     const [semestralPaFilter, setSemestralPaFilter] = useState('All');
     const [mapCategoryFilter, setMapCategoryFilter] = useState('All');
 
@@ -169,6 +177,10 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
     const [editingRecord, setEditingRecord] = useState(null);
+    const [isEditingRecord, setIsEditingRecord] = useState(false);
+    const [addAttachmentPreview, setAddAttachmentPreview] = useState(null);
+    const [editAttachmentPreview, setEditAttachmentPreview] = useState(null);
+    const [actionError, setActionError] = useState('');
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [deleteProcessing, setDeleteProcessing] = useState(false);
     const [bulkDeleteProcessing, setBulkDeleteProcessing] = useState(false);
@@ -219,6 +231,10 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         attachment: null,
         remarks: '',
         mode_of_observation: 'Seen',
+        location: '',
+        length_of_transect: '',
+        weather_condition: '',
+        ecosystem_type: '',
     });
 
     const editForm = useForm({
@@ -237,6 +253,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         elevation: '',
         remarks: '',
         mode_of_observation: 'Seen',
+        location: '',
+        length_of_transect: '',
+        weather_condition: '',
+        ecosystem_type: '',
+        attachment: null,
     });
 
     const annexHeaderForm = useForm({
@@ -292,37 +313,94 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         }));
 
         form.post(route('bms.store'), {
+            forceFormData: true,
             onSuccess: () => {
                 form.reset();
+                if (addAttachmentPreview?.temporary) URL.revokeObjectURL(addAttachmentPreview.url);
+                setAddAttachmentPreview(null);
+                setSuccessMessage('Field record successfully added.');
                 setShowSuccess(true);
                 setActiveTab('list');
             },
         });
     };
 
-    const openEditModal = (record) => {
-        if (isSelectionMode || !canUpdateBms) return;
+    const openRecordDetails = (record) => {
+        if (isSelectionMode) return;
+        editForm.clearErrors();
+        setActionError('');
         setEditingRecord(record);
+        setIsEditingRecord(false);
+        setEditAttachmentPreview(record.attachment_url ? {
+            url: record.attachment_url,
+            name: record.attachment_name || 'Current attachment',
+            temporary: false,
+        } : null);
+    };
+
+    const beginEditingRecord = () => {
+        if (!editingRecord || !canUpdateBms) return;
+        editForm.clearErrors();
         setEditCoordType('DD');
         setEditEasting('');
         setEditNorthing('');
         editForm.setData({
-            protected_area_id: record.protected_area_id || '',
-            monitoring_date: record.monitoring_date ? record.monitoring_date.split('T')[0] : '',
-            station: record.station || '',
-            time: record.time || '',
-            category: record.category || 'Flora',
-            taxonomic_group: record.taxonomic_group || 'trees',
-            species_common_name: record.species_common_name || '',
-            species_scientific_name: record.species_scientific_name || '',
-            count: record.count || '',
-            observer_name: record.observer_name || '',
-            latitude: record.latitude || '',
-            longitude: record.longitude || '',
-            elevation: record.elevation || '',
-            remarks: record.remarks || '',
-            mode_of_observation: record.mode_of_observation || 'Seen',
+            protected_area_id: editingRecord.protected_area_id || '',
+            monitoring_date: editingRecord.monitoring_date ? editingRecord.monitoring_date.split('T')[0] : '',
+            station: editingRecord.station || '',
+            time: editingRecord.time || '',
+            category: editingRecord.category || 'Flora',
+            taxonomic_group: editingRecord.taxonomic_group || '',
+            species_common_name: editingRecord.species_common_name || '',
+            species_scientific_name: editingRecord.species_scientific_name || '',
+            count: editingRecord.count ?? '',
+            observer_name: editingRecord.observer_name || '',
+            latitude: editingRecord.latitude || '',
+            longitude: editingRecord.longitude || '',
+            elevation: editingRecord.elevation || '',
+            remarks: editingRecord.remarks || '',
+            mode_of_observation: editingRecord.mode_of_observation || 'Seen',
+            location: editingRecord.location || '',
+            length_of_transect: editingRecord.length_of_transect || '',
+            weather_condition: editingRecord.weather_condition || '',
+            ecosystem_type: editingRecord.ecosystem_type || '',
+            attachment: null,
         });
+        setIsEditingRecord(true);
+    };
+
+    const closeRecordModal = () => {
+        if (editAttachmentPreview?.temporary) URL.revokeObjectURL(editAttachmentPreview.url);
+        setEditingRecord(null);
+        setIsEditingRecord(false);
+        setEditAttachmentPreview(null);
+        setActionError('');
+        editForm.clearErrors();
+    };
+
+    const selectAttachment = (file, target) => {
+        const setter = target === 'edit' ? setEditAttachmentPreview : setAddAttachmentPreview;
+        const current = target === 'edit' ? editAttachmentPreview : addAttachmentPreview;
+        if (current?.temporary) URL.revokeObjectURL(current.url);
+
+        if (!file) {
+            setter(target === 'edit' && editingRecord?.attachment_url ? {
+                url: editingRecord.attachment_url,
+                name: editingRecord.attachment_name || 'Current attachment',
+                temporary: false,
+            } : null);
+            return;
+        }
+
+        setter({ url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true });
+    };
+
+    const closeAddForm = () => {
+        if (addAttachmentPreview?.temporary) URL.revokeObjectURL(addAttachmentPreview.url);
+        setAddAttachmentPreview(null);
+        form.setData('attachment', null);
+        form.clearErrors();
+        setActiveTab('list');
     };
 
     const submitEdit = (e) => {
@@ -342,16 +420,21 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
         editForm.transform((data) => ({
             ...data,
+            _method: 'put',
             latitude: finalLat,
             longitude: finalLon,
             remarks: finalRemarks,
         }));
 
-        editForm.put(route('bms.update', editingRecord.id), {
-            onSuccess: () => {
-                setEditingRecord(null);
+        editForm.post(route('bms.update', editingRecord.id), {
+            forceFormData: true,
+            preserveScroll: true,
+            onSuccess: (page) => {
+                closeRecordModal();
+                setSuccessMessage(page.props.flash?.success || 'Record updated successfully.');
                 setShowSuccess(true);
             },
+            onError: () => setActionError('Please correct the highlighted fields and try again.'),
         });
     };
 
@@ -384,33 +467,17 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             preserveScroll: true,
             onSuccess: () => {
                 setShowDeleteConfirm(false);
-                setEditingRecord(null);
+                closeRecordModal();
+                setSuccessMessage('Record deleted successfully.');
                 setShowSuccess(true);
             },
             onError: (errors) => {
                 console.error("Delete Error:", errors);
                 setShowDeleteConfirm(false);
+                setActionError('The record could not be deleted. Please try again.');
             },
             onFinish: () => setDeleteProcessing(false),
         });
-    };
-
-    const handleSelectAll = (e) => {
-        if (e.target.checked) {
-            const allIds = bmsRecords.map(record => record.id);
-            setSelectedIds(allIds);
-        } else {
-            setSelectedIds([]);
-        }
-    };
-
-    const handleSelectOne = (id, e) => {
-        e.stopPropagation();
-        if (selectedIds.includes(id)) {
-            setSelectedIds(selectedIds.filter(item => item !== id));
-        } else {
-            setSelectedIds([...selectedIds, id]);
-        }
     };
 
     const confirmBulkDelete = () => {
@@ -478,7 +545,10 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                 };
             }
             const semKey = `${year}-Sem ${sem}`;
-            const countNum = parseFloat(r.count) || 1;
+            const parsedCount = Number.parseFloat(r.count);
+            const countNum = Number.isFinite(parsedCount) && parsedCount >= 0
+                ? Math.trunc(parsedCount)
+                : 0;
             if (!map[key].semesters[semKey]) {
                 map[key].semesters[semKey] = 0;
             }
@@ -663,6 +733,19 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         document.body.removeChild(link);
     };
 
+    const fieldError = (errors, field) => errors?.[field]
+        ? <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400" role="alert">{errors[field]}</p>
+        : null;
+    const speciesColumns = [
+        { key: 'date_location', label: 'Date / Location', render: record => <><div className="font-semibold">{record.monitoring_date || 'N/A'}</div><div className="max-w-[150px] truncate text-[11px] text-gray-500">{record.location || 'No location'}</div></> },
+        { key: 'station_time', label: 'Station / Time', render: record => <><div className="font-bold text-green-700 dark:text-green-400">{record.station || '-'}</div><div className="text-[11px] text-gray-500">{record.time || '-'}</div></> },
+        { key: 'category_group', label: 'Category / Group', render: record => <><span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="mt-1 text-[11px] capitalize text-gray-500">{record.taxonomic_group || '-'}</div></> },
+        { key: 'species', label: 'Species (Scientific / Common Name)', render: record => { const isNew = checkIsNewSpeciesRecord(record); const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`; return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={event => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700">✓ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{record.species_common_name || ''}</div></>; } },
+        { key: 'count', label: 'Count', cellClassName: 'text-center font-bold', headerClassName: 'text-center', render: record => record.count ?? '—' },
+        { key: 'mode_of_observation', label: 'Mode', cellClassName: 'text-center', headerClassName: 'text-center', render: record => <span className="rounded-lg bg-gray-100 px-2 py-0.5 text-[11px] font-medium dark:bg-gray-700">{record.mode_of_observation || 'Seen'}</span> },
+        { key: 'coordinates', label: 'GPS Coordinates', cellClassName: 'font-mono text-[11px]', render: record => record.latitude && record.longitude && Number.isFinite(Number.parseFloat(record.latitude)) && Number.isFinite(Number.parseFloat(record.longitude)) ? `${Number.parseFloat(record.latitude).toFixed(4)}, ${Number.parseFloat(record.longitude).toFixed(4)}` : <span className="italic text-gray-400">No GPS</span> },
+    ];
+
     return (
         <AuthenticatedLayout user={auth.user}>
             <Head title="BMS Monitoring" />
@@ -828,46 +911,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 )}
                             </div>
 
-                            <div className={viewMode === 'table' ? "bg-white dark:bg-gray-800 shadow-xl rounded-2xl overflow-hidden p-6 border border-gray-100 dark:border-gray-700" : ""}>
+                            <div>
                                 {viewMode === 'table' && (
-                                    <div>
-                                        {bmsRecords.length > 0 ? (
-                                            <div className="w-full overflow-x-auto custom-table-scrollbar">
-                                                <table className="w-full text-left border-collapse border border-gray-200 dark:border-gray-700 text-xs font-sans">
-                                                    <thead className="bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 uppercase font-bold sticky top-0">
-                                                        <tr>
-                                                            {isSelectionMode && (<th className="border border-gray-200 dark:border-gray-700 p-3 text-center w-12"><input type="checkbox" onChange={handleSelectAll} checked={selectedIds.length === bmsRecords.length && bmsRecords.length > 0} className="rounded border-gray-400 text-green-600 focus:ring-green-500" /></th>)}
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3">Date / Location</th>
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3">Station / Time</th>
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3">Category / Group</th>
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3">Species (Scientific / Common Name)</th>
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3 text-center">Count</th>
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3 text-center">Mode</th>
-                                                            <th className="border border-gray-200 dark:border-gray-700 p-3">GPS Coordinates</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className="divide-y divide-gray-200 dark:divide-gray-700 dark:bg-gray-800 text-gray-800 dark:text-gray-200">
-                                                        {bmsRecords.map((record) => {
-                                                            const isNew = checkIsNewSpeciesRecord(record);
-                                                            const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;
-                                                            return (
-                                                                <tr key={record.id} onClick={() => openEditModal(record)} className={`hover:bg-green-50/50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${selectedIds.includes(record.id) ? 'bg-green-100/60 dark:bg-green-900/30' : ''}`}>
-                                                                    {isSelectionMode && (<td className="border border-gray-200 dark:border-gray-700 p-3 text-center" onClick={e => e.stopPropagation()}><input type="checkbox" checked={selectedIds.includes(record.id)} onChange={(e) => handleSelectOne(record.id, e)} className="rounded border-gray-400 text-green-600 focus:ring-green-500" /></td>)}
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="font-semibold">{record.monitoring_date || 'N/A'}</div><div className="text-gray-500 text-[11px] truncate max-w-[150px]">{record.location || 'No location'}</div></td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="font-bold text-green-700 dark:text-green-400">{record.station || '-'}</div><div className="text-gray-500 text-[11px]">{record.time || '-'}</div></td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3"><span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="text-[11px] text-gray-500 mt-1 capitalize">{record.taxonomic_group || '-'}</div></td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="flex items-center gap-2 flex-wrap"><span className="italic font-bold text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && (<div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}><span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">✨ New Species</span>{canUpdateBms && <button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" title="Click to acknowledge and remove highlight">✓ Acknowledge</button>}</div>)}</div><div className="text-gray-600 dark:text-gray-400 text-[11px]">{record.species_common_name || ''}</div></td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3 text-center font-bold">{record.count || '1'}</td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3 text-center"><span className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-lg text-[11px] font-medium">{record.mode_of_observation || 'Seen'}</span></td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3 font-mono text-[11px]">{record.latitude && record.longitude ? (<span>{parseFloat(record.latitude).toFixed(4)}, {parseFloat(record.longitude).toFixed(4)}</span>) : (<span className="text-gray-400 italic">No GPS</span>)}</td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        ) : (<div className="text-center py-20 text-gray-500 font-sans">No records found. Please add or import observations.</div>)}
-                                    </div>
+                                    <CrudTable title="BMS Species Observations" subtitle={`${bmsRecords.length} record${bmsRecords.length === 1 ? '' : 's'} in the current filter`} helperText="Click any row to view complete details" columns={speciesColumns} rows={bmsRecords} onRowClick={openRecordDetails} isRowDisabled={() => isSelectionMode} selectable={isSelectionMode} selectedKeys={selectedIds} onSelectRow={(id, checked) => setSelectedIds(current => checked ? [...new Set([...current, id])] : current.filter(item => item !== id))} onSelectAll={(checked, rows) => setSelectedIds(checked ? rows.map(record => record.id) : [])} emptyTitle="No BMS species records found" emptyDescription="Add or import an observation to populate the species table." caption="BMS species observations" />
                                 )}
 
                                 {viewMode === 'pdf' && (
@@ -1149,10 +1195,22 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
                     {/* TAB 5: ADD SINGLE FORM */}
                     {activeTab === 'add' && (
-                        <div className="max-w-4xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Add Field Observation Data</h3>
-                            <p className="text-sm text-gray-500 mb-6">Fill out the form based on the Transect Data Summary sheet.</p>
-                            <form onSubmit={submitRecord} className="space-y-6">
+                        <CrudFormModal open mode="create" icon="🌿" title="Add Field Observation Data" subtitle="Create a BMS species observation from the Transect Data Summary." onClose={closeAddForm} onSubmit={submitRecord} processing={form.processing} errors={form.errors} saveLabel="Save Field Record" preview={addAttachmentPreview ? <FilePreviewPanel file={addAttachmentPreview} title="New Attachment Preview" /> : null}>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Protected Area *</label>
+                                        <select value={form.data.protected_area_id} onChange={e => form.setData('protected_area_id', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required>
+                                            <option value="">Select Protected Area</option>
+                                            {protectedAreas.map(pa => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
+                                        </select>
+                                        {fieldError(form.errors, 'protected_area_id')}
+                                    </div>
+                                    <div>
+                                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Monitoring Date *</label>
+                                        <input type="date" value={form.data.monitoring_date} onChange={e => form.setData('monitoring_date', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required />
+                                        {fieldError(form.errors, 'monitoring_date')}
+                                    </div>
+                                </div>
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     <div className="md:col-span-4"><h4 className="font-bold text-green-700 dark:text-green-400 border-b border-gray-200 dark:border-gray-700 pb-2">🔍 Observation Details (Table Entry)</h4></div>
                                     <div>
@@ -1173,12 +1231,14 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Taxonomic Group</label>
                                         <input type="text" placeholder="e.g. Birds, Trees" value={form.data.taxonomic_group} onChange={e => form.setData('taxonomic_group', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required />
+                                        {fieldError(form.errors, 'taxonomic_group')}
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                                     <div className="md:col-span-2">
                                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Scientific Name *</label>
                                         <input type="text" placeholder="e.g. Agathis philippinensis" value={form.data.species_scientific_name} onChange={e => form.setData('species_scientific_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm italic" required />
+                                        {fieldError(form.errors, 'species_scientific_name')}
                                     </div>
                                     <div className="md:col-span-2">
                                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Local / Common Name</label>
@@ -1189,6 +1249,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Count / No. of Individuals *</label>
                                         <input type="text" placeholder="e.g. 1, 2, Dominant, Flock" value={form.data.count} onChange={e => form.setData('count', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required />
+                                        {fieldError(form.errors, 'count')}
                                     </div>
                                     <div>
                                         <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Mode of Observation</label>
@@ -1248,9 +1309,15 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Elevation (masl)</label><input type="text" placeholder="e.g. 453 - 683" value={form.data.elevation} onChange={e => form.setData('elevation', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                     <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Remarks</label><input type="text" placeholder="Additional notes" value={form.data.remarks} onChange={e => form.setData('remarks', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 </div>
-                                <button type="submit" disabled={form.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl shadow-sm transition">💾 Save Field Record</button>
-                            </form>
-                        </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Location</label><input type="text" value={form.data.location} onChange={e => form.setData('location', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Observer</label><input type="text" value={form.data.observer_name} onChange={e => form.setData('observer_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Length of Transect</label><input type="text" value={form.data.length_of_transect} onChange={e => form.setData('length_of_transect', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Weather Condition</label><input type="text" value={form.data.weather_condition} onChange={e => form.setData('weather_condition', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                    <div><label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">Ecosystem Type</label><input type="text" value={form.data.ecosystem_type} onChange={e => form.setData('ecosystem_type', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                </div>
+                                <FileAttachmentPanel id="bms-create-attachment" label="Attach File" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, JPEG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" selectedFiles={form.data.attachment ? [form.data.attachment] : []} onChange={file => { form.setData('attachment', file); selectAttachment(file, 'add'); }} error={form.errors.attachment} disabled={form.processing} canManage={canCreateBms} />
+                        </CrudFormModal>
                     )}
 
                     {/* TAB 6: EXCEL IMPORT */}
@@ -1342,15 +1409,22 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                 </div>
             )}
 
-            {/* EDIT MODAL POPUP */}
-            {editingRecord && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-3xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 animate-pop-in max-h-[90vh] overflow-y-auto">
-                        <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
-                            <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">✏️ Edit / Delete Record</h3><p className="text-xs text-gray-500">Update the information or delete this record.</p></div>
-                            <button onClick={() => setEditingRecord(null)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
-                        </div>
-                        <form onSubmit={submitEdit} className="space-y-4 text-sm">
+            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || '—' }, { label: 'Category', value: editingRecord.category || '—' }, { label: 'Station', value: editingRecord.station || '—' }, { label: 'Count', value: editingRecord.count ?? '—' }]} />} attachments={editingRecord && <FilePreviewPanel file={editAttachmentPreview} title="Species Attachment" />}>
+                {editingRecord && <div className="space-y-4">
+                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Observer', editingRecord.observer_name], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || '—'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="Site & Transect"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude], ['Elevation', editingRecord.elevation], ['Length of Transect', editingRecord.length_of_transect], ['Weather Condition', editingRecord.weather_condition], ['Ecosystem Type', editingRecord.ecosystem_type]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="Remarks"><p className="whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
+                </div>}
+            </CrudDetailsModal>
+
+            {/* SPECIES EDIT MODAL */}
+            {editingRecord && isEditingRecord && (
+                <CrudFormModal open mode="edit" icon="✏️" title="Edit Species Record" subtitle={editingRecord.species_scientific_name} onClose={() => { editForm.clearErrors(); setActionError(''); setIsEditingRecord(false); if (editAttachmentPreview?.temporary) URL.revokeObjectURL(editAttachmentPreview.url); setEditAttachmentPreview(editingRecord.attachment_url ? { url: editingRecord.attachment_url, name: editingRecord.attachment_name || 'Current attachment', temporary: false } : null); }} onSubmit={submitEdit} processing={editForm.processing} errors={editForm.errors} canDelete={canDeleteBms} onDelete={() => setShowDeleteConfirm(true)} preview={editAttachmentPreview ? <FilePreviewPanel file={editAttachmentPreview} title="Current / Replacement Preview" /> : null}>
+                            {actionError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{actionError}</div>}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Protected Area *</label><select value={editForm.data.protected_area_id} onChange={e => editForm.setData('protected_area_id', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required><option value="">Select Protected Area</option>{protectedAreas.map(pa => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</select>{fieldError(editForm.errors, 'protected_area_id')}</div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Monitoring Date *</label><input type="date" value={editForm.data.monitoring_date} onChange={e => editForm.setData('monitoring_date', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required />{fieldError(editForm.errors, 'monitoring_date')}</div>
+                            </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Station</label><input type="text" value={editForm.data.station} onChange={e => editForm.setData('station', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Time of Arrival</label><input type="text" value={editForm.data.time} onChange={e => editForm.setData('time', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
@@ -1360,12 +1434,12 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 </div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Scientific Name</label><input type="text" value={editForm.data.species_scientific_name} onChange={e => editForm.setData('species_scientific_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm italic" required /></div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Scientific Name *</label><input type="text" value={editForm.data.species_scientific_name} onChange={e => editForm.setData('species_scientific_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm italic" required />{fieldError(editForm.errors, 'species_scientific_name')}</div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Common Name</label><input type="text" value={editForm.data.species_common_name} onChange={e => editForm.setData('species_common_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Taxonomic Group</label><input type="text" value={editForm.data.taxonomic_group} onChange={e => editForm.setData('taxonomic_group', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required /></div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Count / Abundance</label><input type="text" value={editForm.data.count} onChange={e => editForm.setData('count', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required /></div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Count / Abundance *</label><input type="text" value={editForm.data.count} onChange={e => editForm.setData('count', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" required />{fieldError(editForm.errors, 'count')}</div>
                                 <div>
                                     <label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Mode of Observation</label>
                                     <select value={editForm.data.mode_of_observation} onChange={e => editForm.setData('mode_of_observation', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm"><option value="Seen">Seen</option><option value="Heard">Heard</option><option value="Seen/Heard">Seen/Heard</option></select>
@@ -1419,48 +1493,18 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Elevation (masl)</label><input type="text" value={editForm.data.elevation} onChange={e => editForm.setData('elevation', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Observer</label><input type="text" value={editForm.data.observer_name} onChange={e => editForm.setData('observer_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Location</label><input type="text" value={editForm.data.location} onChange={e => editForm.setData('location', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Length of Transect</label><input type="text" value={editForm.data.length_of_transect} onChange={e => editForm.setData('length_of_transect', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Weather Condition</label><input type="text" value={editForm.data.weather_condition} onChange={e => editForm.setData('weather_condition', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
+                                <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Ecosystem Type</label><input type="text" value={editForm.data.ecosystem_type} onChange={e => editForm.setData('ecosystem_type', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                             </div>
-                            <div className="flex justify-between items-center pt-3 border-t border-gray-100 dark:border-gray-700">
-                                {canDeleteBms ? <button type="button" onClick={() => setShowDeleteConfirm(true)} className="px-4 py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-xl text-sm font-semibold transition">🗑️ Delete Record</button> : <span />}
-                                <div className="flex gap-2">
-                                    <button type="button" onClick={() => setEditingRecord(null)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                                    <button type="submit" disabled={editForm.processing} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-sm font-semibold shadow-sm transition">💾 Save Changes</button>
-                                </div>
-                            </div>
-                        </form>
-                    </div>
-                </div>
+                            <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Remarks</label><textarea rows="3" value={editForm.data.remarks} onChange={e => editForm.setData('remarks', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" />{fieldError(editForm.errors, 'remarks')}</div>
+                            <FileAttachmentPanel id="bms-edit-attachment" label="Replace Attachment" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="Leave empty to preserve the current file. PDF, JPG, JPEG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" existingFiles={!editAttachmentPreview?.temporary && editAttachmentPreview ? [editAttachmentPreview] : []} selectedFiles={editForm.data.attachment ? [editForm.data.attachment] : []} onChange={file => { editForm.setData('attachment', file); selectAttachment(file, 'edit'); }} error={editForm.errors.attachment} disabled={editForm.processing} canManage={canUpdateBms} />
+                </CrudFormModal>
             )}
 
-            {/* CUSTOM BULK DELETE CONFIRMATION MODAL */}
-            {canDeleteBms && showBulkDeleteConfirm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected Records?</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to delete {selectedIds.length} selected record(s)? This cannot be undone.</p>
-                        <div className="flex gap-3">
-                            <button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                            <button type="button" onClick={confirmBulkDelete} disabled={bulkDeleteProcessing} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60">{bulkDeleteProcessing ? 'Deleting…' : 'Yes, Delete All'}</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* CUSTOM DELETE CONFIRMATION MODAL (SINGLE) */}
-            {canDeleteBms && showDeleteConfirm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record? This process cannot be undone.</p>
-                        <div className="flex gap-3">
-                            <button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                            <button type="button" onClick={confirmDelete} disabled={deleteProcessing} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60">{deleteProcessing ? 'Deleting…' : 'Yes, Delete'}</button>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <ConfirmDialog open={canDeleteBms && showBulkDeleteConfirm} variant="danger" title="Delete Selected Records?" message={`Delete ${selectedIds.length} selected record(s)? This cannot be undone.`} confirmLabel="Yes, Delete All" onConfirm={confirmBulkDelete} onCancel={() => setShowBulkDeleteConfirm(false)} processing={bulkDeleteProcessing} />
+            <ConfirmDialog open={canDeleteBms && showDeleteConfirm} variant="danger" title="Delete Species Record?" message="This record and its attachment will be deleted. This cannot be undone." confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} processing={deleteProcessing} />
 
             {/* SUCCESS MODAL POPUP */}
             {showSuccess && (

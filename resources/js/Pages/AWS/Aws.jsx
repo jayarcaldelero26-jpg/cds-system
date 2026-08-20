@@ -3,6 +3,7 @@ import { useForm, router, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
+import ConfirmDialog from '../../Components/ConfirmDialog';
 import AwsTable from './AwsTable';
 import AwsGraph from './AwsGraph';
 
@@ -34,6 +35,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+    const [bulkDeleteProcessing, setBulkDeleteProcessing] = useState(false);
     const [showSuccess, setShowSuccess] = useState(false);
     const [successMessage, setSuccessMessage] = useState('Record created successfully.');
 
@@ -219,14 +221,16 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
     };
 
     const confirmBulkDelete = () => {
-        if (selectedIds.length === 0) return;
+        if (selectedIds.length === 0 || bulkDeleteProcessing) return;
+        setBulkDeleteProcessing(true);
         router.post(route('aws.bulk-destroy'), { ids: selectedIds }, {
             onSuccess: () => {
                 setShowBulkDeleteConfirm(false);
                 setSelectedIds([]);
                 setSuccessMessage('Selected records deleted successfully.');
                 setShowSuccess(true);
-            }
+            },
+            onFinish: () => setBulkDeleteProcessing(false),
         });
     };
 
@@ -457,6 +461,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         handleSelectAll={handleSelectAll}
                         handleSelectOne={handleSelectOne}
                         pagination={rawPagination}
+                        selectable={Boolean(auth.canDeleteAws)}
                     />
                 )}
 
@@ -937,7 +942,20 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             )}
 
             {/* BULK DELETE CONFIRMATION */}
-            {showBulkDeleteConfirm && (
+            {showBulkDeleteConfirm && activeTab === 'raw-data' && (
+                <ConfirmDialog
+                    open
+                    title="Delete Selected Raw Data?"
+                    message={`Are you sure you want to delete ${selectedIds.length} selected record(s)? This cannot be undone.`}
+                    confirmLabel="Delete Selected"
+                    onConfirm={confirmBulkDelete}
+                    onCancel={() => setShowBulkDeleteConfirm(false)}
+                    processing={bulkDeleteProcessing}
+                    variant="danger"
+                />
+            )}
+
+            {showBulkDeleteConfirm && activeTab !== 'raw-data' && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
                         <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>

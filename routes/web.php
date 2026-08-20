@@ -82,6 +82,7 @@ Route::middleware('auth')->group(function () {
     Route::post('bms/import', [BmsController::class, 'importExcel'])->middleware('can:bms.create')->name('bms.import');
     Route::put('bms/{bmsRecord}', [BmsController::class, 'update'])->middleware('can:bms.update')->name('bms.update');
     Route::delete('bms/{bmsRecord}', [BmsController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.destroy');
+    Route::get('bms/{bmsRecord}/attachment', [BmsController::class, 'showAttachment'])->middleware('can:bms.view')->name('bms.attachment.show');
     Route::post('/bms/bulk-destroy', [BmsController::class, 'bulkDestroy'])->middleware('can:bms.delete')->name('bms.bulk-destroy');
     Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->middleware('can:bms.update')->name('bms.bulk-update-header');
     Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->middleware('can:bms.view')->name('bms.semestral-report');

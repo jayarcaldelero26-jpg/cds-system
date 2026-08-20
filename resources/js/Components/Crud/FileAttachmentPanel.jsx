@@ -1,0 +1,12 @@
+export default function FileAttachmentPanel({ id, label = 'Attachment', multiple = false, accept, acceptedTypesHint, maxSizeHint, existingFiles = [], selectedFiles = [], onChange, onRemoveExisting, error, disabled = false, canManage = true }) {
+    const files = Array.isArray(existingFiles) ? existingFiles : existingFiles ? [existingFiles] : [];
+    const selected = Array.isArray(selectedFiles) ? selectedFiles : selectedFiles ? [selectedFiles] : [];
+    return <section className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+        <label htmlFor={id} className="text-sm font-bold text-gray-800 dark:text-gray-200">{label}</label>
+        {(acceptedTypesHint || maxSizeHint) && <p className="mt-1 text-xs text-gray-500">{[acceptedTypesHint, maxSizeHint].filter(Boolean).join(' · ')}</p>}
+        {files.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{files.map((file, index) => <span key={file.id ?? file.url ?? index} className="inline-flex max-w-full items-center gap-2 rounded-full border border-green-200 bg-green-50 px-3 py-1.5 text-xs font-semibold text-green-800 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300"><span className="truncate">{file.name || `File ${index + 1}`}</span>{file.url && <a href={file.url} target="_blank" rel="noreferrer" className="font-bold hover:underline">Open</a>}{canManage && onRemoveExisting && <button type="button" onClick={() => onRemoveExisting(file)} className="font-bold text-red-600" aria-label={`Remove ${file.name || 'file'}`}>×</button>}</span>)}</div>}
+        {canManage && <input id={id} type="file" multiple={multiple} accept={accept} disabled={disabled} onChange={event => onChange?.(multiple ? Array.from(event.target.files || []) : (event.target.files?.[0] || null), event)} className="mt-3 block w-full cursor-pointer rounded-xl border border-gray-300 bg-white p-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-green-100 file:px-3 file:py-2 file:text-xs file:font-bold file:text-green-800 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200" />}
+        {selected.length > 0 && <p className="mt-2 truncate text-xs font-semibold text-green-700 dark:text-green-400">Selected: {selected.map(file => file?.name).filter(Boolean).join(', ')}</p>}
+        {error && <p className="mt-2 text-xs font-medium text-red-600 dark:text-red-400" role="alert">{error}</p>}
+    </section>;
+}
