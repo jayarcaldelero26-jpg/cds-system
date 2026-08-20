@@ -105,6 +105,8 @@ class HandleInertiaRequests extends Middleware
                 'canCreateBms' => $user?->can('bms.create') ?? false,
                 'canUpdateBms' => $user?->can('bms.update') ?? false,
                 'canDeleteBms' => $user?->can('bms.delete') ?? false,
+                'canExportBms' => ($user?->can('bms.view') ?? false) && ($user?->can('reports.export') ?? false),
+                'canManageBmsSpatial' => ($user?->can('bms.view') ?? false) && ($user?->can('gis.manage') ?? false),
 
                 // Biodiversity Assessment and Monitoring System (BAMS)
                 'canViewBams' => $user?->can('bams.view') ?? false,

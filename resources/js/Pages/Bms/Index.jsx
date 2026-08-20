@@ -91,11 +91,13 @@ const calculateTrendStatus = (points) => {
     return { slope, status };
 };
 
-export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata, reportSubmissions, reportFilters }) {
+export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata, reportSubmissions, reportFilters, initialTab }) {
     const canCreateBms = Boolean(auth?.canCreateBms);
     const canUpdateBms = Boolean(auth?.canUpdateBms);
     const canDeleteBms = Boolean(auth?.canDeleteBms);
-    const [activeTab, setActiveTab] = useState(reportFilters?.tracker ? 'report-tracker' : 'list');
+    const canExportBms = Boolean(auth?.canExportBms);
+    const canManageBmsSpatial = Boolean(auth?.canManageBmsSpatial);
+    const [activeTab, setActiveTab] = useState(reportFilters?.tracker ? 'report-tracker' : (initialTab || 'list'));
     const [viewMode, setViewMode] = useState('table');
     const [semestralViewMode, setSemestralViewMode] = useState('table');
     const [graphYearFilter, setGraphYearFilter] = useState('All');
@@ -741,9 +743,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         {canCreateBms && <button onClick={() => setActiveTab('import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📁 Excel / CSV Bulk Import
                         </button>}
-                        <button onClick={() => setActiveTab('geojson-import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️📁 Import GeoJSON Spatial File
-                        </button>
+                        </button>}
                     </div>
 
                     {activeTab === 'report-tracker' && (
@@ -780,8 +782,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                             });
                                             setShowEditHeaderModal(true);
                                         }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">✏️ Edit Header Details</button>}
-                                        <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export CSV</button>
-                                        <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">🖨️ Save as PDF / Print</button>
+                                        {canExportBms && <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export CSV</button>}
+                                        {canExportBms && <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">🖨️ Save as PDF / Print</button>}
                                     </div>
                                 )}
                             </div>
@@ -959,10 +961,10 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 p-1 rounded-xl border border-gray-200 dark:border-gray-700">
                                         <button onClick={() => setSemestralViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>Trend Table</button>
                                         <button onClick={() => setSemestralViewMode('graph')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'graph' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>Visual Graph</button>
-                                        <button onClick={() => setSemestralViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>PDF Report Simulator</button>
+                                        {canExportBms && <button onClick={() => setSemestralViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>PDF Report Simulator</button>}
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                {canExportBms && <div className="flex items-center gap-2">
                                     {semestralViewMode === 'pdf' ? (
                                         <>
                                             <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export CSV</button>
@@ -971,7 +973,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     ) : (
                                         <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export to Excel / CSV</button>
                                     )}
-                                </div>
+                                </div>}
                             </div>
 
                             <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-wrap items-center gap-4 no-print">
@@ -1276,7 +1278,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     )}
 
                     {/* TAB 7: GEOJSON SPATIAL FILE IMPORT */}
-                    {activeTab === 'geojson-import' && (
+                    {canManageBmsSpatial && activeTab === 'geojson-import' && (
                         <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">🗺️📁 Import Spatial Boundaries / Transects (GeoJSON)</h3>
                             <p className="text-sm text-gray-500 mb-6">Upload a `.geojson` or `.json` spatial file to render park boundaries, zones, or transect lines directly on the map.</p>
@@ -1287,10 +1289,12 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                         <option value="">Select Protected Area</option>
                                         {protectedAreas.map(pa => (<option key={pa.id} value={pa.id}>{pa.name}</option>))}
                                     </select>
+                                    {geoJsonForm.errors.protected_area_id && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{geoJsonForm.errors.protected_area_id}</p>}
                                 </div>
                                 <div>
                                     <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">GeoJSON / JSON Spatial File</label>
                                     <input type="file" accept=".geojson, .json" onChange={e => geoJsonForm.setData('file', e.target.files[0])} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-bold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer border border-gray-200 dark:border-gray-700 rounded-xl" required />
+                                    {geoJsonForm.errors.file && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{geoJsonForm.errors.file}</p>}
                                 </div>
                                 <button type="submit" disabled={geoJsonForm.processing} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm">🚀 Upload and Map Spatial Boundaries</button>
                             </form>

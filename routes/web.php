@@ -84,9 +84,9 @@ Route::middleware('auth')->group(function () {
     Route::delete('bms/{bmsRecord}', [BmsController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.destroy');
     Route::post('/bms/bulk-destroy', [BmsController::class, 'bulkDestroy'])->middleware('can:bms.delete')->name('bms.bulk-destroy');
     Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->middleware('can:bms.update')->name('bms.bulk-update-header');
-    Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->name('bms.semestral-report');
-    Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->name('bms.export-pdf');
-    Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->name('bms.import-geojson');
+    Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->middleware('can:bms.view')->name('bms.semestral-report');
+    Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->middleware(['can:bms.view', 'can:reports.export'])->name('bms.export-pdf');
+    Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->middleware(['can:bms.view', 'can:gis.manage'])->name('bms.import-geojson');
     Route::post('/bms/report-submissions', [BmsReportSubmissionController::class, 'store'])->middleware('can:bms.create')->name('bms.report-submissions.store');
     Route::put('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'update'])->middleware('can:bms.update')->name('bms.report-submissions.update');
     Route::delete('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.report-submissions.destroy');

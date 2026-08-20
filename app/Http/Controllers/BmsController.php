@@ -93,55 +93,16 @@ class BmsController extends Controller
                     return $data;
                 }),
             'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
+            'initialTab' => $request->input('tab') === 'semestral' ? 'semestral' : null,
         ]);
     }
 
     public function semestralReport(Request $request)
     {
-        $protectedAreaId = $request->input('protected_area_id');
-        $selectedYear = $request->input('year', date('Y'));
-
-        $query = BmsRecord::query();
-
-        if ($protectedAreaId) {
-            $query->where('protected_area_id', $protectedAreaId);
-        }
-
-        if ($selectedYear) {
-            $query->whereYear('monitoring_date', $selectedYear);
-        }
-
-        $semestralData = $query->select(
-                'protected_area_id',
-                'category',
-                'species_scientific_name',
-                'species_common_name',
-                'station',
-                DB::raw('YEAR(monitoring_date) as year_recorded'),
-                DB::raw('CASE WHEN MONTH(monitoring_date) <= 6 THEN "Sem 1" ELSE "Sem 2" END as semester'),
-                DB::raw('SUM(CAST(count AS UNSIGNED)) as total_count')
-            )
-            ->groupBy(
-                'protected_area_id',
-                'category',
-                'species_scientific_name',
-                'species_common_name',
-                'station',
-                'year_recorded',
-                'semester'
-            )
-            ->orderBy('species_scientific_name', 'asc')
-            ->orderBy('station', 'asc')
-            ->get();
-
-        return Inertia::render('Bms/SemestralReport', [
-            'semestralData' => $semestralData,
-            'protectedAreas' => ProtectedArea::all(),
-            'filters' => [
-                'protected_area_id' => $protectedAreaId,
-                'year' => $selectedYear,
-            ],
-        ]);
+        return redirect()->route('bms.index', array_filter([
+            'tab' => 'semestral',
+            'protected_area_id' => $request->input('protected_area_id'),
+        ], fn ($value) => $value !== null && $value !== ''));
     }
 
     public function store(Request $request)
@@ -411,11 +372,45 @@ class BmsController extends Controller
             return back()->withErrors(['file' => 'Dili valid nga GeoJSON format ang gi-upload.']);
         }
 
+        if (! $this->isValidGeoJson($decoded)) {
+            return back()->withErrors(['file' => 'The uploaded file is valid JSON but does not contain a valid GeoJSON structure.']);
+        }
+
         $protectedArea = ProtectedArea::findOrFail($request->protected_area_id);
         $protectedArea->spatial_data = $content;
         $protectedArea->save();
 
         return redirect()->back()->with('success', 'GeoJSON spatial file successfully imported and saved!');
+    }
+
+    private function isValidGeoJson(mixed $geoJson): bool
+    {
+        if (! is_array($geoJson) || ! isset($geoJson['type']) || ! is_string($geoJson['type'])) {
+            return false;
+        }
+
+        if ($geoJson['type'] === 'FeatureCollection') {
+            return isset($geoJson['features'])
+                && is_array($geoJson['features'])
+                && array_is_list($geoJson['features'])
+                && collect($geoJson['features'])->every(fn ($feature) => $this->isValidGeoJson($feature));
+        }
+
+        if ($geoJson['type'] === 'Feature') {
+            return array_key_exists('geometry', $geoJson)
+                && ($geoJson['geometry'] === null || $this->isValidGeoJson($geoJson['geometry']));
+        }
+
+        if ($geoJson['type'] === 'GeometryCollection') {
+            return isset($geoJson['geometries'])
+                && is_array($geoJson['geometries'])
+                && array_is_list($geoJson['geometries'])
+                && collect($geoJson['geometries'])->every(fn ($geometry) => $this->isValidGeoJson($geometry));
+        }
+
+        return in_array($geoJson['type'], [
+            'Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon',
+        ], true) && isset($geoJson['coordinates']) && is_array($geoJson['coordinates']);
     }
 
     public function update(Request $request, BmsRecord $bmsRecord)
