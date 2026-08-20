@@ -14,8 +14,7 @@ export default function Form({ title, protectedArea }) {
     const { auth } = usePage().props;
 
     // Existing values are stored as comma-separated strings.
-    // Convert them to arrays so multiple provinces, municipalities, and barangays
-    // can be selected without requiring a database schema change.
+    // Convert them to arrays so multiple provinces and municipalities can be selected.
     const toArray = (value, fallback = []) => {
         if (Array.isArray(value)) return value.filter(Boolean);
         if (typeof value === 'string') {
@@ -26,16 +25,14 @@ export default function Form({ title, protectedArea }) {
 
     const initialProvinces = toArray(protectedArea?.province, ['Davao Oriental']);
     const initialMunicipalities = toArray(protectedArea?.municipality);
-    const initialBarangays = toArray(protectedArea?.barangays);
 
     const form = useForm({
         name: protectedArea?.name || '',
+        short_name: protectedArea?.short_name || '',
         category: protectedArea?.category || '',
         municipality: initialMunicipalities,
         province: initialProvinces,
         region: protectedArea?.region || 'Region XI',
-        barangays: initialBarangays,
-        classification: protectedArea?.classification || '',
         area_hectares: protectedArea?.area_hectares || '',
         core_zone_hectares: protectedArea?.core_zone_hectares || '',
         buffer_zone_hectares: protectedArea?.buffer_zone_hectares || '',
@@ -55,12 +52,9 @@ export default function Form({ title, protectedArea }) {
 
     const [selectedProvince, setSelectedProvince] = useState('');
     const [selectedMunicipality, setSelectedMunicipality] = useState('');
-    const [selectedBarangay, setSelectedBarangay] = useState('');
     const [provinceOptions, setProvinceOptions] = useState([]);
     const [municipalityOptions, setMunicipalityOptions] = useState([]);
-    const [barangayOptions, setBarangayOptions] = useState([]);
     const [geoLoading, setGeoLoading] = useState(true);
-    const [barangayLoading, setBarangayLoading] = useState(false);
     const [geoError, setGeoError] = useState('');
 
     const unwrapCollection = (payload) => {
@@ -105,13 +99,6 @@ export default function Form({ title, protectedArea }) {
         const municipality = municipalityOptions.find((item) => item.code === selectedMunicipality);
         if (municipality) {
             addToList('municipality', municipality.name, setSelectedMunicipality);
-        }
-    };
-
-    const addBarangay = () => {
-        const barangay = barangayOptions.find((item) => item.code === selectedBarangay);
-        if (barangay) {
-            addToList('barangays', barangay.name, setSelectedBarangay);
         }
     };
 
@@ -171,75 +158,6 @@ export default function Form({ title, protectedArea }) {
         };
     }, []);
 
-    // Load barangays only for the municipalities currently selected.
-    useEffect(() => {
-        let cancelled = false;
-
-        const loadBarangays = async () => {
-            const selectedMunicipalityRecords = municipalityOptions.filter((item) =>
-                form.data.municipality.includes(item.name)
-            );
-
-            if (selectedMunicipalityRecords.length === 0) {
-                setBarangayOptions([]);
-                setBarangayLoading(false);
-                return;
-            }
-
-            setBarangayLoading(true);
-
-            try {
-                const results = await Promise.all(
-                    selectedMunicipalityRecords.map(async (municipality) => {
-                        const payload = await fetchJson(
-                            `${PSGC_BASE_URL}/cities-municipalities/${encodeURIComponent(municipality.code)}/barangays`
-                        );
-
-                        return unwrapCollection(payload).map((barangay) => ({
-                            code: barangay.code,
-                            name: barangay.name,
-                            cityMunicipality: municipality.name,
-                            province: municipality.province,
-                        }));
-                    })
-                );
-
-                if (cancelled) return;
-
-                const merged = results
-                    .flat()
-                    .filter((item) => item.code && item.name)
-                    .reduce((accumulator, item) => {
-                        if (!accumulator.some((existing) => existing.code === item.code)) {
-                            accumulator.push(item);
-                        }
-                        return accumulator;
-                    }, [])
-                    .sort((a, b) => {
-                        const parentCompare = `${a.province} ${a.cityMunicipality}`.localeCompare(`${b.province} ${b.cityMunicipality}`);
-                        return parentCompare || a.name.localeCompare(b.name);
-                    });
-
-                setBarangayOptions(merged);
-            } catch (error) {
-                if (!cancelled) {
-                    setBarangayOptions([]);
-                    setGeoError('Unable to load barangays for the selected municipality/city. Please try again.');
-                }
-            } finally {
-                if (!cancelled) setBarangayLoading(false);
-            }
-        };
-
-        if (!geoLoading) {
-            loadBarangays();
-        }
-
-        return () => {
-            cancelled = true;
-        };
-    }, [geoLoading, municipalityOptions, form.data.municipality.join('|')]);
-
     const deleteRecord = () => {
         if (!protectedArea || !auth?.canDeleteProtectedAreas) return;
 
@@ -259,7 +177,6 @@ export default function Form({ title, protectedArea }) {
             ...form.data,
             province: form.data.province.join(', '),
             municipality: form.data.municipality.join(', '),
-            barangays: form.data.barangays.join(', '),
         };
 
         setSubmitting(true);
@@ -294,7 +211,7 @@ export default function Form({ title, protectedArea }) {
 
     const formFields = (
         <>
-                    <FormSection title="Protected Area Details" description="Enter the official identity, classification, and geographic coverage of the protected area.">
+                    <FormSection title="Protected Area Details" description="Enter the official identity, category, and geographic coverage of the protected area.">
                         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
 
                             {/* Protected Area Name */}
@@ -305,7 +222,17 @@ export default function Form({ title, protectedArea }) {
                                 onChange={(event) => form.setData('name', event.target.value)}
                                 error={form.errors.name}
                                 required
-                                className="sm:col-span-2 lg:col-span-3"
+                                className="sm:col-span-2"
+                            />
+
+                            <FormField
+                                id="short_name"
+                                label="Short Name / Acronym"
+                                value={form.data.short_name}
+                                onChange={(event) => form.setData('short_name', event.target.value)}
+                                error={form.errors.short_name}
+                                maxLength={100}
+                                placeholder="e.g. MHRWS"
                             />
 
                             {/* Category Dropdown */}
@@ -498,99 +425,6 @@ export default function Form({ title, protectedArea }) {
                                 </div>
                             </div>
 
-                            {/* Barangays */}
-                            <div className="sm:col-span-2 lg:col-span-3">
-                                <div className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900/40">
-                                    <div className="mb-4">
-                                        <div className="flex items-start justify-between gap-4">
-                                            <div>
-                                                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Barangays</h3>
-                                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                                    Barangays are loaded automatically from the municipality/city selections above.
-                                                </p>
-                                            </div>
-                                            {barangayLoading && (
-                                                <span className="text-xs font-medium text-green-700 dark:text-green-300">
-                                                    Loading...
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-
-                                    <div className="flex gap-2">
-                                        <select
-                                            className={selectClass + " mt-0"}
-                                            value={selectedBarangay}
-                                            onChange={(e) => setSelectedBarangay(e.target.value)}
-                                            disabled={form.data.municipality.length === 0 || barangayLoading}
-                                        >
-                                            <option value="">
-                                                {form.data.municipality.length === 0
-                                                    ? 'Add a municipality/city first'
-                                                    : barangayLoading
-                                                        ? 'Loading barangays...'
-                                                        : 'Select barangay'}
-                                            </option>
-
-                                            {barangayOptions.map((barangay) => (
-                                                <option
-                                                    key={barangay.code}
-                                                    value={barangay.code}
-                                                    disabled={form.data.barangays.includes(barangay.name)}
-                                                >
-                                                    {barangay.name} — {barangay.cityMunicipality}, {barangay.province}
-                                                </option>
-                                            ))}
-                                        </select>
-
-                                        <button
-                                            type="button"
-                                            onClick={addBarangay}
-                                            disabled={!selectedBarangay || barangayLoading}
-                                            className="shrink-0 rounded-ui bg-green-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50"
-                                        >
-                                            Add
-                                        </button>
-                                    </div>
-
-                                    {form.data.barangays.length > 0 ? (
-                                        <div className="mt-3 flex flex-wrap gap-2">
-                                            {form.data.barangays.map((barangay, index) => (
-                                                <span
-                                                    key={`${barangay}-${index}`}
-                                                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300"
-                                                >
-                                                    {barangay}
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => removeFromList('barangays', index)}
-                                                        className="font-bold text-amber-600 hover:text-red-600"
-                                                        aria-label={`Remove ${barangay}`}
-                                                    >
-                                                        ×
-                                                    </button>
-                                                </span>
-                                            ))}
-                                        </div>
-                                    ) : (
-                                        <p className="mt-3 text-xs text-gray-400">
-                                            No barangays added yet.
-                                        </p>
-                                    )}
-
-                                    {barangayOptions.length > 0 && (
-                                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                                            {barangayOptions.length} barangays available from the selected municipality/city coverage.
-                                        </p>
-                                    )}
-
-                                    {form.errors.barangays && (
-                                        <p className="mt-1.5 text-sm font-normal text-red-700 dark:text-red-300">
-                                            {form.errors.barangays}
-                                        </p>
-                                    )}
-                                </div>
-                            </div>
                         </div>
                     </FormSection>
 
@@ -648,7 +482,7 @@ export default function Form({ title, protectedArea }) {
 
                             {/* Status Dropdown */}
                             {select('status', 'Status',
-                                <><option>Proposed</option><option>Ongoing</option></>
+                                <><option>Proposed</option><option>Active</option><option>Inactive</option></>
                             )}
                         </div>
                     </FormSection>

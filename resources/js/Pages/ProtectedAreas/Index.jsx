@@ -124,12 +124,12 @@ export default function Index({ protectedAreas, filters }) {
         setDeleting(true);
 
         router.delete(`/protected-areas/${protectedAreaToDelete.id}`, {
-            onFinish: () => {
-                setDeleting(false);
+            onSuccess: () => {
                 setProtectedAreaToDelete(null);
                 setDetailsOpen(false);
                 setSelectedArea(null);
             },
+            onFinish: () => setDeleting(false),
         });
     };
 
