@@ -96,6 +96,14 @@ class PermissionSeeder extends Seeder
             'bms.update',
             'bms.delete',
 
+            // Biodiversity Assessment and Monitoring System (BAMS)
+            'bams.view',
+            'bams.create',
+            'bams.update',
+            'bams.delete',
+            'bams.manage-spatial',
+            'bams.calculate',
+
             // Automated Weather Station (AWS)
             'aws.view',
             'aws.create',
@@ -139,6 +147,10 @@ class PermissionSeeder extends Seeder
             'bms.view',
             'bms.create',
             'bms.update',
+            'bams.view',
+            'bams.create',
+            'bams.update',
+            'bams.calculate',
             'aws.view',
             'aws.create',
             'aws.update',
@@ -155,6 +167,7 @@ class PermissionSeeder extends Seeder
             'management-plans.view',
             'cds-lawin.view',
             'bms.view',
+            'bams.view',
             'aws.view',
         ]);
 

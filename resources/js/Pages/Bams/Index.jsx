@@ -13,6 +13,9 @@ export default function BamsIndex({
     spatialData = null
 }) {
     const [activeTab, setActiveTab] = useState('list');
+    const canCreate = Boolean(auth?.canCreateBams);
+    const canDelete = Boolean(auth?.canDeleteBams);
+    const canManageSpatial = Boolean(auth?.canManageBamsSpatial);
 
     // States for Modals (Success, Single Delete, Bulk Delete)
     const [showSuccess, setShowSuccess] = useState(false);
@@ -63,11 +66,15 @@ export default function BamsIndex({
     const submitRecord = (e) => {
         e.preventDefault();
 
-        setSuccessMessage(
-            'Permanent Monitoring Plot record successfully added.'
-        );
-        setShowSuccess(true);
-        form.reset();
+        form.post(route('bams.flora.store'), {
+            preserveScroll: true,
+            onSuccess: () => {
+                setSuccessMessage('Permanent Monitoring Plot record successfully added.');
+                setShowSuccess(true);
+                form.reset();
+                setActiveTab('list');
+            }
+        });
     };
 
     const submitExcelImport = (e) => {
@@ -140,7 +147,7 @@ export default function BamsIndex({
                     />
 
                     {/* CUSTOM BULK DELETE CONFIRMATION MODAL */}
-                    {showBulkDeleteConfirm && (
+                    {canDelete && showBulkDeleteConfirm && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
 
@@ -178,7 +185,7 @@ export default function BamsIndex({
                     )}
 
                     {/* CUSTOM SINGLE DELETE CONFIRMATION MODAL */}
-                    {showDeleteConfirm && (
+                    {canDelete && showDeleteConfirm && (
                         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
 
@@ -240,7 +247,7 @@ export default function BamsIndex({
                             📄 Database Records
                         </button>
 
-                        <button
+                        {canCreate && <button
                             onClick={() => setActiveTab('add')}
                             className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
                                 activeTab === 'add'
@@ -249,7 +256,7 @@ export default function BamsIndex({
                             }`}
                         >
                             ➕ Encode Field Sheet
-                        </button>
+                        </button>}
 
                         <button
                             onClick={() => setActiveTab('map')}
@@ -262,7 +269,7 @@ export default function BamsIndex({
                             🗺️ Map View
                         </button>
 
-                        <button
+                        {canCreate && <button
                             onClick={() => setActiveTab('excel-import')}
                             className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
                                 activeTab === 'excel-import'
@@ -271,9 +278,9 @@ export default function BamsIndex({
                             }`}
                         >
                             📊 Excel / CSV Import
-                        </button>
+                        </button>}
 
-                        <button
+                        {canManageSpatial && <button
                             onClick={() => setActiveTab('spatial-import')}
                             className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
                                 activeTab === 'spatial-import'
@@ -282,7 +289,7 @@ export default function BamsIndex({
                             }`}
                         >
                             🌐 Spatial File Import
-                        </button>
+                        </button>}
                     </div>
 
                     {/* TAB 1: RECORDS VIEW */}
@@ -294,7 +301,7 @@ export default function BamsIndex({
                                     Permanent Monitoring Plot Records
                                 </h3>
 
-                                {bamsRecords.length > 0 && (
+                                {canDelete && bamsRecords.length > 0 && (
                                     <button
                                         onClick={() => setShowBulkDeleteConfirm(true)}
                                         className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-xs font-bold transition"
@@ -401,7 +408,7 @@ export default function BamsIndex({
                     )}
 
                     {/* TAB 2: ENCODE FORM */}
-                    {activeTab === 'add' && (
+                    {canCreate && activeTab === 'add' && (
                         <div className="max-w-5xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
 
                             <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
@@ -860,7 +867,7 @@ export default function BamsIndex({
                     )}
 
                     {/* TAB 4: EXCEL / CSV IMPORT */}
-                    {activeTab === 'excel-import' && (
+                    {canCreate && activeTab === 'excel-import' && (
                         <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
 
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
@@ -954,7 +961,7 @@ export default function BamsIndex({
                     )}
 
                     {/* TAB 5: SPATIAL FILE IMPORT */}
-                    {activeTab === 'spatial-import' && (
+                    {canManageSpatial && activeTab === 'spatial-import' && (
                         <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
 
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">

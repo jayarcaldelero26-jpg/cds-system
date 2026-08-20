@@ -93,11 +93,11 @@ Route::middleware('auth')->group(function () {
     Route::delete('/bms/report-submissions/{bmsReportSubmission}/mov', [BmsReportSubmissionController::class, 'destroyMov'])->middleware('can:bms.update')->name('bms.report-submissions.mov.destroy');
 
     // BAMS ROUTES
-    Route::get('bams', [BamsAssessmentController::class, 'index'])->name('bams.index');
-    Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->name('bams.flora.store');
-    Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->name('bams.fauna.store');
-    Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->name('bams.store-spatial');
-    Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->name('bams.calculate');
+    Route::get('bams', [BamsAssessmentController::class, 'index'])->middleware('can:bams.view')->name('bams.index');
+    Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->middleware('can:bams.create')->name('bams.flora.store');
+    Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->middleware('can:bams.create')->name('bams.fauna.store');
+    Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->middleware('can:bams.manage-spatial')->name('bams.store-spatial');
+    Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->middleware('can:bams.calculate')->name('bams.calculate');
 
     // IMEA ROUTES
     Route::get('imea', [ImeaAssessmentController::class, 'index'])->name('imea.index');
