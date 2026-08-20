@@ -4,6 +4,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Auth\Access\AuthorizationException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Inertia\Inertia;
 use App\Http\Middleware\PreventBackHistory;
@@ -39,5 +40,15 @@ return Application::configure(basePath: dirname(__DIR__))
             return Inertia::render('Errors/404')
                 ->toResponse($request)
                 ->setStatusCode(404);
+        });
+
+        $exceptions->render(function (AuthorizationException $e, Request $request) {
+            if (! $request->is('bms', 'bms/*')) {
+                return null;
+            }
+
+            return Inertia::render('Errors/403', [
+                'message' => 'You do not have permission to perform this BMS action.',
+            ])->toResponse($request)->setStatusCode(403);
         });
     })->create();

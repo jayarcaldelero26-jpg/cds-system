@@ -92,6 +92,9 @@ const calculateTrendStatus = (points) => {
 };
 
 export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialData, annexHeaderMetadata, reportSubmissions, reportFilters }) {
+    const canCreateBms = Boolean(auth?.canCreateBms);
+    const canUpdateBms = Boolean(auth?.canUpdateBms);
+    const canDeleteBms = Boolean(auth?.canDeleteBms);
     const [activeTab, setActiveTab] = useState(reportFilters?.tracker ? 'report-tracker' : 'list');
     const [viewMode, setViewMode] = useState('table');
     const [semestralViewMode, setSemestralViewMode] = useState('table');
@@ -147,6 +150,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     }, [acknowledgedSpecies]);
 
     const handleAcknowledge = (speciesKey) => {
+        if (!canUpdateBms) return;
+
         if (!acknowledgedSpecies.includes(speciesKey)) {
             setAcknowledgedSpecies([...acknowledgedSpecies, speciesKey]);
         }
@@ -163,6 +168,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
     const [editingRecord, setEditingRecord] = useState(null);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    const [deleteProcessing, setDeleteProcessing] = useState(false);
+    const [bulkDeleteProcessing, setBulkDeleteProcessing] = useState(false);
     const [showEditHeaderModal, setShowEditHeaderModal] = useState(false);
 
     const [latDeg, setLatDeg] = useState('');
@@ -292,7 +299,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     };
 
     const openEditModal = (record) => {
-        if (isSelectionMode) return;
+        if (isSelectionMode || !canUpdateBms) return;
         setEditingRecord(record);
         setEditCoordType('DD');
         setEditEasting('');
@@ -369,7 +376,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     };
 
     const confirmDelete = () => {
-        if (!editingRecord) return;
+        if (!editingRecord || !canDeleteBms || deleteProcessing) return;
+        setDeleteProcessing(true);
         router.delete(route('bms.destroy', editingRecord.id), {
             preserveScroll: true,
             onSuccess: () => {
@@ -379,8 +387,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             },
             onError: (errors) => {
                 console.error("Delete Error:", errors);
-                alert("Failed to delete record.");
-            }
+                setShowDeleteConfirm(false);
+            },
+            onFinish: () => setDeleteProcessing(false),
         });
     };
 
@@ -403,7 +412,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
     };
 
     const confirmBulkDelete = () => {
-        if (selectedIds.length === 0) return;
+        if (selectedIds.length === 0 || !canDeleteBms || bulkDeleteProcessing) return;
+        setBulkDeleteProcessing(true);
         router.post(route('bms.bulk-destroy'), { ids: selectedIds }, {
             preserveScroll: true,
             onSuccess: () => {
@@ -414,8 +424,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             },
             onError: (errors) => {
                 console.error("Bulk Delete Error:", errors);
-                alert("Failed to delete selected records.");
-            }
+                setShowBulkDeleteConfirm(false);
+            },
+            onFinish: () => setBulkDeleteProcessing(false),
         });
     };
 
@@ -724,12 +735,12 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         <button onClick={() => setActiveTab('report-tracker')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'report-tracker' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📑 Report Submission Tracker
                         </button>
-                        <button onClick={() => setActiveTab('add')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'add' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        {canCreateBms && <button onClick={() => setActiveTab('add')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'add' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             ➕ Add Field Observation
-                        </button>
-                        <button onClick={() => setActiveTab('import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        </button>}
+                        {canCreateBms && <button onClick={() => setActiveTab('import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📁 Excel / CSV Bulk Import
-                        </button>
+                        </button>}
                         <button onClick={() => setActiveTab('geojson-import')} className={`px-5 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️📁 Import GeoJSON Spatial File
                         </button>
@@ -752,7 +763,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 </div>
                                 {viewMode === 'pdf' && (
                                     <div className="flex items-center gap-2">
-                                        <button onClick={() => {
+                                        {canUpdateBms && <button onClick={() => {
                                             const first = bmsRecords[0] || {};
                                             annexHeaderForm.setData({
                                                 location: annexHeaderMetadata?.location || '',
@@ -768,7 +779,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                                 observer: annexHeaderMetadata?.observer || '',
                                             });
                                             setShowEditHeaderModal(true);
-                                        }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">✏️ Edit Header Details</button>
+                                        }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">✏️ Edit Header Details</button>}
                                         <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export CSV</button>
                                         <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">🖨️ Save as PDF / Print</button>
                                     </div>
@@ -801,7 +812,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                         </div>
                                     </div>
                                 </div>
-                                {viewMode === 'table' && (
+                                {viewMode === 'table' && canDeleteBms && (
                                     <div className="flex items-center gap-2 self-end md:self-auto">
                                         {!isSelectionMode ? (
                                             <button onClick={() => setIsSelectionMode(true)} className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs h-[38px] flex items-center">☑️ Enable Select to Delete</button>
@@ -843,7 +854,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="font-semibold">{record.monitoring_date || 'N/A'}</div><div className="text-gray-500 text-[11px] truncate max-w-[150px]">{record.location || 'No location'}</div></td>
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="font-bold text-green-700 dark:text-green-400">{record.station || '-'}</div><div className="text-gray-500 text-[11px]">{record.time || '-'}</div></td>
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3"><span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="text-[11px] text-gray-500 mt-1 capitalize">{record.taxonomic_group || '-'}</div></td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="flex items-center gap-2 flex-wrap"><span className="italic font-bold text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && (<div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}><span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">✨ New Species</span><button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" title="Click to acknowledge and remove highlight">✓ Acknowledge</button></div>)}</div><div className="text-gray-600 dark:text-gray-400 text-[11px]">{record.species_common_name || ''}</div></td>
+                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3"><div className="flex items-center gap-2 flex-wrap"><span className="italic font-bold text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && (<div className="flex items-center gap-1.5" onClick={e => e.stopPropagation()}><span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">✨ New Species</span>{canUpdateBms && <button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" title="Click to acknowledge and remove highlight">✓ Acknowledge</button>}</div>)}</div><div className="text-gray-600 dark:text-gray-400 text-[11px]">{record.species_common_name || ''}</div></td>
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3 text-center font-bold">{record.count || '1'}</td>
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3 text-center"><span className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-lg text-[11px] font-medium">{record.mode_of_observation || 'Seen'}</span></td>
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3 font-mono text-[11px]">{record.latitude && record.longitude ? (<span>{parseFloat(record.latitude).toFixed(4)}, {parseFloat(record.longitude).toFixed(4)}</span>) : (<span className="text-gray-400 italic">No GPS</span>)}</td>
@@ -1007,7 +1018,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3">
                                                                         <div className="flex items-center gap-2 flex-wrap">
                                                                             <span className="italic font-bold text-gray-900 dark:text-white">{item.species}</span>
-                                                                            {item.isNewSpecies && !isAcknowledged && (
+                                                                            {item.isNewSpecies && !isAcknowledged && canUpdateBms && (
                                                                                 <div className="flex items-center gap-1.5">
                                                                                     <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">✨ New Species</span>
                                                                                     <button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" title="Click to acknowledge and remove highlight">✓ Acknowledge</button>
@@ -1406,7 +1417,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 <div><label className="block font-bold text-gray-700 dark:text-gray-300 mb-1">Observer</label><input type="text" value={editForm.data.observer_name} onChange={e => editForm.setData('observer_name', e.target.value)} className="w-full border-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-white rounded-xl shadow-sm text-sm" /></div>
                             </div>
                             <div className="flex justify-between items-center pt-3 border-t border-gray-100 dark:border-gray-700">
-                                <button type="button" onClick={() => setShowDeleteConfirm(true)} className="px-4 py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-xl text-sm font-semibold transition">🗑️ Delete Record</button>
+                                {canDeleteBms ? <button type="button" onClick={() => setShowDeleteConfirm(true)} className="px-4 py-2 bg-red-50 hover:bg-red-100 dark:bg-red-950/50 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-xl text-sm font-semibold transition">🗑️ Delete Record</button> : <span />}
                                 <div className="flex gap-2">
                                     <button type="button" onClick={() => setEditingRecord(null)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
                                     <button type="submit" disabled={editForm.processing} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-sm font-semibold shadow-sm transition">💾 Save Changes</button>
@@ -1418,7 +1429,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
             )}
 
             {/* CUSTOM BULK DELETE CONFIRMATION MODAL */}
-            {showBulkDeleteConfirm && (
+            {canDeleteBms && showBulkDeleteConfirm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
                         <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>
@@ -1426,14 +1437,14 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to delete {selectedIds.length} selected record(s)? This cannot be undone.</p>
                         <div className="flex gap-3">
                             <button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                            <button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">Yes, Delete All</button>
+                            <button type="button" onClick={confirmBulkDelete} disabled={bulkDeleteProcessing} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60">{bulkDeleteProcessing ? 'Deleting…' : 'Yes, Delete All'}</button>
                         </div>
                     </div>
                 </div>
             )}
 
             {/* CUSTOM DELETE CONFIRMATION MODAL (SINGLE) */}
-            {showDeleteConfirm && (
+            {canDeleteBms && showDeleteConfirm && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
                         <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>
@@ -1441,7 +1452,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record? This process cannot be undone.</p>
                         <div className="flex gap-3">
                             <button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                            <button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">Yes, Delete</button>
+                            <button type="button" onClick={confirmDelete} disabled={deleteProcessing} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-60">{deleteProcessing ? 'Deleting…' : 'Yes, Delete'}</button>
                         </div>
                     </div>
                 </div>

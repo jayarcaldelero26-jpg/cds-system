@@ -83,7 +83,7 @@ Route::middleware('auth')->group(function () {
     Route::put('bms/{bmsRecord}', [BmsController::class, 'update'])->middleware('can:bms.update')->name('bms.update');
     Route::delete('bms/{bmsRecord}', [BmsController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.destroy');
     Route::post('/bms/bulk-destroy', [BmsController::class, 'bulkDestroy'])->middleware('can:bms.delete')->name('bms.bulk-destroy');
-    Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->name('bms.bulk-update-header');
+    Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->middleware('can:bms.update')->name('bms.bulk-update-header');
     Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->name('bms.semestral-report');
     Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->name('bms.export-pdf');
     Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->name('bms.import-geojson');

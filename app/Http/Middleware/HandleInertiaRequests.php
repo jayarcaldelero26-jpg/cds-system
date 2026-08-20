@@ -100,6 +100,12 @@ class HandleInertiaRequests extends Middleware
                 'canUpdateAws' => $isAdmin || ($user?->can('aws.update') ?? false),
                 'canDeleteAws' => $isAdmin || ($user?->can('aws.delete') ?? false),
 
+                // Biodiversity Monitoring System (BMS)
+                'canViewBms' => $user?->can('bms.view') ?? false,
+                'canCreateBms' => $user?->can('bms.create') ?? false,
+                'canUpdateBms' => $user?->can('bms.update') ?? false,
+                'canDeleteBms' => $user?->can('bms.delete') ?? false,
+
                 // Biodiversity Assessment and Monitoring System (BAMS)
                 'canViewBams' => $user?->can('bams.view') ?? false,
                 'canCreateBams' => $user?->can('bams.create') ?? false,
