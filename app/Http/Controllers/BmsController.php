@@ -7,6 +7,7 @@ use App\Models\BmsAnnexHeader;
 use App\Models\BmsReportSubmission;
 use App\Models\BmsThreat;
 use App\Models\ProtectedArea;
+use App\Services\SpatialLayerService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
@@ -61,22 +62,13 @@ class BmsController extends Controller
         }
 
         // --- KUHA SA SPATIAL DATA NGA GIPAMATUD-AN NGA DILI MA-NULL ---
-        $geoJsonData = null;
         $protectedAreaId = $request->input('protected_area_id');
 
         $selectedPa = $protectedAreaId
             ? ProtectedArea::find($protectedAreaId)
             : ProtectedArea::first();
 
-        if ($selectedPa && !empty($selectedPa->spatial_data)) {
-            $geoJsonData = json_decode($selectedPa->spatial_data, true);
-        } else {
-            // Fallback: Kung wala sa napili, pangitaa ang bisan asa nga PA nga naay spatial data
-            $anyPaWithData = ProtectedArea::whereNotNull('spatial_data')->first();
-            if ($anyPaWithData) {
-                $geoJsonData = json_decode($anyPaWithData->spatial_data, true);
-            }
-        }
+        $spatialLayers = $selectedPa?->spatialLayers()->latest('id')->get() ?? collect();
 
         $bmsRecords = $query->get()->each(function (BmsRecord $record): void {
             $record->setAttribute('attachment_name', $record->attachment ? basename($record->attachment) : null);
@@ -89,7 +81,7 @@ class BmsController extends Controller
             'bmsRecords' => $bmsRecords,
             'protectedAreas' => ProtectedArea::all(),
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date', 'year']),
-            'spatialData' => $geoJsonData, // <-- Gi-match na nato sa 'spatialData' prop sa MapView!
+            'spatialLayers' => $spatialLayers,
             'annexHeaderMetadata' => $this->annexHeaderFor($request),
             'reportSubmissions' => BmsReportSubmission::with('protectedArea:id,name,short_name')
                 ->when($request->filled('report_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->report_protected_area_id))
@@ -389,26 +381,27 @@ class BmsController extends Controller
     {
         $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
-            'file' => 'required|file|mimes:json,geojson,txt',
+            'spatial_geojson' => 'required|string|max:52428800',
+            'layer_name' => 'nullable|string|max:255',
+            'source_format' => 'nullable|in:geojson,shapefile',
+            'original_filename' => 'nullable|string|max:255',
         ]);
 
-        $file = $request->file('file');
-        $content = file_get_contents($file->getRealPath());
+        app(SpatialLayerService::class)->create([
+            'protected_area_id' => $request->integer('protected_area_id'),
+            'name' => $request->input('layer_name'),
+            'source_format' => $request->input('source_format', 'geojson'),
+            'original_filename' => $request->input('original_filename'),
+            'geojson' => $request->input('spatial_geojson'),
+        ], $request->user()->id);
 
-        $decoded = json_decode($content, true);
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            return back()->withErrors(['file' => 'Dili valid nga GeoJSON format ang gi-upload.']);
-        }
+        $redirectQuery = array_filter([
+            'protected_area_id' => $request->integer('protected_area_id'),
+            ...$request->only(['tab', 'category', 'start_date', 'end_date', 'year']),
+        ], fn ($value) => $value !== null && $value !== '');
 
-        if (! $this->isValidGeoJson($decoded)) {
-            return back()->withErrors(['file' => 'The uploaded file is valid JSON but does not contain a valid GeoJSON structure.']);
-        }
-
-        $protectedArea = ProtectedArea::findOrFail($request->protected_area_id);
-        $protectedArea->spatial_data = $content;
-        $protectedArea->save();
-
-        return redirect()->back()->with('success', 'GeoJSON spatial file successfully imported and saved!');
+        return redirect()->route('bms.index', $redirectQuery)
+            ->with('success', 'Spatial layer successfully imported and added to the map!');
     }
 
     private function isValidGeoJson(mixed $geoJson): bool

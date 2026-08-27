@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use App\Models\ProtectedArea;
+use App\Services\SpatialLayerService;
 use App\Models\BamsFlora;
 use App\Models\BamsFauna;
 use Illuminate\Support\Facades\DB;
@@ -18,25 +19,13 @@ class BamsAssessmentController extends Controller
         $floraRecords = BamsFlora::with('protectedArea')->latest()->get();
 
         $selectedPaId = $request->input('protected_area_id');
-        $spatialData = null;
-        $hasSpatialColumn = Schema::hasColumn('protected_areas', 'spatial_data');
-
-        if ($hasSpatialColumn) {
-            if ($selectedPaId) {
-                $activePa = ProtectedArea::find($selectedPaId);
-                $spatialData = ($activePa && $activePa->spatial_data) ? json_decode($activePa->spatial_data, true) : null;
-            }
-
-            if (!$spatialData) {
-                $latestPa = ProtectedArea::whereNotNull('spatial_data')->latest('updated_at')->first();
-                $spatialData = ($latestPa && $latestPa->spatial_data) ? json_decode($latestPa->spatial_data, true) : null;
-            }
-        }
+        $activePa = $selectedPaId ? ProtectedArea::find($selectedPaId) : $protectedAreas->first();
+        $spatialLayers = $activePa?->spatialLayers()->latest('id')->get() ?? collect();
 
         return Inertia::render('Bams/Index', [
             'protectedAreas' => $protectedAreas,
             'bamsRecords' => $floraRecords,
-            'spatialData' => $spatialData,
+            'spatialLayers' => $spatialLayers,
             'filters' => $request->only(['search', 'vegetation_type', 'protected_area_id']),
         ]);
     }
@@ -97,65 +86,27 @@ class BamsAssessmentController extends Controller
     {
         $request->validate([
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'spatial_file' => ['required', 'file', 'mimes:json,geojson,txt', 'max:10240'],
+            'spatial_geojson' => ['required', 'string', 'max:52428800'],
+            'layer_name' => ['nullable', 'string', 'max:255'],
+            'source_format' => ['nullable', 'in:geojson,shapefile'],
+            'original_filename' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $file = $request->file('spatial_file');
-        $content = file_get_contents($file->getRealPath());
-        $decoded = json_decode($content, true);
+        app(SpatialLayerService::class)->create([
+            'protected_area_id' => $request->integer('protected_area_id'),
+            'name' => $request->input('layer_name'),
+            'source_format' => $request->input('source_format', 'geojson'),
+            'original_filename' => $request->input('original_filename'),
+            'geojson' => $request->input('spatial_geojson'),
+        ], $request->user()->id);
 
-        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
-            return redirect()->back()->withErrors(['spatial_file' => 'The uploaded file is not valid JSON.']);
-        }
+        $redirectQuery = array_filter([
+            'protected_area_id' => $request->integer('protected_area_id'),
+            ...$request->only(['search', 'vegetation_type']),
+        ], fn ($value) => $value !== null && $value !== '');
 
-        $features = [];
-        if (($decoded['type'] ?? null) !== 'FeatureCollection' || ! isset($decoded['features']) || ! is_array($decoded['features'])) {
-            return redirect()->back()->withErrors(['spatial_file' => 'The uploaded file must be a GeoJSON FeatureCollection.']);
-        }
-
-        foreach ($decoded['features'] as $feature) {
-            if (! is_array($feature)) {
-                return redirect()->back()->withErrors(['spatial_file' => 'Every GeoJSON feature must be an object.']);
-            }
-
-            if (isset($feature['geometry']['rings']) && is_array($feature['geometry']['rings'])) {
-                    $features[] = [
-                        'type' => 'Feature',
-                        'geometry' => [
-                            'type' => 'Polygon',
-                            'coordinates' => $feature['geometry']['rings'],
-                        ],
-                        'properties' => $feature['attributes'] ?? [],
-                    ];
-                    continue;
-            }
-
-            $geometry = $feature['geometry'] ?? null;
-            $allowedGeometryTypes = ['Point', 'MultiPoint', 'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon'];
-
-            if (! is_array($geometry)
-                || ! in_array($geometry['type'] ?? null, $allowedGeometryTypes, true)
-                || ! isset($geometry['coordinates'])
-                || ! is_array($geometry['coordinates'])
-                || $geometry['coordinates'] === []) {
-                return redirect()->back()->withErrors(['spatial_file' => 'Every feature must contain a supported, non-empty GeoJSON geometry.']);
-            }
-
-            $features[] = $feature;
-        }
-
-        $standardGeoJson = [
-            'type' => 'FeatureCollection',
-            'features' => $features,
-        ];
-
-        $protectedArea = ProtectedArea::findOrFail($request->protected_area_id);
-        DB::transaction(function () use ($protectedArea, $standardGeoJson): void {
-            $protectedArea->spatial_data = json_encode($standardGeoJson, JSON_THROW_ON_ERROR);
-            $protectedArea->save();
-        });
-
-        return redirect()->back()->with('success', 'Spatial boundary file successfully uploaded, converted, and rendered!');
+        return redirect()->route('bams.index', $redirectQuery)
+            ->with('success', 'Spatial layer successfully uploaded and added to the map!');
     }
 
     public function calculateIndices(Request $request)

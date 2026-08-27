@@ -1,5 +1,6 @@
 import { Head } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
+import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 
 export default function AuthLayout({ title, children }) {
     const [darkMode, setDarkMode] = useState(false);
@@ -21,6 +22,7 @@ export default function AuthLayout({ title, children }) {
     return (
         <>
             <Head title={title} />
+            <FlashSuccessDialog />
             <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gray-100 px-4 py-10 dark:bg-gray-950 sm:px-6">
                 <div className="pointer-events-none absolute inset-x-0 top-0 h-1 bg-green-800 dark:bg-green-600" />
                 <button

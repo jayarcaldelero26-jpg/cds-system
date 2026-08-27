@@ -2,6 +2,7 @@ import { Link, useForm } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
+import { FloatingInput, FloatingTextarea } from '../../Components/Form';
 
 export default function Create({ cenroList = [], statuses = [] }) {
     const { data, setData, post, processing, errors } = useForm({
@@ -21,9 +22,6 @@ export default function Create({ cenroList = [], statuses = [] }) {
         post(route('cds-lawin.store'));
     };
 
-    const labelClass = "block text-sm font-medium text-gray-700 dark:text-gray-300";
-    const inputClass = "mt-1 block w-full rounded-lg border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-green-700 focus:ring-green-700 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:[color-scheme:dark]";
-    const errorClass = "text-xs text-red-600 dark:text-red-400 mt-1";
 
     return (
         <AuthenticatedLayout title="Record CDS LAWIN Patrol">
@@ -43,95 +41,81 @@ export default function Create({ cenroList = [], statuses = [] }) {
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Patrol Area / Protected Area */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>Patrol Area / Protected Area</label>
-                                <input
+                                <FloatingInput id="cds-lawin-area" label="Patrol Area / Protected Area"
                                     required
                                     type="text"
                                     placeholder="E.g., Mt. Hamiguitan Range Wildlife Sanctuary"
-                                    className={inputClass}
                                     value={data.patrol_area}
+                                    error={errors.patrol_area}
                                     onChange={(e) => setData('patrol_area', e.target.value)}
                                 />
-                                {errors.patrol_area && <p className={errorClass}>{errors.patrol_area}</p>}
                             </div>
 
                             {/* Patrol Date */}
                             <div>
-                                <label className={labelClass}>Patrol Date</label>
-                                <input
+                                <FloatingInput id="cds-lawin-date" label="Patrol Date"
                                     required
                                     type="date"
-                                    className={inputClass}
                                     value={data.patrol_date}
+                                    error={errors.patrol_date}
                                     onChange={(e) => setData('patrol_date', e.target.value)}
                                 />
-                                {errors.patrol_date && <p className={errorClass}>{errors.patrol_date}</p>}
                             </div>
 
                             {/* Ecoregion */}
                             <div>
-                                <label className={labelClass}>Ecoregion</label>
-                                <input
+                                <FloatingInput id="cds-lawin-ecoregion" label="Ecoregion"
                                     type="text"
                                     placeholder="E.g., Forest / Protected Zone"
-                                    className={inputClass}
                                     value={data.ecoregion}
+                                    error={errors.ecoregion}
                                     onChange={(e) => setData('ecoregion', e.target.value)}
                                 />
-                                {errors.ecoregion && <p className={errorClass}>{errors.ecoregion}</p>}
                             </div>
 
                             {/* Team Leader */}
                             <div>
-                                <label className={labelClass}>Team Leader</label>
-                                <input
+                                <FloatingInput id="cds-lawin-leader" label="Team Leader"
                                     type="text"
                                     placeholder="Enter Team Leader Name"
-                                    className={inputClass}
                                     value={data.team_leader}
+                                    error={errors.team_leader}
                                     onChange={(e) => setData('team_leader', e.target.value)}
                                 />
-                                {errors.team_leader && <p className={errorClass}>{errors.team_leader}</p>}
                             </div>
 
                             {/* Team Members Count */}
                             <div>
-                                <label className={labelClass}>No. of Patrol Members (Pax)</label>
-                                <input
+                                <FloatingInput id="cds-lawin-members" label="No. of Patrol Members (Pax)"
                                     required
                                     type="number"
                                     min="1"
-                                    className={inputClass}
                                     value={data.team_members_count}
+                                    error={errors.team_members_count}
                                     onChange={(e) => setData('team_members_count', e.target.value)}
                                 />
-                                {errors.team_members_count && <p className={errorClass}>{errors.team_members_count}</p>}
                             </div>
 
                             {/* Threats Observed */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>Threats Observed / Detected</label>
-                                <textarea
+                                <FloatingTextarea id="cds-lawin-threats" label="Threats Observed / Detected"
                                     rows="3"
                                     placeholder="E.g., 2 instances of illegal hunting, encroachment..."
-                                    className={inputClass}
                                     value={data.threats_observed}
+                                    error={errors.threats_observed}
                                     onChange={(e) => setData('threats_observed', e.target.value)}
                                 />
-                                {errors.threats_observed && <p className={errorClass}>{errors.threats_observed}</p>}
                             </div>
 
                             {/* Remarks */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>Remarks / Notes</label>
-                                <textarea
+                                <FloatingTextarea id="cds-lawin-remarks" label="Remarks / Notes"
                                     rows="3"
                                     placeholder="Additional observations, weather conditions, or local sightings..."
-                                    className={inputClass}
                                     value={data.remarks}
+                                    error={errors.remarks}
                                     onChange={(e) => setData('remarks', e.target.value)}
                                 />
-                                {errors.remarks && <p className={errorClass}>{errors.remarks}</p>}
                             </div>
                         </div>
 

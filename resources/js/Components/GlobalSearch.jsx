@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from '@inertiajs/react';
+import FloatingInput from './Form/FloatingInput';
 
 export default function GlobalSearch() {
     const [query, setQuery] = useState('');
@@ -43,17 +44,7 @@ export default function GlobalSearch() {
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <span className="text-gray-400">🔍</span>
                 </div>
-                <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => {
-                        setQuery(e.target.value);
-                        setIsOpen(true);
-                    }}
-                    onFocus={() => setIsOpen(true)}
-                    placeholder="Global search (e.g., Pujada Bay, Watershed...)"
-                    className="block w-full rounded-lg border border-gray-300 bg-gray-50 py-2 pl-10 pr-3 text-sm text-gray-900 focus:border-green-700 focus:ring-green-700 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
-                />
+                <FloatingInput id="global-search" label="Global search" size="sm" type="search" value={query} onChange={(e) => { setQuery(e.target.value); setIsOpen(true); }} onFocus={() => setIsOpen(true)} placeholder="Pujada Bay, Watershed..." className="pl-10" />
             </div>
 
             {/* DROPDOWN RESULT LIST */}

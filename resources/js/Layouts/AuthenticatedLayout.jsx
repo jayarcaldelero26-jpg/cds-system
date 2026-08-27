@@ -2,6 +2,7 @@ import { Head, Link, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
+import Tooltip from '../Components/Tooltip';
 
 const allNavigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', section: 'BOTH' },
@@ -21,12 +22,8 @@ const allNavigation = [
         label: 'Management Plan',
         icon: 'document',
         section: 'CDS',
-        children: [
-            { label: 'PAMP', href: '/management-plans?plan_type=PAMP' },
-            { label: 'EMP', href: '/management-plans?plan_type=EMP' },
-            { label: 'CEPA Plan', href: '/management-plans?plan_type=CEPA' },
-            { label: 'Restoration Plan', href: '/management-plans?plan_type=Other' },
-        ]
+        permission: 'canViewManagementPlans',
+        dynamicManagementPlans: true,
     },
 
     // --- TECHNICAL REPORTS DROPDOWN ---
@@ -40,7 +37,7 @@ const allNavigation = [
             { label: 'IMEA', href: '/imea' },
             { label: 'Automated Weather Station (AWS)', href: '/aws' },
             { label: 'BDFE', href: '#', comingSoon: true },
-            { label: 'IPAF Collection', href: '#', comingSoon: true },
+            { label: 'IPAF', href: '/ipaf', permission: 'canViewTechnicalReports' },
             { label: 'All Technical Reports', href: '/technical-reports', permission: 'canViewTechnicalReports' },
         ]
     },
@@ -96,13 +93,21 @@ function Icon({ name, className = 'h-5 w-5' }) {
     );
 }
 
-function Sidebar({ open, onClose, auth }) {
+function Sidebar({ open, onClose, auth, managementPlanTypes = [] }) {
     const { url } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
     const isMES = userSection === 'MES';
 
     const [openDropdowns, setOpenDropdowns] = useState({});
+    const navigation = allNavigation.map(item => item.dynamicManagementPlans ? {
+        ...item,
+        children: [
+            { label: 'All Plans', href: '/management-plans', exact: true },
+            ...managementPlanTypes.map(type => ({ label: type.name, href: `/management-plans/types/${type.slug}` })),
+            ...(safeAuth.canCreateManagementPlans ? [{ label: '+ Create Plan', href: '/management-plans?create=1', exact: true }] : []),
+        ],
+    } : item);
 
     const toggleDropdown = (label) => {
         setOpenDropdowns((prev) => ({
@@ -112,7 +117,7 @@ function Sidebar({ open, onClose, auth }) {
     };
 
     useEffect(() => {
-        allNavigation.forEach(item => {
+        navigation.forEach(item => {
             if (item.children) {
                 const isActive = item.children.some(child => url.startsWith(child.href) && child.href !== '#');
                 if (isActive) {
@@ -120,13 +125,13 @@ function Sidebar({ open, onClose, auth }) {
                 }
             }
         });
-    }, [url]);
+    }, [url, managementPlanTypes]);
 
     const logoSrc = isMES ? "/images/DENR LOGO.png" : "/images/CDS Logo.png";
     const systemTitle = isMES ? "MES IMS" : "CDS IMS";
     const systemSubtitle = isMES ? "Monitoring & Enforcement Section" : "Conservation Development Section";
 
-    const filteredNavigation = allNavigation.filter(item =>
+    const filteredNavigation = navigation.filter(item =>
         item.section === 'BOTH' || item.section === userSection
     );
 
@@ -168,7 +173,7 @@ function Sidebar({ open, onClose, auth }) {
                                             {item.children.map((child) => {
                                                 if (child.permission && !safeAuth[child.permission]) return null;
 
-                                                const isChildActive = child.href !== '#' && (url === child.href || url.startsWith(`${child.href}/`));
+                                                const isChildActive = child.href !== '#' && (child.exact ? url === child.href : (url === child.href || url.startsWith(`${child.href}/`)));
 
                                                 const childCommon = `block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition ${
                                                     isChildActive
@@ -177,10 +182,10 @@ function Sidebar({ open, onClose, auth }) {
                                                 }`;
 
                                                 if (child.comingSoon) return (
-                                                    <div key={child.label} className={`${childCommon} cursor-not-allowed opacity-75 flex justify-between items-center`} title="Coming Soon">
+                                                    <Tooltip key={child.label} content="Coming Soon" className="block w-full"><div className={`${childCommon} cursor-not-allowed opacity-75 flex justify-between items-center`}>
                                                         <span className="truncate pr-2">{child.label}</span>
                                                         <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] font-bold tracking-wide text-green-100 flex-shrink-0">Coming Soon</span>
-                                                    </div>
+                                                    </div></Tooltip>
                                                 );
 
                                                 return (
@@ -204,11 +209,11 @@ function Sidebar({ open, onClose, auth }) {
                         }`;
 
                         if (item.comingSoon) return (
-                            <div key={item.label} className={`${common} cursor-not-allowed opacity-75`} title="Coming Soon">
+                            <Tooltip key={item.label} content="Coming Soon" className="block w-full"><div className={`${common} cursor-not-allowed opacity-75`}>
                                 <Icon name={item.icon} />
                                 <span className="flex-1 text-left">{item.label}</span>
                                 <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-green-100">Coming Soon</span>
-                            </div>
+                            </div></Tooltip>
                         );
                         return (
                             <Link key={item.label} href={item.href} onClick={onClose} className={common}>
@@ -225,7 +230,7 @@ function Sidebar({ open, onClose, auth }) {
 }
 
 export default function AuthenticatedLayout({ title, children }) {
-    const { auth } = usePage().props;
+    const { auth, managementPlanTypes = [] } = usePage().props;
     const { url } = usePage();
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
@@ -254,7 +259,7 @@ export default function AuthenticatedLayout({ title, children }) {
             <Head title={title} />
             <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} />
+                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} managementPlanTypes={managementPlanTypes} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-4 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden">

@@ -1,4 +1,4 @@
-import { Link, router, usePage } from '@inertiajs/react';
+import { FloatingInput, FloatingSelect } from "@/Components/Form";import { Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
@@ -6,80 +6,69 @@ import ConfirmDialog from '../../Components/ConfirmDialog';
 import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
+import Tooltip from '../../Components/Tooltip';
 
 const statusVariants = {
-    'Approved': 'active',
-    'Under Review': 'pending'
-};
-
-const messages = {
-    'lawin-monitoring-created': 'LAWIN monitoring record created successfully.',
-    'lawin-monitoring-updated': 'LAWIN monitoring record updated successfully.',
-    'lawin-monitoring-deleted': 'LAWIN monitoring record deleted successfully.'
+  'Approved': 'active',
+  'Under Review': 'pending'
 };
 
 export default function Index({ monitorings = { data: [] }, filters = {}, cenroList = [], statuses = [] }) {
-    const { status } = usePage().props;
-    const [search, setSearch] = useState(filters?.search || '');
-    const [deleting, setDeleting] = useState(null);
-    const [showSuccess, setShowSuccess] = useState(false);
+  const [search, setSearch] = useState(filters?.search || '');
+  const [deleting, setDeleting] = useState(null);
 
-    useEffect(() => setSearch(filters?.search || ''), [filters?.search]);
+  useEffect(() => setSearch(filters?.search || ''), [filters?.search]);
 
-    useEffect(() => {
-        if (status && messages[status]) {
-            setShowSuccess(true);
-        }
-    }, [status]);
 
-    const visit = (params) => router.get('/lawin-monitorings', { ...filters, search, ...params }, { preserveState: true, replace: true });
-    const remove = () => router.delete(`/lawin-monitorings/${deleting.id}`, { onFinish: () => setDeleting(null) });
+  const visit = (params) => router.get('/lawin-monitorings', { ...filters, search, ...params }, { preserveState: true, replace: true });
+  const remove = () => router.delete(`/lawin-monitorings/${deleting.id}`, { onFinish: () => setDeleting(null) });
 
-    const columns = [
-        {
-            key: 'cenro',
-            label: 'CENRO / Station',
-            render: (item) => <span className="font-medium text-gray-900 dark:text-white">{item?.cenro}</span>
-        },
-        {
-            key: 'patrol_date',
-            label: 'Patrol Date',
-            render: (item) => item?.patrol_date
-        },
-        {
-            key: 'patrol_distance',
-            label: 'Distance (km)',
-            render: (item) => `${Number(item?.patrol_distance || 0).toFixed(2)} km`
-        },
-        {
-            key: 'patrol_hours',
-            label: 'Duration (hrs)',
-            render: (item) => `${Number(item?.patrol_hours || 0).toFixed(1)} hrs`
-        },
-        {
-            key: 'patrol_members_count',
-            label: 'Patrollers',
-            render: (item) => `${item?.patrol_members_count || 0} pax`
-        },
-        {
-            key: 'threats_observed',
-            label: 'Threats Observed',
-            render: (item) => (
-                <div className="max-w-xs truncate text-xs" title={item?.threats_observed || 'None'}>
+  const columns = [
+  {
+    key: 'cenro',
+    label: 'CENRO / Station',
+    headerTooltip: 'CENRO means Community Environment and Natural Resources Office.',
+    render: (item) => <span className="font-medium text-gray-900 dark:text-white">{item?.cenro}</span>
+  },
+  {
+    key: 'patrol_date',
+    label: 'Patrol Date',
+    render: (item) => item?.patrol_date
+  },
+  {
+    key: 'patrol_distance',
+    label: 'Distance (km)',
+    render: (item) => `${Number(item?.patrol_distance || 0).toFixed(2)} km`
+  },
+  {
+    key: 'patrol_hours',
+    label: 'Duration (hrs)',
+    render: (item) => `${Number(item?.patrol_hours || 0).toFixed(1)} hrs`
+  },
+  {
+    key: 'patrol_members_count',
+    label: 'Patrollers',
+    render: (item) => `${item?.patrol_members_count || 0} pax`
+  },
+  {
+    key: 'threats_observed',
+    label: 'Threats Observed',
+    render: (item) =>
+    <Tooltip content={item?.threats_observed || 'None'}><div className="max-w-xs truncate text-xs">
                     {item?.threats_observed || <span className="text-gray-400 italic">No threats logged</span>}
-                </div>
-            )
-        },
-        {
-            key: 'status',
-            label: 'Status',
-            render: (item) => <StatusBadge variant={statusVariants[item?.status]}>{item?.status}</StatusBadge>
-        },
-        {
-            key: 'attachment',
-            label: 'Attachment',
-            render: (item) => item?.attachment ? (
-                <div className="flex items-center gap-2">
+                </div></Tooltip>
+
+  },
+  {
+    key: 'status',
+    label: 'Status',
+    render: (item) => <StatusBadge variant={statusVariants[item?.status]}>{item?.status}</StatusBadge>
+  },
+  {
+    key: 'attachment',
+    label: 'Attachment',
+    render: (item) => item?.attachment ?
+    <div className="flex items-center gap-2">
                     <a href={`/view-file/${item.attachment}`} target="_blank" rel="noopener noreferrer" className="text-green-700 hover:text-green-900 dark:text-green-400 text-sm font-medium">
                         View
                     </a>
@@ -87,74 +76,73 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
                     <a href={`/storage/${item.attachment}`} download className="text-blue-700 hover:text-blue-900 dark:text-blue-400 text-sm font-medium">
                         Download
                     </a>
-                </div>
-            ) : <span className="text-gray-400 text-xs italic">No Attachment</span>
-        },
-        {
-            key: 'actions',
-            label: <span className="sr-only">Actions</span>,
-            cellClassName: 'text-right',
-            render: (item) => {
-                const { auth } = usePage().props;
+                </div> :
+    <span className="text-gray-400 text-xs italic">No Attachment</span>
+  },
+  {
+    key: 'actions',
+    label: <span className="sr-only">Actions</span>,
+    cellClassName: 'text-right',
+    render: (item) => {
+      const { auth } = usePage().props;
 
-                return (
-                    <div className="flex justify-end gap-3">
+      return (
+        <div className="flex justify-end gap-3">
                         <Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/lawin-monitorings/${item?.id}/edit`}>Edit</Link>
 
-                        {auth?.canDeleteLawinMonitoring && (
-                            <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)}>Delete</button>
-                        )}
-                    </div>
-                );
-            }
-        }
-    ];
+                        {auth?.canDeleteLawinMonitoring &&
+          <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)}>Delete</button>
+          }
+                    </div>);
 
-    const selectClass = 'mt-1.5 block w-full rounded-lg border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-green-700 focus:ring-green-700 dark:border-gray-600 dark:bg-gray-900 dark:text-white';
+    }
+  }];
 
-    // 🚀 Fallback arrays para protected ka sa runtime nulls (Apil ang CENRO Mati!)
-    const safeCenroList = Array.isArray(cenroList) && cenroList.length > 0
-        ? cenroList
-        : ['CENRO Lupon', 'CENRO Mati', 'CENRO Manay', 'CENRO Baganga', 'PENRO Main Office'];
 
-    const safeStatuses = Array.isArray(statuses) && statuses.length > 0
-        ? statuses
-        : ['Under Review', 'Approved'];
 
-    const safeRows = monitorings?.data || [];
+  // 🚀 Fallback arrays para protected ka sa runtime nulls (Apil ang CENRO Mati!)
+  const safeCenroList = Array.isArray(cenroList) && cenroList.length > 0 ?
+  cenroList :
+  ['CENRO Lupon', 'CENRO Mati', 'CENRO Manay', 'CENRO Baganga', 'PENRO Main Office'];
 
-    return (
-        <AuthenticatedLayout title="LAWIN Monitoring">
+  const safeStatuses = Array.isArray(statuses) && statuses.length > 0 ?
+  statuses :
+  ['Under Review', 'Approved'];
+
+  const safeRows = monitorings?.data || [];
+
+  return (
+    <AuthenticatedLayout title="LAWIN Monitoring">
             <PageHeader
-                title="LAWIN Monitoring System"
-                description="Manage and track patrol activities, distances covered, hours rendered, and threats detected by forest patrollers."
-                actions={
-                    <Link href="/lawin-monitorings/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
+        title="LAWIN Monitoring System"
+        description="Manage and track patrol activities, distances covered, hours rendered, and threats detected by forest patrollers."
+        actions={
+        <Link href="/lawin-monitorings/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
                         Record patrol activity
                     </Link>
-                }
-            />
+        } />
+
 
             <Card className="mt-6" padding="p-0">
-                <form onSubmit={(e) => { e.preventDefault(); visit({ page: 1 }); }} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-4">
-                    <label className="md:col-span-2">
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Search</span>
-                        <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search threats, remarks, or CENRO..." className={selectClass} />
-                    </label>
-                    <label>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">CENRO / Station</span>
-                        <select className={selectClass} value={filters?.cenro || ''} onChange={(e) => visit({ cenro: e.target.value, page: 1 })}>
+                <form onSubmit={(e) => {e.preventDefault();visit({ page: 1 });}} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-4">
+                    <div className="md:col-span-2">
+
+            <FloatingInput id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search threats, remarks, or CENRO..." size="sm" />
+                    </div>
+                    <div>
+
+            <FloatingSelect id="index-cenro-station" label="CENRO / Station" value={filters?.cenro || ''} onChange={(e) => visit({ cenro: e.target.value, page: 1 })}>
                             <option value="">All CENRO / Stations</option>
                             {safeCenroList.map((cenro) => <option key={cenro} value={cenro}>{cenro}</option>)}
-                        </select>
-                    </label>
-                    <label>
-                        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">Status</span>
-                        <select className={selectClass} value={filters?.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
+                        </FloatingSelect>
+                    </div>
+                    <div>
+
+            <FloatingSelect id="index-status" label="Status" value={filters?.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {safeStatuses.map((st) => <option key={st} value={st}>{st}</option>)}
-                        </select>
-                    </label>
+                        </FloatingSelect>
+                    </div>
                     <div className="flex items-end md:col-span-4">
                         <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900">Search Filter</button>
                     </div>
@@ -170,29 +158,6 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
 
             <ConfirmDialog open={Boolean(deleting)} title="Delete patrol record?" message="Are you sure you want to delete this LAWIN monitoring record? This action cannot be undone." confirmLabel="Delete" onCancel={() => setDeleting(null)} onConfirm={remove} />
 
-            {/* SUCCESS MODAL */}
-            {showSuccess && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
-                    <style>{`
-                        @keyframes stroke { 100% { stroke-dashoffset: 0; } }
-                        @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.15, 1.15, 1); } }
-                        @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-                        .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
-                        .checkmark-circle { animation: scale 0.3s ease-in-out 0.3s both; }
-                        .checkmark-check { stroke-dasharray: 50; stroke-dashoffset: 50; animation: stroke 0.4s cubic-bezier(0.65, 0, 0.45, 1) 0.15s forwards; }
-                    `}</style>
-                    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 max-w-sm w-full shadow-2xl border border-emerald-100 dark:border-emerald-900 text-center animate-pop-in">
-                        <div className="checkmark-circle mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-emerald-100 dark:bg-emerald-950 mb-4 shadow-sm">
-                            <svg className="h-8 w-8 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor">
-                                <path className="checkmark-check" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                            </svg>
-                        </div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2 font-sans">Success!</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">{messages[status]}</p>
-                        <button type="button" onClick={() => setShowSuccess(false)} className="w-full inline-flex justify-center rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-900 transition active:scale-95">Okay</button>
-                    </div>
-                </div>
-            )}
-        </AuthenticatedLayout>
-    );
+        </AuthenticatedLayout>);
+
 }

@@ -85,7 +85,7 @@ class CdsLawinMonitoringController extends Controller
         }
 
         return redirect()->route('cds-lawin.index')
-            ->with('status', 'cds-lawin-created');
+            ->with('success', 'CDS LAWIN monitoring record created successfully.');
     }
 
     public function edit(CdsLawinMonitoring $cdsLawinMonitoring)
@@ -133,7 +133,7 @@ class CdsLawinMonitoringController extends Controller
         }
 
         return redirect()->route('cds-lawin.index')
-            ->with('status', 'cds-lawin-updated');
+            ->with('success', 'CDS LAWIN monitoring record updated successfully.');
     }
 
     public function destroy(CdsLawinMonitoring $cdsLawinMonitoring)
@@ -147,7 +147,7 @@ class CdsLawinMonitoringController extends Controller
         }
 
         return redirect()->route('cds-lawin.index')
-            ->with('status', 'cds-lawin-deleted');
+            ->with('success', 'CDS LAWIN monitoring record deleted successfully.');
     }
 
     private function validationRules(): array

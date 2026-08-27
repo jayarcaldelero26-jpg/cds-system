@@ -1,44 +1,43 @@
-import { Link, useForm } from '@inertiajs/react';
+import { FileInput } from "@/Components/Crud/FileInput";import { FloatingInput, FloatingSelect, FloatingTextarea } from "@/Components/Form";import { Link, useForm } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
 
 export default function Edit({ ppa, protectedAreas, categories, statuses }) {
-    const { data, setData, post, processing, errors } = useForm({
-        _method: 'PATCH',
-        protected_area_id: ppa.protected_area_id || '',
-        title: ppa.title || '',
-        category: ppa.category || 'Activity',
-        description: ppa.description || '',
-        budget: ppa.budget || 0,
-        source_of_fund: ppa.source_of_fund || '',
-        start_date: ppa.start_date || '',
-        end_date: ppa.end_date || '',
-        status: ppa.status || 'Ongoing',
-        remarks: ppa.remarks || '',
-        attachment: null,
-    });
+  const { data, setData, post, processing, errors } = useForm({
+    _method: 'PATCH',
+    protected_area_id: ppa.protected_area_id || '',
+    title: ppa.title || '',
+    category: ppa.category || 'Activity',
+    description: ppa.description || '',
+    budget: ppa.budget || 0,
+    source_of_fund: ppa.source_of_fund || '',
+    start_date: ppa.start_date || '',
+    end_date: ppa.end_date || '',
+    status: ppa.status || 'Ongoing',
+    remarks: ppa.remarks || '',
+    attachment: null
+  });
 
-    const submit = (e) => {
-        e.preventDefault();
-        post(`/program-project-activities/${ppa.id}`);
-    };
+  const submit = (e) => {
+    e.preventDefault();
+    post(`/program-project-activities/${ppa.id}`);
+  };
 
-    const labelClass = "block text-sm font-medium text-gray-700 dark:text-gray-300";
-    const inputClass = "mt-1 block w-full rounded-lg border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-green-700 focus:ring-green-700 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:[color-scheme:dark]";
-    const errorClass = "text-xs text-red-600 dark:text-red-400 mt-1";
+  const labelClass = "block text-sm font-medium text-gray-700 dark:text-gray-300";
+  const errorClass = "text-xs text-red-600 dark:text-red-400 mt-1";
 
-    return (
-        <AuthenticatedLayout title="Edit PPA">
+  return (
+    <AuthenticatedLayout title="Edit PPA">
             <PageHeader
-                title="Edit PPA Details"
-                description="Update progress status, latest budget allocations, or milestones for this project."
-                actions={
-                    <Link href="/program-project-activities" className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">
+        title="Edit PPA Details"
+        description="Update progress status, latest budget allocations, or milestones for this project."
+        actions={
+        <Link href="/program-project-activities" className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">
                         Back
                     </Link>
-                }
-            />
+        } />
+
 
             <div className="mt-6 max-w-3xl">
                 <Card>
@@ -46,96 +45,96 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Title */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>PPA Title / Name</label>
-                                <input required type="text" className={inputClass} value={data.title} onChange={(e) => setData('title', e.target.value)} />
+
+                                <FloatingInput id="edit-ppa-title-name" label="PPA Title / Name" required type="text" value={data.title} onChange={(e) => setData('title', e.target.value)} />
                                 {errors.title && <p className={errorClass}>{errors.title}</p>}
                             </div>
 
                             {/* Protected Area */}
                             <div>
-                                <label className={labelClass}>Protected Area / PAMO</label>
-                                <select required className={inputClass} value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
+
+                                <FloatingSelect id="edit-protected-area-pamo" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
                                     <option value="">Select Protected Area</option>
-                                    {protectedAreas.map((area) => (
-                                        <option key={area.id} value={area.id}>{area.name}</option>
-                                    ))}
-                                </select>
+                                    {protectedAreas.map((area) =>
+                  <option key={area.id} value={area.id}>{area.name}</option>
+                  )}
+                                </FloatingSelect>
                                 {errors.protected_area_id && <p className={errorClass}>{errors.protected_area_id}</p>}
                             </div>
 
                             {/* Category */}
                             <div>
-                                <label className={labelClass}>Category</label>
-                                <select required className={inputClass} value={data.category} onChange={(e) => setData('category', e.target.value)}>
-                                    {categories.map((cat) => (
-                                        <option key={cat} value={cat}>{cat}</option>
-                                    ))}
-                                </select>
+
+                                <FloatingSelect id="edit-category" label="Category" required value={data.category} onChange={(e) => setData('category', e.target.value)}>
+                                    {categories.map((cat) =>
+                  <option key={cat} value={cat}>{cat}</option>
+                  )}
+                                </FloatingSelect>
                                 {errors.category && <p className={errorClass}>{errors.category}</p>}
                             </div>
 
                             {/* Budget */}
                             <div>
-                                <label className={labelClass}>Allocated Budget (PHP)</label>
-                                <input required type="number" min="0" step="0.01" className={inputClass} value={data.budget} onChange={(e) => setData('budget', e.target.value)} />
+
+                                <FloatingInput id="edit-allocated-budget-php" label="Allocated Budget (PHP)" required type="number" min="0" step="0.01" value={data.budget} onChange={(e) => setData('budget', e.target.value)} />
                                 {errors.budget && <p className={errorClass}>{errors.budget}</p>}
                             </div>
 
                             {/* Source of Fund */}
                             <div>
-                                <label className={labelClass}>Source of Fund</label>
-                                <input type="text" className={inputClass} value={data.source_of_fund} onChange={(e) => setData('source_of_fund', e.target.value)} />
+
+                                <FloatingInput id="edit-source-of-fund" label="Source of Fund" type="text" value={data.source_of_fund} onChange={(e) => setData('source_of_fund', e.target.value)} />
                                 {errors.source_of_fund && <p className={errorClass}>{errors.source_of_fund}</p>}
                             </div>
 
                             {/* Start Date */}
                             <div>
-                                <label className={labelClass}>Start Date</label>
-                                <input type="date" className={inputClass} value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} />
+
+                                <FloatingInput id="edit-start-date" label="Start Date" type="date" value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} />
                                 {errors.start_date && <p className={errorClass}>{errors.start_date}</p>}
                             </div>
 
                             {/* End Date */}
                             <div>
-                                <label className={labelClass}>End Date</label>
-                                <input type="date" className={inputClass} value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} />
+
+                                <FloatingInput id="edit-end-date" label="End Date" type="date" value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} />
                                 {errors.end_date && <p className={errorClass}>{errors.end_date}</p>}
                             </div>
 
                             {/* Status */}
                             <div>
-                                <label className={labelClass}>Status</label>
-                                <select required className={inputClass} value={data.status} onChange={(e) => setData('status', e.target.value)}>
-                                    {statuses.map((stat) => (
-                                        <option key={stat} value={stat}>{stat}</option>
-                                    ))}
-                                </select>
+
+                                <FloatingSelect id="edit-status" label="Status" required value={data.status} onChange={(e) => setData('status', e.target.value)}>
+                                    {statuses.map((stat) =>
+                  <option key={stat} value={stat}>{stat}</option>
+                  )}
+                                </FloatingSelect>
                                 {errors.status && <p className={errorClass}>{errors.status}</p>}
                             </div>
 
                             {/* Replacement File Upload */}
                             <div>
-                                <label className={labelClass}>Replace Attachment (Optional - PDF Max 20MB)</label>
-                                <input type="file" accept=".pdf" className="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 dark:file:bg-gray-800 dark:file:text-green-400" onChange={(e) => setData('attachment', e.target.files[0])} />
-                                {ppa.attachment && (
-                                    <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+
+                                <FileInput id="edit-replace-attachment-optional-pdf-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
+                                {ppa.attachment &&
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                         Current document: <span className="font-mono text-green-700 dark:text-green-400">{ppa.attachment.split('/').pop()}</span>
                                     </p>
-                                )}
+                }
                                 {errors.attachment && <p className={errorClass}>{errors.attachment}</p>}
                             </div>
 
                             {/* Description */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>PPA Description / Objectives</label>
-                                <textarea rows="3" className={inputClass} value={data.description} onChange={(e) => setData('description', e.target.value)} />
+
+                                <FloatingTextarea id="edit-ppa-description-objectives" label="PPA Description / Objectives" rows="3" value={data.description} onChange={(e) => setData('description', e.target.value)} />
                                 {errors.description && <p className={errorClass}>{errors.description}</p>}
                             </div>
 
                             {/* Remarks */}
                             <div className="md:col-span-2">
-                                <label className={labelClass}>Remarks / Project Update Notes</label>
-                                <textarea rows="3" className={inputClass} value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} />
+
+                                <FloatingTextarea id="edit-remarks-project-update-notes" label="Remarks / Project Update Notes" rows="3" value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} />
                                 {errors.remarks && <p className={errorClass}>{errors.remarks}</p>}
                             </div>
                         </div>
@@ -151,6 +150,6 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                     </form>
                 </Card>
             </div>
-        </AuthenticatedLayout>
-    );
+        </AuthenticatedLayout>);
+
 }

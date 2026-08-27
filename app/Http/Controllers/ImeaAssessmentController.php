@@ -181,7 +181,7 @@ class ImeaAssessmentController extends Controller
             'updated_by' => $request->user()->id,
         ]);
 
-        return to_route('imea.index')->with('status', 'imea-assessment-created');
+        return to_route('imea.index')->with('success', 'IMEA assessment created successfully.');
     }
 
     public function update(Request $request, ImeaAssessment $imeaAssessment)
@@ -238,14 +238,14 @@ class ImeaAssessmentController extends Controller
             'updated_by' => $request->user()->id,
         ]);
 
-        return to_route('imea.index')->with('status', 'imea-assessment-updated');
+        return to_route('imea.index')->with('success', 'IMEA assessment updated successfully.');
     }
 
     public function destroy(ImeaAssessment $imeaAssessment): RedirectResponse
     {
         $imeaAssessment->delete();
 
-        return to_route('imea.index')->with('status', 'imea-assessment-deleted');
+        return to_route('imea.index')->with('success', 'IMEA assessment deleted successfully.');
     }
 
     // ========================================================
@@ -274,7 +274,7 @@ class ImeaAssessmentController extends Controller
 
         ProtectedAreaFacility::create($validated);
 
-        return redirect()->back()->with('status', 'facility-created');
+        return redirect()->back()->with('success', 'Facility inventory record created successfully.');
     }
 
     public function updateFacility(Request $request, $id): RedirectResponse
@@ -302,7 +302,7 @@ class ImeaAssessmentController extends Controller
 
         $facility->update($validated);
 
-        return redirect()->back()->with('status', 'facility-updated');
+        return redirect()->back()->with('success', 'Facility inventory record updated successfully.');
     }
 
     public function exportFacilitiesExcel(Request $request)
@@ -556,7 +556,7 @@ class ImeaAssessmentController extends Controller
             }
         });
 
-        return back()->with('status', 'facility-imported')->with(
+        return back()->with(
             'success',
             sprintf('Facility import complete: %d imported, %d exact duplicates skipped, 0 failed.', count($validRows), $duplicateCount)
         );
@@ -578,7 +578,7 @@ class ImeaAssessmentController extends Controller
 
         DB::transaction(fn () => ProtectedAreaFacility::whereKey($facilities->modelKeys())->delete());
 
-        return redirect()->back()->with('status', 'facility-deleted');
+        return redirect()->back()->with('success', 'Selected facility inventory records deleted successfully.');
     }
 
     private function normalizeFacilityHeader(mixed $header): string
@@ -628,6 +628,6 @@ class ImeaAssessmentController extends Controller
         $facility = ProtectedAreaFacility::findOrFail($id);
         $facility->delete();
 
-        return redirect()->back()->with('status', 'facility-deleted');
+        return redirect()->back()->with('success', 'Facility inventory record deleted successfully.');
     }
 }

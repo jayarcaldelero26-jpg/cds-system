@@ -5,6 +5,7 @@ import CrudTable from '@/Components/Crud/CrudTable';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
+import Tooltip from '@/Components/Tooltip';
 
 const displayValue = (value, fallback = '—') => value === null || value === undefined || value === '' ? fallback : String(value);
 const protectedAreaTableLabel = protectedArea => {
@@ -49,7 +50,7 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
             cellClassName: 'w-[8%] overflow-hidden px-3 py-3 text-xs',
             render: row => {
                 const protectedArea = protectedAreaTableLabel(row.protected_area);
-                return <span title={protectedArea.fullName} className="block w-full truncate whitespace-nowrap font-semibold text-gray-900 dark:text-white">{protectedArea.label}</span>;
+                return <Tooltip content={protectedArea.fullName}><span className="block w-full truncate whitespace-nowrap font-semibold text-gray-900 dark:text-white">{protectedArea.label}</span></Tooltip>;
             },
         },
         { key: 'date', label: 'Date', headerClassName: 'w-[10%] whitespace-normal px-3 py-3 text-left text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-3 py-3 text-xs font-medium text-gray-900 dark:text-white', render: row => String(row.timestamps || row.start_date || '—') },
@@ -66,7 +67,7 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
             cellClassName: 'w-[15%] overflow-hidden px-3 py-3 text-xs',
             render: row => {
                 const remarks = String(row.remarks || 'Normal Weather Conditions');
-                return <span title={remarks} className="block w-full min-w-0 overflow-hidden"><StatusBadge variant={statusVariant(row.remarks || '')}><span className="block w-full min-w-0 truncate whitespace-nowrap">{remarks}</span></StatusBadge></span>;
+                return <Tooltip content={remarks}><span className="block w-full min-w-0 overflow-hidden"><StatusBadge variant={statusVariant(row.remarks || '')}><span className="block w-full min-w-0 truncate whitespace-nowrap">{remarks}</span></StatusBadge></span></Tooltip>;
             },
         },
     ];

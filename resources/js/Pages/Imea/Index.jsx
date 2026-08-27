@@ -1,376 +1,354 @@
-import { Link, useForm, usePage, router } from '@inertiajs/react';
-import { useState, useEffect } from 'react';
+import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { Link, useForm, usePage, router } from '@inertiajs/react';
+import { useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import StatusBadge from '@/Components/StatusBadge';
 import PageHeader from '@/Components/PageHeader';
+import WorkflowTabs from './WorkflowTabs';
+import Tooltip from '@/Components/Tooltip';
 
 export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
-    const { props } = usePage();
-    const canCreate = Boolean(props.auth?.canCreateImea);
-    const canUpdate = Boolean(props.auth?.canUpdateImea);
-    const canDelete = Boolean(props.auth?.canDeleteImea);
-    const canImport = Boolean(props.auth?.canImportImea);
+  const { props } = usePage();
+  const canCreate = Boolean(props.auth?.canCreateImea);
+  const canUpdate = Boolean(props.auth?.canUpdateImea);
+  const canDelete = Boolean(props.auth?.canDeleteImea);
+  const canImport = Boolean(props.auth?.canImportImea);
 
-    const [activeTab, setActiveTab] = useState('assessments');
-    const [selectedFacilityPA, setSelectedFacilityPA] = useState(filters.protected_area_id || '');
+  const [activeTab, setActiveTab] = useState('facilities');
+  const [selectedFacilityPA, setSelectedFacilityPA] = useState(filters.protected_area_id || '');
 
-    // IMEA Assessment Modal States
-    const [selectedAssessment, setSelectedAssessment] = useState(null);
-    const [isViewAssessmentModalOpen, setIsViewAssessmentModalOpen] = useState(false);
-    const [isAssessmentModalOpen, setIsAssessmentModalOpen] = useState(false);
+  // IMEA Assessment Modal States
+  const [selectedAssessment, setSelectedAssessment] = useState(null);
+  const [isViewAssessmentModalOpen, setIsViewAssessmentModalOpen] = useState(false);
+  const [isAssessmentModalOpen, setIsAssessmentModalOpen] = useState(false);
 
-    // Facility Modal States
-    const [selectedFacility, setSelectedFacility] = useState(null);
-    const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
-    const [isViewFacilityModalOpen, setIsViewFacilityModalOpen] = useState(false);
-    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  // Facility Modal States
+  const [selectedFacility, setSelectedFacility] = useState(null);
+  const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
+  const [isViewFacilityModalOpen, setIsViewFacilityModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-    const [selectedFacilityIds, setSelectedFacilityIds] = useState([]);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-    const [showFacilityDeleteConfirm, setShowFacilityDeleteConfirm] = useState(false);
-    const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
-    const [showSuccess, setShowSuccess] = useState(false);
-    const [successMessage, setSuccessMessage] = useState('Action completed successfully.');
+  const [selectedFacilityIds, setSelectedFacilityIds] = useState([]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showFacilityDeleteConfirm, setShowFacilityDeleteConfirm] = useState(false);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState([]);
+  const [existingFiles, setExistingFiles] = useState([]);
+  const [activePreview, setActivePreview] = useState(null);
 
-    const [attachedFiles, setAttachedFiles] = useState([]);
-    const [existingFiles, setExistingFiles] = useState([]);
-    const [activePreview, setActivePreview] = useState(null);
+  const { data, setData, delete: destroy, processing, reset, errors } = useForm({
+    protected_area_id: '',
+    pamo_name: '',
+    assessment_year: '',
+    assessment_period: 'Annual',
+    visitor_arrivals: '',
+    trail_condition: '',
+    solid_waste_generation_kg: '',
+    wildlife_disturbance: '',
+    vegetation_damage: '',
+    water_quality: '',
+    carrying_capacity_compliance: true,
+    community_benefits_income: '',
+    visitor_satisfaction_rate: '',
+    biodiversity_impact_notes: '',
+    environment_impact_notes: '',
+    social_cultural_impact_notes: '',
+    economic_impact_notes: '',
+    general_remarks: '',
+    status: 'Pending',
+    attachments: [],
+    removed_attachments: []
+  });
 
-    useEffect(() => {
-        if (props.flash?.status) {
-            if (props.flash.status === 'imea-assessment-created' || props.flash.status === 'facility-created') {
-                setSuccessMessage('Record created successfully.');
-                setShowSuccess(true);
-            } else if (props.flash.status === 'facility-updated' || props.flash.status === 'imea-assessment-updated') {
-                setSuccessMessage('Record updated successfully.');
-                setShowSuccess(true);
-            } else if (props.flash.status === 'facility-deleted' || props.flash.status === 'imea-assessment-deleted') {
-                setSuccessMessage('Record deleted successfully.');
-                setShowSuccess(true);
-            } else if (props.flash.status === 'facility-imported') {
-                setSuccessMessage(props.flash.success || 'Facilities imported successfully from CSV.');
-                setShowSuccess(true);
-            }
-        }
-    }, [props.flash]);
+  // Facility Form
+  const facilityForm = useForm({
+    protected_area_id: '',
+    inventory_date: '',
+    facility_type: '',
+    unit_no: 1,
+    year_established: '',
+    location_brgy_muni: '',
+    management_zone: 'MUZ',
+    within_easement_zone: 'No',
+    coordinates: '',
+    source_of_fund: '',
+    description: '',
+    status: 'Functional',
+    typhoon_affected: 'No',
+    tenurial_instrument: '',
+    recommendations: '',
+    remarks: '',
+    attachments: []
+  });
 
-    const { data, setData, delete: destroy, processing, reset, errors } = useForm({
-        protected_area_id: '',
-        pamo_name: '',
-        assessment_year: '',
-        assessment_period: 'Annual',
-        visitor_arrivals: '',
-        trail_condition: '',
-        solid_waste_generation_kg: '',
-        wildlife_disturbance: '',
-        vegetation_damage: '',
-        water_quality: '',
-        carrying_capacity_compliance: true,
-        community_benefits_income: '',
-        visitor_satisfaction_rate: '',
-        biodiversity_impact_notes: '',
-        environment_impact_notes: '',
-        social_cultural_impact_notes: '',
-        economic_impact_notes: '',
-        general_remarks: '',
-        status: 'Pending',
-        attachments: [],
-        removed_attachments: [],
+  const importForm = useForm({
+    protected_area_id: '',
+    file: null
+  });
+
+  const openViewAssessmentModal = (row) => {
+    setSelectedAssessment(row);
+    setAttachedFiles([]);
+
+    let rawFiles = [];
+    const possibleValues = [row.attachments, row.file_path, row.attachment, row.file, row.documents, row.document, row.media];
+    for (const val of possibleValues) {
+      if (val) {
+        if (Array.isArray(val)) {rawFiles = val;break;} else
+        if (typeof val === 'string') {try {const parsed = JSON.parse(val);rawFiles = Array.isArray(parsed) ? parsed : [parsed];break;} catch (e) {rawFiles = [val];break;}} else
+        if (typeof val === 'object') {rawFiles = [val];break;}
+      }
+    }
+    const formattedExisting = rawFiles.map((file, idx) => {
+      const filePath = typeof file === 'string' ? file : file.url || file.path || file.file_path || file.file_name;
+      const fileName = typeof file === 'string' ? file.split('/').pop() : file.name || file.original_name || `Document ${idx + 1}`;
+      const fileUrl = filePath && filePath.startsWith('http') ? filePath : `/storage/${filePath}`;
+      return { id: file.id || idx, name: fileName, url: fileUrl, original: file };
     });
+    setExistingFiles(formattedExisting);
+    setActivePreview(formattedExisting.length > 0 ? formattedExisting[0] : null);
 
-    // Facility Form
-    const facilityForm = useForm({
-        protected_area_id: '',
-        inventory_date: '',
-        facility_type: '',
-        unit_no: 1,
-        year_established: '',
-        location_brgy_muni: '',
-        management_zone: 'MUZ',
-        within_easement_zone: 'No',
-        coordinates: '',
-        source_of_fund: '',
-        description: '',
-        status: 'Functional',
-        typhoon_affected: 'No',
-        tenurial_instrument: '',
-        recommendations: '',
-        remarks: '',
-        attachments: [],
+    setData({
+      protected_area_id: row.protected_area_id || '',
+      pamo_name: row.pamo_name || '',
+      assessment_year: row.assessment_year || '',
+      assessment_period: row.assessment_period || 'Annual',
+      visitor_arrivals: row.visitor_arrivals || '',
+      trail_condition: row.trail_condition || '',
+      solid_waste_generation_kg: row.solid_waste_generation_kg || '',
+      wildlife_disturbance: row.wildlife_disturbance || '',
+      vegetation_damage: row.vegetation_damage || '',
+      water_quality: row.water_quality || '',
+      carrying_capacity_compliance: row.carrying_capacity_compliance === 1 || row.carrying_capacity_compliance === true,
+      community_benefits_income: row.community_benefits_income || '',
+      visitor_satisfaction_rate: row.visitor_satisfaction_rate || '',
+      biodiversity_impact_notes: row.biodiversity_impact_notes || '',
+      environment_impact_notes: row.environment_impact_notes || '',
+      social_cultural_impact_notes: row.social_cultural_impact_notes || '',
+      economic_impact_notes: row.economic_impact_notes || '',
+      general_remarks: row.general_remarks || '',
+      status: row.status || 'Pending',
+      attachments: [],
+      removed_attachments: []
     });
+    setIsViewAssessmentModalOpen(true);
+  };
 
-    const importForm = useForm({
-        protected_area_id: '',
-        file: null,
-    });
+  const openAssessmentEditModal = (row) => {
+    setIsViewAssessmentModalOpen(false);
+    openViewAssessmentModal(row);
+    setIsAssessmentModalOpen(true);
+  };
 
-    const openViewAssessmentModal = (row) => {
-        setSelectedAssessment(row);
-        setAttachedFiles([]);
+  const openFacilityModal = (facility = null) => {
+    facilityForm.clearErrors();
+    if (facility) {
+      setSelectedFacility(facility);
+      facilityForm.setData({
+        protected_area_id: facility.protected_area_id || '',
+        inventory_date: facility.inventory_date || '',
+        facility_type: facility.facility_type || '',
+        unit_no: facility.unit_no || 1,
+        year_established: facility.year_established || '',
+        location_brgy_muni: facility.location_brgy_muni || '',
+        management_zone: facility.management_zone || 'MUZ',
+        within_easement_zone: facility.within_easement_zone || 'No',
+        coordinates: facility.coordinates || '',
+        source_of_fund: facility.source_of_fund || '',
+        description: facility.description || '',
+        status: facility.status || 'Functional',
+        typhoon_affected: facility.typhoon_affected || 'No',
+        tenurial_instrument: facility.tenurial_instrument || '',
+        recommendations: facility.recommendations || '',
+        remarks: facility.remarks || '',
+        attachments: []
+      });
+    } else {
+      setSelectedFacility(null);
+      facilityForm.reset();
+    }
+    setIsFacilityModalOpen(true);
+  };
 
-        let rawFiles = [];
-        const possibleValues = [row.attachments, row.file_path, row.attachment, row.file, row.documents, row.document, row.media];
-        for (const val of possibleValues) {
-            if (val) {
-                if (Array.isArray(val)) { rawFiles = val; break; }
-                else if (typeof val === 'string') { try { const parsed = JSON.parse(val); rawFiles = Array.isArray(parsed) ? parsed : [parsed]; break; } catch(e) { rawFiles = [val]; break; } }
-                else if (typeof val === 'object') { rawFiles = [val]; break; }
-            }
-        }
-        const formattedExisting = rawFiles.map((file, idx) => {
-            const filePath = typeof file === 'string' ? file : (file.url || file.path || file.file_path || file.file_name);
-            const fileName = typeof file === 'string' ? file.split('/').pop() : (file.name || file.original_name || `Document ${idx + 1}`);
-            const fileUrl = filePath && filePath.startsWith('http') ? filePath : `/storage/${filePath}`;
-            return { id: file.id || idx, name: fileName, url: fileUrl, original: file };
-        });
-        setExistingFiles(formattedExisting);
-        setActivePreview(formattedExisting.length > 0 ? formattedExisting[0] : null);
+  const openViewFacilityModal = (facility) => {
+    setSelectedFacility(facility);
+    setIsViewFacilityModalOpen(true);
+  };
 
-        setData({
-            protected_area_id: row.protected_area_id || '',
-            pamo_name: row.pamo_name || '',
-            assessment_year: row.assessment_year || '',
-            assessment_period: row.assessment_period || 'Annual',
-            visitor_arrivals: row.visitor_arrivals || '',
-            trail_condition: row.trail_condition || '',
-            solid_waste_generation_kg: row.solid_waste_generation_kg || '',
-            wildlife_disturbance: row.wildlife_disturbance || '',
-            vegetation_damage: row.vegetation_damage || '',
-            water_quality: row.water_quality || '',
-            carrying_capacity_compliance: row.carrying_capacity_compliance === 1 || row.carrying_capacity_compliance === true,
-            community_benefits_income: row.community_benefits_income || '',
-            visitor_satisfaction_rate: row.visitor_satisfaction_rate || '',
-            biodiversity_impact_notes: row.biodiversity_impact_notes || '',
-            environment_impact_notes: row.environment_impact_notes || '',
-            social_cultural_impact_notes: row.social_cultural_impact_notes || '',
-            economic_impact_notes: row.economic_impact_notes || '',
-            general_remarks: row.general_remarks || '',
-            status: row.status || 'Pending',
-            attachments: [],
-            removed_attachments: [],
-        });
-        setIsViewAssessmentModalOpen(true);
-    };
+  const closeAssessmentModal = () => {
+    setIsAssessmentModalOpen(false);
+    setSelectedAssessment(null);
+    setAttachedFiles([]);
+    setExistingFiles([]);
+    setActivePreview(null);
+    reset();
+  };
 
-    const openAssessmentEditModal = (row) => {
-        setIsViewAssessmentModalOpen(false);
-        openViewAssessmentModal(row);
-        setIsAssessmentModalOpen(true);
-    };
+  const closeFacilityModal = () => {
+    setIsFacilityModalOpen(false);
+    setSelectedFacility(null);
+    facilityForm.reset();
+    facilityForm.clearErrors();
+  };
 
-    const openFacilityModal = (facility = null) => {
-        facilityForm.clearErrors();
-        if (facility) {
-            setSelectedFacility(facility);
-            facilityForm.setData({
-                protected_area_id: facility.protected_area_id || '',
-                inventory_date: facility.inventory_date || '',
-                facility_type: facility.facility_type || '',
-                unit_no: facility.unit_no || 1,
-                year_established: facility.year_established || '',
-                location_brgy_muni: facility.location_brgy_muni || '',
-                management_zone: facility.management_zone || 'MUZ',
-                within_easement_zone: facility.within_easement_zone || 'No',
-                coordinates: facility.coordinates || '',
-                source_of_fund: facility.source_of_fund || '',
-                description: facility.description || '',
-                status: facility.status || 'Functional',
-                typhoon_affected: facility.typhoon_affected || 'No',
-                tenurial_instrument: facility.tenurial_instrument || '',
-                recommendations: facility.recommendations || '',
-                remarks: facility.remarks || '',
-                attachments: [],
-            });
-        } else {
-            setSelectedFacility(null);
-            facilityForm.reset();
-        }
-        setIsFacilityModalOpen(true);
-    };
-
-    const openViewFacilityModal = (facility) => {
-        setSelectedFacility(facility);
-        setIsViewFacilityModalOpen(true);
-    };
-
-    const closeAssessmentModal = () => {
+  const handleUpdate = (e) => {
+    e.preventDefault();
+    if (!selectedAssessment) return;
+    router.post(`/imea/${selectedAssessment.id}`, {
+      _method: 'PUT',
+      ...data,
+      attachments: attachedFiles.map((item) => item.file)
+    }, {
+      forceFormData: true,
+      preserveScroll: true,
+      onSuccess: () => {
         setIsAssessmentModalOpen(false);
-        setSelectedAssessment(null);
-        setAttachedFiles([]);
-        setExistingFiles([]);
-        setActivePreview(null);
-        reset();
-    };
+      }
+    });
+  };
 
-    const closeFacilityModal = () => {
-        setIsFacilityModalOpen(false);
-        setSelectedFacility(null);
-        facilityForm.reset();
-        facilityForm.clearErrors();
-    };
+  const handleFacilitySubmit = (e) => {
+    e.preventDefault();
 
-    const handleUpdate = (e) => {
-        e.preventDefault();
-        if (!selectedAssessment) return;
-        router.post(`/imea/${selectedAssessment.id}`, {
-            _method: 'PUT',
-            ...data,
-            attachments: attachedFiles.map(item => item.file),
-        }, {
-            forceFormData: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                setIsAssessmentModalOpen(false);
-                setSuccessMessage('Assessment updated successfully.');
-                setShowSuccess(true);
-            },
-        });
-    };
-
-    const handleFacilitySubmit = (e) => {
-        e.preventDefault();
-
-        if (selectedFacility) {
-            facilityForm.put(`/imea/facilities/${selectedFacility.id}`, {
-                preserveScroll: true,
-                onSuccess: () => {
-                    closeFacilityModal();
-                    setSuccessMessage('Facility updated successfully.');
-                    setShowSuccess(true);
-                }
-            });
-        } else {
-            facilityForm.post('/imea/facilities', {
-                preserveScroll: true,
-                onSuccess: () => {
-                    closeFacilityModal();
-                    setSuccessMessage('Facility created successfully.');
-                    setShowSuccess(true);
-                }
-            });
+    if (selectedFacility) {
+      facilityForm.put(`/imea/facilities/${selectedFacility.id}`, {
+        preserveScroll: true,
+        onSuccess: () => {
+          closeFacilityModal();
         }
-    };
+      });
+    } else {
+      facilityForm.post('/imea/facilities', {
+        preserveScroll: true,
+        onSuccess: () => {
+          closeFacilityModal();
+        }
+      });
+    }
+  };
 
-    const handleImportSubmit = (e) => {
-        e.preventDefault();
-        importForm.post('/imea/facilities-import', {
-            preserveScroll: true,
-            onSuccess: () => {
-                setIsImportModalOpen(false);
-                importForm.reset();
-            },
-        });
-    };
+  const handleImportSubmit = (e) => {
+    e.preventDefault();
+    importForm.post('/imea/facilities-import', {
+      preserveScroll: true,
+      onSuccess: () => {
+        setIsImportModalOpen(false);
+        importForm.reset();
+      }
+    });
+  };
 
-    // Filter the Facilities & Infrastructures inventory by Protected Area.
-    // This is a backend filter so it also works correctly with pagination.
-    const handleFacilityPAFilter = (value) => {
-        setSelectedFacilityPA(value);
+  // Filter the Facilities & Infrastructures inventory by Protected Area.
+  // This is a backend filter so it also works correctly with pagination.
+  const handleFacilityPAFilter = (value) => {
+    setSelectedFacilityPA(value);
+    setSelectedFacilityIds([]);
+
+    const query = value ? { protected_area_id: value } : {};
+
+    router.get('/imea', query, {
+      preserveState: true,
+      preserveScroll: true,
+      replace: true
+    });
+  };
+
+  const handleBulkDelete = () => {if (selectedFacilityIds.length === 0) return;setShowBulkDeleteConfirm(true);};
+  const confirmBulkDelete = () => {
+    router.post('/imea/facilities-bulk-delete', { ids: selectedFacilityIds }, {
+      preserveScroll: true,
+      onSuccess: () => {
+        setShowBulkDeleteConfirm(false);
         setSelectedFacilityIds([]);
+      }
+    });
+  };
 
-        const query = value ? { protected_area_id: value } : {};
+  const toggleSelectAll = (e) => {e.target.checked ? setSelectedFacilityIds(facilities.data.map((f) => f.id)) : setSelectedFacilityIds([]);};
+  const toggleSelectFacility = (id) => {selectedFacilityIds.includes(id) ? setSelectedFacilityIds(selectedFacilityIds.filter((item) => item !== id)) : setSelectedFacilityIds([...selectedFacilityIds, id]);};
 
-        router.get('/imea', query, {
-            preserveState: true,
-            preserveScroll: true,
-            replace: true,
-        });
-    };
+  const confirmDelete = () => {
+    if (!selectedAssessment) return;
+    destroy(`/imea/${selectedAssessment.id}`, { preserveScroll: false, onSuccess: () => {setShowDeleteConfirm(false);setIsAssessmentModalOpen(false);setIsViewAssessmentModalOpen(false);} });
+  };
 
-    const handleBulkDelete = () => { if (selectedFacilityIds.length === 0) return; setShowBulkDeleteConfirm(true); };
-    const confirmBulkDelete = () => {
-        router.post('/imea/facilities-bulk-delete', { ids: selectedFacilityIds }, {
-            preserveScroll: true,
-            onSuccess: () => {
-                setShowBulkDeleteConfirm(false);
-                setSelectedFacilityIds([]);
-                setSuccessMessage('Selected facilities deleted successfully.');
-                setShowSuccess(true);
-            }
-        });
-    };
+  const confirmFacilityDelete = () => {
+    if (!selectedFacility) return;
+    router.delete(`/imea/facilities/${selectedFacility.id}`, { preserveScroll: true, onSuccess: () => {setShowFacilityDeleteConfirm(false);closeFacilityModal();setIsViewFacilityModalOpen(false);} });
+  };
 
-    const toggleSelectAll = (e) => { e.target.checked ? setSelectedFacilityIds(facilities.data.map(f => f.id)) : setSelectedFacilityIds([]); };
-    const toggleSelectFacility = (id) => { selectedFacilityIds.includes(id) ? setSelectedFacilityIds(selectedFacilityIds.filter(item => item !== id)) : setSelectedFacilityIds([...selectedFacilityIds, id]); };
-
-    const confirmDelete = () => {
-        if (!selectedAssessment) return;
-        destroy(`/imea/${selectedAssessment.id}`, { preserveScroll: false, onSuccess: () => { setShowDeleteConfirm(false); setIsAssessmentModalOpen(false); setIsViewAssessmentModalOpen(false); setSuccessMessage('Record deleted successfully.'); setShowSuccess(true); } });
-    };
-
-    const confirmFacilityDelete = () => {
-        if (!selectedFacility) return;
-        router.delete(`/imea/facilities/${selectedFacility.id}`, { preserveScroll: true, onSuccess: () => { setShowFacilityDeleteConfirm(false); closeFacilityModal(); setIsViewFacilityModalOpen(false); setSuccessMessage('Facility deleted successfully.'); setShowSuccess(true); } });
-    };
-
-    return (
-        <AuthenticatedLayout title="IMEA Monitoring">
+  return (
+    <AuthenticatedLayout title="IMEA Monitoring">
             <style>{`
-                @keyframes stroke { 100% { stroke-dashoffset: 0; } }
-                @keyframes scale { 0%, 100% { transform: none; } 50% { transform: scale3d(1.15, 1.15, 1); } }
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
-                .checkmark-circle { animation: scale 0.3s ease-in-out 0.3s both; }
-                .checkmark-check { stroke-dasharray: 50; stroke-dashoffset: 50; animation: stroke 0.4s cubic-bezier(0.65, 0, 0.45, 1) 0.15s forwards; }
                 .custom-table-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
                 .custom-table-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 9999px; }
             `}</style>
 
             <PageHeader
-                title="Integrated Protected Area Ecotourism Monitoring (IMEA)"
-                description="Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs."
-                actions={
-                    activeTab === 'assessments' ? (
-                        <>
+        title="Integrated Protected Area Ecotourism Monitoring (IMEA)"
+        description="Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs."
+        actions={
+        activeTab === 'assessments' ?
+        <>
                             <Link href="/imea/report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📊 View Summary Report</Link>
                             {canCreate && <Link href="/imea/create" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">+ Add IMEA Assessment</Link>}
-                        </>
-                    ) : (
-                        <div className="flex items-center gap-2">
+                        </> :
+
+        <div className="flex items-center gap-2">
                             <Link href="/imea/facilities-report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📊 View Facilities Summary Report</Link>
                             {canImport && <button onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center justify-center rounded-xl bg-blue-600/80 hover:bg-blue-600 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📥 Import CSV</button>}
                             {canCreate && <button onClick={() => openFacilityModal()} className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">+ Add Facility / Infrastructure</button>}
                         </div>
-                    )
-                }
-            />
 
-            <div className="flex items-center gap-1.5 w-full mt-2 mb-3 overflow-x-auto">
+        } />
+
+
+            <WorkflowTabs active="facilities" />
+            <div className="hidden">
 
                 <button
-                    type="button"
-                    onClick={() => setActiveTab('assessments')}
-                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
-                        activeTab === 'assessments'
-                            ? 'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800'
-                            : 'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'
-                    }`}
-                >
+          type="button"
+          onClick={() => setActiveTab('assessments')}
+          className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
+          activeTab === 'assessments' ?
+          'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800' :
+          'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'}`
+          }>
+
                     <span>📊</span>
                     <span>IMEA Assessments</span>
                 </button>
 
                 <button
-                    type="button"
-                    onClick={() => setActiveTab('facilities')}
-                    className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
-                        activeTab === 'facilities'
-                            ? 'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800'
-                            : 'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'
-                    }`}
-                >
+          type="button"
+          onClick={() => setActiveTab('facilities')}
+          className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
+          activeTab === 'facilities' ?
+          'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800' :
+          'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'}`
+          }>
+
                     <span>🏗️</span>
                     <span>Facilities & Infrastructures Inventory</span>
                 </button>
 
+                <Link
+          href={route('imea.report-submissions.index')}
+          className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-bold text-gray-700 shadow-sm transition-all duration-200 hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400">
+
+                    <span>📋</span>
+                    <span>Report Submission Tracker</span>
+                </Link>
+
             </div>
 
             {/* TAB 1: IMEA ASSESSMENTS */}
-            {activeTab === 'assessments' && (
-                <Card padding="p-0" className="border border-gray-100 dark:border-gray-800 overflow-hidden shadow-xl rounded-2xl">
-                    {assessments?.data?.length > 0 ? (
-                        <div className="overflow-x-auto custom-table-scrollbar">
+            {activeTab === 'assessments' &&
+      <Card padding="p-0" className="border border-gray-100 dark:border-gray-800 overflow-hidden shadow-xl rounded-2xl">
+                    {assessments?.data?.length > 0 ?
+        <div className="overflow-x-auto custom-table-scrollbar">
                             <table className="w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-gray-200 bg-green-900 text-white text-xs uppercase tracking-wider dark:border-gray-700">
@@ -384,8 +362,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 text-sm dark:divide-gray-800">
-                                    {assessments.data.map((row) => (
-                                        <tr key={row.id} onClick={() => openViewAssessmentModal(row)} className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
+                                    {assessments.data.map((row) =>
+              <tr key={row.id} onClick={() => openViewAssessmentModal(row)} className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
                                             <td className="px-6 py-4 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
                                             <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.pamo_name}</td>
                                             <td className="px-6 py-4"><StatusBadge variant={row.status === 'Approved' ? 'active' : 'pending'}>{row.status || 'Pending'}</StatusBadge></td>
@@ -394,65 +372,65 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                             <td className="px-6 py-4"><StatusBadge variant={row.carrying_capacity_compliance ? 'active' : 'pending'}>{row.carrying_capacity_compliance ? 'Compliant' : 'Exceeded'}</StatusBadge></td>
                                             <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.visitor_satisfaction_rate ? `${row.visitor_satisfaction_rate}%` : 'N/A'}</td>
                                         </tr>
-                                    ))}
+              )}
                                 </tbody>
                             </table>
-                        </div>
-                    ) : (
-                        <div className="p-12 text-center">
+                        </div> :
+
+        <div className="p-12 text-center">
                             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-400 mb-3 text-xl">🌿</div>
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">No IMEA assessments recorded yet</h3>
                         </div>
-                    )}
+        }
                 </Card>
-            )}
+      }
 
             {/* TAB 2: FACILITIES & INFRASTRUCTURES INVENTORY */}
-            {activeTab === 'facilities' && (
-                <>
+            {activeTab === 'facilities' &&
+      <>
                     <div className="mb-4">
                         <Card className="border border-gray-100 dark:border-gray-800 shadow-md rounded-2xl bg-white dark:bg-gray-900 p-4">
                             <div className="flex flex-col sm:flex-row sm:items-end gap-3">
                                 <div className="w-full sm:max-w-md">
-                                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                                        Filter Facilities by Protected Area
-                                    </label>
-                                    <select
-                                        value={selectedFacilityPA}
-                                        onChange={(e) => handleFacilityPAFilter(e.target.value)}
-                                        className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white text-sm"
-                                    >
+
+
+
+                                    <FloatingSelect id="index-filter-facilities-by-protected-area" label="Filter Facilities by Protected Area"
+                value={selectedFacilityPA}
+                onChange={(e) => handleFacilityPAFilter(e.target.value)} size="sm">
+
+
                                         <option value="">All Protected Areas</option>
-                                        {protectedAreas?.map((pa) => (
-                                            <option key={pa.id} value={pa.id}>
+                                        {protectedAreas?.map((pa) =>
+                  <option key={pa.id} value={pa.id}>
                                                 {pa.name}
                                             </option>
-                                        ))}
-                                    </select>
+                  )}
+                                    </FloatingSelect>
                                 </div>
 
-                                {selectedFacilityPA && (
-                                    <button
-                                        type="button"
-                                        onClick={() => handleFacilityPAFilter('')}
-                                        className="rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition"
-                                    >
+                                {selectedFacilityPA &&
+              <button
+                type="button"
+                onClick={() => handleFacilityPAFilter('')}
+                className="rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition">
+
                                         Reset Filter
                                     </button>
-                                )}
+              }
                             </div>
                         </Card>
                     </div>
 
                     <Card padding="p-0" className="border border-gray-100 dark:border-gray-800 overflow-hidden shadow-xl rounded-2xl">
-                    {canDelete && selectedFacilityIds.length > 0 && (
-                        <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900 flex items-center justify-between">
+                    {canDelete && selectedFacilityIds.length > 0 &&
+          <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900 flex items-center justify-between">
                             <span className="text-xs font-bold text-red-700 dark:text-red-300">{selectedFacilityIds.length} item(s) selected</span>
                             <button onClick={handleBulkDelete} className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition">🗑️ Delete Selected Items</button>
                         </div>
-                    )}
-                    {facilities?.data?.length > 0 ? (
-                        <div className="overflow-x-auto custom-table-scrollbar">
+          }
+                    {facilities?.data?.length > 0 ?
+          <div className="overflow-x-auto custom-table-scrollbar">
                             <table className="w-full text-left border-collapse text-xs">
                                 <thead>
                                     <tr className="border-b border-gray-200 bg-green-900 text-white uppercase tracking-wider dark:border-gray-700">
@@ -470,8 +448,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                                    {facilities.data.map((row) => (
-                                        <tr key={row.id} onClick={() => openViewFacilityModal(row)} className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
+                                    {facilities.data.map((row) =>
+                <tr key={row.id} onClick={() => openViewFacilityModal(row)} className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
                                             <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                                                 {canDelete && <input type="checkbox" checked={selectedFacilityIds.includes(row.id)} onChange={() => toggleSelectFacility(row.id)} className="rounded border-gray-300 text-green-600 focus:ring-green-500" />}
                                             </td>
@@ -486,24 +464,24 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                                 <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${row.status === 'Functional' ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'}`}>{row.status}</span>
                                             </td>
                                         </tr>
-                                    ))}
+                )}
                                 </tbody>
                             </table>
-                        </div>
-                    ) : (
-                        <div className="p-12 text-center">
+                        </div> :
+
+          <div className="p-12 text-center">
                             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-400 mb-3 text-xl">🏗️</div>
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">No facilities or infrastructures recorded yet</h3>
                             <p className="text-xs text-gray-500 mt-1">Click "+ Add Facility / Infrastructure" or "📥 Import CSV" to populate records.</p>
                         </div>
-                    )}
+          }
                     </Card>
                 </>
-            )}
+      }
 
             {/* VIEW ASSESSMENT FULL DETAILS MODAL */}
-            {isViewAssessmentModalOpen && selectedAssessment && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
+            {isViewAssessmentModalOpen && selectedAssessment &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
                     <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
@@ -560,16 +538,16 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
-                            {canUpdate && <button type="button" onClick={() => { setIsViewAssessmentModalOpen(false); openAssessmentEditModal(selectedAssessment); }} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Assessment</button>}
+                            {canUpdate && <button type="button" onClick={() => {setIsViewAssessmentModalOpen(false);openAssessmentEditModal(selectedAssessment);}} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Assessment</button>}
                             <button type="button" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">Close Details</button>
                         </div>
                     </div>
                 </div>
-            )}
+      }
 
             {/* EDIT MODAL FOR IMEA ASSESSMENTS */}
-            {isAssessmentModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs">
+            {isAssessmentModalOpen &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs">
                     <div className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div className="flex items-center gap-2">
@@ -586,35 +564,35 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <div className="lg:col-span-6 space-y-5">
                                 <form onSubmit={handleUpdate} id="edit-imea-form" className="space-y-4">
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Protected Area *</label>
-                                        <select value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs">
+
+                                        <FloatingSelect id="index-protected-area" label="Protected Area" value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
                                             <option value="">Select Protected Area</option>
-                                            {protectedAreas?.map((pa) => (<option key={pa.id} value={pa.id}>{pa.name}</option>))}
-                                        </select>
+                                            {protectedAreas?.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
+                                        </FloatingSelect>
                                     </div>
 
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">PAMO Office *</label>
-                                            <input type="text" value={data.pamo_name} onChange={(e) => setData('pamo_name', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                            <FloatingInput id="index-pamo-office" label="PAMO Office" type="text" value={data.pamo_name} onChange={(e) => setData('pamo_name', e.target.value)} />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Assessment Year *</label>
-                                            <input type="number" value={data.assessment_year} onChange={(e) => setData('assessment_year', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                            <FloatingInput id="index-assessment-year" label="Assessment Year" type="number" value={data.assessment_year} onChange={(e) => setData('assessment_year', e.target.value)} />
                                         </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Verification Status *</label>
-                                            <select value={data.status} onChange={(e) => setData('status', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm font-semibold shadow-xs">
+
+                                            <FloatingSelect id="index-verification-status" label="Verification Status" value={data.status} onChange={(e) => setData('status', e.target.value)}>
                                                 <option value="Pending">Pending (For Review)</option>
                                                 <option value="Approved">Approved (Verified)</option>
-                                            </select>
+                                            </FloatingSelect>
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Assessment Period *</label>
-                                            <select value={data.assessment_period} onChange={(e) => setData('assessment_period', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs">
+
+                                            <FloatingSelect id="index-assessment-period" label="Assessment Period" value={data.assessment_period} onChange={(e) => setData('assessment_period', e.target.value)}>
                                                 <option value="Annual">Annual</option>
                                                 <option value="Semestral - 1st Semester">Semestral - 1st Semester</option>
                                                 <option value="Semestral - 2nd Semester">Semestral - 2nd Semester</option>
@@ -622,22 +600,22 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                                 <option value="Q2">Q2</option>
                                                 <option value="Q3">Q3</option>
                                                 <option value="Q4">Q4</option>
-                                            </select>
+                                            </FloatingSelect>
                                         </div>
                                     </div>
 
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Visitor Arrivals</label>
-                                            <input type="number" value={data.visitor_arrivals} onChange={(e) => setData('visitor_arrivals', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                            <FloatingInput id="index-visitor-arrivals" label="Visitor Arrivals" type="number" value={data.visitor_arrivals} onChange={(e) => setData('visitor_arrivals', e.target.value)} />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Solid Waste (kg)</label>
-                                            <input type="number" step="0.01" value={data.solid_waste_generation_kg} onChange={(e) => setData('solid_waste_generation_kg', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                            <FloatingInput id="index-solid-waste-kg" label="Solid Waste (kg)" type="number" step="0.01" value={data.solid_waste_generation_kg} onChange={(e) => setData('solid_waste_generation_kg', e.target.value)} />
                                         </div>
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Satisfaction (%)</label>
-                                            <input type="number" step="0.01" value={data.visitor_satisfaction_rate} onChange={(e) => setData('visitor_satisfaction_rate', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                            <FloatingInput id="index-satisfaction" label="Satisfaction (%)" type="number" step="0.01" value={data.visitor_satisfaction_rate} onChange={(e) => setData('visitor_satisfaction_rate', e.target.value)} />
                                         </div>
                                     </div>
 
@@ -646,20 +624,20 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                         <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">🔍 Impact Assessment Indicators</h4>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Trail Condition</label>
-                                                <input type="text" value={data.trail_condition} onChange={(e) => setData('trail_condition', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingInput id="index-trail-condition" label="Trail Condition" type="text" value={data.trail_condition} onChange={(e) => setData('trail_condition', e.target.value)} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Wildlife Disturbance</label>
-                                                <input type="text" value={data.wildlife_disturbance} onChange={(e) => setData('wildlife_disturbance', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingInput id="index-wildlife-disturbance" label="Wildlife Disturbance" type="text" value={data.wildlife_disturbance} onChange={(e) => setData('wildlife_disturbance', e.target.value)} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Vegetation Damage</label>
-                                                <input type="text" value={data.vegetation_damage} onChange={(e) => setData('vegetation_damage', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingInput id="index-vegetation-damage" label="Vegetation Damage" type="text" value={data.vegetation_damage} onChange={(e) => setData('vegetation_damage', e.target.value)} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Water Quality</label>
-                                                <input type="text" value={data.water_quality} onChange={(e) => setData('water_quality', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingInput id="index-water-quality" label="Water Quality" type="text" value={data.water_quality} onChange={(e) => setData('water_quality', e.target.value)} />
                                             </div>
                                         </div>
                                     </div>
@@ -669,20 +647,20 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                         <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📝 Detailed Impact Notes</h4>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Biodiversity Impact Notes</label>
-                                                <textarea rows="2" value={data.biodiversity_impact_notes} onChange={(e) => setData('biodiversity_impact_notes', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingTextarea id="index-biodiversity-impact-notes" label="Biodiversity Impact Notes" rows="2" value={data.biodiversity_impact_notes} onChange={(e) => setData('biodiversity_impact_notes', e.target.value)} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Environment Impact Notes</label>
-                                                <textarea rows="2" value={data.environment_impact_notes} onChange={(e) => setData('environment_impact_notes', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingTextarea id="index-environment-impact-notes" label="Environment Impact Notes" rows="2" value={data.environment_impact_notes} onChange={(e) => setData('environment_impact_notes', e.target.value)} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Social / Cultural Impact Notes</label>
-                                                <textarea rows="2" value={data.social_cultural_impact_notes} onChange={(e) => setData('social_cultural_impact_notes', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingTextarea id="index-social-cultural-impact-notes" label="Social / Cultural Impact Notes" rows="2" value={data.social_cultural_impact_notes} onChange={(e) => setData('social_cultural_impact_notes', e.target.value)} />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Economic Impact & Livelihood</label>
-                                                <textarea rows="2" value={data.economic_impact_notes} onChange={(e) => setData('economic_impact_notes', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                                <FloatingTextarea id="index-economic-impact-livelihood" label="Economic Impact & Livelihood" rows="2" value={data.economic_impact_notes} onChange={(e) => setData('economic_impact_notes', e.target.value)} />
                                             </div>
                                         </div>
                                     </div>
@@ -691,68 +669,68 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-3">
                                         <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📎 Attachments & Remarks</h4>
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Upload Additional Files (PDF)</label>
-                                            <input
-                                                type="file"
-                                                multiple
-                                                accept=".pdf,.jpg,.jpeg,.png"
-                                                onChange={(e) => {
-                                                    const files = Array.from(e.target.files).map(file => ({ name: file.name, file }));
-                                                    setAttachedFiles([...attachedFiles, ...files]);
-                                                }}
-                                                className="block w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-green-50 file:text-green-700 hover:file:bg-green-100 border border-gray-300 dark:border-gray-700 rounded-xl"
-                                            />
+
+                                            <FileInput id="index-upload-additional-files-pdf"
+                    type="file"
+                    multiple
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files).map((file) => ({ name: file.name, file }));
+                      setAttachedFiles([...attachedFiles, ...files]);
+                    }} />
+
+
                                         </div>
 
-                                        {existingFiles.length > 0 && (
-                                            <div>
+                                        {existingFiles.length > 0 &&
+                  <div>
                                                 <span className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Existing Files (Click to Preview):</span>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {existingFiles.map((file, idx) => (
-                                                        <div key={idx} className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
-                                                            <button type="button" onClick={() => setActivePreview(file)} className="truncate max-w-[180px] hover:underline text-left">
+                                                    {existingFiles.map((file, idx) =>
+                      <div key={idx} className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
+                                                            <Tooltip content={file.name}><button type="button" onClick={() => setActivePreview(file)} className="truncate max-w-[180px] hover:underline text-left">
                                                                 📄 {file.name}
-                                                            </button>
+                                                            </button></Tooltip>
                                                             <button
-                                                                type="button"
-                                                                onClick={() => {
-                                                                    setExistingFiles(existingFiles.filter((_, i) => i !== idx));
-                                                                    setData('removed_attachments', [...data.removed_attachments, file.original]);
-                                                                    if (activePreview?.url === file.url) setActivePreview(null);
-                                                                }}
-                                                                className="text-white/80 hover:text-white font-bold ml-1"
-                                                            >
+                          type="button"
+                          onClick={() => {
+                            setExistingFiles(existingFiles.filter((_, i) => i !== idx));
+                            setData('removed_attachments', [...data.removed_attachments, file.original]);
+                            if (activePreview?.url === file.url) setActivePreview(null);
+                          }}
+                          className="text-white/80 hover:text-white font-bold ml-1" aria-label={`Remove ${file.name}`}>
+
                                                                 ✕
                                                             </button>
                                                         </div>
-                                                    ))}
+                      )}
                                                 </div>
                                             </div>
-                                        )}
+                  }
 
-                                        {attachedFiles.length > 0 && (
-                                            <div>
+                                        {attachedFiles.length > 0 &&
+                  <div>
                                                 <span className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Newly Added Files:</span>
                                                 <div className="flex flex-wrap gap-2">
-                                                    {attachedFiles.map((item, idx) => (
-                                                        <div key={idx} className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
-                                                            <span className="truncate max-w-[180px]">📄 {item.name}</span>
+                                                    {attachedFiles.map((item, idx) =>
+                      <div key={idx} className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
+                                                            <Tooltip content={item.name}><span tabIndex={0} className="truncate max-w-[180px] outline-none">📄 {item.name}</span></Tooltip>
                                                             <button
-                                                                type="button"
-                                                                onClick={() => setAttachedFiles(attachedFiles.filter((_, i) => i !== idx))}
-                                                                className="text-white/80 hover:text-white font-bold ml-1"
-                                                            >
+                          type="button"
+                          onClick={() => setAttachedFiles(attachedFiles.filter((_, i) => i !== idx))}
+                          className="text-white/80 hover:text-white font-bold ml-1" aria-label={`Remove ${item.name}`}>
+
                                                                 ✕
                                                             </button>
                                                         </div>
-                                                    ))}
+                      )}
                                                 </div>
                                             </div>
-                                        )}
+                  }
 
                                         <div>
-                                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">General Remarks / Notes</label>
-                                            <textarea rows="2" value={data.general_remarks} onChange={(e) => setData('general_remarks', e.target.value)} placeholder="Enter remarks or notes..." className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                            <FloatingTextarea id="index-general-remarks-notes" label="General Remarks / Notes" rows="2" value={data.general_remarks} onChange={(e) => setData('general_remarks', e.target.value)} placeholder="Enter remarks or notes..." />
                                         </div>
                                     </div>
                                 </form>
@@ -764,10 +742,10 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">
                                         👁️ LIVE DOCUMENT PREVIEW {activePreview && <span className="normal-case text-gray-500 text-[11px] font-normal ml-1">({activePreview.name})</span>}
                                     </h4>
-                                    {activePreview && (<a href={activePreview.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 hover:underline">Fullscreen ↗</a>)}
+                                    {activePreview && <a href={activePreview.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 hover:underline">Fullscreen ↗</a>}
                                 </div>
                                 <div className="flex-1 w-full bg-white dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-300 dark:border-gray-800 flex items-center justify-center">
-                                    {activePreview ? (<iframe src={activePreview.url} title={activePreview.name} className="w-full h-full border-0" />) : (<div className="text-center p-6 text-gray-400 text-xs">📁 No file selected or available for preview</div>)}
+                                    {activePreview ? <iframe src={activePreview.url} title={activePreview.name} className="w-full h-full border-0" /> : <div className="text-center p-6 text-gray-400 text-xs">📁 No file selected or available for preview</div>}
                                 </div>
                             </div>
                         </div>
@@ -775,17 +753,17 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             {canDelete && <button type="button" onClick={() => setShowDeleteConfirm(true)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition">🗑️ Delete Record</button>}
                             <div className="flex gap-2">
-                                <button type="button" onClick={() => { closeAssessmentModal(); openViewAssessmentModal(selectedAssessment); }} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
+                                <button type="button" onClick={() => {closeAssessmentModal();openViewAssessmentModal(selectedAssessment);}} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
                                 <button type="submit" form="edit-imea-form" disabled={processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-md transition">💾 Save Changes</button>
                             </div>
                         </div>
                     </div>
                 </div>
-            )}
+      }
 
             {/* MODAL FOR ADDING/EDITING FACILITIES */}
-            {isFacilityModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
+            {isFacilityModalOpen &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
                     <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">
@@ -798,101 +776,101 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <div className="p-6 overflow-y-auto space-y-4 flex-1">
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="sm:col-span-2">
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Protected Area *</label>
-                                        <select value={facilityForm.data.protected_area_id} onChange={(e) => facilityForm.setData('protected_area_id', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs">
+
+                                        <FloatingSelect id="index-protected-area" label="Protected Area" value={facilityForm.data.protected_area_id} onChange={(e) => facilityForm.setData('protected_area_id', e.target.value)}>
                                             <option value="">Select Protected Area</option>
-                                            {protectedAreas?.map((pa) => (<option key={pa.id} value={pa.id}>{pa.name}</option>))}
-                                        </select>
+                                            {protectedAreas?.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
+                                        </FloatingSelect>
                                         {facilityForm.errors.protected_area_id && <div className="text-red-500 text-xs mt-1 font-bold">{facilityForm.errors.protected_area_id}</div>}
                                     </div>
 
                                     <div className="sm:col-span-2">
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Date Conducted / Inventory As-Of Period *</label>
-                                        <input
-                                            type="text"
-                                            value={facilityForm.data.inventory_date}
-                                            onChange={(e) => facilityForm.setData('inventory_date', e.target.value)}
-                                            placeholder="e.g. July 2022, Q1 2026"
-                                            className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs"
-                                        />
+
+                                        <FloatingInput id="index-date-conducted-inventory-as-of-period" label="Date Conducted / Inventory As-Of Period"
+                  type="text"
+                  value={facilityForm.data.inventory_date}
+                  onChange={(e) => facilityForm.setData('inventory_date', e.target.value)}
+                  placeholder="e.g. July 2022, Q1 2026" />
+
+
                                         {facilityForm.errors.inventory_date && <div className="text-red-500 text-xs mt-1 font-bold">{facilityForm.errors.inventory_date}</div>}
                                     </div>
 
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Types of Facilities / Structure *</label>
-                                        <input type="text" value={facilityForm.data.facility_type} onChange={(e) => facilityForm.setData('facility_type', e.target.value)} placeholder="e.g. Boardwalk, Birdwatch Tower" className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-types-of-facilities-structure" label="Types of Facilities / Structure" type="text" value={facilityForm.data.facility_type} onChange={(e) => facilityForm.setData('facility_type', e.target.value)} placeholder="e.g. Boardwalk, Birdwatch Tower" />
                                         {facilityForm.errors.facility_type && <div className="text-red-500 text-xs mt-1 font-bold">{facilityForm.errors.facility_type}</div>}
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Unit (no.) *</label>
-                                        <input type="number" value={facilityForm.data.unit_no} onChange={(e) => facilityForm.setData('unit_no', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-unit-no" label="Unit (no.)" type="number" value={facilityForm.data.unit_no} onChange={(e) => facilityForm.setData('unit_no', e.target.value)} />
                                         {facilityForm.errors.unit_no && <div className="text-red-500 text-xs mt-1 font-bold">{facilityForm.errors.unit_no}</div>}
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Year Established</label>
-                                        <input type="number" value={facilityForm.data.year_established} onChange={(e) => facilityForm.setData('year_established', e.target.value)} placeholder="e.g. 2015" className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-year-established" label="Year Established" type="number" value={facilityForm.data.year_established} onChange={(e) => facilityForm.setData('year_established', e.target.value)} placeholder="e.g. 2015" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Area Location (Brgy/Municipality/Province)</label>
-                                        <input type="text" value={facilityForm.data.location_brgy_muni} onChange={(e) => facilityForm.setData('location_brgy_muni', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-area-location-brgy-municipality-province" label="Area Location (Brgy/Municipality/Province)" type="text" value={facilityForm.data.location_brgy_muni} onChange={(e) => facilityForm.setData('location_brgy_muni', e.target.value)} />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Management Zone</label>
-                                        <select value={facilityForm.data.management_zone} onChange={(e) => facilityForm.setData('management_zone', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs">
+
+                                        <FloatingSelect id="index-management-zone" label="Management Zone" value={facilityForm.data.management_zone} onChange={(e) => facilityForm.setData('management_zone', e.target.value)}>
                                             <option value="MUZ">MUZ (Multiple Use Zone)</option>
                                             <option value="SPZ">SPZ (Strict Protection Zone)</option>
-                                        </select>
+                                        </FloatingSelect>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Within Easement Zone?</label>
-                                        <select value={facilityForm.data.within_easement_zone} onChange={(e) => facilityForm.setData('within_easement_zone', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs">
+
+                                        <FloatingSelect id="index-within-easement-zone" label="Within Easement Zone?" value={facilityForm.data.within_easement_zone} onChange={(e) => facilityForm.setData('within_easement_zone', e.target.value)}>
                                             <option value="No">No</option>
                                             <option value="Yes">Yes</option>
-                                        </select>
+                                        </FloatingSelect>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Coordinates</label>
-                                        <input type="text" value={facilityForm.data.coordinates} onChange={(e) => facilityForm.setData('coordinates', e.target.value)} placeholder="6°44'9.54N, 126°8'31E" className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-coordinates" label="Coordinates" type="text" value={facilityForm.data.coordinates} onChange={(e) => facilityForm.setData('coordinates', e.target.value)} placeholder="6°44'9.54N, 126°8'31E" />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Source of Fund</label>
-                                        <input type="text" value={facilityForm.data.source_of_fund} onChange={(e) => facilityForm.setData('source_of_fund', e.target.value)} placeholder="DENR, PLGU, LGU, etc." className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-source-of-fund" label="Source of Fund" type="text" value={facilityForm.data.source_of_fund} onChange={(e) => facilityForm.setData('source_of_fund', e.target.value)} placeholder="DENR, PLGU, LGU, etc." />
                                     </div>
                                     <div className="sm:col-span-2">
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Description (Function / Objective)</label>
-                                        <textarea rows="2" value={facilityForm.data.description} onChange={(e) => facilityForm.setData('description', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingTextarea id="index-description-function-objective" label="Description (Function / Objective)" rows="2" value={facilityForm.data.description} onChange={(e) => facilityForm.setData('description', e.target.value)} />
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Status</label>
-                                        <select value={facilityForm.data.status} onChange={(e) => facilityForm.setData('status', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs">
+
+                                        <FloatingSelect id="index-status" label="Status" value={facilityForm.data.status} onChange={(e) => facilityForm.setData('status', e.target.value)}>
                                             <option value="Functional">Functional</option>
                                             <option value="Under Renovation">Under Renovation</option>
                                             <option value="Under Construction">Under Construction</option>
                                             <option value="Dilapidated">Dilapidated</option>
                                             <option value="Abandoned">Abandoned</option>
-                                        </select>
+                                        </FloatingSelect>
                                     </div>
                                     <div>
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Tenurial Instrument / Permits</label>
-                                        <input type="text" value={facilityForm.data.tenurial_instrument} onChange={(e) => facilityForm.setData('tenurial_instrument', e.target.value)} placeholder="SAPA, PACBRMA, ECC, PAMB permit" className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-tenurial-instrument-permits" label="Tenurial Instrument / Permits" type="text" value={facilityForm.data.tenurial_instrument} onChange={(e) => facilityForm.setData('tenurial_instrument', e.target.value)} placeholder="SAPA, PACBRMA, ECC, PAMB permit" />
                                     </div>
                                     <div className="sm:col-span-2">
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Appropriate Recommendations</label>
-                                        <input type="text" value={facilityForm.data.recommendations} onChange={(e) => facilityForm.setData('recommendations', e.target.value)} placeholder="For demolition, for funding, need repairs" className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingInput id="index-appropriate-recommendations" label="Appropriate Recommendations" type="text" value={facilityForm.data.recommendations} onChange={(e) => facilityForm.setData('recommendations', e.target.value)} placeholder="For demolition, for funding, need repairs" />
                                     </div>
                                     <div className="sm:col-span-2">
-                                        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Remarks</label>
-                                        <textarea rows="2" value={facilityForm.data.remarks} onChange={(e) => facilityForm.setData('remarks', e.target.value)} placeholder="Additional notes..." className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" />
+
+                                        <FloatingTextarea id="index-remarks" label="Remarks" rows="2" value={facilityForm.data.remarks} onChange={(e) => facilityForm.setData('remarks', e.target.value)} placeholder="Additional notes..." />
                                     </div>
                                 </div>
                             </div>
 
                             <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
                                 <div className="flex items-center gap-2">
-                                    {canDelete && selectedFacility && (
-                                        <button type="button" onClick={() => setShowFacilityDeleteConfirm(true)} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition">Delete Record</button>
-                                    )}
-                                    <button type="button" onClick={() => { closeFacilityModal(); openViewFacilityModal(selectedFacility); }} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
+                                    {canDelete && selectedFacility &&
+                <button type="button" onClick={() => setShowFacilityDeleteConfirm(true)} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition">Delete Record</button>
+                }
+                                    <button type="button" onClick={() => {closeFacilityModal();openViewFacilityModal(selectedFacility);}} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
                                 </div>
                                 <div className="flex gap-2">
                                     <button type="button" onClick={closeFacilityModal} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">Cancel</button>
@@ -904,11 +882,11 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </form>
                     </div>
                 </div>
-            )}
+      }
 
             {/* VIEW FACILITY DETAILS MODAL */}
-            {isViewFacilityModalOpen && selectedFacility && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
+            {isViewFacilityModalOpen && selectedFacility &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
                     <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
@@ -967,50 +945,48 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
-                            {canUpdate && <button type="button" onClick={() => { setIsViewFacilityModalOpen(false); openFacilityModal(selectedFacility); }} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Facility</button>}
+                            {canUpdate && <button type="button" onClick={() => {setIsViewFacilityModalOpen(false);openFacilityModal(selectedFacility);}} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Facility</button>}
                             <button type="button" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">Close Details</button>
                         </div>
                     </div>
                 </div>
-            )}
+      }
 
             {/* IMPORT EXCEL/CSV MODAL */}
-            {canImport && isImportModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+            {canImport && isImportModalOpen &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">📥 Import Facilities via CSV/Excel</h3>
-                            <button type="button" onClick={() => { setIsImportModalOpen(false); importForm.reset(); }} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <button type="button" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
                         </div>
                         <form onSubmit={handleImportSubmit} className="flex flex-col p-6 space-y-4">
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Select Target Protected Area *</label>
-                                <select value={importForm.data.protected_area_id} onChange={(e) => importForm.setData('protected_area_id', e.target.value)} className="block w-full rounded-xl border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm shadow-xs" required>
+
+                                <FloatingSelect id="index-select-target-protected-area" label="Select Target Protected Area" value={importForm.data.protected_area_id} onChange={(e) => importForm.setData('protected_area_id', e.target.value)} required>
                                     <option value="">-- Select Protected Area to Assign --</option>
-                                    {protectedAreas?.map((pa) => (<option key={pa.id} value={pa.id}>{pa.name}</option>))}
-                                </select>
+                                    {protectedAreas?.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
+                                </FloatingSelect>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Upload CSV / Excel File *</label>
-                                <input type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 border border-gray-300 dark:border-gray-700 rounded-xl" required />
+
+                                <FileInput id="index-upload-csv-excel-file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} required />
                                 <p className="mt-1 text-xs text-gray-500">CSV/TXT only. Use the exported facilities CSV headers without metadata rows.</p>
                             </div>
                             <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 dark:border-gray-800">
-                                <button type="button" onClick={() => { setIsImportModalOpen(false); importForm.reset(); }} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">Cancel</button>
+                                <button type="button" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">Cancel</button>
                                 <button type="submit" disabled={importForm.processing} className="rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2 text-xs font-bold text-white shadow-md transition">{importForm.processing ? 'Importing...' : 'Upload & Import'}</button>
                             </div>
                         </form>
                     </div>
                 </div>
-            )}
+      }
 
             {/* DELETE ALERTS */}
-            {canDelete && showDeleteConfirm && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>)}
-            {canDelete && showFacilityDeleteConfirm && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><button type="button" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmFacilityDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>)}
-            {canDelete && showBulkDeleteConfirm && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>)}
+            {canDelete && showDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>}
+            {canDelete && showFacilityDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><button type="button" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmFacilityDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>}
+            {canDelete && showBulkDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>}
 
-            {/* SUCCESS MODAL */}
-            {showSuccess && (<div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-emerald-100 text-center animate-pop-in"><div className="checkmark-circle mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-emerald-100 mb-4 shadow-sm"><svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth="3" stroke="currentColor"><path className="checkmark-check" strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg></div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Success!</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">{successMessage}</p><button type="button" onClick={() => setShowSuccess(false)} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-xl shadow-sm transition text-sm">Continue</button></div></div>)}
-        </AuthenticatedLayout>
-    );
+        </AuthenticatedLayout>);
+
 }

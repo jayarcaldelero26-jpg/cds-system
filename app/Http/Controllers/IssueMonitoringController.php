@@ -90,7 +90,7 @@ class IssueMonitoringController extends Controller
         IssueMonitoring::create($validated);
 
         return redirect()->route('issue-monitorings.index')
-            ->with('status', 'issue-monitoring-created');
+            ->with('success', 'Issue monitoring record created successfully.');
     }
 
     public function edit(IssueMonitoring $issueMonitoring)
@@ -137,7 +137,7 @@ class IssueMonitoringController extends Controller
         $issueMonitoring->update($validated);
 
         return redirect()->route('issue-monitorings.index')
-            ->with('status', 'issue-monitoring-updated');
+            ->with('success', 'Issue monitoring record updated successfully.');
     }
 
     public function destroy(IssueMonitoring $issueMonitoring)
@@ -148,6 +148,6 @@ class IssueMonitoringController extends Controller
         $issueMonitoring->delete();
 
         return redirect()->route('issue-monitorings.index')
-            ->with('status', 'issue-monitoring-deleted');
+            ->with('success', 'Issue monitoring record deleted successfully.');
     }
 }

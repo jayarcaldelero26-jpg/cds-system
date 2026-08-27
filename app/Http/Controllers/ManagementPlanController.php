@@ -3,202 +3,299 @@
 namespace App\Http\Controllers;
 
 use App\Models\ManagementPlan;
+use App\Models\ManagementPlanType;
 use App\Models\ProtectedArea;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use RuntimeException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
 use Throwable;
 
 class ManagementPlanController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(): Response
     {
+        return Inertia::render('ManagementPlans/Index', [
+            'planTypes' => ManagementPlanType::query()
+                ->where('is_active', true)
+                ->with(['profile.protectedArea:id,name'])
+                ->withCount('managementPlans')
+                ->orderByRaw('sort_order IS NULL')
+                ->orderBy('sort_order')
+                ->orderBy('name')
+                ->get(['id', 'name', 'slug', 'description'])
+                ->map(fn (ManagementPlanType $type) => $this->typeData($type)),
+            'selectedPlanType' => null,
+        ]);
+    }
+
+    public function storeType(Request $request): RedirectResponse
+    {
+        $request->merge(['name' => trim((string) $request->input('name'))]);
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:150', Rule::unique('management_plan_types', 'name')],
+            'description' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $baseSlug = Str::slug($data['name']) ?: 'plan';
+        $slug = $baseSlug;
+        $suffix = 2;
+        while (ManagementPlanType::where('slug', $slug)->exists()) {
+            $slug = $baseSlug.'-'.$suffix++;
+        }
+
+        $type = ManagementPlanType::create([
+            ...$data,
+            'slug' => $slug,
+            'created_by' => $request->user()->id,
+            'updated_by' => $request->user()->id,
+        ]);
+
+        return to_route('management-plans.types.show', $type->slug)->with('success', 'Management plan created successfully.');
+    }
+
+    public function tracker(Request $request, ManagementPlanType $managementPlanType): Response
+    {
+        abort_unless($managementPlanType->is_active, 404);
+        $managementPlanType->load(['profile.protectedArea:id,name'])->loadCount('managementPlans');
         $search = trim((string) $request->string('search'));
         $filters = [
             'search' => $search,
             'protected_area_id' => $request->integer('protected_area_id') ?: null,
-            'plan_type' => $request->string('plan_type')->toString(),
-            'status' => $request->string('status')->toString(),
+            'semester' => $request->string('semester')->toString(),
         ];
 
         return Inertia::render('ManagementPlans/Index', [
-            'managementPlans' => ManagementPlan::query()
+            'selectedPlanType' => $this->typeData($managementPlanType),
+            'planProfile' => $managementPlanType->profile
+                ? ManagementPlanProfileController::profileData($managementPlanType->profile, $managementPlanType)
+                : null,
+            'managementPlans' => $managementPlanType->managementPlans()
                 ->with('protectedArea:id,name')
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
-                    $query->where('plan_type', 'like', "%{$search}%")
-                        ->orWhere('status', 'like', "%{$search}%")
-                        ->orWhere('prepared_year', 'like', "%{$search}%")
+                    $query->where('target_office', 'like', "%{$search}%")
+                        ->orWhere('activity_name', 'like', "%{$search}%")
+                        ->orWhere('document_type', 'like', "%{$search}%")
+                        ->orWhere('semester', 'like', "%{$search}%")
                         ->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%"));
                 }))
                 ->when($filters['protected_area_id'], fn ($query, $id) => $query->where('protected_area_id', $id))
-                ->when($filters['plan_type'], fn ($query, $type) => $query->where('plan_type', $type))
-                ->when($filters['status'], fn ($query, $status) => $query->where('status', $status))
-                ->latest('prepared_year')
+                ->when($filters['semester'], fn ($query, $semester) => $query->where('semester', $semester))
+                ->latest('id')
                 ->paginate(15)
                 ->withQueryString()
-                ->through(fn (ManagementPlan $plan) => $this->planData($plan)),
+                ->through(fn (ManagementPlan $plan) => $this->planData($plan, $managementPlanType)),
             'filters' => $filters,
             'protectedAreas' => $this->protectedAreaOptions(),
-            'planTypes' => $this->planTypes(),
-            'statuses' => $this->statuses(),
+            'planTypes' => [],
+            'approvalStatuses' => ManagementPlanProfileController::APPROVAL_STATUSES,
+            'documentCategories' => ManagementPlanProfileController::DOCUMENT_CATEGORIES,
         ]);
     }
 
-    public function create(): Response
+    public function createReport(ManagementPlanType $managementPlanType): Response
     {
-        return Inertia::render('ManagementPlans/Create', $this->formOptions());
+        abort_unless($managementPlanType->is_active, 404);
+
+        return Inertia::render('ManagementPlans/Create', [
+            'managementPlanType' => $this->typeData($managementPlanType),
+            'protectedAreas' => $this->protectedAreaOptions(),
+        ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function storeReport(Request $request, ManagementPlanType $managementPlanType): RedirectResponse
     {
-        $data = $request->validate([
-            'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
-            'title' => ['required', 'string', 'max:255'],
-            'prepared_year' => ['required', 'integer', 'min:1900', 'max:2100'],
-            'approval_date' => ['nullable', 'date'],
-            'valid_from' => ['nullable', 'date'],
-            'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
-            'status' => ['required', 'string', 'in:Active,For Update,Under Review'],
-            'remarks' => ['nullable', 'string'],
-            'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
-        ]);
-
-        $newAttachmentPaths = [];
+        abort_unless($managementPlanType->is_active, 404);
+        $data = $request->validate($this->reportRules());
+        $newAttachments = [];
 
         try {
-            if ($request->hasFile('attachments')) {
-                foreach ($request->file('attachments') as $file) {
-                    $newAttachmentPaths[] = $file->store('management-plans', 'public');
-                }
+            foreach ($request->file('attachments', []) as $file) {
+                $newAttachments[] = $this->storeAttachment($file);
             }
 
             DB::transaction(fn () => ManagementPlan::create([
                 ...collect($data)->except('attachments')->toArray(),
-                'attachments' => $newAttachmentPaths,
-                'version' => 'v1',
+                'management_plan_type_id' => $managementPlanType->id,
+                'plan_type' => $managementPlanType->name,
+                'attachments' => $newAttachments,
                 'created_by' => $request->user()->id,
                 'updated_by' => $request->user()->id,
             ]));
         } catch (Throwable $exception) {
-            $this->deleteAttachments($newAttachmentPaths);
-
+            $this->deleteAttachments($newAttachments);
             throw $exception;
         }
 
-        return to_route('management-plans.index')->with('status', 'management-plan-created');
+        return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report added successfully.');
     }
 
-    public function edit(ManagementPlan $managementPlan): Response
+    public function editReport(ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): Response
     {
+        $this->assertOwnedByType($managementPlanType, $managementPlan);
+
         return Inertia::render('ManagementPlans/Edit', [
-            'managementPlan' => $this->planData($managementPlan->load('protectedArea:id,name')),
-            ...$this->formOptions(),
+            'managementPlanType' => $this->typeData($managementPlanType),
+            'managementPlan' => $this->planData($managementPlan->load('protectedArea:id,name'), $managementPlanType),
+            'protectedAreas' => $this->protectedAreaOptions(),
         ]);
     }
 
-    public function update(Request $request, ManagementPlan $managementPlan): RedirectResponse
+    public function updateReport(Request $request, ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): RedirectResponse
     {
+        $this->assertOwnedByType($managementPlanType, $managementPlan);
         $data = $request->validate([
-            'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'plan_type' => ['required', 'string', 'in:PAMP,EMP,CEPA,ECC,CNC,Other'],
-            'title' => ['required', 'string', 'max:255'],
-            'prepared_year' => ['required', 'integer', 'min:1900', 'max:2100'],
-            'approval_date' => ['nullable', 'date'],
-            'valid_from' => ['nullable', 'date'],
-            'valid_until' => ['nullable', 'date', 'after_or_equal:valid_from'],
-            'status' => ['required', 'string', 'in:Active,For Update,Under Review'],
-            'remarks' => ['nullable', 'string'],
-            'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
+            ...$this->reportRules(),
             'removed_attachments' => ['nullable', 'array'],
             'removed_attachments.*' => ['string', 'distinct'],
         ]);
 
-        $currentAttachments = array_values(array_filter(
-            $managementPlan->attachments ?? [],
-            fn ($attachment) => is_string($attachment) && $attachment !== ''
-        ));
+        $currentAttachments = array_values(array_filter($managementPlan->attachments ?? [], fn ($attachment) => $this->attachmentPath($attachment) !== null));
+        $attachmentsByPath = collect($currentAttachments)->keyBy(fn ($attachment) => $this->attachmentPath($attachment));
         $requestedRemovals = array_values($data['removed_attachments'] ?? []);
-        $unownedRemovals = array_values(array_diff($requestedRemovals, $currentAttachments));
+        $unownedRemovals = array_values(array_filter($requestedRemovals, fn (string $path) => ! $attachmentsByPath->has($path)));
 
         if ($unownedRemovals !== []) {
-            throw ValidationException::withMessages([
-                'removed_attachments' => 'One or more selected attachments do not belong to this management plan.',
-            ]);
+            throw ValidationException::withMessages(['removed_attachments' => 'One or more selected attachments do not belong to this management plan report.']);
         }
 
-        $retainedAttachments = array_values(array_diff($currentAttachments, $requestedRemovals));
-        $newAttachmentPaths = [];
+        $retainedAttachments = array_values(array_filter($currentAttachments, fn ($attachment) => ! in_array($this->attachmentPath($attachment), $requestedRemovals, true)));
+        $newAttachments = [];
 
         try {
-            if ($request->hasFile('attachments')) {
-                foreach ($request->file('attachments') as $file) {
-                    $newAttachmentPaths[] = $file->store('management-plans', 'public');
-                }
+            foreach ($request->file('attachments', []) as $file) {
+                $newAttachments[] = $this->storeAttachment($file);
             }
-
-            $finalAttachments = [...$retainedAttachments, ...$newAttachmentPaths];
 
             DB::transaction(fn () => $managementPlan->update([
                 ...collect($data)->except(['attachments', 'removed_attachments'])->toArray(),
-                'attachments' => $finalAttachments,
-                'version' => $managementPlan->version ?? 'v1',
+                'plan_type' => $managementPlanType->name,
+                'attachments' => [...$retainedAttachments, ...$newAttachments],
                 'updated_by' => $request->user()->id,
             ]));
         } catch (Throwable $exception) {
-            $this->deleteAttachments($newAttachmentPaths);
-
+            $this->deleteAttachments($newAttachments);
             throw $exception;
         }
 
-        // The database no longer references these files, so they can now be removed safely.
         $this->deleteAttachments($requestedRemovals);
 
-        return to_route('management-plans.index')->with('status', 'management-plan-updated');
+        return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report updated successfully.');
     }
 
-    public function destroy(Request $request, ManagementPlan $managementPlan): RedirectResponse
+    public function destroyReport(Request $request, ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): RedirectResponse
     {
+        $this->assertOwnedByType($managementPlanType, $managementPlan);
         $managementPlan->update(['updated_by' => $request->user()->id]);
         $managementPlan->delete();
 
-        return to_route('management-plans.index')->with('status', 'management-plan-deleted');
+        return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report deleted successfully.');
     }
 
-    public function summary(Request $request): Response
+    public function viewScopedAttachment(ManagementPlanType $managementPlanType, ManagementPlan $managementPlan, string $attachment): BinaryFileResponse
     {
-        $protectedAreaId = $request->integer('protected_area_id');
-        $selectedArea = $protectedAreaId ? ProtectedArea::find($protectedAreaId) : null;
+        $this->assertOwnedByType($managementPlanType, $managementPlan);
 
-        $plans = ManagementPlan::query()
-            ->when($protectedAreaId, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
-            ->get();
-
-        return Inertia::render('ManagementPlans/Summary', [
-            'protectedAreas' => $this->protectedAreaOptions(),
-            'selectedArea' => $selectedArea,
-            'summaryData' => [
-                'total_plans' => $plans->count(),
-                'by_type' => $plans->groupBy('plan_type')->map->count(),
-                'by_status' => $plans->groupBy('status')->map->count(),
-                'plans' => $plans->map(fn ($plan) => $this->planData($plan)),
-            ],
-            'filters' => ['protected_area_id' => $protectedAreaId],
-        ]);
+        return $this->attachmentResponse($managementPlan, $attachment);
     }
 
-    /** @return array<string, mixed> */
-    private function planData(ManagementPlan $plan): array
+    public function viewAttachment(ManagementPlan $managementPlan, string $attachment): BinaryFileResponse
+    {
+        return $this->attachmentResponse($managementPlan, $attachment);
+    }
+
+    public function legacyEdit(ManagementPlan $managementPlan): RedirectResponse
+    {
+        abort_unless($managementPlan->managementPlanType, 404);
+
+        return to_route('management-plans.types.reports.edit', [$managementPlan->managementPlanType->slug, $managementPlan]);
+    }
+
+    public function summary(): RedirectResponse
+    {
+        return to_route('management-plans.index');
+    }
+
+    private function assertOwnedByType(ManagementPlanType $type, ManagementPlan $plan): void
+    {
+        abort_unless($type->is_active && $plan->management_plan_type_id === $type->id, 404);
+    }
+
+    private function attachmentResponse(ManagementPlan $plan, string $attachment): BinaryFileResponse
+    {
+        abort_unless(ctype_digit($attachment), 404);
+        $path = $this->attachmentPath(($plan->attachments ?? [])[(int) $attachment] ?? null);
+        abort_unless($path && Storage::disk('public')->exists($path), 404);
+
+        return response()->file(Storage::disk('public')->path($path));
+    }
+
+    private function reportRules(): array
+    {
+        return [
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
+            'target_office' => ['required', 'string', 'max:255'],
+            'activity_name' => ['required', 'string', 'max:255'],
+            'document_type' => ['required', 'string', Rule::in(['Final Report', 'Progress Report'])],
+            'semester' => ['required', 'string', 'in:1st Semester,2nd Semester'],
+            'date_conducted' => ['nullable', 'string', 'max:255'],
+            'date_accomplished' => ['nullable', 'date'],
+            'date_report_released_cenro' => ['nullable', 'date'],
+            'date_received_penro' => ['nullable', 'date'],
+            'date_endorsed_regional' => ['nullable', 'date'],
+            'remarks' => ['nullable', 'string'],
+            'attachments' => ['nullable', 'array'],
+            'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
+        ];
+    }
+
+    private function typeData(ManagementPlanType $type): array
+    {
+        $profile = $type->relationLoaded('profile') ? $type->profile : null;
+
+        return [
+            'id' => $type->id,
+            'name' => $type->name,
+            'slug' => $type->slug,
+            'description' => $type->description,
+            'management_plans_count' => $type->management_plans_count ?? null,
+            'has_profile' => $profile !== null,
+            'approval_status' => $profile?->approval_status,
+            'completeness_completed' => $profile?->completeness_completed,
+            'completeness_total' => $profile?->completeness_total,
+        ];
+    }
+
+    private function planData(ManagementPlan $plan, ManagementPlanType $type): array
     {
         return [
             'id' => $plan->id,
+            'management_plan_type_id' => $type->id,
             'protected_area_id' => $plan->protected_area_id,
             'protected_area_name' => $plan->protectedArea?->name,
-            'plan_type' => $plan->plan_type,
+            'plan_type' => $type->name,
+            'target_office' => $plan->target_office,
+            'activity_name' => $plan->activity_name,
+            'document_type' => $plan->document_type,
+            'semester' => $plan->semester,
+            'date_conducted' => $plan->date_conducted,
+            'date_accomplished' => $plan->date_accomplished?->toDateString(),
+            'date_report_released_cenro' => $plan->date_report_released_cenro?->toDateString(),
+            'date_received_penro' => $plan->date_received_penro?->toDateString(),
+            'date_endorsed_regional' => $plan->date_endorsed_regional?->toDateString(),
+            'deadline_submission' => $plan->deadline_submission,
+            'number_days_complied' => $plan->number_days_complied,
+            'timeliness' => $plan->timeliness,
+            'submission_status' => $plan->submission_status,
+            'total_days_delayed_penro' => $plan->total_days_delayed_penro,
             'title' => $plan->title,
             'version' => $plan->version,
             'prepared_year' => $plan->prepared_year,
@@ -207,31 +304,39 @@ class ManagementPlanController extends Controller
             'valid_until' => $plan->valid_until?->toDateString(),
             'status' => $plan->status,
             'remarks' => $plan->remarks,
-            'attachments' => $plan->attachments,
+            'attachments' => collect($plan->attachments ?? [])->map(function ($attachment, int $index) use ($plan, $type): array {
+                $path = $this->attachmentPath($attachment);
+                $metadata = is_array($attachment) ? $attachment : [];
+                $name = $metadata['original_name'] ?? $metadata['name'] ?? ($path ? basename($path) : 'Attachment');
+                $mimeType = $metadata['mime_type'] ?? $metadata['type'] ?? '';
+                return [...$metadata, 'path' => $path, 'original_name' => $name, 'name' => $name, 'mime_type' => $mimeType, 'type' => $mimeType, 'url' => $path ? route('management-plans.types.reports.attachments.view', [$type->slug, $plan, $index]) : null];
+            })->filter(fn (array $attachment) => $attachment['path'] !== null)->values()->all(),
         ];
     }
 
-    /** @return array<int, array{id: int, name: string}> */
     private function protectedAreaOptions(): array
     {
         return ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map(fn (ProtectedArea $area) => ['id' => $area->id, 'name' => $area->name])->all();
     }
 
-    /** @return array<string, mixed> */
-    private function formOptions(): array
+    private function storeAttachment(UploadedFile $file): array
     {
-        return ['protectedAreas' => $this->protectedAreaOptions(), 'planTypes' => $this->planTypes(), 'statuses' => $this->statuses()];
+        $path = $file->store('management-plans', 'public');
+        if (! is_string($path)) {
+            throw new RuntimeException('The attachment could not be stored.');
+        }
+        return ['original_name' => $file->getClientOriginalName(), 'stored_name' => basename($path), 'path' => $path, 'mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'size' => $file->getSize()];
     }
 
-    /** @return array<int, string> */
-    private function planTypes(): array { return ['PAMP', 'EMP', 'CEPA', 'ECC', 'CNC', 'Other']; }
-
-    /** @return array<int, string> */
-    private function statuses(): array { return ['Active', 'For Update', 'Under Review']; }
-
-    /** @param array<int, string> $paths */
-    private function deleteAttachments(array $paths): void
+    private function attachmentPath(mixed $attachment): ?string
     {
+        $path = is_string($attachment) ? $attachment : (is_array($attachment) ? ($attachment['path'] ?? null) : null);
+        return is_string($path) && $path !== '' ? $path : null;
+    }
+
+    private function deleteAttachments(array $attachments): void
+    {
+        $paths = array_values(array_filter(array_map(fn ($attachment) => $this->attachmentPath($attachment), $attachments)));
         if ($paths !== []) {
             Storage::disk('public')->delete($paths);
         }

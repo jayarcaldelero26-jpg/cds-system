@@ -97,7 +97,7 @@ class LawinMonitoringController extends Controller
         LawinMonitoring::create($validated);
 
         return redirect()->route('lawin-monitorings.index')
-            ->with('status', 'lawin-monitoring-created');
+            ->with('success', 'LAWIN monitoring record created successfully.');
     }
 
     public function edit(LawinMonitoring $lawinMonitoring)
@@ -145,7 +145,7 @@ class LawinMonitoringController extends Controller
         $lawinMonitoring->update($validated);
 
         return redirect()->route('lawin-monitorings.index')
-            ->with('status', 'lawin-monitoring-updated');
+            ->with('success', 'LAWIN monitoring record updated successfully.');
     }
 
     public function destroy(LawinMonitoring $lawinMonitoring)
@@ -156,6 +156,6 @@ class LawinMonitoringController extends Controller
         $lawinMonitoring->delete();
 
         return redirect()->route('lawin-monitorings.index')
-            ->with('status', 'lawin-monitoring-deleted');
+            ->with('success', 'LAWIN monitoring record deleted successfully.');
     }
 }

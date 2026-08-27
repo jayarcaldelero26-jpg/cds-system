@@ -1,78 +1,78 @@
-import { Link, router } from '@inertiajs/react';
+import { FloatingSelect } from "@/Components/Form";import { Link, router } from '@inertiajs/react';
 import { useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 
 export default function ImeaReport({
-    totalVisitors,
-    totalWaste,
-    avgSatisfaction,
-    assessmentsList,
-    muzCount,
-    spzCount,
-    newStructuresCount,
-    facilitiesList,
-    protectedAreas,
-    availableYears,
-    filters
+  totalVisitors,
+  totalWaste,
+  avgSatisfaction,
+  assessmentsList,
+  muzCount,
+  spzCount,
+  newStructuresCount,
+  facilitiesList,
+  protectedAreas,
+  availableYears,
+  filters
 }) {
-    const [selectedYear, setSelectedYear] = useState(filters.year || '');
-    const [selectedPeriod, setSelectedPeriod] = useState(filters.period || '');
-    const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
+  const [selectedYear, setSelectedYear] = useState(filters.year || '');
+  const [selectedPeriod, setSelectedPeriod] = useState(filters.period || '');
+  const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
 
-    const [selectedRecord, setSelectedRecord] = useState(null);
-    const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
 
-    const handleFilterChange = (type, value) => {
-        const queryParams = {
-            year: type === 'year' ? value : selectedYear,
-            period: type === 'period' ? value : selectedPeriod,
-            protected_area_id: type === 'pa' ? value : selectedPA,
-        };
-
-        Object.keys(queryParams).forEach(key => {
-            if (!queryParams[key]) delete queryParams[key];
-        });
-
-        router.get('/imea/report', queryParams, {
-            preserveState: true,
-            preserveScroll: true,
-            replace: true,
-        });
+  const handleFilterChange = (type, value) => {
+    const queryParams = {
+      year: type === 'year' ? value : selectedYear,
+      period: type === 'period' ? value : selectedPeriod,
+      protected_area_id: type === 'pa' ? value : selectedPA
     };
 
-    const resetFilters = () => {
-        setSelectedYear('');
-        setSelectedPeriod('');
-        setSelectedPA('');
-        router.get('/imea/report', {}, { preserveState: true });
-    };
+    Object.keys(queryParams).forEach((key) => {
+      if (!queryParams[key]) delete queryParams[key];
+    });
 
-    const openModal = (row) => {
-        setSelectedRecord(row);
-        setIsDetailModalOpen(true);
-    };
+    router.get('/imea/report', queryParams, {
+      preserveState: true,
+      preserveScroll: true,
+      replace: true
+    });
+  };
 
-    const closeModal = () => {
-        setIsDetailModalOpen(false);
-        setSelectedRecord(null);
-    };
+  const resetFilters = () => {
+    setSelectedYear('');
+    setSelectedPeriod('');
+    setSelectedPA('');
+    router.get('/imea/report', {}, { preserveState: true });
+  };
 
-    const handlePrint = () => {
-        window.print();
-    };
+  const openModal = (row) => {
+    setSelectedRecord(row);
+    setIsDetailModalOpen(true);
+  };
 
-    const chartData = assessmentsList.map(item => ({
-        name: item.protected_area?.name ? item.protected_area.name.replace('Protected Landscape', 'PL').replace('Range Wildlife Sanctuary', 'RWS') : 'N/A',
-        periodLabel: `${item.assessment_year} (${item.assessment_period})`,
-        visitors: Number(item.visitor_arrivals || 0),
-        waste: Number(item.solid_waste_generation_kg || 0),
-        satisfaction: Number(item.visitor_satisfaction_rate || 0),
-    }));
+  const closeModal = () => {
+    setIsDetailModalOpen(false);
+    setSelectedRecord(null);
+  };
 
-    return (
-        <AuthenticatedLayout title="IMEA Summary Report">
+  const handlePrint = () => {
+    window.print();
+  };
+
+  const chartData = assessmentsList.map((item) => ({
+    name: item.protected_area?.name ? item.protected_area.name.replace('Protected Landscape', 'PL').replace('Range Wildlife Sanctuary', 'RWS') : 'N/A',
+    periodLabel: `${item.assessment_year} (${item.assessment_period})`,
+    visitors: Number(item.visitor_arrivals || 0),
+    waste: Number(item.solid_waste_generation_kg || 0),
+    satisfaction: Number(item.visitor_satisfaction_rate || 0)
+  }));
+
+  return (
+    <AuthenticatedLayout title="IMEA Summary Report">
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
@@ -160,7 +160,7 @@ export default function ImeaReport({
                 <div className="print-header space-y-1.5 pb-2 mb-2 border-b-2 border-black" style={{ fontFamily: '"Times New Roman", Times, serif' }}>
                     <div className="flex items-center justify-between">
                         <div className="w-24 h-24 flex items-center justify-center shrink-0">
-                            <img src="/images/DENR LOGO.png" alt="DENR Logo" className="w-24 h-24 object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+                            <img src="/images/DENR LOGO.png" alt="DENR Logo" className="w-24 h-24 object-contain" onError={(e) => {e.target.style.display = 'none';}} />
                         </div>
                         <div className="text-center space-y-0.5 flex-1 px-2">
                             <p style={{ fontSize: '8pt' }} className="font-bold tracking-widest text-black">REPUBLIC OF THE PHILIPPINES</p>
@@ -170,7 +170,7 @@ export default function ImeaReport({
                             <p style={{ fontSize: '7.5pt' }} className="text-gray-700">TEL #: 3883-275 | EMAIL ADD: PENRODAVAOORIENTAL@DENR.GOV.PH</p>
                         </div>
                         <div className="w-24 h-24 flex items-center justify-center shrink-0">
-                            <img src="/images/Bagong Pilipinas logo.png" alt="Bagong Pilipinas Logo" className="w-24 h-24 object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+                            <img src="/images/Bagong Pilipinas logo.png" alt="Bagong Pilipinas Logo" className="w-24 h-24 object-contain" onError={(e) => {e.target.style.display = 'none';}} />
                         </div>
                     </div>
                 </div>
@@ -196,16 +196,16 @@ export default function ImeaReport({
                         </div>
                         <div className="flex items-center gap-3">
                             <button
-                                type="button"
-                                onClick={handlePrint}
-                                className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition whitespace-nowrap"
-                            >
+                type="button"
+                onClick={handlePrint}
+                className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition whitespace-nowrap">
+
                                 🖨️ Print / Save PDF
                             </button>
                             <Link
-                                href="/imea"
-                                className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs"
-                            >
+                href="/imea"
+                className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">
+
                                 ← Back to List
                             </Link>
                         </div>
@@ -217,47 +217,47 @@ export default function ImeaReport({
                     <Card className="border border-gray-100 dark:border-gray-800 shadow-lg rounded-2xl bg-white dark:bg-gray-900 p-4 sm:p-6 mb-6">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Filter by Protected Area</label>
-                                <select
-                                    value={selectedPA}
-                                    onChange={(e) => {
-                                        setSelectedPA(e.target.value);
-                                        handleFilterChange('pa', e.target.value);
-                                    }}
-                                    className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm"
-                                >
+
+                                <FloatingSelect id="report-filter-by-protected-area" label="Filter by Protected Area"
+                value={selectedPA}
+                onChange={(e) => {
+                  setSelectedPA(e.target.value);
+                  handleFilterChange('pa', e.target.value);
+                }} size="sm">
+
+
                                     <option value="">All Protected Areas</option>
-                                    {protectedAreas.map((pa) => (
-                                        <option key={pa.id} value={pa.id}>{pa.name}</option>
-                                    ))}
-                                </select>
+                                    {protectedAreas.map((pa) =>
+                  <option key={pa.id} value={pa.id}>{pa.name}</option>
+                  )}
+                                </FloatingSelect>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Filter by Year</label>
-                                <select
-                                    value={selectedYear}
-                                    onChange={(e) => {
-                                        setSelectedYear(e.target.value);
-                                        handleFilterChange('year', e.target.value);
-                                    }}
-                                    className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm"
-                                >
+
+                                <FloatingSelect id="report-filter-by-year" label="Filter by Year"
+                value={selectedYear}
+                onChange={(e) => {
+                  setSelectedYear(e.target.value);
+                  handleFilterChange('year', e.target.value);
+                }} size="sm">
+
+
                                     <option value="">All Years</option>
-                                    {availableYears.map((year) => (
-                                        <option key={year} value={year}>{year}</option>
-                                    ))}
-                                </select>
+                                    {availableYears.map((year) =>
+                  <option key={year} value={year}>{year}</option>
+                  )}
+                                </FloatingSelect>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Filter by Period</label>
-                                <select
-                                    value={selectedPeriod}
-                                    onChange={(e) => {
-                                        setSelectedPeriod(e.target.value);
-                                        handleFilterChange('period', e.target.value);
-                                    }}
-                                    className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm"
-                                >
+
+                                <FloatingSelect id="report-filter-by-period" label="Filter by Period"
+                value={selectedPeriod}
+                onChange={(e) => {
+                  setSelectedPeriod(e.target.value);
+                  handleFilterChange('period', e.target.value);
+                }} size="sm">
+
+
                                     <option value="">All Periods</option>
                                     <option value="Annual">Annual</option>
                                     <option value="Semestral - 1st Semester">Semestral - 1st Semester</option>
@@ -266,14 +266,14 @@ export default function ImeaReport({
                                     <option value="Q2">Q2</option>
                                     <option value="Q3">Q3</option>
                                     <option value="Q4">Q4</option>
-                                </select>
+                                </FloatingSelect>
                             </div>
                             <div>
                                 <button
-                                    type="button"
-                                    onClick={resetFilters}
-                                    className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition"
-                                >
+                  type="button"
+                  onClick={resetFilters}
+                  className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition">
+
                                     Reset Filters
                                 </button>
                             </div>
@@ -336,8 +336,8 @@ export default function ImeaReport({
                 </div>
 
                 {/* VISUAL CHARTS & TRENDS SECTION */}
-                {chartData.length > 0 && (
-                    <div className="dashboard-charts-grid grid grid-cols-1 gap-6 lg:grid-cols-2 mb-6">
+                {chartData.length > 0 &&
+        <div className="dashboard-charts-grid grid grid-cols-1 gap-6 lg:grid-cols-2 mb-6">
                         <Card className="dashboard-card-item border border-gray-100 dark:border-gray-800 shadow-lg rounded-2xl bg-white dark:bg-gray-900 p-6">
                             <h3 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider mb-2">Visitor Arrivals & Waste per Area</h3>
                             <div className="dashboard-chart-box h-72 w-full">
@@ -371,7 +371,7 @@ export default function ImeaReport({
                             </div>
                         </Card>
                     </div>
-                )}
+        }
 
                 {/* Clickable Table List for Assessments */}
                 <div className="print-table-container">
@@ -380,8 +380,8 @@ export default function ImeaReport({
                             <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Detailed Assessment Records & Status</h3>
                             <span className="text-xs text-gray-500 italic">💡 Click any row to view full details</span>
                         </div>
-                        {assessmentsList && assessmentsList.length > 0 ? (
-                            <div className="overflow-x-auto custom-table-scrollbar">
+                        {assessmentsList && assessmentsList.length > 0 ?
+            <div className="overflow-x-auto custom-table-scrollbar">
                                 <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="border-b border-gray-200 bg-green-900 text-white text-xs uppercase tracking-wider dark:border-gray-700">
@@ -393,12 +393,12 @@ export default function ImeaReport({
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 text-sm dark:divide-gray-800">
-                                        {assessmentsList.map((row) => (
-                                            <tr
-                                                key={row.id}
-                                                onClick={() => openModal(row)}
-                                                className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30"
-                                            >
+                                        {assessmentsList.map((row) =>
+                  <tr
+                    key={row.id}
+                    onClick={() => openModal(row)}
+                    className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
+
                                                 <td className="px-6 py-4 font-semibold text-gray-900 dark:text-white">
                                                     <div>{row.protected_area?.name || 'N/A'}</div>
                                                     <div className="text-xs text-gray-500 font-normal">{row.pamo_name}</div>
@@ -420,23 +420,23 @@ export default function ImeaReport({
                                                     </span>
                                                 </td>
                                             </tr>
-                                        ))}
+                  )}
                                     </tbody>
                                 </table>
-                            </div>
-                        ) : (
-                            <div className="p-12 text-center">
+                            </div> :
+
+            <div className="p-12 text-center">
                                 <p className="text-xs text-gray-500 dark:text-gray-400">No assessment records found for the selected filters.</p>
                             </div>
-                        )}
+            }
                     </Card>
                 </div>
 
             </div>
 
             {/* FULL DETAILS MODAL */}
-            {isDetailModalOpen && selectedRecord && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print">
+            {isDetailModalOpen && selectedRecord &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print">
                     <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto animate-pop-in custom-table-scrollbar border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-4 dark:border-gray-800">
                             <div className="flex items-center gap-2">
@@ -504,17 +504,17 @@ export default function ImeaReport({
 
                             <div className="flex justify-end pt-2 border-t border-gray-100 dark:border-gray-800">
                                 <button
-                                    type="button"
-                                    onClick={closeModal}
-                                    className="rounded-lg bg-green-800 hover:bg-green-900 text-white font-semibold py-2 px-5 text-xs transition"
-                                >
+                type="button"
+                onClick={closeModal}
+                className="rounded-lg bg-green-800 hover:bg-green-900 text-white font-semibold py-2 px-5 text-xs transition">
+
                                     Close Details
                                 </button>
                             </div>
                         </div>
                     </div>
                 </div>
-            )}
-        </AuthenticatedLayout>
-    );
+      }
+        </AuthenticatedLayout>);
+
 }

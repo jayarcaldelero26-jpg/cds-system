@@ -23,7 +23,7 @@ class BmsReportSubmissionController extends Controller
 
     public function update(Request $request, BmsReportSubmission $bmsReportSubmission)
     {
-        $validated = $request->validate($this->rules());
+        $validated = $request->validate($this->rules($bmsReportSubmission->document_type));
 
         if ($request->boolean('delete_mov')) {
             $this->deleteMov($bmsReportSubmission);
@@ -64,13 +64,15 @@ class BmsReportSubmissionController extends Controller
         return redirect()->back()->with('success', 'MOV attachment successfully deleted.');
     }
 
-    private function rules(): array
+    private function rules(?string $legacyDocumentType = null): array
     {
+        $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
+
         return [
             'protected_area_id' => ['nullable', 'exists:protected_areas,id'],
             'target_office' => ['nullable', 'string', 'max:255'],
             'activity_name' => ['nullable', 'string', 'max:255'],
-            'document_type' => ['nullable', 'string', 'max:255'],
+            'document_type' => ['nullable', 'string', Rule::in($documentTypes)],
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],

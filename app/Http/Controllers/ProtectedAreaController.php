@@ -53,7 +53,7 @@ class ProtectedAreaController extends Controller
     {
         ProtectedArea::create([...$request->validated(), 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
 
-        return to_route('protected-areas.index')->with('status', 'protected-area-created');
+        return to_route('protected-areas.index')->with('success', 'Protected area created successfully.');
     }
 
     public function edit(ProtectedArea $protectedArea): Response
@@ -65,7 +65,7 @@ class ProtectedAreaController extends Controller
     {
         $protectedArea->update([...$request->validated(), 'updated_by' => $request->user()->id]);
 
-        return to_route('protected-areas.index')->with('status', 'protected-area-updated');
+        return to_route('protected-areas.index')->with('success', 'Protected area updated successfully.');
     }
 
     public function destroy(Request $request, ProtectedArea $protectedArea): RedirectResponse
@@ -73,7 +73,7 @@ class ProtectedAreaController extends Controller
         $protectedArea->update(['updated_by' => $request->user()->id]);
         $protectedArea->delete();
 
-        return to_route('protected-areas.index')->with('status', 'protected-area-deleted');
+        return to_route('protected-areas.index')->with('success', 'Protected area deleted successfully.');
     }
 
     /** @return array<string, mixed> */

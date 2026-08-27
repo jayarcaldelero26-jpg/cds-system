@@ -9,6 +9,10 @@ use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
+use RuntimeException;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Throwable;
 
 class AwsController extends Controller
 {
@@ -20,6 +24,19 @@ class AwsController extends Controller
         if ($request->has('protected_area_id') && $request->protected_area_id) {
             $reportsQuery->where('protected_area_id', $request->protected_area_id);
         }
+        $reportsQuery
+            ->when($request->filled('report_search'), function ($query) use ($request): void {
+                $search = trim((string) $request->input('report_search'));
+                $query->where(function ($query) use ($search): void {
+                    $query->where('station_name', 'like', "%{$search}%")
+                        ->orWhere('location', 'like', "%{$search}%")
+                        ->orWhere('activity_name', 'like', "%{$search}%")
+                        ->orWhere('document_type', 'like', "%{$search}%")
+                        ->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%"));
+                });
+            })
+            ->when($request->filled('report_semester'), fn ($query) => $query->where('semester', $request->input('report_semester')))
+            ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')));
 
         // 2. RAW DATA QUERY: Kuhaon lang kadtong mga naay timestamps (mga imported CSV data)
         $rawQuery = Aws::with('protectedArea')->whereNotNull('timestamps')->latest();
@@ -88,74 +105,83 @@ class AwsController extends Controller
             ->get();
 
         return Inertia::render('AWS/Aws', [
-            'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString(),
+            'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString()->through(fn (Aws $report) => $this->reportData($report)),
             'rawRecords'     => $rawQuery->paginate(15, ['*'], 'raw_page')->withQueryString(),
             'chartRecords'   => $chartData,
             'protectedAreas' => ProtectedArea::orderBy('name')->get(),
             'allProtectedAreasMode' => ! $request->filled('protected_area_id'),
-            'filters'        => $request->only(['protected_area_id', 'graph_start_date', 'graph_end_date', 'graph_range'])
+            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range'])
         ]);
     }
 
     public function store(Request $request)
     {
         $validated = $request->validate($this->validationRules(fileRequired: true));
+        $storedPath = null;
 
-        if ($request->hasFile('report_file')) {
-            $path = $request->file('report_file')->store('aws_reports', 'public');
-            $validated['report_file_path'] = $path;
-            $validated['report_file_name'] = $request->file('report_file')->getClientOriginalName();
+        try {
+            if ($request->hasFile('report_file')) {
+                $storedPath = $request->file('report_file')->store('aws_reports', 'public');
+                if (! is_string($storedPath)) throw new RuntimeException('The AWS report file could not be stored.');
+                $validated['report_file_path'] = $storedPath;
+                $validated['report_file_name'] = $request->file('report_file')->getClientOriginalName();
+            }
+
+            $validated['timestamps'] = null;
+            DB::transaction(fn () => Aws::create($validated));
+        } catch (Throwable $exception) {
+            if ($storedPath) Storage::disk('public')->delete($storedPath);
+            throw $exception;
         }
 
-        // Siguraduhon nga null ang timestamps para malista gyud sa Reports tab ug dili sa Raw Data
-        $validated['timestamps'] = null;
-
-        Aws::create($validated);
-
-        return redirect()->route('aws.index')->with('success', 'AWS report added successfully.');
+        return redirect()->route('aws.index')->with('success', 'AWS report submission successfully added.');
     }
 
     public function update(Request $request, Aws $aws)
     {
-        $validated = $request->validate($this->validationRules(fileRequired: false));
+        abort_unless($aws->timestamps === null, 404);
+        $validated = $request->validate([...$this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type), 'remove_report_file' => ['nullable', 'boolean']]);
+        $oldPath = $aws->report_file_path;
+        $storedPath = null;
+        $removeOld = $request->boolean('remove_report_file') || $request->hasFile('report_file');
 
-        if ($request->hasFile('report_file')) {
-            $path = $request->file('report_file')->store('aws_reports', 'public');
-            $validated['report_file_path'] = $path;
-            $validated['report_file_name'] = $request->file('report_file')->getClientOriginalName();
-
-            if ($aws->report_file_path) {
-                Storage::disk('public')->delete($aws->report_file_path);
-            }
-        }
-        elseif (
-            !$request->hasFile('report_file') &&
-            ($request->input('report_file') === null || $request->input('report_file') === 'null' || $request->input('report_file') === '')
-        ) {
-            if ($aws->report_file_path) {
-                Storage::disk('public')->delete($aws->report_file_path);
+        try {
+            if ($request->hasFile('report_file')) {
+                $storedPath = $request->file('report_file')->store('aws_reports', 'public');
+                if (! is_string($storedPath)) throw new RuntimeException('The AWS report file could not be stored.');
+                $validated['report_file_path'] = $storedPath;
+                $validated['report_file_name'] = $request->file('report_file')->getClientOriginalName();
+            } elseif ($request->boolean('remove_report_file')) {
+                $validated['report_file_path'] = null;
+                $validated['report_file_name'] = null;
             }
 
-            $validated['report_file_path'] = null;
-            $validated['report_file_name'] = null;
+            $validated['timestamps'] = null;
+            DB::transaction(fn () => $aws->update(collect($validated)->except('remove_report_file')->all()));
+        } catch (Throwable $exception) {
+            if ($storedPath) Storage::disk('public')->delete($storedPath);
+            throw $exception;
         }
 
-        // Magpabilin nga null ang timestamps para sa manual reports
-        $validated['timestamps'] = null;
+        if ($removeOld && $oldPath) Storage::disk('public')->delete($oldPath);
 
-        $aws->update($validated);
-
-        return redirect()->route('aws.index')->with('success', 'AWS monitoring report successfully updated.');
+        return redirect()->route('aws.index')->with('success', 'AWS report submission successfully updated.');
     }
 
     public function destroy(Aws $aws)
     {
-        if ($aws->report_file_path) {
-            Storage::disk('public')->delete($aws->report_file_path);
-        }
-        $aws->delete();
+        $path = $aws->report_file_path;
+        DB::transaction(fn () => $aws->delete());
+        if ($path) Storage::disk('public')->delete($path);
 
-        return redirect()->route('aws.index')->with('success', 'AWS record successfully deleted.');
+        return redirect()->route('aws.index')->with('success', $aws->timestamps === null ? 'AWS report submission successfully deleted.' : 'AWS raw data record successfully deleted.');
+    }
+
+    public function showReportFile(Aws $aws): BinaryFileResponse
+    {
+        abort_unless($aws->timestamps === null && $aws->report_file_path && Storage::disk('public')->exists($aws->report_file_path), 404);
+
+        return response()->file(Storage::disk('public')->path($aws->report_file_path));
     }
 
     public function bulkDestroy(Request $request)
@@ -598,18 +624,46 @@ class AwsController extends Controller
         }
     }
 
-    private function validationRules(bool $fileRequired): array
+    private function validationRules(bool $fileRequired, ?string $legacyDocumentType = null): array
     {
+        $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
+
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'station_name' => ['required', 'string', 'max:255'],
             'location' => ['required', 'string', 'max:255'],
             'report_period_type' => ['required', 'string', 'in:Monthly,Quarterly,Semestral,Daily'],
+            'activity_name' => ['nullable', 'string', 'max:255'],
+            'document_type' => ['required', 'string', Rule::in($documentTypes)],
+            'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
+            'date_conducted' => ['nullable', 'string', 'max:255'],
+            'date_accomplished' => ['nullable', 'date'],
+            'date_report_released_cenro' => ['nullable', 'date'],
+            'date_received_penro' => ['nullable', 'date'],
+            'date_endorsed_regional' => ['nullable', 'date'],
             'start_date' => ['required', 'date'],
             'end_date' => ['required', 'date', 'after_or_equal:start_date'],
             'status' => ['required', 'string', 'in:Active,Maintenance,Inactive,Approve,Pending,Under Maintenance'],
             'recommendation_remarks' => ['nullable', 'string'],
             'report_file' => [$fileRequired ? 'required' : 'nullable', 'file', 'mimes:xlsx,xls,docx,pdf', 'max:10240'],
+        ];
+    }
+
+    private function reportData(Aws $report): array
+    {
+        return [
+            ...$report->toArray(),
+            'protected_area_name' => $report->protectedArea?->name,
+            'document_type' => $report->document_type ?: $report->report_period_type,
+            'date_accomplished' => $report->date_accomplished?->toDateString(),
+            'date_report_released_cenro' => $report->date_report_released_cenro?->toDateString(),
+            'date_received_penro' => $report->date_received_penro?->toDateString(),
+            'date_endorsed_regional' => $report->date_endorsed_regional?->toDateString(),
+            'report_file' => $report->report_file_path ? [
+                'name' => $report->report_file_name ?: basename($report->report_file_path),
+                'type' => '',
+                'url' => route('aws.report-file.show', $report),
+            ] : null,
         ];
     }
 }

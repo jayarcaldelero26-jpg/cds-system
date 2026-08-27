@@ -93,7 +93,7 @@ class EcotourismMonitoringController extends Controller
         EcotourismMonitoring::create($validated);
 
         return redirect()->route('ecotourism-monitorings.index')
-            ->with('status', 'ecotourism-monitoring-created');
+            ->with('success', 'Ecotourism monitoring record created successfully.');
     }
 
     public function edit(EcotourismMonitoring $ecotourismMonitoring)
@@ -144,7 +144,7 @@ class EcotourismMonitoringController extends Controller
         $ecotourismMonitoring->update($validated);
 
         return redirect()->route('ecotourism-monitorings.index')
-            ->with('status', 'ecotourism-monitoring-updated');
+            ->with('success', 'Ecotourism monitoring record updated successfully.');
     }
 
     public function destroy(EcotourismMonitoring $ecotourismMonitoring)
@@ -156,6 +156,6 @@ class EcotourismMonitoringController extends Controller
         $ecotourismMonitoring->delete();
 
         return redirect()->route('ecotourism-monitorings.index')
-            ->with('status', 'ecotourism-monitoring-deleted');
+            ->with('success', 'Ecotourism monitoring record deleted successfully.');
     }
 }

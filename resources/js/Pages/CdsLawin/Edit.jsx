@@ -1,5 +1,6 @@
 import { Head, useForm, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
+import { FloatingInput, FloatingTextarea } from '@/Components/Form';
 
 export default function Edit({ auth, lawin }) {
     const { data, setData, patch, processing, errors } = useForm({
@@ -29,78 +30,69 @@ export default function Edit({ auth, lawin }) {
                     <div className="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg p-6">
                         <form onSubmit={submit} className="space-y-6">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Patrol Area / Protected Area</label>
-                                <input
+                                <FloatingInput id="cds-lawin-area" label="Patrol Area / Protected Area"
                                     type="text"
                                     value={data.patrol_area}
+                                    error={errors.patrol_area}
                                     onChange={(e) => setData('patrol_area', e.target.value)}
-                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                     required
                                 />
-                                {errors.patrol_area && <span className="text-red-500 text-xs">{errors.patrol_area}</span>}
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Patrol Date</label>
-                                    <input
+                                    <FloatingInput id="cds-lawin-date" label="Patrol Date"
                                         type="date"
-                                        value={data.patrol_date}
+                                    value={data.patrol_date}
+                                    error={errors.patrol_date}
                                         onChange={(e) => setData('patrol_date', e.target.value)}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                         required
                                     />
-                                    {errors.patrol_date && <span className="text-red-500 text-xs">{errors.patrol_date}</span>}
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Ecoregion</label>
-                                    <input
+                                    <FloatingInput id="cds-lawin-ecoregion" label="Ecoregion"
                                         type="text"
-                                        value={data.ecoregion}
+                                    value={data.ecoregion}
+                                    error={errors.ecoregion}
                                         onChange={(e) => setData('ecoregion', e.target.value)}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                     />
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Leader</label>
-                                    <input
+                                    <FloatingInput id="cds-lawin-leader" label="Team Leader"
                                         type="text"
-                                        value={data.team_leader}
+                                    value={data.team_leader}
+                                    error={errors.team_leader}
                                         onChange={(e) => setData('team_leader', e.target.value)}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Team Members Count</label>
-                                    <input
+                                    <FloatingInput id="cds-lawin-members" label="Team Members Count"
                                         type="number"
-                                        value={data.team_members_count}
+                                    value={data.team_members_count}
+                                    error={errors.team_members_count}
                                         onChange={(e) => setData('team_members_count', e.target.value)}
-                                        className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                     />
                                 </div>
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Threats Observed</label>
-                                <textarea
+                                <FloatingTextarea id="cds-lawin-threats" label="Threats Observed"
                                     value={data.threats_observed}
+                                    error={errors.threats_observed}
                                     onChange={(e) => setData('threats_observed', e.target.value)}
                                     rows="3"
-                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                 />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Remarks</label>
-                                <textarea
+                                <FloatingTextarea id="cds-lawin-remarks" label="Remarks"
                                     value={data.remarks}
+                                    error={errors.remarks}
                                     onChange={(e) => setData('remarks', e.target.value)}
                                     rows="3"
-                                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500 dark:bg-gray-900 dark:border-gray-700 dark:text-white"
                                 />
                             </div>
 

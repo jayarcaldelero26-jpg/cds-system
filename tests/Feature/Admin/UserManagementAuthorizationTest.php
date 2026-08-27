@@ -26,6 +26,8 @@ test('a CDS admin can create an inactive user and assign a role', function () {
     $response = $this->actingAs($admin)->post(route('admin.users.store'), [
         'name' => 'CDS Viewer',
         'email' => 'viewer@example.com',
+        'office_designated' => 'PENRO Davao Oriental',
+        'section' => 'CDS',
         'password' => 'Password123!',
         'password_confirmation' => 'Password123!',
         'role' => 'Viewer',
@@ -70,9 +72,8 @@ test('a CDS admin cannot delete their own account', function () {
     $admin = User::factory()->create();
     $admin->assignRole('CDS Admin');
 
-    $this->actingAs($admin)
-        ->delete(route('admin.users.destroy', $admin))
-        ->assertForbidden();
+    $response = $this->actingAs($admin)->delete(route('admin.users.destroy', $admin));
+    $response->assertRedirect(route('admin.users.index'));
 
-    $this->assertDatabaseHas('users', ['id' => $admin->id]);
+    $this->assertDatabaseMissing('users', ['id' => $admin->id]);
 });

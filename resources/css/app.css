@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes floating-field-autofill {
+    from { opacity: 0.99; }
+    to { opacity: 1; }
+}
+
+input:-webkit-autofill,
+select:-webkit-autofill,
+textarea:-webkit-autofill {
+    animation-name: floating-field-autofill;
+    animation-duration: 0.01s;
+}
+
 @layer base {
     html {
         @apply bg-gray-100 text-gray-900 antialiased;
@@ -50,4 +62,65 @@
 
 ::-webkit-scrollbar-thumb:hover {
     background: #15803d; /* Darker green when hovering */
+}
+
+.global-loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    background: rgb(255 255 255 / 0.08);
+    backdrop-filter: blur(1px);
+    -webkit-backdrop-filter: blur(1px);
+    cursor: wait;
+}
+
+.global-loading-card {
+    display: flex;
+    width: min(9rem, calc(100vw - 2rem));
+    flex-direction: column;
+    align-items: center;
+    gap: 0.55rem;
+    border: 1px solid rgb(148 163 184 / 0.35);
+    border-radius: 0.9rem;
+    background: rgb(255 255 255 / 0.94);
+    padding: 1rem 1.25rem;
+    box-shadow: 0 12px 30px rgb(15 23 42 / 0.12);
+}
+
+.global-loading-gears { width: 4.5rem; height: 4rem; overflow: visible; color: #2563eb; }
+.global-loading-gear { fill: currentColor; transform-box: fill-box; transform-origin: center; }
+.global-loading-gear-large { animation: global-loading-gear-clockwise 1.15s linear infinite; }
+.global-loading-gear-small { opacity: 0.82; animation: global-loading-gear-counterclockwise 0.9s linear infinite; }
+.global-loading-gear-hole { fill: rgb(255 255 255 / 0.94); }
+.global-loading-label { font-size: 0.75rem; font-weight: 600; color: #334155; }
+.global-loading-inline-gear { width: 1rem; height: 1rem; color: #2563eb; }
+
+@keyframes global-loading-gear-clockwise { to { transform: rotate(360deg); } }
+@keyframes global-loading-gear-counterclockwise { to { transform: rotate(-360deg); } }
+
+.tooltip-trigger { display: inline-flex; }
+.shared-tooltip { position: fixed; z-index: 200; width: max-content; max-width: min(17.5rem, calc(100vw - 1rem)); transform: translate(-50%, -100%); border: 1px solid rgb(255 255 255 / 0.08); border-radius: 0.4rem; background: rgb(30 41 59 / 0.96); padding: 0.35rem 0.55rem; color: #f8fafc; font-size: 0.75rem; line-height: 1.25rem; pointer-events: none; box-shadow: 0 8px 18px rgb(15 23 42 / 0.2); animation: shared-tooltip-in 140ms ease-out both; }
+.shared-tooltip-bottom { transform: translate(-50%, 0); }
+.shared-tooltip-left { transform: translate(-100%, -50%); }
+.shared-tooltip-right { transform: translate(0, -50%); }
+.shared-tooltip-arrow { position: absolute; width: 0.42rem; height: 0.42rem; background: inherit; transform: rotate(45deg); }
+.shared-tooltip-top .shared-tooltip-arrow { bottom: -0.24rem; left: calc(50% - 0.21rem); }
+.shared-tooltip-bottom .shared-tooltip-arrow { top: -0.24rem; left: calc(50% - 0.21rem); }
+.shared-tooltip-left .shared-tooltip-arrow { right: -0.24rem; top: calc(50% - 0.21rem); }
+.shared-tooltip-right .shared-tooltip-arrow { left: -0.24rem; top: calc(50% - 0.21rem); }
+@keyframes shared-tooltip-in { from { opacity: 0; } to { opacity: 1; } }
+
+.dark .global-loading-overlay { background: rgb(2 6 23 / 0.12); }
+.dark .global-loading-card { border-color: rgb(71 85 105 / 0.55); background: rgb(15 23 42 / 0.94); box-shadow: 0 12px 30px rgb(0 0 0 / 0.24); }
+.dark .global-loading-label { color: #cbd5e1; }
+.dark .global-loading-gear-hole { fill: rgb(15 23 42 / 0.94); }
+.dark .shared-tooltip { background: rgb(51 65 85 / 0.98); }
+
+@media (prefers-reduced-motion: reduce) {
+    .global-loading-gear { animation: none; opacity: 0.75; }
+    .shared-tooltip { animation: none; }
 }

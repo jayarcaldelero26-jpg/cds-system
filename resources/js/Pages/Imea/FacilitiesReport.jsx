@@ -1,75 +1,76 @@
-import { Link, router, usePage } from '@inertiajs/react';
+import { FloatingSelect } from "@/Components/Form";import { Link, router, usePage } from '@inertiajs/react';
 import { useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
+import Tooltip from '@/Components/Tooltip';
 
 export default function FacilitiesReport({
-    totalFacilities,
-    muzCount,
-    spzCount,
-    newStructuresCount,
-    facilitiesList,
-    protectedAreas,
-    inventoryDates = [], // Lista sa mga na-encode nga inventory dates para sa dropdown
-    filters
+  totalFacilities,
+  muzCount,
+  spzCount,
+  newStructuresCount,
+  facilitiesList,
+  protectedAreas,
+  inventoryDates = [], // Lista sa mga na-encode nga inventory dates para sa dropdown
+  filters
 }) {
-    const canExportImea = usePage().props.auth?.canExportImea ?? false;
-    const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
-    const [selectedZone, setSelectedZone] = useState(filters.zone || '');
-    const [selectedInventoryDate, setSelectedInventoryDate] = useState(filters.inventory_date || '');
+  const canExportImea = usePage().props.auth?.canExportImea ?? false;
+  const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
+  const [selectedZone, setSelectedZone] = useState(filters.zone || '');
+  const [selectedInventoryDate, setSelectedInventoryDate] = useState(filters.inventory_date || '');
 
-    // Facility Detail Modal State
-    const [selectedFacility, setSelectedFacility] = useState(null);
-    const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
+  // Facility Detail Modal State
+  const [selectedFacility, setSelectedFacility] = useState(null);
+  const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
 
-    // Dynamic As-Of Date para sa header ug print view
-    const currentInventoryDateDisplay = selectedInventoryDate
-        ? `As of ${selectedInventoryDate}`
-        : (facilitiesList && facilitiesList.length > 0 && facilitiesList[0].inventory_date
-            ? `As of ${facilitiesList[0].inventory_date}`
-            : 'As of Recent Inventory');
+  // Dynamic As-Of Date para sa header ug print view
+  const currentInventoryDateDisplay = selectedInventoryDate ?
+  `As of ${selectedInventoryDate}` :
+  facilitiesList && facilitiesList.length > 0 && facilitiesList[0].inventory_date ?
+  `As of ${facilitiesList[0].inventory_date}` :
+  'As of Recent Inventory';
 
-    const handleFilterChange = (type, value) => {
-        const queryParams = {
-            protected_area_id: type === 'pa' ? value : selectedPA,
-            zone: type === 'zone' ? value : selectedZone,
-            inventory_date: type === 'date' ? value : selectedInventoryDate,
-        };
-
-        Object.keys(queryParams).forEach(key => {
-            if (!queryParams[key]) delete queryParams[key];
-        });
-
-        router.get('/imea/facilities-report', queryParams, {
-            preserveState: true,
-            preserveScroll: true,
-            replace: true,
-        });
+  const handleFilterChange = (type, value) => {
+    const queryParams = {
+      protected_area_id: type === 'pa' ? value : selectedPA,
+      zone: type === 'zone' ? value : selectedZone,
+      inventory_date: type === 'date' ? value : selectedInventoryDate
     };
 
-    const resetFilters = () => {
-        setSelectedPA('');
-        setSelectedZone('');
-        setSelectedInventoryDate('');
-        router.get('/imea/facilities-report', {}, { preserveState: true });
-    };
+    Object.keys(queryParams).forEach((key) => {
+      if (!queryParams[key]) delete queryParams[key];
+    });
 
-    const handlePrint = () => {
-        window.print();
-    };
+    router.get('/imea/facilities-report', queryParams, {
+      preserveState: true,
+      preserveScroll: true,
+      replace: true
+    });
+  };
 
-    const openFacilityModal = (facility) => {
-        setSelectedFacility(facility);
-        setIsFacilityModalOpen(true);
-    };
+  const resetFilters = () => {
+    setSelectedPA('');
+    setSelectedZone('');
+    setSelectedInventoryDate('');
+    router.get('/imea/facilities-report', {}, { preserveState: true });
+  };
 
-    const closeFacilityModal = () => {
-        setIsFacilityModalOpen(false);
-        setSelectedFacility(null);
-    };
+  const handlePrint = () => {
+    window.print();
+  };
 
-    return (
-        <AuthenticatedLayout title="Facilities Summary Report">
+  const openFacilityModal = (facility) => {
+    setSelectedFacility(facility);
+    setIsFacilityModalOpen(true);
+  };
+
+  const closeFacilityModal = () => {
+    setIsFacilityModalOpen(false);
+    setSelectedFacility(null);
+  };
+
+  return (
+    <AuthenticatedLayout title="Facilities Summary Report">
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
@@ -102,7 +103,7 @@ export default function FacilitiesReport({
                 <div className="print-header space-y-1.5 pb-2 mb-2 border-b-2 border-black" style={{ fontFamily: '"Times New Roman", Times, serif' }}>
                     <div className="flex items-center justify-between">
                         <div className="w-20 h-20 flex items-center justify-center shrink-0">
-                            <img src="/images/DENR LOGO.png" alt="DENR Logo" className="w-20 h-20 object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+                            <img src="/images/DENR LOGO.png" alt="DENR Logo" className="w-20 h-20 object-contain" onError={(e) => {e.target.style.display = 'none';}} />
                         </div>
                         <div className="text-center space-y-0.5 flex-1 px-2">
                             <p style={{ fontSize: '8pt' }} className="font-bold tracking-widest text-black">REPUBLIC OF THE PHILIPPINES</p>
@@ -111,7 +112,7 @@ export default function FacilitiesReport({
                             <p style={{ fontSize: '8pt' }} className="font-semibold text-gray-800">GOVERNMENT CENTER, DAHICAN, CITY OF MATI</p>
                         </div>
                         <div className="w-20 h-20 flex items-center justify-center shrink-0">
-                            <img src="/images/Bagong Pilipinas logo.png" alt="Bagong Pilipinas Logo" className="w-20 h-20 object-contain" onError={(e) => { e.target.style.display = 'none'; }} />
+                            <img src="/images/Bagong Pilipinas logo.png" alt="Bagong Pilipinas Logo" className="w-20 h-20 object-contain" onError={(e) => {e.target.style.display = 'none';}} />
                         </div>
                     </div>
                 </div>
@@ -135,14 +136,14 @@ export default function FacilitiesReport({
                             <p className="mt-1 text-sm text-green-100">Consolidated zoning and infrastructure records ({currentInventoryDateDisplay}).</p>
                         </div>
                         <div className="flex items-center gap-3">
-                            {canExportImea && (
-                                <a
-                                    href={`/imea/facilities-export?protected_area_id=${selectedPA}&zone=${selectedZone}&inventory_date=${selectedInventoryDate}`}
-                                    className="inline-flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition whitespace-nowrap"
-                                >
+                            {canExportImea &&
+              <a
+                href={`/imea/facilities-export?protected_area_id=${selectedPA}&zone=${selectedZone}&inventory_date=${selectedInventoryDate}`}
+                className="inline-flex items-center justify-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition whitespace-nowrap">
+
                                     Export to CSV
                                 </a>
-                            )}
+              }
                             <button onClick={handlePrint} className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition">
                                 🖨️ Print / Save PDF
                             </button>
@@ -158,28 +159,28 @@ export default function FacilitiesReport({
                     <Card className="border border-gray-100 dark:border-gray-800 shadow-lg rounded-2xl bg-white dark:bg-gray-900 p-4">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Filter by Protected Area</label>
-                                <select value={selectedPA} onChange={(e) => { setSelectedPA(e.target.value); handleFilterChange('pa', e.target.value); }} className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm">
+
+                                <FloatingSelect id="facilitiesreport-filter-by-protected-area" label="Filter by Protected Area" value={selectedPA} onChange={(e) => {setSelectedPA(e.target.value);handleFilterChange('pa', e.target.value);}} size="sm">
                                     <option value="">All Protected Areas</option>
-                                    {protectedAreas.map((pa) => (<option key={pa.id} value={pa.id}>{pa.name}</option>))}
-                                </select>
+                                    {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
+                                </FloatingSelect>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Filter by Management Zone</label>
-                                <select value={selectedZone} onChange={(e) => { setSelectedZone(e.target.value); handleFilterChange('zone', e.target.value); }} className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm">
+
+                                <FloatingSelect id="facilitiesreport-filter-by-management-zone" label="Filter by Management Zone" value={selectedZone} onChange={(e) => {setSelectedZone(e.target.value);handleFilterChange('zone', e.target.value);}} size="sm">
                                     <option value="">All Zones</option>
                                     <option value="MUZ">MUZ (Multiple Use Zone)</option>
                                     <option value="SPZ">SPZ (Strict Protection Zone)</option>
-                                </select>
+                                </FloatingSelect>
                             </div>
                             <div>
-                                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">Date Conducted (As Of)</label>
-                                <select value={selectedInventoryDate} onChange={(e) => { setSelectedInventoryDate(e.target.value); handleFilterChange('date', e.target.value); }} className="w-full rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-sm">
+
+                                <FloatingSelect id="facilitiesreport-date-conducted-as-of" label="Date Conducted (As Of)" value={selectedInventoryDate} onChange={(e) => {setSelectedInventoryDate(e.target.value);handleFilterChange('date', e.target.value);}}>
                                     <option value="">All Inventory Dates</option>
-                                    {inventoryDates.map((dateVal, index) => (
-                                        <option key={index} value={dateVal}>{dateVal}</option>
-                                    ))}
-                                </select>
+                                    {inventoryDates.map((dateVal, index) =>
+                  <option key={index} value={dateVal}>{dateVal}</option>
+                  )}
+                                </FloatingSelect>
                             </div>
                             <div>
                                 <button type="button" onClick={resetFilters} className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition">
@@ -224,8 +225,8 @@ export default function FacilitiesReport({
                             </div>
                             <span className="text-xs text-gray-500 italic no-print">💡 Click any row to view full details</span>
                         </div>
-                        {facilitiesList && facilitiesList.length > 0 ? (
-                            <div className="overflow-x-auto custom-table-scrollbar">
+                        {facilitiesList && facilitiesList.length > 0 ?
+            <div className="overflow-x-auto custom-table-scrollbar">
                                 <table className="w-full text-left border-collapse text-xs">
                                     <thead>
                                         <tr className="border-b border-gray-200 bg-green-900 text-white uppercase tracking-wider dark:border-gray-700">
@@ -241,12 +242,12 @@ export default function FacilitiesReport({
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                                        {facilitiesList.map((row) => (
-                                            <tr
-                                                key={row.id}
-                                                onClick={() => openFacilityModal(row)}
-                                                className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30"
-                                            >
+                                        {facilitiesList.map((row) =>
+                  <tr
+                    key={row.id}
+                    onClick={() => openFacilityModal(row)}
+                    className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
+
                                                 <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
                                                 <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">{row.facility_type}</td>
                                                 <td className="px-4 py-3">{row.unit_no}</td>
@@ -259,25 +260,25 @@ export default function FacilitiesReport({
                                                         {row.status}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 py-3 truncate max-w-xs">{row.recommendations || '—'}</td>
+                                                <td className="px-4 py-3 truncate max-w-xs">{row.recommendations ? <Tooltip content={row.recommendations}><span tabIndex={0} className="outline-none">{row.recommendations}</span></Tooltip> : '—'}</td>
                                             </tr>
-                                        ))}
+                  )}
                                     </tbody>
                                 </table>
-                            </div>
-                        ) : (
-                            <div className="p-12 text-center">
+                            </div> :
+
+            <div className="p-12 text-center">
                                 <p className="text-xs text-gray-500">No facility records found.</p>
                             </div>
-                        )}
+            }
                     </Card>
                 </div>
 
             </div>
 
             {/* FACILITY FULL DETAILS MODAL */}
-            {isFacilityModalOpen && selectedFacility && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print">
+            {isFacilityModalOpen && selectedFacility &&
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print">
                     <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto animate-pop-in custom-table-scrollbar border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-4 dark:border-gray-800">
                             <div className="flex items-center gap-2">
@@ -345,17 +346,17 @@ export default function FacilitiesReport({
 
                             <div className="flex justify-end pt-2 border-t border-gray-100 dark:border-gray-800">
                                 <button
-                                    type="button"
-                                    onClick={closeFacilityModal}
-                                    className="rounded-lg bg-green-800 hover:bg-green-900 text-white font-semibold py-2 px-5 text-xs transition"
-                                >
+                type="button"
+                onClick={closeFacilityModal}
+                className="rounded-lg bg-green-800 hover:bg-green-900 text-white font-semibold py-2 px-5 text-xs transition">
+
                                     Close Details
                                 </button>
                             </div>
                         </div>
                     </div>
                 </div>
-            )}
-        </AuthenticatedLayout>
-    );
+      }
+        </AuthenticatedLayout>);
+
 }

@@ -64,6 +64,8 @@ class BmsReportSubmission extends Model
 
     public function getDeadlineSubmissionAttribute(): ?string
     {
+        // BMS, BAMS, and IMEA use the 15-working-day submission standard.
+        // The 7-working-day standard applies only to General/Other Reports.
         return $this->date_accomplished
             ? $this->date_accomplished->copy()->addWeekdays(15)->format('Y-m-d')
             : null;
@@ -99,7 +101,8 @@ class BmsReportSubmission extends Model
             $days <= 13 => 'Very Satisfactory',
             $days <= 15 => 'Satisfactory',
             $days <= 29 => 'Unsatisfactory',
-            default => 'Poor',
+            $days <= 90 => 'Poor',
+            default => 'No Rating',
         };
     }
 
@@ -113,18 +116,18 @@ class BmsReportSubmission extends Model
             return 'Report Submitted';
         }
 
-        return now()->startOfDay()->greaterThan($this->date_accomplished->copy()->addWeekdays(15))
+        return now()->startOfDay()->greaterThan($this->date_accomplished->copy()->addWeekdays(15)->startOfDay())
             ? 'Report Not Yet Submitted'
             : 'Ongoing Preparation at CENRO Level';
     }
 
-    public function getTotalDaysDelayedPenroAttribute(): ?int
+    public function getTotalDaysDelayedPenroAttribute(): int|string
     {
         if (! $this->date_received_penro || ! $this->date_endorsed_regional) {
-            return null;
+            return 'Please Update Date Endorsed to Regional Office';
         }
 
-        return self::workingDaysAfterThrough($this->date_received_penro, $this->date_endorsed_regional);
+        return (int) $this->date_received_penro->diffInDays($this->date_endorsed_regional);
     }
 
     public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end): int

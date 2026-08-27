@@ -1,14 +1,11 @@
 import { Link, useForm } from '@inertiajs/react';
-import { useState } from 'react';
 import Input from '../../Components/Input';
+import FloatingSelect from '../../Components/Form/FloatingSelect';
 import PrimaryButton from '../../Components/PrimaryButton';
 import SecondaryButton from '../../Components/SecondaryButton';
 import AuthLayout from '../../Layouts/AuthLayout';
-import Modal from '../../Components/Modal'; // 🚀 Gi-import ang imong Modal component
 
 export default function Register() {
-    const [showSuccessModal, setShowSuccessModal] = useState(false);
-
     const { data, setData, post, processing, errors } = useForm({
         name: '',
         email: '',
@@ -20,9 +17,7 @@ export default function Register() {
 
     const submit = (event) => {
         event.preventDefault();
-        post('/register', {
-            onSuccess: () => setShowSuccessModal(true),
-        });
+        post('/register');
     };
 
     return (
@@ -63,28 +58,11 @@ export default function Register() {
                     />
 
                     {/* Section Dropdown Field (CDS vs MES) */}
-                    <div>
-                        <label htmlFor="section" className="block text-sm font-semibold text-gray-700 dark:text-gray-200">
-                            Section
-                        </label>
-                        <select
-                            id="section"
-                            name="section"
-                            value={data.section}
-                            onChange={(event) => setData('section', event.target.value)}
-                            required
-                            className="mt-1.5 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-600 focus:ring-green-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300"
-                        >
+                    <FloatingSelect id="section" label="Section" name="section" value={data.section} onChange={(event) => setData('section', event.target.value)} required error={errors.section}>
                             <option value="">Select Section</option>
                             <option value="CDS">Conservation Development Section (CDS)</option>
                             <option value="MES">Monitoring and Enforcement Section (MES)</option>
-                        </select>
-                        {errors.section && (
-                            <p className="mt-1.5 text-sm text-red-700 dark:text-red-300" role="alert">
-                                {errors.section}
-                            </p>
-                        )}
-                    </div>
+                    </FloatingSelect>
 
                     <Field
                         id="password"
@@ -116,32 +94,6 @@ export default function Register() {
                 </p>
             </div>
 
-            {/* 🚀 Uniporme nga Success Modal gamit ang imong Modal Component */}
-            <Modal
-                open={showSuccessModal}
-                onClose={() => {}} // Dili nato i-allow nga masirhan pinaagi sa click sa gawas aron mapugos sila sa pag-click sa button
-                title="Registration Successful"
-                size="md"
-                footer={
-                    <Link
-                        href="/login"
-                        className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-700"
-                    >
-                        Go to Sign in
-                    </Link>
-                }
-            >
-                <div className="flex items-center gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300 text-xl font-bold">
-                        ✓
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-600 dark:text-gray-300">
-                            Your account has been created successfully and is currently pending administrator approval. Click the button below to proceed to the sign-in page.
-                        </p>
-                    </div>
-                </div>
-            </Modal>
         </AuthLayout>
     );
 }
@@ -149,9 +101,7 @@ export default function Register() {
 function Field({ id, label, error, ...props }) {
     return (
         <div>
-            <label htmlFor={id} className="block text-sm font-semibold text-gray-700 dark:text-gray-200">{label}</label>
-            <Input id={id} error={Boolean(error)} className="mt-1.5" required {...props} />
-            {error && <p className="mt-1.5 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
+            <Input id={id} label={label} error={Boolean(error)} required {...props} />
         </div>
     );
 }

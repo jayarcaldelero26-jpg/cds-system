@@ -100,7 +100,7 @@ class ProgramProjectActivityController extends Controller
         ProgramProjectActivity::create($validated);
 
         return redirect()->route('program-project-activities.index')
-            ->with('status', 'ppa-created');
+            ->with('success', 'Program, project, or activity record created successfully.');
     }
 
     public function edit(ProgramProjectActivity $programProjectActivity)
@@ -153,7 +153,7 @@ class ProgramProjectActivityController extends Controller
         $programProjectActivity->update($validated);
 
         return redirect()->route('program-project-activities.index')
-            ->with('status', 'ppa-updated');
+            ->with('success', 'Program, project, or activity record updated successfully.');
     }
 
     public function destroy(ProgramProjectActivity $programProjectActivity)
@@ -164,6 +164,6 @@ class ProgramProjectActivityController extends Controller
         $programProjectActivity->delete();
 
         return redirect()->route('program-project-activities.index')
-            ->with('status', 'ppa-deleted');
+            ->with('success', 'Program, project, or activity record deleted successfully.');
     }
 }

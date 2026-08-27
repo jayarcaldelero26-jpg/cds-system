@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\ManagementPlanType;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -42,6 +43,7 @@ class HandleInertiaRequests extends Middleware
 
         // Susiha kung Technical Staff ba ang nag-log in
         $isTechnicalStaff = $user?->hasRole('Technical Staff') ?? false;
+        $canViewManagementPlans = $isAdmin || (! $isMes && ($isStaff || ($user?->can('management-plans.view') ?? false)));
 
         return [
             ...parent::share($request),
@@ -65,7 +67,7 @@ class HandleInertiaRequests extends Middleware
                 'canDeleteProtectedAreas' => $isAdmin,
 
                 // Management Plans (CDS ra)
-                'canViewManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.view') ?? false))),
+                'canViewManagementPlans' => $canViewManagementPlans,
                 'canCreateManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.create') ?? false))),
                 'canUpdateManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.update') ?? false))),
                 'canDeleteManagementPlans' => $isAdmin,
@@ -133,6 +135,14 @@ class HandleInertiaRequests extends Middleware
                 // Reports (CDS ra)
                 'canViewReports' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
             ],
+            'managementPlanTypes' => fn () => $canViewManagementPlans
+                ? ManagementPlanType::query()
+                    ->where('is_active', true)
+                    ->orderByRaw('sort_order IS NULL')
+                    ->orderBy('sort_order')
+                    ->orderBy('name')
+                    ->get(['id', 'name', 'slug'])
+                : [],
             'flash' => [
                 'status' => fn () => $request->session()->get('status'),
                 'success' => fn () => $request->session()->get('success'),

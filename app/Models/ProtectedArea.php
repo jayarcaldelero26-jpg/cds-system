@@ -47,4 +47,9 @@ class ProtectedArea extends Model
     {
         return $this->hasMany(TechnicalReport::class);
     }
+
+    public function spatialLayers(): HasMany
+    {
+        return $this->hasMany(SpatialLayer::class);
+    }
 }

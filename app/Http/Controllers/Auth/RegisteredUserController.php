@@ -49,6 +49,6 @@ class RegisteredUserController extends Controller
         // 🚀 Gitangtang ang Auth::login($user) aron mo-pop up ang success dialog
         // ug dili mo-diretso og login samtang pending pa sa admin approval.
 
-        return back()->with('status', 'registered-successfully');
+        return back()->with('success', 'Your account was created successfully and is pending administrator approval.');
     }
 }
