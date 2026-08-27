@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ComplianceAlertRecipient;
 use App\Models\ComplianceNotificationRun;
+use App\Models\NonWorkingDay;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceAlertSettingsService;
@@ -103,6 +104,7 @@ class ComplianceAlertController extends Controller
             'recipients' => $requestUser ? ComplianceAlertRecipient::query()->with('protectedArea:id,name')->latest('id')->get()->map(fn (ComplianceAlertRecipient $recipient) => $this->recipientPayload($recipient)) : [],
             'protectedAreas' => $requestUser ? ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name']) : [],
             'settings' => $requestUser ? $effectiveSettings : null,
+            'nonWorkingDays' => $requestUser ? NonWorkingDay::query()->latest('date')->latest('id')->get()->map(fn (NonWorkingDay $day) => $this->nonWorkingDayPayload($day))->values() : [],
             'safeMode' => ! config('compliance_alerts.enabled') || ! (bool) $effectiveSettings['alerts_enabled'],
             'testEmailEnabled' => $settings->testEmailEnabled(),
             'automaticDeliveryState' => $automaticState,
@@ -252,6 +254,30 @@ class ComplianceAlertController extends Controller
         return back()->with('success', 'Compliance alert settings updated.');
     }
 
+    public function storeNonWorkingDay(Request $request): RedirectResponse
+    {
+        $data = $this->nonWorkingDayData($request);
+        try {
+            NonWorkingDay::query()->create([...$data, 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
+        } catch (QueryException $exception) {
+            $this->throwNonWorkingDayDuplicate($exception);
+        }
+
+        return back()->with('success', 'Non-working day saved.');
+    }
+
+    public function updateNonWorkingDay(Request $request, NonWorkingDay $nonWorkingDay): RedirectResponse
+    {
+        $data = $this->nonWorkingDayData($request);
+        try {
+            $nonWorkingDay->update([...$data, 'updated_by' => $request->user()->id]);
+        } catch (QueryException $exception) {
+            $this->throwNonWorkingDayDuplicate($exception);
+        }
+
+        return back()->with('success', 'Non-working day updated.');
+    }
+
     public function confirm(Request $request, OverdueReportService $reports, ComplianceConfirmationService $confirmations): RedirectResponse
     {
         $data = $request->validate(['source_type' => ['required', 'string'], 'source_id' => ['required', 'integer'], 'remarks' => ['nullable', 'string', 'max:2000']]);
@@ -299,6 +325,53 @@ class ComplianceAlertController extends Controller
         $data['cc_emails'] = $this->emails($data['cc_emails'] ?? '', 'cc_emails');
 
         return $data;
+    }
+
+    /** @return array<string, mixed> */
+    private function nonWorkingDayData(Request $request): array
+    {
+        $data = $request->validate([
+            'date' => ['required', 'date'],
+            'name' => ['required', 'string', 'max:255'],
+            'type' => ['required', Rule::in([
+                NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+                NonWorkingDay::TYPE_LOCAL_HOLIDAY,
+                NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY,
+                NonWorkingDay::TYPE_OFFICE_DECLARED_NON_WORKING_DAY,
+            ])],
+            'scope' => ['required', Rule::in([NonWorkingDay::SCOPE_NATIONAL, NonWorkingDay::SCOPE_DAVAO_ORIENTAL, NonWorkingDay::SCOPE_OFFICE])],
+            'location' => ['nullable', 'string', 'max:255'],
+            'reference' => ['nullable', 'string', 'max:255'],
+            'remarks' => ['nullable', 'string', 'max:2000'],
+            'is_active' => ['required', 'boolean'],
+        ]);
+        $data['date'] = CarbonImmutable::parse($data['date'], 'Asia/Manila')->toDateString();
+        $data['name'] = trim($data['name']);
+        $data['location'] = $data['scope'] === NonWorkingDay::SCOPE_OFFICE ? trim((string) ($data['location'] ?? '')) : '';
+        if ($data['scope'] === NonWorkingDay::SCOPE_OFFICE && $data['location'] === '') {
+            throw ValidationException::withMessages(['location' => 'An office location is required for an office-declared non-working day.']);
+        }
+
+        return $data;
+    }
+
+    private function throwNonWorkingDayDuplicate(QueryException $exception): never
+    {
+        if (str_contains(strtolower($exception->getMessage()), 'non_working_days_date_scope_location_unique')) {
+            throw ValidationException::withMessages(['date' => 'A non-working-day entry already exists for this date and scope.']);
+        }
+
+        throw $exception;
+    }
+
+    /** @return array<string, mixed> */
+    private function nonWorkingDayPayload(NonWorkingDay $day): array
+    {
+        return [
+            'id' => $day->id, 'date' => $day->date?->toDateString(), 'name' => $day->name, 'type' => $day->type,
+            'scope' => $day->scope, 'location' => $day->location, 'reference' => $day->reference, 'remarks' => $day->remarks,
+            'is_active' => $day->is_active, 'created_at' => $day->created_at?->toIso8601String(), 'updated_at' => $day->updated_at?->toIso8601String(),
+        ];
     }
 
     /** @param array<string,mixed> $data */

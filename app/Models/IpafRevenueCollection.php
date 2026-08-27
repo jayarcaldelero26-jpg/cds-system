@@ -2,7 +2,7 @@
 
 namespace App\Models;
 
-use Carbon\Carbon;
+use App\Services\BusinessCalendarService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -14,7 +14,7 @@ class IpafRevenueCollection extends Model
     public function protectedArea(): BelongsTo { return $this->belongsTo(ProtectedArea::class); }
     public function getIpafRiaAttribute(): string { return self::split($this->total_collected)['ipaf_ria']; }
     public function getSagfAttribute(): string { return self::split($this->total_collected)['sagf']; }
-    public function getNumberDaysCompliedAttribute(): ?int { if (! $this->deadline_submission || ! $this->date_received_penro) return null; return $this->date_received_penro->diffInDays(Carbon::parse($this->deadline_submission), false); }
+    public function getNumberDaysCompliedAttribute(): ?int { if (! $this->deadline_submission || ! $this->date_received_penro) return null; return app(BusinessCalendarService::class)->signedWorkingDayDifference($this->deadline_submission, $this->date_received_penro, $this->target_office ?? null); }
     public function getTimelinessAttribute(): string
     {
         if (! $this->deadline_submission || ! $this->date_report_released_cenro || ! $this->date_received_penro) return 'No Data';

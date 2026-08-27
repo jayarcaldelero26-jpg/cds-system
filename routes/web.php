@@ -60,6 +60,8 @@ Route::middleware('auth')->group(function () {
     Route::patch('compliance-alerts/recipients/{recipient}/status', [ComplianceAlertController::class, 'toggleRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.status');
     Route::delete('compliance-alerts/recipients/{recipient}', [ComplianceAlertController::class, 'destroyRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.destroy');
     Route::put('compliance-alerts/settings', [ComplianceAlertController::class, 'updateSettings'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.settings.update');
+    Route::post('compliance-alerts/non-working-days', [ComplianceAlertController::class, 'storeNonWorkingDay'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.non-working-days.store');
+    Route::put('compliance-alerts/non-working-days/{nonWorkingDay}', [ComplianceAlertController::class, 'updateNonWorkingDay'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.non-working-days.update');
     Route::post('compliance-alerts/confirmations', [ComplianceAlertController::class, 'confirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.confirm');
     Route::delete('compliance-alerts/confirmations', [ComplianceAlertController::class, 'unconfirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.unconfirm');
 

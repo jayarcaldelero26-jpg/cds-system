@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceConfirmationService;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\BusinessCalendarService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
@@ -53,7 +54,7 @@ function bmsForDeadline(ProtectedArea $area, User $user, string $deadline, array
     $report = BmsReportSubmission::create([...[ 
         'protected_area_id' => $area->id, 'target_office' => 'PAMO Pujada Bay', 'activity_name' => 'Monitoring on the Established BMS site',
         'document_type' => 'Final Report', 'semester' => '1st Semester',
-        'date_accomplished' => CarbonImmutable::parse($deadline, 'Asia/Manila')->subWeekdays(15)->toDateString(),
+        'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays($deadline, -15)->toDateString(),
         'created_by' => $user->id, 'updated_by' => $user->id,
     ], ...$overrides]);
     if (! array_key_exists('mov_file_path', $overrides)) {
@@ -90,8 +91,8 @@ function enabledComplianceSettings(array $overrides = []): ComplianceAlertSettin
 /** @return array<class-string, \Illuminate\Database\Eloquent\Model> */
 function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string $deadline): array
 {
-    $standardAStart = CarbonImmutable::parse($deadline, 'Asia/Manila')->subWeekdays(15)->toDateString();
-    $standardBStart = CarbonImmutable::parse($deadline, 'Asia/Manila')->subWeekdays(7)->toDateString();
+    $standardAStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -15)->toDateString();
+    $standardBStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7)->toDateString();
     $common = ['protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'Compliance activity', 'document_type' => 'Final Report', 'created_by' => $user->id, 'updated_by' => $user->id];
 
     $records = [
@@ -138,12 +139,12 @@ test('future and today deadlines are not overdue while yesterday is one calendar
 
 test('overdue days use calendar days rather than tracker working-day formulas', function () {
     $user = complianceUser(); $area = complianceArea($user);
-    $report = bmsForDeadline($area, $user, '2026-08-21');
+    $report = bmsForDeadline($area, $user, '2026-08-20');
 
     $normalized = app(OverdueReportService::class)->overdueReports()->first();
 
-    expect($report->deadline_submission)->toBe('2026-08-21')
-        ->and($normalized->daysOverdue)->toBe(4);
+    expect($report->deadline_submission)->toBe('2026-08-20')
+        ->and($normalized->daysOverdue)->toBe(5);
 });
 
 test('multiple tracker models normalize into the same overdue DTO', function () {
@@ -151,7 +152,7 @@ test('multiple tracker models normalize into the same overdue DTO', function () 
     $bms = bmsForDeadline($area, $user, '2026-08-24');
     $technical = TechnicalReport::create([
         'protected_area_id' => $area->id, 'report_type' => 'Technical Assessment', 'activity_name' => 'Technical Assessment Activity',
-        'target_office' => 'PAMO Pujada Bay', 'date_accomplished' => CarbonImmutable::parse('2026-08-24')->subWeekdays(7)->toDateString(),
+        'target_office' => 'PAMO Pujada Bay', 'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays('2026-08-24', -7)->toDateString(),
         'status' => 'Pending', 'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
 
@@ -253,7 +254,7 @@ test('confirmation history safely labels a missing source record', function () {
 
 test('automatic runs deduplicate a sent memorandum for the same recipient and local date', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
-    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-21');
+    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-20');
     ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
     $delivery = app(ComplianceAlertDeliveryService::class);
 
@@ -266,7 +267,7 @@ test('automatic runs deduplicate a sent memorandum for the same recipient and lo
 
 test('automatic delivery is eligible on Monday and Friday but skips Saturday and Sunday', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
-    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-21');
+    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-20');
     ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
     enabledComplianceSettings();
     $delivery = app(ComplianceAlertDeliveryService::class);
@@ -398,7 +399,7 @@ test('existing Standard A and Standard B deadline calculations remain authoritat
     ]);
 
     expect($standardA->deadline_submission)->toBe('2026-08-24')
-        ->and($standardB->deadline_submission)->toBe('2026-08-25');
+        ->and($standardB->deadline_submission)->toBe('2026-08-26');
 });
 
 test('an exact Protected Area recipient mapping wins over office and fallback mappings', function () {
@@ -830,9 +831,9 @@ test('boss default office mappings resolve exact recipients and presentation dat
     $baganga = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id]);
     $hamiguitan = ProtectedArea::create(['name' => 'Mt. Hamiguitan Range Wildlife Sanctuary', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id]);
     $mati = ProtectedArea::create(['name' => 'Mati Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id]);
-    bmsForDeadline($baganga, $user, '2026-08-21', ['target_office' => 'Baganga']);
-    bmsForDeadline($hamiguitan, $user, '2026-08-21', ['target_office' => 'Hamiguitan']);
-    bmsForDeadline($mati, $user, '2026-08-21', ['target_office' => 'Mati']);
+    bmsForDeadline($baganga, $user, '2026-08-20', ['target_office' => 'Baganga']);
+    bmsForDeadline($hamiguitan, $user, '2026-08-20', ['target_office' => 'Hamiguitan']);
+    bmsForDeadline($mati, $user, '2026-08-20', ['target_office' => 'Mati']);
 
     $plan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
     $byOffice = $plan['deliveries']->keyBy(fn (array $delivery) => $delivery['reports']->first()->targetOffice);

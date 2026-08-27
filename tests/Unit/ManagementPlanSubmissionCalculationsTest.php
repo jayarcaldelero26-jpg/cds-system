@@ -3,6 +3,7 @@
 namespace Tests\Unit;
 
 use App\Models\ManagementPlan;
+use App\Services\BusinessCalendarService;
 use Carbon\Carbon;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -17,7 +18,7 @@ class ManagementPlanSubmissionCalculationsTest extends TestCase
             'date_endorsed_regional' => '2026-03-30',
         ]);
 
-        $this->assertSame('2026-04-01', $plan->deadline_submission);
+        $this->assertSame('2026-04-02', $plan->deadline_submission);
         $this->assertSame(2, $plan->number_days_complied);
         $this->assertSame('Outstanding', $plan->timeliness);
         $this->assertSame('Report Submitted', $plan->submission_status);
@@ -28,9 +29,10 @@ class ManagementPlanSubmissionCalculationsTest extends TestCase
     public function test_standard_b_timeliness_boundaries(int $days, string $expected): void
     {
         $start = Carbon::parse('2026-01-05');
+        $calendar = new BusinessCalendarService;
         $plan = new ManagementPlan([
             'date_accomplished' => $start->toDateString(),
-            'date_received_penro' => $start->copy()->addWeekdays($days)->toDateString(),
+            'date_received_penro' => $calendar->addWorkingDays($start, $days)->toDateString(),
         ]);
 
         $this->assertSame($days, $plan->number_days_complied);

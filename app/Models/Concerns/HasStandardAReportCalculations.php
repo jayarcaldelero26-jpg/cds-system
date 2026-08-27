@@ -2,13 +2,16 @@
 
 namespace App\Models\Concerns;
 
+use App\Services\BusinessCalendarService;
 use Carbon\CarbonInterface;
 
 trait HasStandardAReportCalculations
 {
     public function getDeadlineSubmissionAttribute(): ?string
     {
-        return $this->date_accomplished?->copy()->addWeekdays(15)->format('Y-m-d');
+        return $this->date_accomplished
+            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 15, $this->target_office ?? null)->format('Y-m-d')
+            : null;
     }
 
     public function getNumberDaysCompliedAttribute(): int|string|null
@@ -20,7 +23,12 @@ trait HasStandardAReportCalculations
             return 'Pending Submission by CENRO';
         }
 
-        return self::workingDaysAfterThrough($this->date_accomplished, $this->date_received_penro);
+        return app(BusinessCalendarService::class)->workingDaysBetween(
+            $this->date_accomplished,
+            $this->date_received_penro,
+            'after_through',
+            $this->target_office ?? null,
+        );
     }
 
     public function getTimelinessAttribute(): string
@@ -52,7 +60,9 @@ trait HasStandardAReportCalculations
             return 'Report Submitted';
         }
 
-        return now()->startOfDay()->greaterThan($this->date_accomplished->copy()->addWeekdays(15)->startOfDay())
+        return now(BusinessCalendarService::TIMEZONE)->startOfDay()->greaterThan(
+            app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 15, $this->target_office ?? null)->startOfDay(),
+        )
             ? 'Report Not Yet Submitted'
             : 'Ongoing Preparation at CENRO Level';
     }
@@ -66,21 +76,8 @@ trait HasStandardAReportCalculations
         return (int) $this->date_received_penro->diffInDays($this->date_endorsed_regional);
     }
 
-    public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end): int
+    public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end, ?string $office = null): int
     {
-        if ($end->lessThanOrEqualTo($start)) {
-            return 0;
-        }
-        $days = 0;
-        $cursor = $start->copy()->addDay()->startOfDay();
-        $lastDay = $end->copy()->startOfDay();
-        while ($cursor->lessThanOrEqualTo($lastDay)) {
-            if ($cursor->isWeekday()) {
-                $days++;
-            }
-            $cursor->addDay();
-        }
-
-        return $days;
+        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office);
     }
 }
