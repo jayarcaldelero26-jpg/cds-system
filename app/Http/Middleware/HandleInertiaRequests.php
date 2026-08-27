@@ -57,6 +57,7 @@ class HandleInertiaRequests extends Middleware
                     'is_active' => $user->is_active,
                 ] : null,
                 'canManageUsers' => $isAdmin,
+                'canManageAdministration' => $isAdmin || (!$isMes && ($user?->can('compliance-alerts.manage') ?? false)),
 
                 // 🚀 SECTION-BASED PERMISSIONS FILTERING
 

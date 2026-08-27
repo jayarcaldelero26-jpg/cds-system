@@ -61,6 +61,7 @@ class ComplianceAlertController extends Controller
             ->values();
 
         return Inertia::render('ComplianceAlerts/Index', [
+            'view' => 'operational',
             'groups' => $groups,
             'deliveryPlan' => [
                 'deliveries' => $plan['deliveries']->map(fn (array $deliveryItem) => [
@@ -108,6 +109,33 @@ class ComplianceAlertController extends Controller
             'safeMode' => ! config('compliance_alerts.enabled') || ! (bool) $effectiveSettings['alerts_enabled'],
             'testEmailEnabled' => $settings->testEmailEnabled(),
             'automaticDeliveryState' => $automaticState,
+        ]);
+    }
+
+    public function settings(OverdueReportService $reports, ComplianceAlertDeliveryService $deliveryService, ComplianceAlertSettingsService $settings): Response
+    {
+        return Inertia::render('ComplianceAlerts/Index', [
+            'view' => 'settings',
+            'settings' => $settings->effective(),
+            'monitoredSources' => collect($reports->sourceDefinitions())->map(fn (array $definition, string $sourceType): array => ['source_type' => $sourceType, 'module' => $definition['module']])->values(),
+            'automaticDeliveryState' => $deliveryService->automaticDeliveryState(),
+        ]);
+    }
+
+    public function recipientMapping(): Response
+    {
+        return Inertia::render('ComplianceAlerts/Index', [
+            'view' => 'recipients',
+            'recipients' => ComplianceAlertRecipient::query()->with('protectedArea:id,name')->latest('id')->get()->map(fn (ComplianceAlertRecipient $recipient) => $this->recipientPayload($recipient)),
+            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name']),
+        ]);
+    }
+
+    public function businessCalendar(): Response
+    {
+        return Inertia::render('ComplianceAlerts/Index', [
+            'view' => 'calendar',
+            'nonWorkingDays' => NonWorkingDay::query()->latest('date')->latest('id')->get()->map(fn (NonWorkingDay $day) => $this->nonWorkingDayPayload($day))->values(),
         ]);
     }
 

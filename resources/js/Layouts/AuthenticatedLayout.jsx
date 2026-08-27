@@ -67,10 +67,12 @@ const allNavigation = [
 
     // --- MGA MENU NGA MAKITA SA DUHA (ADMIN / REPORTS) ---
     { label: 'Reports', href: '#', icon: 'report', comingSoon: true, permission: 'canViewReports', section: 'BOTH' },
-    { label: 'Administration', heading: true, permission: 'canManageUsers', section: 'BOTH' },
+    { label: 'Administration', heading: true, permission: 'canManageAdministration', section: 'BOTH' },
     { label: 'User Management', href: '/admin/users', icon: 'users', permission: 'canManageUsers', section: 'BOTH' },
     { label: 'Audit Logs', icon: 'audit', comingSoon: true, permission: 'canManageUsers', section: 'BOTH' },
-    { label: 'Settings', icon: 'settings', comingSoon: true, permission: 'canManageUsers', section: 'BOTH' },
+    { label: 'Recipient Mapping', href: '/admin/recipient-mapping', icon: 'users', permission: 'canManageComplianceAlerts', section: 'BOTH' },
+    { label: 'Business Calendar', href: '/admin/business-calendar', icon: 'document', permission: 'canManageComplianceAlerts', section: 'BOTH' },
+    { label: 'Settings', href: '/settings', icon: 'settings', permission: 'canManageUsers', section: 'BOTH' },
 ];
 
 function Icon({ name, className = 'h-5 w-5' }) {

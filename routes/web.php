@@ -52,6 +52,11 @@ Route::middleware('auth')->group(function () {
 
     Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
     Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:reports.view')->name('compliance-alerts.index');
+    Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
+    Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');
+    Route::get('settings/compliance-alerts', [ComplianceAlertController::class, 'settings'])->middleware('can:compliance-alerts.manage')->name('settings.compliance-alerts');
+    Route::get('admin/recipient-mapping', [ComplianceAlertController::class, 'recipientMapping'])->middleware('can:compliance-alerts.manage')->name('compliance-alert-recipients.index');
+    Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:compliance-alerts.manage')->name('business-calendar.index');
     Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:reports.view')->name('compliance-alerts.preview');
     Route::post('compliance-alerts/send', [ComplianceAlertController::class, 'send'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send');
     Route::post('compliance-alerts/send-test', [ComplianceAlertController::class, 'sendTest'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send-test');
