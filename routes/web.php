@@ -25,6 +25,7 @@ use App\Http\Controllers\IpafController;
 use App\Http\Controllers\AwsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\SpatialLayerController;
+use App\Http\Controllers\ComplianceAlertController;
 
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
@@ -50,6 +51,17 @@ Route::middleware('auth')->group(function () {
     Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])->middleware('can:protected-areas.delete')->name('protected-areas.destroy');
 
     Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
+    Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:reports.view')->name('compliance-alerts.index');
+    Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:reports.view')->name('compliance-alerts.preview');
+    Route::post('compliance-alerts/send', [ComplianceAlertController::class, 'send'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send');
+    Route::post('compliance-alerts/send-test', [ComplianceAlertController::class, 'sendTest'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send-test');
+    Route::post('compliance-alerts/recipients', [ComplianceAlertController::class, 'storeRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.store');
+    Route::put('compliance-alerts/recipients/{recipient}', [ComplianceAlertController::class, 'updateRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.update');
+    Route::patch('compliance-alerts/recipients/{recipient}/status', [ComplianceAlertController::class, 'toggleRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.status');
+    Route::delete('compliance-alerts/recipients/{recipient}', [ComplianceAlertController::class, 'destroyRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.destroy');
+    Route::put('compliance-alerts/settings', [ComplianceAlertController::class, 'updateSettings'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.settings.update');
+    Route::post('compliance-alerts/confirmations', [ComplianceAlertController::class, 'confirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.confirm');
+    Route::delete('compliance-alerts/confirmations', [ComplianceAlertController::class, 'unconfirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.unconfirm');
 
     // ECOTOURISM IMPACT MONITORING ROUTES
     Route::get('ecotourism-monitorings', [EcotourismMonitoringController::class, 'index'])->middleware('can:ecotourism-monitoring.view')->name('ecotourism-monitorings.index');

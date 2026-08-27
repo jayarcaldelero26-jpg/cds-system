@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BmsReportSubmission;
+use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -11,7 +12,7 @@ class BmsReportSubmissionController extends Controller
 {
     public function store(Request $request)
     {
-        $validated = $request->validate($this->rules());
+        $validated = $request->validate($this->rules(requireMov: true));
         $validated = $this->storeMov($request, $validated);
         $validated['created_by'] = $request->user()?->id;
         $validated['updated_by'] = $request->user()?->id;
@@ -24,6 +25,9 @@ class BmsReportSubmissionController extends Controller
     public function update(Request $request, BmsReportSubmission $bmsReportSubmission)
     {
         $validated = $request->validate($this->rules($bmsReportSubmission->document_type));
+        if (! $request->hasFile('mov') && ($request->boolean('delete_mov') || ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path'))) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
+        }
 
         if ($request->boolean('delete_mov')) {
             $this->deleteMov($bmsReportSubmission);
@@ -54,17 +58,10 @@ class BmsReportSubmissionController extends Controller
 
     public function destroyMov(BmsReportSubmission $bmsReportSubmission)
     {
-        $this->deleteMov($bmsReportSubmission);
-        $bmsReportSubmission->update([
-            'mov_file_name' => null,
-            'mov_file_path' => null,
-            'updated_by' => request()->user()?->id,
-        ]);
-
-        return redirect()->back()->with('success', 'MOV attachment successfully deleted.');
+        return redirect()->back()->withErrors(['mov' => 'An existing MOV cannot be removed without a replacement.']);
     }
 
-    private function rules(?string $legacyDocumentType = null): array
+    private function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
     {
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
@@ -79,7 +76,7 @@ class BmsReportSubmissionController extends Controller
             'date_report_released_cenro' => ['nullable', 'date'],
             'date_received_penro' => ['nullable', 'date'],
             'date_endorsed_regional' => ['nullable', 'date'],
-            'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
             'delete_mov' => ['nullable', 'boolean'],
             'remarks' => ['nullable', 'string'],
         ];

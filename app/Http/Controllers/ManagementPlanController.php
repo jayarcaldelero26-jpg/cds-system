@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ManagementPlan;
 use App\Models\ManagementPlanType;
 use App\Models\ProtectedArea;
+use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -114,7 +115,7 @@ class ManagementPlanController extends Controller
     public function storeReport(Request $request, ManagementPlanType $managementPlanType): RedirectResponse
     {
         abort_unless($managementPlanType->is_active, 404);
-        $data = $request->validate($this->reportRules());
+        $data = $request->validate($this->reportRules(requireAttachments: true));
         $newAttachments = [];
 
         try {
@@ -161,6 +162,10 @@ class ManagementPlanController extends Controller
         $currentAttachments = array_values(array_filter($managementPlan->attachments ?? [], fn ($attachment) => $this->attachmentPath($attachment) !== null));
         $attachmentsByPath = collect($currentAttachments)->keyBy(fn ($attachment) => $this->attachmentPath($attachment));
         $requestedRemovals = array_values($data['removed_attachments'] ?? []);
+        $uploadedAttachments = $request->file('attachments', []);
+        if ($uploadedAttachments === [] && ! app(ComplianceMovService::class)->hasValidAttachments($currentAttachments, $requestedRemovals)) {
+            throw ValidationException::withMessages(['attachments' => 'At least one supporting document is required.']);
+        }
         $unownedRemovals = array_values(array_filter($requestedRemovals, fn (string $path) => ! $attachmentsByPath->has($path)));
 
         if ($unownedRemovals !== []) {
@@ -171,7 +176,7 @@ class ManagementPlanController extends Controller
         $newAttachments = [];
 
         try {
-            foreach ($request->file('attachments', []) as $file) {
+            foreach ($uploadedAttachments as $file) {
                 $newAttachments[] = $this->storeAttachment($file);
             }
 
@@ -238,7 +243,7 @@ class ManagementPlanController extends Controller
         return response()->file(Storage::disk('public')->path($path));
     }
 
-    private function reportRules(): array
+    private function reportRules(bool $requireAttachments = false): array
     {
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
@@ -252,7 +257,7 @@ class ManagementPlanController extends Controller
             'date_received_penro' => ['nullable', 'date'],
             'date_endorsed_regional' => ['nullable', 'date'],
             'remarks' => ['nullable', 'string'],
-            'attachments' => ['nullable', 'array'],
+            'attachments' => [$requireAttachments ? 'required' : 'nullable', 'array', ...($requireAttachments ? ['min:1'] : [])],
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
         ];
     }

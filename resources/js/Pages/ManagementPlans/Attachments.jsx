@@ -61,13 +61,13 @@ export function useManagementPlanAttachments(initialAttachments = [], onChange) 
 
 const sizeLabel = (size) => Number.isFinite(Number(size)) ? `${(Number(size) / 1024 / 1024).toFixed(2)} MB` : '';
 
-export default function ManagementPlanAttachments({ manager, error, canRemoveExisting = true, previewClassName = '', previewOnly = false }) {
+export default function ManagementPlanAttachments({ manager, error, canRemoveExisting = true, previewClassName = '', previewOnly = false, required = false }) {
   return <>
         {!previewOnly && <div className="space-y-3">
-            <div className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
+            <div className="block text-xs font-semibold text-gray-700 dark:text-gray-300">{required && <p className="mb-1 text-amber-700 dark:text-amber-300">At least one supporting document is required.</p>}
 
 
-        <FileInput id="attachments-attachments-multiple-maximum-20-mb-per-file" type="file" multiple accept={MANAGEMENT_PLAN_ACCEPT} onChange={(event) => {manager.addFiles(Array.from(event.target.files || []));event.target.value = '';}} />
+        <FileInput id="attachments-attachments-multiple-maximum-20-mb-per-file" type="file" required={required && manager.existingFiles.length === 0 && manager.newFiles.length === 0} multiple accept={MANAGEMENT_PLAN_ACCEPT} onChange={(event) => {manager.addFiles(Array.from(event.target.files || []));event.target.value = '';}} />
             </div>
             {error && <p className="text-sm text-red-700 dark:text-red-300">{error}</p>}
             {manager.existingFiles.length > 0 && <FileGroup title="Existing Attachments" files={manager.existingFiles} active={manager.activePreview} onSelect={manager.setActivePreview} onRemove={canRemoveExisting ? manager.removeExisting : null} />}

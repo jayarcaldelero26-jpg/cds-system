@@ -67,6 +67,7 @@ class PermissionSeeder extends Seeder
             'reports.view',
             'reports.generate',
             'reports.export',
+            'compliance-alerts.manage',
 
             // GIS
             'gis.view',
@@ -141,6 +142,7 @@ class PermissionSeeder extends Seeder
             'reports.view',
             'reports.generate',
             'reports.export',
+            'compliance-alerts.manage',
             'gis.view',
             'gis.manage',
             'protected-areas.view',

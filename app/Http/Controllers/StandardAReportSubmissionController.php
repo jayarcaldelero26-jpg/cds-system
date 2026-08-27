@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
+use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -54,7 +55,7 @@ abstract class StandardAReportSubmissionController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $request->validate($this->rules());
+        $validated = $request->validate($this->rules(requireMov: true));
         $newPath = null;
         try {
             if ($request->hasFile('mov')) {
@@ -83,6 +84,9 @@ abstract class StandardAReportSubmissionController extends Controller
     {
         $submission = $this->findSubmission($reportSubmission);
         $validated = $request->validate($this->rules($submission->document_type));
+        if (! $request->hasFile('mov') && ($request->boolean('delete_mov') || ! app(ComplianceMovService::class)->hasValidSingleFile($submission, 'mov_file_path'))) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
+        }
         $oldPath = $submission->mov_file_path;
         $newPath = null;
         $removeOld = $request->boolean('delete_mov') || $request->hasFile('mov');
@@ -127,7 +131,7 @@ abstract class StandardAReportSubmissionController extends Controller
         return response()->file(Storage::disk('public')->path($submission->mov_file_path));
     }
 
-    private function rules(?string $legacyDocumentType = null): array
+    private function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
     {
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
@@ -142,7 +146,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'date_report_released_cenro' => ['nullable', 'date'],
             'date_received_penro' => ['nullable', 'date'],
             'date_endorsed_regional' => ['nullable', 'date'],
-            'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
             'delete_mov' => ['nullable', 'boolean'],
             'remarks' => ['nullable', 'string'],
         ];

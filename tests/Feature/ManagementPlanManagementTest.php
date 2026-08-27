@@ -4,6 +4,7 @@ use App\Models\ManagementPlan;
 use App\Models\ManagementPlanType;
 use App\Models\ProtectedArea;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -23,7 +24,7 @@ function managementPlanArea(User $user): ProtectedArea
 
 function managementPlanReportPayload(int $areaId, array $overrides = []): array
 {
-    return [...['protected_area_id' => $areaId, 'target_office' => 'PENRO Davao Oriental', 'activity_name' => 'Management Plan Implementation', 'document_type' => 'Final Report', 'semester' => '1st Semester', 'date_conducted' => '2026-01-15', 'date_accomplished' => '2026-02-01', 'remarks' => 'Initial report.'], ...$overrides];
+    return [...['protected_area_id' => $areaId, 'target_office' => 'PENRO Davao Oriental', 'activity_name' => 'Management Plan Implementation', 'document_type' => 'Final Report', 'semester' => '1st Semester', 'date_conducted' => '2026-01-15', 'date_accomplished' => '2026-02-01', 'remarks' => 'Initial report.', 'attachments' => [UploadedFile::fake()->create('management-plan-report.pdf', 10, 'application/pdf')]], ...$overrides];
 }
 
 test('authorized users can access the dynamic management plan workspace', function () {

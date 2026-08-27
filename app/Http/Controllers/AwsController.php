@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Aws;
 use App\Models\ProtectedArea;
+use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
@@ -141,6 +142,9 @@ class AwsController extends Controller
     {
         abort_unless($aws->timestamps === null, 404);
         $validated = $request->validate([...$this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type), 'remove_report_file' => ['nullable', 'boolean']]);
+        if (! $request->hasFile('report_file') && ($request->boolean('remove_report_file') || ! app(ComplianceMovService::class)->hasValidSingleFile($aws, 'report_file_path'))) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['report_file' => ComplianceMovService::MESSAGE]);
+        }
         $oldPath = $aws->report_file_path;
         $storedPath = null;
         $removeOld = $request->boolean('remove_report_file') || $request->hasFile('report_file');

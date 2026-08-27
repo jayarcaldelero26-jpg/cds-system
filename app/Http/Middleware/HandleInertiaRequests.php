@@ -134,6 +134,8 @@ class HandleInertiaRequests extends Middleware
 
                 // Reports (CDS ra)
                 'canViewReports' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
+                'canViewComplianceAlerts' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
+                'canManageComplianceAlerts' => $isAdmin || (!$isMes && ($user?->can('compliance-alerts.manage') ?? false)),
             ],
             'managementPlanTypes' => fn () => $canViewManagementPlans
                 ? ManagementPlanType::query()

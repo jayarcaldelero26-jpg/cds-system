@@ -7,6 +7,7 @@ use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\IpafRevenueTarget;
 use App\Models\ProtectedArea;
+use App\Services\Compliance\ComplianceMovService;
 use App\Services\IpafBankBalanceSyncService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
@@ -49,8 +50,8 @@ class IpafController extends Controller
         ]);
     }
 
-    public function storeRevenue(Request $request): RedirectResponse { return $this->persist($request, new IpafRevenueCollection, $this->revenueRules(), 'Revenue Collection', 'ipaf-revenue-movs', 'Revenue collection added successfully.'); }
-    public function updateRevenue(Request $request, IpafRevenueCollection $revenueCollection): RedirectResponse { return $this->persist($request, $revenueCollection, $this->revenueRules(), 'Revenue Collection', 'ipaf-revenue-movs', 'Revenue collection updated successfully.'); }
+    public function storeRevenue(Request $request): RedirectResponse { return $this->persist($request, new IpafRevenueCollection, $this->revenueRules(true), 'Revenue Collection', 'ipaf-revenue-movs', 'Revenue collection added successfully.'); }
+    public function updateRevenue(Request $request, IpafRevenueCollection $revenueCollection): RedirectResponse { return $this->persist($request, $revenueCollection, $this->revenueRules(false), 'Revenue Collection', 'ipaf-revenue-movs', 'Revenue collection updated successfully.'); }
     public function destroyRevenue(IpafRevenueCollection $revenueCollection): RedirectResponse { return $this->destroyRecord($revenueCollection, 'Revenue collection deleted successfully.'); }
     public function revenueMov(IpafRevenueCollection $revenueCollection): BinaryFileResponse { return $this->mov($revenueCollection); }
     public function updateRevenueTargets(Request $request): RedirectResponse
@@ -159,14 +160,17 @@ class IpafController extends Controller
             ->with('success', $message.'.')
             ->with('ipaf_bank_balance_sync_result', $result);
     }
-    public function storeManagement(Request $request): RedirectResponse { return $this->persist($request, new IpafManagementReport, $this->managementRules(), 'Management of Integrated Area Protected Area Fund (IPAF)', 'ipaf-management-movs', 'Management of IPAF report added successfully.'); }
-    public function updateManagement(Request $request, IpafManagementReport $managementReport): RedirectResponse { return $this->persist($request, $managementReport, $this->managementRules(), 'Management of Integrated Area Protected Area Fund (IPAF)', 'ipaf-management-movs', 'Management of IPAF report updated successfully.'); }
+    public function storeManagement(Request $request): RedirectResponse { return $this->persist($request, new IpafManagementReport, $this->managementRules(true), 'Management of Integrated Area Protected Area Fund (IPAF)', 'ipaf-management-movs', 'Management of IPAF report added successfully.'); }
+    public function updateManagement(Request $request, IpafManagementReport $managementReport): RedirectResponse { return $this->persist($request, $managementReport, $this->managementRules(false), 'Management of Integrated Area Protected Area Fund (IPAF)', 'ipaf-management-movs', 'Management of IPAF report updated successfully.'); }
     public function destroyManagement(IpafManagementReport $managementReport): RedirectResponse { return $this->destroyRecord($managementReport, 'Management of IPAF report deleted successfully.'); }
     public function managementMov(IpafManagementReport $managementReport): BinaryFileResponse { return $this->mov($managementReport); }
 
     private function persist(Request $request, Model $record, array $rules, string $activity, string $folder, string $message): RedirectResponse
     {
         $data = $request->validate($rules); $exists = $record->exists; $old = $record->mov_file_path; $new = null; $replace = $request->boolean('delete_mov') || $request->hasFile('mov');
+        if ($exists && ! $request->hasFile('mov') && ($request->boolean('delete_mov') || ! app(ComplianceMovService::class)->hasValidSingleFile($record, 'mov_file_path'))) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
+        }
         try {
             if ($request->hasFile('mov')) { $file = $request->file('mov'); $new = $file->store($folder, 'public'); if (! is_string($new)) throw new RuntimeException('The MOV could not be stored.'); $data = [...$data, 'mov_file_name' => $file->getClientOriginalName(), 'mov_file_path' => $new, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()]; }
             elseif ($request->boolean('delete_mov')) $data = [...$data, 'mov_file_name' => null, 'mov_file_path' => null, 'mov_mime_type' => null, 'mov_size' => null];
@@ -179,9 +183,9 @@ class IpafController extends Controller
     private function destroyRecord(Model $record, string $message): RedirectResponse { $path = $record->mov_file_path; DB::transaction(fn () => $record->delete()); if ($path) Storage::disk('public')->delete($path); return back()->with('success', $message); }
     private function mov(Model $record): BinaryFileResponse { abort_unless($record->mov_file_path && Storage::disk('public')->exists($record->mov_file_path), 404); return response()->file(Storage::disk('public')->path($record->mov_file_path)); }
     private function search($query, string $search): void { $search = trim($search); $query->where(fn ($q) => $q->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($q) => $q->where('name', 'like', "%{$search}%"))); }
-    private function commonRules(): array { return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'document_type' => ['required', Rule::in(['Final Report', 'Progress Report'])], 'date_report_released_cenro' => ['nullable', 'date'], 'date_received_penro' => ['nullable', 'date'], 'date_endorsed_regional' => ['nullable', 'date'], 'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'delete_mov' => ['nullable', 'boolean'], 'remarks' => ['nullable', 'string']]; }
-    private function revenueRules(): array { return [...$this->commonRules(), 'reporting_month' => ['required', 'integer', 'between:1,12'], 'reporting_year' => ['required', 'integer', 'between:2000,2100'], 'total_collected' => ['required', 'decimal:0,2', 'min:0'], 'deadline_submission' => ['required', 'date']]; }
-    private function managementRules(): array { return [...$this->commonRules(), 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date']]; }
+    private function commonRules(bool $requireMov): array { return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'document_type' => ['required', Rule::in(['Final Report', 'Progress Report'])], 'date_report_released_cenro' => ['nullable', 'date'], 'date_received_penro' => ['nullable', 'date'], 'date_endorsed_regional' => ['nullable', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'delete_mov' => ['nullable', 'boolean'], 'remarks' => ['nullable', 'string']]; }
+    private function revenueRules(bool $requireMov): array { return [...$this->commonRules($requireMov), 'reporting_month' => ['required', 'integer', 'between:1,12'], 'reporting_year' => ['required', 'integer', 'between:2000,2100'], 'total_collected' => ['required', 'decimal:0,2', 'min:0'], 'deadline_submission' => ['required', 'date']]; }
+    private function managementRules(bool $requireMov): array { return [...$this->commonRules($requireMov), 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date']]; }
     private function data(Model $record, string $movRoute): array { return [...$record->toArray(), 'protected_area_name' => $record->protectedArea?->name, 'mov' => $record->mov_file_path ? ['name' => $record->mov_file_name ?: basename($record->mov_file_path), 'type' => $record->mov_mime_type ?: '', 'size' => $record->mov_size, 'url' => route($movRoute, $record)] : null]; }
 
     private function quarterlyRevenueSummary(Request $request, $protectedAreas): array

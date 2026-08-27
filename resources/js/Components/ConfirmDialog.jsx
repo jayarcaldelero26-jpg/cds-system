@@ -1,4 +1,18 @@
+import { useEffect } from 'react';
+
 export default function ConfirmDialog({ open, title = 'Are you sure you want to change the data?', message = 'Once updated, you will not be able to revert it.', confirmLabel = 'OK', cancelLabel = 'Cancel', onConfirm, onCancel, processing = false, variant = 'default' }) {
+    useEffect(() => {
+        if (!open) return;
+        const closeTopDialog = event => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (!processing) onCancel?.();
+        };
+        document.addEventListener('keydown', closeTopDialog, true);
+        return () => document.removeEventListener('keydown', closeTopDialog, true);
+    }, [open, processing, onCancel]);
+
     if (!open) return null;
     return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
         <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" aria-describedby="confirm-dialog-message" className={`w-full max-w-sm animate-pop-in rounded-2xl border bg-white p-6 text-center shadow-2xl dark:bg-gray-900 ${variant === 'danger' ? 'border-red-100 dark:border-red-950' : 'border-gray-200 dark:border-gray-800'}`}>

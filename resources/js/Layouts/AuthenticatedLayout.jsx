@@ -59,6 +59,7 @@ const allNavigation = [
 
     { label: 'Programs, Projects & Activities', href: '#', icon: 'folder', comingSoon: true, permission: 'canViewPPA', section: 'CDS' },
     { label: 'CDS LAWIN Monitoring', href: '#', icon: 'shield', comingSoon: true, section: 'CDS' },
+    { label: 'Compliance Alerts', href: '/compliance-alerts', icon: 'shield-alert', permission: 'canViewComplianceAlerts', section: 'CDS' },
 
     // --- MGA MENU PARA SA MES ---
     { label: 'Issues Monitoring', href: '/issue-monitorings', icon: 'shield-alert', permission: 'canViewIssueMonitoring', section: 'MES' },

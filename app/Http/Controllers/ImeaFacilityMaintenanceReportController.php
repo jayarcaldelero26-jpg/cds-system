@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ProtectedArea;
+use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -37,8 +38,11 @@ class ImeaFacilityMaintenanceReportController extends Controller
 
     private function persist(Request $request, ImeaFacilityMaintenanceReport $report): RedirectResponse
     {
-        $validated = $request->validate($this->rules());
         $wasExisting = $report->exists;
+        $validated = $request->validate($this->rules(requireMov: ! $wasExisting));
+        if ($wasExisting && ! $request->hasFile('mov') && ($request->boolean('delete_mov') || ! app(ComplianceMovService::class)->hasValidSingleFile($report, 'mov_file_path'))) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
+        }
         $oldPath = $report->mov_file_path;
         $newPath = null;
         $removeOld = $request->boolean('delete_mov') || $request->hasFile('mov');
@@ -58,9 +62,9 @@ class ImeaFacilityMaintenanceReportController extends Controller
         return back()->with('success', $wasExisting ? 'Maintenance report updated successfully.' : 'Maintenance report added successfully.');
     }
 
-    private function rules(): array
+    private function rules(bool $requireMov = false): array
     {
-        return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date'], 'date_report_released_cenro' => ['nullable', 'date'], 'date_received_penro' => ['nullable', 'date'], 'date_endorsed_regional' => ['nullable', 'date'], 'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'delete_mov' => ['nullable', 'boolean'], 'remarks' => ['nullable', 'string']];
+        return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date'], 'date_report_released_cenro' => ['nullable', 'date'], 'date_received_penro' => ['nullable', 'date'], 'date_endorsed_regional' => ['nullable', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'delete_mov' => ['nullable', 'boolean'], 'remarks' => ['nullable', 'string']];
     }
     private function data(ImeaFacilityMaintenanceReport $report): array { return [...$report->toArray(), 'protected_area_name' => $report->protectedArea?->name, 'mov' => $report->mov_file_path ? ['name' => $report->mov_file_name ?: basename($report->mov_file_path), 'type' => $report->mov_mime_type ?: '', 'size' => $report->mov_size, 'url' => route('imea.maintenance-reports.mov', $report)] : null]; }
 }

@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
         // 1. Tawgon una ang PermissionSeeder aron mabuhat ang tanang permissions ug roles
         $this->call([
             PermissionSeeder::class,
+            ComplianceAlertBossDefaultsSeeder::class,
         ]);
 
         // 2. Siguraduhon nga naa ang basic roles

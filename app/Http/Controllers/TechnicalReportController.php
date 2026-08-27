@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
 use App\Models\TechnicalReport;
+use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -56,7 +57,7 @@ class TechnicalReportController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $request->validate($this->rules());
+        $validated = $request->validate($this->rules(requireMov: true));
         $storedPath = null;
 
         try {
@@ -101,6 +102,9 @@ class TechnicalReportController extends Controller
             ...$this->rules($technicalReport->report_type),
             'remove_attachment' => ['nullable', 'boolean'],
         ]);
+        if (! $request->hasFile('attachment') && ($request->boolean('remove_attachment') || ! app(ComplianceMovService::class)->hasValidSingleFile($technicalReport, 'attachment'))) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => ComplianceMovService::MESSAGE]);
+        }
         $oldPath = $technicalReport->attachment;
         $storedPath = null;
         $shouldRemoveOld = $request->boolean('remove_attachment') || $request->hasFile('attachment');
@@ -160,7 +164,7 @@ class TechnicalReportController extends Controller
         return to_route('technical-reports.index')->with('success', 'General report deleted successfully.');
     }
 
-    private function rules(?string $legacyDocumentType = null): array
+    private function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
     {
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
@@ -175,7 +179,7 @@ class TechnicalReportController extends Controller
             'date_report_released_cenro' => ['nullable', 'date'],
             'date_received_penro' => ['nullable', 'date'],
             'date_endorsed_regional' => ['nullable', 'date'],
-            'attachment' => ['nullable', 'file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
+            'attachment' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
             'remarks' => ['nullable', 'string'],
         ];
     }
