@@ -1,6 +1,7 @@
-import { FloatingSelect, FloatingInput } from "@/Components/Form";import { useState } from 'react';
+import { FloatingSelect, FloatingInput } from "@/Components/Form";import { useEffect, useState } from 'react';
 import { router } from '@inertiajs/react';
 import Card from '../../Components/Card';
+import { dateOnlyTimestamp, parseDateOnly } from '@/Utils/dateFormatters';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -32,6 +33,12 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
   const [selectedPaId, setSelectedPaId] = useState(filters.protected_area_id || '');
   const [rangePreset, setRangePreset] = useState(String(filters.graph_range || '30'));
   const [analysisView, setAnalysisView] = useState('overall');
+  useEffect(() => {
+    setGraphStartDate(filters.graph_start_date || '');
+    setGraphEndDate(filters.graph_end_date || '');
+    setSelectedPaId(filters.protected_area_id || '');
+    setRangePreset(String(filters.graph_range || '30'));
+  }, [filters.graph_start_date, filters.graph_end_date, filters.protected_area_id, filters.graph_range]);
 
   const metricConfig = {
     air_temperature: {
@@ -75,9 +82,9 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
 
   const formatChartDate = (value) => {
     if (!value) return '';
-    const date = new Date(value);
+    const date = parseDateOnly(value);
 
-    if (Number.isNaN(date.getTime())) {
+    if (!date) {
       return String(value);
     }
 
@@ -89,9 +96,9 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
 
   const formatChartDateLong = (value) => {
     if (!value) return '';
-    const date = new Date(value);
+    const date = parseDateOnly(value);
 
-    if (Number.isNaN(date.getTime())) {
+    if (!date) {
       return String(value);
     }
 
@@ -134,13 +141,14 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     router.get(
       route('aws.index'),
       {
+        ...filters,
         protected_area_id: newPaId !== undefined ? newPaId : selectedPaId,
         tab: 'analytics',
         graph_start_date: newStartDate !== undefined ? newStartDate : graphStartDate,
         graph_end_date: newEndDate !== undefined ? newEndDate : graphEndDate,
         graph_range: newRange !== undefined ? newRange : rangePreset
       },
-      { preserveState: true, preserveScroll: true }
+      { preserveState: true, preserveScroll: true, replace: true }
     );
   };
 
@@ -165,7 +173,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     setRangePreset('custom');
     setGraphStartDate(val);
 
-    if (val && graphEndDate && val <= graphEndDate) {
+    if (!val || (graphEndDate && val <= graphEndDate)) {
       triggerUpdate(undefined, val, graphEndDate);
     }
   };
@@ -175,15 +183,15 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     setRangePreset('custom');
     setGraphEndDate(val);
 
-    if (val && graphStartDate && graphStartDate <= val) {
+    if (!val || (graphStartDate && graphStartDate <= val)) {
       triggerUpdate(undefined, graphStartDate, val);
     }
   };
 
   const formatDate = (date) => {
     if (!date) return '—';
-    const parsedDate = new Date(date);
-    if (Number.isNaN(parsedDate.getTime())) return '—';
+    const parsedDate = parseDateOnly(date);
+    if (!parsedDate) return '—';
 
     return parsedDate.toLocaleDateString(undefined, {
       month: 'short',
@@ -337,7 +345,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
       return groups;
     }, {})
   ).
-  sort((a, b) => new Date(a.date) - new Date(b.date)).
+  sort((a, b) => dateOnlyTimestamp(a.date) - dateOnlyTimestamp(b.date)).
   map((item) => ({
     date: item.date,
     value: mean(item.values)
@@ -401,7 +409,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     null;
 
     return Object.values(byDate).
-    sort((a, b) => new Date(a.date) - new Date(b.date)).
+    sort((a, b) => dateOnlyTimestamp(a.date) - dateOnlyTimestamp(b.date)).
     map((item) => ({
       start_date: item.date,
       air_temperature: average(item.temperatures),
@@ -423,7 +431,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     paGroupsForSpells.forEach((paRecords) => {
       const sorted = [...paRecords].
       filter((record) => record?.start_date).
-      sort((a, b) => new Date(a.start_date) - new Date(b.start_date));
+      sort((a, b) => dateOnlyTimestamp(a.start_date) - dateOnlyTimestamp(b.start_date));
 
       let wet = 0;
       let dry = 0;
@@ -458,7 +466,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     const rawRecords = [...chartRecords].
     map((record) => ({
       ...record,
-      date: new Date(record.start_date),
+      date: parseDateOnly(record.start_date),
       temperature: toNumber(record.air_temperature),
       precipitation: toNumber(record.precipitation),
       windSpeed: toNumber(record.wind_speed),
@@ -473,14 +481,14 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
       rainfallCrosscheckStatus: record.rainfall_crosscheck_status || 'Unavailable',
       soilConditionContext: record.soil_condition_context || 'Unavailable'
     })).
-    filter((record) => !Number.isNaN(record.date.getTime())).
+    filter((record) => record.date)
     sort((a, b) => a.date - b.date);
 
     const isAllPa = selectedPaId === '';
     const networkDaily = isAllPa ?
     buildDailyNetworkSeries(rawRecords).map((record) => ({
       ...record,
-      date: new Date(record.start_date),
+      date: parseDateOnly(record.start_date),
       temperature: toNumber(record.air_temperature),
       precipitation: toNumber(record.precipitation),
       windSpeed: toNumber(record.wind_speed),

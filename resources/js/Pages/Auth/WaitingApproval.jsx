@@ -1,5 +1,5 @@
 import { useForm } from '@inertiajs/react';
-import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
+import AuthLayout from '../../Layouts/AuthLayout';
 import Card from '../../Components/Card';
 
 export default function WaitingApproval() {
@@ -11,12 +11,12 @@ export default function WaitingApproval() {
     };
 
     return (
-        <AuthenticatedLayout title="Account Pending">
+        <AuthLayout title="Account Pending">
             <div className="flex min-h-[70vh] items-center justify-center">
                 <Card className="max-w-md text-center p-8 shadow-lg">
                     <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Account Pending Approval</h2>
                     <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-                        Your account has been registered successfully, but it is currently waiting for approval and role assignment by the CDS Admin.
+                        Your account has been registered successfully, but it is currently waiting for approval and role assignment by an administrator.
                     </p>
                     <button
                         onClick={handleLogout}
@@ -26,6 +26,6 @@ export default function WaitingApproval() {
                     </button>
                 </Card>
             </div>
-        </AuthenticatedLayout>
+        </AuthLayout>
     );
 }

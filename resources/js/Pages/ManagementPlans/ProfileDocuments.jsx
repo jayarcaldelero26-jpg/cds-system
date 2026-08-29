@@ -3,7 +3,7 @@ import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import Tooltip from '@/Components/Tooltip';
 
 export function useProfileDocuments(initialDocuments = [], onChange) {
-  const normalize = (document, index) => ({ ...document, id: document.path || `existing-${index}`, name: document.original_name || document.name || document.path?.split('/').pop() || `Document ${index + 1}`, type: document.mime_type || '' });
+  const normalize = (document, index) => ({ ...document, id: document.id || document.key || `existing-${index}`, key: document.key ?? String(index), name: document.original_name || document.name || document.path?.split('/').pop() || `Document ${index + 1}`, type: document.mime_type || '' });
   const [existing, setExisting] = useState((Array.isArray(initialDocuments) ? initialDocuments : []).map(normalize));
   const [added, setAdded] = useState([]);
   const [removed, setRemoved] = useState([]);
@@ -11,13 +11,13 @@ export function useProfileDocuments(initialDocuments = [], onChange) {
   const addedRef = useRef([]);
   useEffect(() => {addedRef.current = added;}, [added]);
   useEffect(() => () => addedRef.current.forEach((item) => URL.revokeObjectURL(item.url)), []);
-  const publish = (nextAdded, nextRemoved = removed) => onChange(nextAdded.map((item) => item.file), nextAdded.map((item) => item.category), nextRemoved.map((item) => item.path));
+  const publish = (nextAdded, nextRemoved = removed) => onChange(nextAdded.map((item) => item.file), nextAdded.map((item) => item.category), nextRemoved.map((item) => item.key ?? item.path));
   const addFiles = (files, category) => {
     const items = files.map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}-${Math.random()}`, file, name: file.name, type: file.type, size: file.size, category, temporary: true, url: URL.createObjectURL(file) }));
     const next = [...added, ...items];setAdded(next);publish(next);if (items.length) setActive(items[items.length - 1]);
   };
   const removeAdded = (item) => {URL.revokeObjectURL(item.url);const next = added.filter((file) => file.id !== item.id);setAdded(next);publish(next);if (active?.id === item.id) setActive(next[0] || existing[0] || null);};
-  const removeExisting = (item) => {const nextExisting = existing.filter((file) => file.path !== item.path);const nextRemoved = [...removed, item];setExisting(nextExisting);setRemoved(nextRemoved);publish(added, nextRemoved);if (active?.path === item.path) setActive(nextExisting[0] || added[0] || null);};
+  const removeExisting = (item) => {const nextExisting = existing.filter((file) => (file.key ?? file.path) !== (item.key ?? item.path));const nextRemoved = [...removed, item];setExisting(nextExisting);setRemoved(nextRemoved);publish(added, nextRemoved);if ((active?.key ?? active?.path) === (item.key ?? item.path)) setActive(nextExisting[0] || added[0] || null);};
   return { existing, added, active, setActive, addFiles, removeAdded, removeExisting };
 }
 

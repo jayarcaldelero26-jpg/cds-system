@@ -12,7 +12,8 @@ const normalizeExisting = (attachment, index) => {
 
   return {
     ...attachment,
-    id: attachment?.path || `existing-${index}`,
+    id: attachment?.id || attachment?.key || `existing-${index}`,
+    key: attachment?.key ?? String(index),
     name: attachment?.original_name || attachment?.name || attachment?.stored_name || attachment?.path?.split('/').pop() || `Attachment ${index + 1}`,
     type: attachment?.mime_type || ''
   };
@@ -29,7 +30,7 @@ export function useManagementPlanAttachments(initialAttachments = [], onChange) 
   useEffect(() => {newFilesRef.current = newFiles;}, [newFiles]);
   useEffect(() => () => newFilesRef.current.forEach((item) => URL.revokeObjectURL(item.url)), []);
 
-  const publish = (nextNew, nextRemoved = removedExistingFiles) => onChange?.(nextNew.map((item) => item.file), nextRemoved.map((item) => item.path));
+  const publish = (nextNew, nextRemoved = removedExistingFiles) => onChange?.(nextNew.map((item) => item.file), nextRemoved.map((item) => item.key ?? item.path));
 
   const addFiles = (files) => {
     const added = files.map((file) => ({ id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID?.() || Math.random()}`, file, name: file.name, type: file.type, size: file.size, url: URL.createObjectURL(file), temporary: true }));
@@ -48,12 +49,12 @@ export function useManagementPlanAttachments(initialAttachments = [], onChange) 
   };
 
   const removeExisting = (item) => {
-    const nextExisting = existingFiles.filter((file) => file.path !== item.path);
+    const nextExisting = existingFiles.filter((file) => (file.key ?? file.path) !== (item.key ?? item.path));
     const nextRemoved = [...removedExistingFiles, item];
     setExistingFiles(nextExisting);
     setRemovedExistingFiles(nextRemoved);
     publish(newFiles, nextRemoved);
-    if (activePreview?.path === item.path) setActivePreview(nextExisting[0] || newFiles[0] || null);
+    if ((activePreview?.key ?? activePreview?.path) === (item.key ?? item.path)) setActivePreview(nextExisting[0] || newFiles[0] || null);
   };
 
   return { existingFiles, newFiles, activePreview, setActivePreview, addFiles, removeNew, removeExisting };
@@ -64,7 +65,7 @@ const sizeLabel = (size) => Number.isFinite(Number(size)) ? `${(Number(size) / 1
 export default function ManagementPlanAttachments({ manager, error, canRemoveExisting = true, previewClassName = '', previewOnly = false, required = false }) {
   return <>
         {!previewOnly && <div className="space-y-3">
-            <div className="block text-xs font-semibold text-gray-700 dark:text-gray-300">{required && <p className="mb-1 text-amber-700 dark:text-amber-300">At least one supporting document is required.</p>}
+            <div className="block text-xs font-semibold text-gray-700 dark:text-gray-300"><label htmlFor="attachments-attachments-multiple-maximum-20-mb-per-file" className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300">Supporting Documents{required && <span className="ml-0.5 text-xs leading-4 text-red-500">*</span>}</label>{required && <p className="mb-1 text-amber-700 dark:text-amber-300">At least one supporting document is required.</p>}
 
 
         <FileInput id="attachments-attachments-multiple-maximum-20-mb-per-file" type="file" required={required && manager.existingFiles.length === 0 && manager.newFiles.length === 0} multiple accept={MANAGEMENT_PLAN_ACCEPT} onChange={(event) => {manager.addFiles(Array.from(event.target.files || []));event.target.value = '';}} />

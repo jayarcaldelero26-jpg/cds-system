@@ -133,8 +133,7 @@ class ComplianceAlertController extends Controller
 
     public function businessCalendar(): Response
     {
-        return Inertia::render('ComplianceAlerts/Index', [
-            'view' => 'calendar',
+        return Inertia::render('Calendar/Index', [
             'nonWorkingDays' => NonWorkingDay::query()->latest('date')->latest('id')->get()->map(fn (NonWorkingDay $day) => $this->nonWorkingDayPayload($day))->values(),
         ]);
     }
@@ -306,6 +305,13 @@ class ComplianceAlertController extends Controller
         return back()->with('success', 'Non-working day updated.');
     }
 
+    public function destroyNonWorkingDay(NonWorkingDay $nonWorkingDay): RedirectResponse
+    {
+        $nonWorkingDay->delete();
+
+        return back()->with('success', 'Non-working day deleted.');
+    }
+
     public function confirm(Request $request, OverdueReportService $reports, ComplianceConfirmationService $confirmations): RedirectResponse
     {
         $data = $request->validate(['source_type' => ['required', 'string'], 'source_id' => ['required', 'integer'], 'remarks' => ['nullable', 'string', 'max:2000']]);
@@ -366,6 +372,7 @@ class ComplianceAlertController extends Controller
                 NonWorkingDay::TYPE_LOCAL_HOLIDAY,
                 NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY,
                 NonWorkingDay::TYPE_OFFICE_DECLARED_NON_WORKING_DAY,
+                NonWorkingDay::TYPE_OTHER,
             ])],
             'scope' => ['required', Rule::in([NonWorkingDay::SCOPE_NATIONAL, NonWorkingDay::SCOPE_DAVAO_ORIENTAL, NonWorkingDay::SCOPE_OFFICE])],
             'location' => ['nullable', 'string', 'max:255'],
@@ -385,7 +392,9 @@ class ComplianceAlertController extends Controller
 
     private function throwNonWorkingDayDuplicate(QueryException $exception): never
     {
-        if (str_contains(strtolower($exception->getMessage()), 'non_working_days_date_scope_location_unique')) {
+        $message = strtolower($exception->getMessage());
+        if (str_contains($message, 'non_working_days_date_scope_location_unique')
+            || str_contains($message, 'unique constraint failed: non_working_days.date, non_working_days.scope, non_working_days.location')) {
             throw ValidationException::withMessages(['date' => 'A non-working-day entry already exists for this date and scope.']);
         }
 

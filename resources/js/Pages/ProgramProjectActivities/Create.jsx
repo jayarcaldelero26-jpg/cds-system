@@ -45,14 +45,14 @@ export default function Create({ protectedAreas, categories, statuses }) {
                             {/* Title */}
                             <div className="md:col-span-2">
 
-                                <FloatingInput id="create-ppa-title-name" label="PPA Title / Name" required type="text" placeholder="E.g., Coastal Resource Rehabilitation, Forest Watch Training..." value={data.title} onChange={(e) => setData('title', e.target.value)} />
+                                <FloatingInput variant="legacy" id="create-ppa-title-name" label="PPA Title / Name" required type="text" placeholder="E.g., Coastal Resource Rehabilitation, Forest Watch Training..." value={data.title} onChange={(e) => setData('title', e.target.value)} />
                                 {errors.title && <p className={errorClass}>{errors.title}</p>}
                             </div>
 
                             {/* Protected Area */}
                             <div>
 
-                                <FloatingSelect id="create-protected-area-pamo" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
+                                <FloatingSelect variant="legacy" id="create-protected-area-pamo" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
                                     <option value="">Select Protected Area</option>
                                     {protectedAreas.map((area) =>
                   <option key={area.id} value={area.id}>{area.name}</option>
@@ -64,7 +64,7 @@ export default function Create({ protectedAreas, categories, statuses }) {
                             {/* Category */}
                             <div>
 
-                                <FloatingSelect id="create-category" label="Category" required value={data.category} onChange={(e) => setData('category', e.target.value)}>
+                                <FloatingSelect variant="legacy" id="create-category" label="Category" required value={data.category} onChange={(e) => setData('category', e.target.value)}>
                                     {categories.map((cat) =>
                   <option key={cat} value={cat}>{cat}</option>
                   )}
@@ -75,35 +75,35 @@ export default function Create({ protectedAreas, categories, statuses }) {
                             {/* Budget */}
                             <div>
 
-                                <FloatingInput id="create-allocated-budget-php" label="Allocated Budget (PHP)" required type="number" min="0" step="0.01" value={data.budget} onChange={(e) => setData('budget', e.target.value)} />
+                                <FloatingInput variant="legacy" id="create-allocated-budget-php" label="Allocated Budget (PHP)" required type="number" min="0" step="0.01" value={data.budget} onChange={(e) => setData('budget', e.target.value)} />
                                 {errors.budget && <p className={errorClass}>{errors.budget}</p>}
                             </div>
 
                             {/* Source of Fund */}
                             <div>
 
-                                <FloatingInput id="create-source-of-fund" label="Source of Fund" type="text" placeholder="E.g., GOP, IPAF, NGO Grant" value={data.source_of_fund} onChange={(e) => setData('source_of_fund', e.target.value)} />
+                                <FloatingInput variant="legacy" id="create-source-of-fund" label="Source of Fund" type="text" placeholder="E.g., GOP, IPAF, NGO Grant" value={data.source_of_fund} onChange={(e) => setData('source_of_fund', e.target.value)} />
                                 {errors.source_of_fund && <p className={errorClass}>{errors.source_of_fund}</p>}
                             </div>
 
                             {/* Start Date */}
                             <div>
 
-                                <FloatingInput id="create-start-date" label="Start Date" type="date" value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} />
+                                <FloatingInput variant="legacy" id="create-start-date" label="Start Date" type="date" value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} />
                                 {errors.start_date && <p className={errorClass}>{errors.start_date}</p>}
                             </div>
 
                             {/* End Date */}
                             <div>
 
-                                <FloatingInput id="create-end-date" label="End Date" type="date" value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} />
+                                <FloatingInput variant="legacy" id="create-end-date" label="End Date" type="date" value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} />
                                 {errors.end_date && <p className={errorClass}>{errors.end_date}</p>}
                             </div>
 
                             {/* Status */}
                             <div>
 
-                                <FloatingSelect id="create-status" label="Status" required value={data.status} onChange={(e) => setData('status', e.target.value)}>
+                                <FloatingSelect variant="legacy" id="create-status" label="Status" required value={data.status} onChange={(e) => setData('status', e.target.value)}>
                                     {statuses.map((stat) =>
                   <option key={stat} value={stat}>{stat}</option>
                   )}
@@ -114,21 +114,21 @@ export default function Create({ protectedAreas, categories, statuses }) {
                             {/* PDF Attachment */}
                             <div>
 
-                                <FileInput id="create-upload-project-document-max-20mb-pdf" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
+                                <FileInput variant="legacy" id="create-upload-project-document-max-20mb-pdf" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
                                 {errors.attachment && <p className={errorClass}>{errors.attachment}</p>}
                             </div>
 
                             {/* Description */}
                             <div className="md:col-span-2">
 
-                                <FloatingTextarea id="create-ppa-description-objectives" label="PPA Description / Objectives" rows="3" placeholder="Brief outline of project scope, physical targets, or objectives..." value={data.description} onChange={(e) => setData('description', e.target.value)} />
+                                <FloatingTextarea variant="legacy" id="create-ppa-description-objectives" label="PPA Description / Objectives" rows="3" placeholder="Brief outline of project scope, physical targets, or objectives..." value={data.description} onChange={(e) => setData('description', e.target.value)} />
                                 {errors.description && <p className={errorClass}>{errors.description}</p>}
                             </div>
 
                             {/* Remarks */}
                             <div className="md:col-span-2">
 
-                                <FloatingTextarea id="create-remarks-project-update-notes" label="Remarks / Project Update Notes" rows="3" placeholder="Latest implementations, procurement milestones, or bottlenecks..." value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} />
+                                <FloatingTextarea variant="legacy" id="create-remarks-project-update-notes" label="Remarks / Project Update Notes" rows="3" placeholder="Latest implementations, procurement milestones, or bottlenecks..." value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} />
                                 {errors.remarks && <p className={errorClass}>{errors.remarks}</p>}
                             </div>
                         </div>

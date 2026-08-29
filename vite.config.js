@@ -18,10 +18,10 @@ export default defineConfig({
         cors: true,
 
         hmr: {
-            host: 'cds-server',
+            host: 'edats-cds',
             port: 5173,
         },
 
-        origin: 'http://cds-server:5173',
+        origin: 'http://edats-cds:5173',
     },
 });

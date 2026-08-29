@@ -30,7 +30,7 @@ export default function Edit({ auth, lawin }) {
                     <div className="bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg p-6">
                         <form onSubmit={submit} className="space-y-6">
                             <div>
-                                <FloatingInput id="cds-lawin-area" label="Patrol Area / Protected Area"
+                                <FloatingInput variant="legacy" id="cds-lawin-area" label="Patrol Area / Protected Area"
                                     type="text"
                                     value={data.patrol_area}
                                     error={errors.patrol_area}
@@ -41,7 +41,7 @@ export default function Edit({ auth, lawin }) {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <FloatingInput id="cds-lawin-date" label="Patrol Date"
+                                    <FloatingInput variant="legacy" id="cds-lawin-date" label="Patrol Date"
                                         type="date"
                                     value={data.patrol_date}
                                     error={errors.patrol_date}
@@ -50,7 +50,7 @@ export default function Edit({ auth, lawin }) {
                                     />
                                 </div>
                                 <div>
-                                    <FloatingInput id="cds-lawin-ecoregion" label="Ecoregion"
+                                    <FloatingInput variant="legacy" id="cds-lawin-ecoregion" label="Ecoregion"
                                         type="text"
                                     value={data.ecoregion}
                                     error={errors.ecoregion}
@@ -61,7 +61,7 @@ export default function Edit({ auth, lawin }) {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
-                                    <FloatingInput id="cds-lawin-leader" label="Team Leader"
+                                    <FloatingInput variant="legacy" id="cds-lawin-leader" label="Team Leader"
                                         type="text"
                                     value={data.team_leader}
                                     error={errors.team_leader}
@@ -69,7 +69,7 @@ export default function Edit({ auth, lawin }) {
                                     />
                                 </div>
                                 <div>
-                                    <FloatingInput id="cds-lawin-members" label="Team Members Count"
+                                    <FloatingInput variant="legacy" id="cds-lawin-members" label="Team Members Count"
                                         type="number"
                                     value={data.team_members_count}
                                     error={errors.team_members_count}
@@ -79,7 +79,7 @@ export default function Edit({ auth, lawin }) {
                             </div>
 
                             <div>
-                                <FloatingTextarea id="cds-lawin-threats" label="Threats Observed"
+                                <FloatingTextarea variant="legacy" id="cds-lawin-threats" label="Threats Observed"
                                     value={data.threats_observed}
                                     error={errors.threats_observed}
                                     onChange={(e) => setData('threats_observed', e.target.value)}
@@ -88,7 +88,7 @@ export default function Edit({ auth, lawin }) {
                             </div>
 
                             <div>
-                                <FloatingTextarea id="cds-lawin-remarks" label="Remarks"
+                                <FloatingTextarea variant="legacy" id="cds-lawin-remarks" label="Remarks"
                                     value={data.remarks}
                                     error={errors.remarks}
                                     onChange={(e) => setData('remarks', e.target.value)}

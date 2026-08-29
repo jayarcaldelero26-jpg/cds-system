@@ -4,11 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
 use App\Models\TechnicalReport;
+use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -18,6 +18,8 @@ use Throwable;
 
 class TechnicalReportController extends Controller
 {
+    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+
     public function index(Request $request): Response
     {
         $filters = $request->only(['search', 'protected_area_id', 'target_office', 'semester', 'year']);
@@ -57,13 +59,14 @@ class TechnicalReportController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
+        $this->rejectRoutingFields($request);
         $validated = $request->validate($this->rules(requireMov: true));
         $storedPath = null;
 
         try {
             if ($request->hasFile('attachment')) {
                 $file = $request->file('attachment');
-                $storedPath = $file->store('technical-reports', 'public');
+                $storedPath = $this->attachments->store($file, 'technical-report');
                 if (! is_string($storedPath)) {
                     throw new RuntimeException('The attachment could not be stored.');
                 }
@@ -80,7 +83,7 @@ class TechnicalReportController extends Controller
             ]));
         } catch (Throwable $exception) {
             if ($storedPath) {
-                Storage::disk('public')->delete($storedPath);
+                $this->attachments->delete($storedPath);
             }
             throw $exception;
         }
@@ -98,21 +101,21 @@ class TechnicalReportController extends Controller
 
     public function update(Request $request, TechnicalReport $technicalReport): RedirectResponse
     {
+        $this->rejectRoutingFields($request);
         $validated = $request->validate([
             ...$this->rules($technicalReport->report_type),
-            'remove_attachment' => ['nullable', 'boolean'],
         ]);
-        if (! $request->hasFile('attachment') && ($request->boolean('remove_attachment') || ! app(ComplianceMovService::class)->hasValidSingleFile($technicalReport, 'attachment'))) {
+        if (! $request->hasFile('attachment') && ! app(ComplianceMovService::class)->hasValidSingleFile($technicalReport, 'attachment')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => ComplianceMovService::MESSAGE]);
         }
         $oldPath = $technicalReport->attachment;
         $storedPath = null;
-        $shouldRemoveOld = $request->boolean('remove_attachment') || $request->hasFile('attachment');
+        $shouldRemoveOld = $request->hasFile('attachment');
 
         try {
             if ($request->hasFile('attachment')) {
                 $file = $request->file('attachment');
-                $storedPath = $file->store('technical-reports', 'public');
+                $storedPath = $this->attachments->store($file, 'technical-report');
                 if (! is_string($storedPath)) {
                     throw new RuntimeException('The attachment could not be stored.');
                 }
@@ -120,26 +123,21 @@ class TechnicalReportController extends Controller
                 $validated['attachment_original_name'] = $file->getClientOriginalName();
                 $validated['attachment_mime_type'] = $file->getMimeType() ?: $file->getClientMimeType();
                 $validated['attachment_size'] = $file->getSize();
-            } elseif ($request->boolean('remove_attachment')) {
-                $validated['attachment'] = null;
-                $validated['attachment_original_name'] = null;
-                $validated['attachment_mime_type'] = null;
-                $validated['attachment_size'] = null;
             }
 
             DB::transaction(fn () => $technicalReport->update([
-                ...$this->persistenceData($validated),
+                ...$this->persistenceData($validated, $technicalReport),
                 'updated_by' => $request->user()->id,
             ]));
         } catch (Throwable $exception) {
             if ($storedPath) {
-                Storage::disk('public')->delete($storedPath);
+                $this->attachments->delete($storedPath);
             }
             throw $exception;
         }
 
         if ($shouldRemoveOld && $oldPath) {
-            Storage::disk('public')->delete($oldPath);
+            $this->attachments->delete($oldPath);
         }
 
         return to_route('technical-reports.index')->with('success', 'General report updated successfully.');
@@ -147,9 +145,7 @@ class TechnicalReportController extends Controller
 
     public function viewAttachment(TechnicalReport $technicalReport): BinaryFileResponse
     {
-        abort_unless($technicalReport->attachment && Storage::disk('public')->exists($technicalReport->attachment), 404);
-
-        return response()->file(Storage::disk('public')->path($technicalReport->attachment));
+        return $this->attachments->response('technical-report', $technicalReport, 'attachment');
     }
 
     public function destroy(TechnicalReport $technicalReport): RedirectResponse
@@ -158,7 +154,7 @@ class TechnicalReportController extends Controller
         DB::transaction(fn () => $technicalReport->delete());
 
         if ($path) {
-            Storage::disk('public')->delete($path);
+            $this->attachments->delete($path);
         }
 
         return to_route('technical-reports.index')->with('success', 'General report deleted successfully.');
@@ -176,29 +172,50 @@ class TechnicalReportController extends Controller
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
-            'date_report_released_cenro' => ['nullable', 'date'],
-            'date_received_penro' => ['nullable', 'date'],
-            'date_endorsed_regional' => ['nullable', 'date'],
             'attachment' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
             'remarks' => ['nullable', 'string'],
         ];
     }
 
-    private function persistenceData(array $validated): array
+    private function persistenceData(array $validated, ?TechnicalReport $existing = null): array
     {
-        $received = $validated['date_received_penro'] ?? null;
-
-        return [
-            ...collect($validated)->except(['date_received_penro', 'remarks', 'remove_attachment'])->all(),
-            'submission_date' => $received,
-            'status' => $received ? 'Submitted' : 'Pending',
+        $data = [
+            ...collect($validated)->except(['date_received_penro', 'remarks'])->all(),
             'recommendations' => $validated['remarks'] ?? null,
         ];
+
+        if ($existing === null) {
+            $data['submission_date'] = null;
+            $data['status'] = 'Pending';
+        }
+
+        return $data;
+    }
+
+    private function rejectRoutingFields(Request $request): void
+    {
+        $fields = collect(['date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional'])
+            ->filter(fn (string $field): bool => $request->exists($field))
+            ->values();
+
+        if ($fields->isNotEmpty()) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'routing' => 'Routing dates are recorded through Submission Tracking only.',
+            ]);
+        }
     }
 
     private function reportData(TechnicalReport $report): array
     {
+        $data = collect($report->toArray())->except([
+            'attachment',
+            'attachment_original_name',
+            'attachment_mime_type',
+            'attachment_size',
+        ])->all();
+
         return [
+            ...$data,
             'id' => $report->id,
             'protected_area_id' => $report->protected_area_id,
             'protected_area_name' => $report->protectedArea?->name ?? 'Unknown',
@@ -218,10 +235,13 @@ class TechnicalReportController extends Controller
             'submission_status' => $report->submission_status,
             'total_days_delayed_penro' => $report->total_days_delayed_penro,
             'attachment' => $report->attachment ? [
+                'key' => 'attachment',
                 'name' => $report->attachment_original_name ?: basename($report->attachment),
+                'mime_type' => $report->attachment_mime_type ?: '',
                 'type' => $report->attachment_mime_type ?: '',
                 'size' => $report->attachment_size,
-                'url' => route('technical-reports.attachment.show', $report),
+                'url' => $this->attachments->url('technical-report', $report, 'attachment'),
+                'external' => false,
             ] : null,
         ];
     }

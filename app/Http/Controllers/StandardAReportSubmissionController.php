@@ -3,12 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
-use App\Services\Compliance\ComplianceMovService;
+use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -24,6 +24,7 @@ abstract class StandardAReportSubmissionController extends Controller
     protected string $routePrefix;
     protected string $storageFolder;
     protected string $label;
+    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
 
     public function index(Request $request): Response
     {
@@ -55,25 +56,27 @@ abstract class StandardAReportSubmissionController extends Controller
 
     public function store(Request $request): RedirectResponse
     {
-        $validated = $request->validate($this->rules(requireMov: true));
+        $validated = $request->validate($this->rules(requireMov: true), [
+            'mov.required' => 'A report attachment / MOV is required.',
+        ]);
         $newPath = null;
         try {
             if ($request->hasFile('mov')) {
                 $file = $request->file('mov');
-                $newPath = $file->store($this->storageFolder, 'public');
+                $newPath = $this->attachments->store($file, $this->attachmentSource());
                 if (! is_string($newPath)) {
                     throw new RuntimeException('The MOV could not be stored.');
                 }
                 $validated['mov_file_name'] = $file->getClientOriginalName();
                 $validated['mov_file_path'] = $newPath;
             }
-            unset($validated['mov'], $validated['delete_mov']);
+            unset($validated['mov']);
             $validated['created_by'] = $request->user()?->id;
             $validated['updated_by'] = $request->user()?->id;
             $model = $this->modelClass;
             DB::transaction(fn () => $model::create($validated));
         } catch (Throwable $exception) {
-            if ($newPath) Storage::disk('public')->delete($newPath);
+            if ($newPath) $this->attachments->delete($newPath);
             throw $exception;
         }
 
@@ -84,31 +87,25 @@ abstract class StandardAReportSubmissionController extends Controller
     {
         $submission = $this->findSubmission($reportSubmission);
         $validated = $request->validate($this->rules($submission->document_type));
-        if (! $request->hasFile('mov') && ($request->boolean('delete_mov') || ! app(ComplianceMovService::class)->hasValidSingleFile($submission, 'mov_file_path'))) {
-            throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
-        }
         $oldPath = $submission->mov_file_path;
         $newPath = null;
-        $removeOld = $request->boolean('delete_mov') || $request->hasFile('mov');
+        $removeOld = $request->hasFile('mov');
         try {
             if ($request->hasFile('mov')) {
                 $file = $request->file('mov');
-                $newPath = $file->store($this->storageFolder, 'public');
+                $newPath = $this->attachments->store($file, $this->attachmentSource());
                 if (! is_string($newPath)) throw new RuntimeException('The MOV could not be stored.');
                 $validated['mov_file_name'] = $file->getClientOriginalName();
                 $validated['mov_file_path'] = $newPath;
-            } elseif ($request->boolean('delete_mov')) {
-                $validated['mov_file_name'] = null;
-                $validated['mov_file_path'] = null;
             }
-            unset($validated['mov'], $validated['delete_mov']);
+            unset($validated['mov']);
             $validated['updated_by'] = $request->user()?->id;
             DB::transaction(fn () => $submission->update($validated));
         } catch (Throwable $exception) {
-            if ($newPath) Storage::disk('public')->delete($newPath);
+            if ($newPath) $this->attachments->delete($newPath);
             throw $exception;
         }
-        if ($removeOld && $oldPath) Storage::disk('public')->delete($oldPath);
+        if ($removeOld && $oldPath) $this->attachments->delete($oldPath);
 
         return back()->with('success', "{$this->label} report submission successfully updated.");
     }
@@ -118,7 +115,7 @@ abstract class StandardAReportSubmissionController extends Controller
         $submission = $this->findSubmission($reportSubmission);
         $path = $submission->mov_file_path;
         DB::transaction(fn () => $submission->delete());
-        if ($path) Storage::disk('public')->delete($path);
+        if ($path) $this->attachments->delete($path);
 
         return back()->with('success', "{$this->label} report submission successfully deleted.");
     }
@@ -126,9 +123,7 @@ abstract class StandardAReportSubmissionController extends Controller
     public function showMov(int $reportSubmission): BinaryFileResponse
     {
         $submission = $this->findSubmission($reportSubmission);
-        abort_unless($submission->mov_file_path && Storage::disk('public')->exists($submission->mov_file_path), 404);
-
-        return response()->file(Storage::disk('public')->path($submission->mov_file_path));
+        return $this->attachments->response($this->attachmentSource(), $submission, 'mov');
     }
 
     private function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
@@ -143,11 +138,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
-            'date_report_released_cenro' => ['nullable', 'date'],
-            'date_received_penro' => ['nullable', 'date'],
-            'date_endorsed_regional' => ['nullable', 'date'],
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
-            'delete_mov' => ['nullable', 'boolean'],
             'remarks' => ['nullable', 'string'],
         ];
     }
@@ -158,10 +149,20 @@ abstract class StandardAReportSubmissionController extends Controller
         return $model::query()->findOrFail($id);
     }
 
+
     private function submissionData(Model $submission): array
     {
-        $data = $submission->toArray();
-        $data['mov_url'] = $submission->mov_file_path ? route("{$this->routePrefix}.mov", ['reportSubmission' => $submission->id]) : null;
+        $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
+        $data['mov'] = $this->attachments->descriptor($this->attachmentSource(), $submission, 'mov');
+        $data['mov_url'] = $submission->mov_file_path ? $this->attachments->url($this->attachmentSource(), $submission, 'mov') : null;
+        $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
+        $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
+        $data['cenro_release_applicable'] = ! $directPenro;
         return $data;
+    }
+
+    protected function attachmentSource(): string
+    {
+        return $this->routePrefix === 'bams.report-submissions' ? 'bams-report' : 'imea-report';
     }
 }

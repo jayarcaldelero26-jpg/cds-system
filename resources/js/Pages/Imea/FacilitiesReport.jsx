@@ -1,5 +1,5 @@
 import { FloatingSelect } from "@/Components/Form";import { Link, router, usePage } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import Tooltip from '@/Components/Tooltip';
@@ -18,6 +18,11 @@ export default function FacilitiesReport({
   const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
   const [selectedZone, setSelectedZone] = useState(filters.zone || '');
   const [selectedInventoryDate, setSelectedInventoryDate] = useState(filters.inventory_date || '');
+  useEffect(() => {
+    setSelectedPA(filters.protected_area_id || '');
+    setSelectedZone(filters.zone || '');
+    setSelectedInventoryDate(filters.inventory_date || '');
+  }, [filters.protected_area_id, filters.zone, filters.inventory_date]);
 
   // Facility Detail Modal State
   const [selectedFacility, setSelectedFacility] = useState(null);
@@ -52,7 +57,7 @@ export default function FacilitiesReport({
     setSelectedPA('');
     setSelectedZone('');
     setSelectedInventoryDate('');
-    router.get('/imea/facilities-report', {}, { preserveState: true });
+    router.get('/imea/facilities-report', {}, { preserveState: true, preserveScroll: true, replace: true });
   };
 
   const handlePrint = () => {

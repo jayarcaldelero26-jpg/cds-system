@@ -11,7 +11,7 @@
         <div class="w-64 bg-[#0a3d20] text-white flex flex-col">
             <!-- Logo / Header -->
             <div class="p-4 flex items-center space-x-3 border-b border-emerald-800">
-                <span class="font-bold text-lg">CDS IMS</span>
+                <span class="font-bold text-lg">eDATS</span>
             </div>
 
             <!-- Sidebar Navigation Links -->

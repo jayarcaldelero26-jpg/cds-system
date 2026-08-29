@@ -46,19 +46,27 @@ export default function Index({ protectedAreas, filters }) {
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => setSearch(filters.search || ''), [filters.search]);
+  useEffect(() => {
+    if (search === (filters.search || '')) return undefined;
+    const timer = window.setTimeout(() => {
+      router.get('/protected-areas', { search: search || undefined, sort: filters.sort, direction: filters.direction, page: 1 }, { preserveState: true, preserveScroll: true, replace: true });
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
 
   const visit = (params) =>
   router.get(
     '/protected-areas',
     {
-      search,
+      search: search || undefined,
       sort: filters.sort,
       direction: filters.direction,
       ...params
     },
     {
       preserveState: true,
+      preserveScroll: true,
       replace: true
     }
   );
@@ -307,12 +315,7 @@ export default function Index({ protectedAreas, filters }) {
         className="mt-6 overflow-hidden border border-gray-200 shadow-sm dark:border-gray-800"
         padding="p-0">
 
-                <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            visit({ page: 1 });
-          }}
-          className="border-b border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/40 sm:flex sm:items-end sm:gap-3">
+                <div className="border-b border-gray-200 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/40">
 
                     <div
             className="block flex-1 text-sm font-medium text-gray-700 dark:text-gray-200">
@@ -329,13 +332,7 @@ export default function Index({ protectedAreas, filters }) {
 
                     </div>
 
-                    <button
-            type="submit"
-            className="mt-3 rounded-xl bg-green-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 sm:mt-0">
-
-                        Search
-                    </button>
-                </form>
+                </div>
 
                 <div className="border-b border-gray-100 bg-white px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
                     <div className="flex items-center justify-between gap-3">

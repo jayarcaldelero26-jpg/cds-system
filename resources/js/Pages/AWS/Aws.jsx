@@ -17,6 +17,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   const initialTab = urlTab === 'raw-data' ? 'raw-data' : urlTab === 'analytics' ? 'analytics' : 'reports';
 
   const [activeTab, setActiveTab] = useState(initialTab);
+  const isReportContext = activeTab === 'reports' || activeTab === 'form';
 
   // Reports records ug pagination
   const records = Array.isArray(awsRecords) ? awsRecords : awsRecords.data || [];
@@ -102,28 +103,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
   const handleFilterChange = (e) => {
     const paId = e.target.value;
-    router.get(route('aws.index'), { protected_area_id: paId, tab: activeTab }, { preserveState: true });
+    router.get(route('aws.index'), { ...filters, protected_area_id: paId || undefined, tab: activeTab }, { preserveState: true, preserveScroll: true, replace: true });
   };
 
-  const openCreateForm = () => {
-    setSelectedRecord(null);
-    clearErrors();
-    reset();
-    setPreviewUrl(null);
-    setExistingFile(null);
-    setData({
-      protected_area_id: protectedAreas[0]?.id || '',
-      station_name: '',
-      location: '',
-      report_period_type: 'Monthly',
-      start_date: '',
-      end_date: '',
-      status: 'Approve',
-      recommendation_remarks: '',
-      report_file: null
-    });
-    handleTabChange('form');
-  };
 
   const openViewModal = (record) => {
     setSelectedRecord(record);
@@ -146,9 +128,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       report_file: null
     });
 
-    const fileUrl = record.report_file_path ? `/storage/${record.report_file_path}` : null;
+    const fileUrl = record.report_file?.url || null;
     setPreviewUrl(fileUrl);
-    setExistingFile(record.report_file_path ? record.report_file_name || record.report_file_path.split('/').pop() : null);
+    setExistingFile(record.report_file?.name || null);
     setIsEditModalOpen(true);
   };
 
@@ -223,7 +205,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   };
 
   return (
-    <AuthenticatedLayout title="Automated Weather Stations (AWS)">
+    <AuthenticatedLayout title={isReportContext ? 'AWS Report' : 'Automated Weather Stations (AWS)'}>
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
@@ -233,57 +215,22 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
             <div className="space-y-6">
                 <PageHeader
-          title="Automated Weather Stations (AWS)"
-          description="Consolidation of meteorological monitoring reports and document attachments."
+          title={isReportContext ? 'AWS Report' : 'Automated Weather Stations (AWS)'}
+          description={isReportContext ? 'AWS report submission and compliance tracking.' : 'Consolidation of meteorological monitoring reports and document attachments.'}
           actions={
-          activeTab !== 'form' ?
-          <>
-                                <button
-              type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm">
-
-                                    📥 Import CSV
-                                </button>
-
-                                {auth.canCreateAws &&
-            <button
-              type="button"
-              onClick={() => {handleTabChange('reports');window.setTimeout(() => window.dispatchEvent(new Event('aws-report-create')), 0);}}
-              className="inline-flex items-center gap-2 bg-white/10 hover:bg-white/20 px-4 py-2 rounded-xl text-xs font-bold text-white transition border border-white/20 shadow-sm">
-
-                                        + Add Report
-                                    </button>
-            }
-                            </> :
-
-          <button
-            type="button"
-            onClick={() => {
-              handleTabChange('reports');
-              reset();
-              setPreviewUrl(null);
-              setSelectedRecord(null);
-            }}
-            className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-white transition">
-
-                                ← Back to Report Submission Tracker
-                            </button>
-
+          !isReportContext ?
+          <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm">
+                                Import CSV
+          </button> : activeTab === 'reports' ?
+          null : activeTab === 'form' ?
+          <button type="button" onClick={() => { handleTabChange('reports'); reset(); setPreviewUrl(null); setSelectedRecord(null); }} className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-white transition">
+                                Back to AWS Report
+          </button> : null
           } />
 
 
+{!isReportContext && (
                 <div className="mt-2 mb-3 flex items-center gap-2 overflow-x-auto">
-                    <button
-            onClick={() => handleTabChange('reports')}
-            className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
-            activeTab === 'reports' || activeTab === 'form' ?
-            'bg-green-700 text-white shadow-md' :
-            'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-            }>
-
-                        <span className="text-sm">📊</span> Report Submission Tracker
-                    </button>
                     <button
             onClick={() => handleTabChange('raw-data')}
             className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
@@ -292,7 +239,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
             }>
 
-                        <span className="text-sm">🏗️</span> AWS Raw Data Table
+                        <span className="text-sm"></span> AWS Raw Data Table
                     </button>
                     <button
             onClick={() => handleTabChange('analytics')}
@@ -302,9 +249,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
             }>
 
-                        <span className="text-sm">📈</span> Weather Analytics & Graph
+                        <span className="text-sm"></span> Weather Analytics & Graph
                     </button>
-                </div>
+                </div>                )}
 
                 {activeTab === 'raw-data' &&
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
@@ -327,7 +274,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             onClick={() => setShowBulkDeleteConfirm(true)}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition">
 
-                                🗑️ Delete Selected ({selectedIds.length})
+                                Delete Selected ({selectedIds.length})
                             </button>
           }
                     </div>
@@ -341,10 +288,10 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
           <Card className="border border-gray-100 dark:border-gray-800 shadow-xl rounded-2xl overflow-hidden" padding="p-0">
                                 <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                                     <div>
-                                        <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Report Submission Tracker</h3>
-                                        <p className="text-xs text-green-700 dark:text-green-400 font-semibold mt-0.5">📅 Consolidated AWS Monitoring Reports</p>
+                                        <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">AWS Report</h3>
+                                        <p className="text-xs text-green-700 dark:text-green-400 font-semibold mt-0.5"> Consolidated AWS Monitoring Reports</p>
                                     </div>
-                                    <span className="text-xs text-gray-500 italic">💡 Click any row to view full details</span>
+                                    <span className="text-xs text-gray-500 italic"> Click any row to view full details</span>
                                 </div>
 
                                 <div className="overflow-x-auto custom-table-scrollbar">
@@ -382,11 +329,11 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         className="rounded border-gray-300 text-green-600 focus:ring-green-500" />
 
                                                     </td>
-                                                    <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.station_name || '—'}</td>
-                                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.location || '—'}</td>
+                                                    <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.station_name || ''}</td>
+                                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.location || ''}</td>
                                                     <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.report_period_type || 'Monthly'}</td>
-                                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.start_date || '—'}</td>
-                                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.end_date || '—'}</td>
+                                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.start_date || ''}</td>
+                                                    <td className="px-4 py-3 text-gray-700 dark:text-gray-300">{row.end_date || ''}</td>
                                                     <td className="px-4 py-3">
                                                         <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${row.status === 'Approve' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
                                                             {row.status || 'Approve'}
@@ -401,7 +348,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
           <Card className="border border-gray-100 dark:border-gray-800 shadow-xl rounded-2xl flex flex-col items-center justify-center text-center py-24 px-6 bg-white dark:bg-gray-900">
                                 <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-600 text-4xl mb-4 shadow-sm border border-green-100 dark:border-green-900">
-                                    📄
+
                                 </div>
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
                                     No AWS Reports Found
@@ -478,7 +425,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                                     <div className="bg-gray-50/70 dark:bg-gray-800/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 space-y-4">
                                         <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 mb-2 flex items-center gap-2">
-                                            <span>📌</span> General Information & Status
+                                            <span></span> General Information & Status
                                         </h4>
 
                                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -582,7 +529,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                                     <div className="pt-2">
                                         <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 mb-3 flex items-center gap-2">
-                                            <span>📋</span> Recommendation & Remarks
+                                            <span></span> Recommendation & Remarks
                                         </h4>
                                         <FloatingTextarea id="aws-enter-recommendation-or-remarks-here" label="Enter recommendation or remarks here..."
                   rows="3"
@@ -596,7 +543,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                                     <div className="border-t border-gray-100 dark:border-gray-800 pt-6">
                                         <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 mb-3 flex items-center gap-2">
-                                            <span>📎</span> Attach Supporting Document
+                                            <span></span> Attach Supporting Document
                                         </h4>
                                         <div className="space-y-3">
                                             <FileInput id="aws-602-field"
@@ -610,8 +557,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                                             {data.report_file &&
                     <div className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-xs w-fit">
-                                                    <span>📄 {data.report_file.name}</span>
-                                                    <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1">✕</button>
+                                                    <span> {data.report_file.name}</span>
+                                                    <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1"></button>
                                                 </div>
                     }
                                         </div>
@@ -630,7 +577,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     disabled={processing}
                     className="rounded-xl bg-green-700 hover:bg-green-800 px-6 py-2.5 text-xs font-bold text-white shadow-md transition flex items-center gap-1.5">
 
-                                            💾 Save Assessment Record
+                                             Save Report
                                         </button>
                                     </div>
                                 </form>
@@ -641,11 +588,11 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             <Card padding="p-5" className="border border-gray-200 dark:border-gray-800 shadow-xl rounded-2xl bg-white dark:bg-gray-900">
                                 <div className="flex items-center justify-between mb-3 pb-3 border-b border-gray-100 dark:border-gray-800">
                                     <h3 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 flex items-center gap-2">
-                                        <span>👁️</span> LIVE DOCUMENT PREVIEW {previewUrl && <span className="text-gray-500 text-[11px] font-normal ml-1 truncate max-w-[150px]">({data.report_file?.name})</span>}
+                                        <span></span> LIVE DOCUMENT PREVIEW {previewUrl && <span className="text-gray-500 text-[11px] font-normal ml-1 truncate max-w-[150px]">({data.report_file?.name})</span>}
                                     </h3>
                                     {previewUrl &&
                 <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 dark:text-green-400 hover:underline">
-                                            Fullscreen ↗
+                                            Fullscreen
                                         </a>
                 }
                                 </div>
@@ -656,7 +603,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                     </div> :
 
               <div className="flex flex-col items-center justify-center h-[620px] text-center p-8 bg-gray-50 dark:bg-gray-950/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-                                        <span className="text-4xl mb-3">📁</span>
+                                        <span className="text-4xl mb-3"></span>
                                         <h4 className="text-sm font-semibold text-gray-800 dark:text-white">No file selected for preview</h4>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-xs">
                                             Upload a supporting document or report on the left form to view it here live.
@@ -669,15 +616,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
         }
             </div>
 
-            {/* IMPORT CSV MODAL */}
             {isImportModalOpen &&
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 animate-pop-in space-y-6">
                         <div className="flex items-center justify-between border-b pb-4 dark:border-gray-800">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
-                                <span>📥</span> Import Meteorological Data from CSV
+                                <span></span> Import Meteorological Data from CSV
                             </h3>
-                            <button type="button" onClick={() => setIsImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <button type="button" onClick={() => setIsImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg"></button>
                         </div>
 
                         <form onSubmit={handleImportSubmit} className="space-y-4">
@@ -710,7 +656,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                                 {importForm.errors.file &&
               <div className="max-h-28 overflow-y-auto text-red-600 dark:text-red-400 text-xs mt-2 font-semibold p-2.5 bg-red-50 dark:bg-red-950/50 rounded-xl border border-red-200 dark:border-red-900">
-                                        ❌ {importForm.errors.file}
+                                         {importForm.errors.file}
                                     </div>
               }
                             </div>
@@ -728,7 +674,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                 disabled={importForm.processing}
                 className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5">
 
-                                    {importForm.processing ? 'Importing...' : '🚀 Upload & Import CSV'}
+                                Import CSV
                                 </button>
                             </div>
                         </form>
@@ -743,9 +689,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">AWS Monitoring Full Details</h3>
-                                <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'N/A'} — Station: {selectedRecord.station_name}</p>
+                                <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'N/A'}  Station: {selectedRecord.station_name}</p>
                             </div>
-                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg"></button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -765,7 +711,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             </div>
 
                             <div className="space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📍 Station Location Information</h4>
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400"> Station Location Information</h4>
                                 <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-2 text-xs">
                                     <div><span className="text-gray-500 block">Station Name:</span><span className="font-semibold text-gray-800 dark:text-gray-200 text-sm">{selectedRecord.station_name}</span></div>
                                     <div><span className="text-gray-500 block">Location:</span><span className="font-semibold text-gray-800 dark:text-gray-200 text-sm">{selectedRecord.location}</span></div>
@@ -773,22 +719,22 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             </div>
 
                             <div className="space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📝 Recommendation & Remarks</h4>
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400"> Recommendation & Remarks</h4>
                                 <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 text-xs">
                                     <p className="text-gray-800 dark:text-gray-200">{selectedRecord.recommendation_remarks || 'No remarks provided.'}</p>
                                 </div>
                             </div>
 
-                            {selectedRecord.report_file_path &&
+                            {selectedRecord.report_file?.url &&
             <div className="space-y-2">
-                                    <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📎 Attached Document</h4>
+                                    <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400"> Attached Document</h4>
                                     <a
-                href={`/storage/${selectedRecord.report_file_path}`}
+                href={selectedRecord.report_file.url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-2 bg-green-700 text-white px-4 py-2 rounded-xl text-xs font-medium shadow-xs hover:bg-green-800 transition">
 
-                                        <span>📄 View / Download Attached Document ↗</span>
+                                        <span> View / Download Attached Document </span>
                                     </a>
                                 </div>
             }
@@ -796,7 +742,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
                             {auth.canUpdateAws ?
-            <button type="button" onClick={() => openEditModalFromView(selectedRecord)} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Record</button> :
+            <button type="button" onClick={() => openEditModalFromView(selectedRecord)} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition"> Edit This Record</button> :
             <div></div>}
                             <button type="button" onClick={() => setIsViewModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">Close Details</button>
                         </div>
@@ -810,13 +756,13 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     <div className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div className="flex items-center gap-2">
-                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">🌤️</span>
+                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400"></span>
                                 <div>
                                     <h3 className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">Edit AWS Report & Document Preview</h3>
                                     <p className="text-xs text-gray-500">Update weather station details and review attached files side-by-side.</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 font-bold text-lg">✕</button>
+                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 font-bold text-lg"></button>
                         </div>
 
                         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto custom-table-scrollbar">
@@ -885,15 +831,15 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                                         {existingFile && !data.report_file &&
                   <div className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs w-fit">
-                                                <span>📄 {existingFile}</span>
-                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1">✕</button>
+                                                <span> {existingFile}</span>
+                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1"></button>
                                             </div>
                   }
 
                                         {data.report_file &&
                   <div className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs w-fit">
-                                                <span>📄 {data.report_file.name}</span>
-                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1">✕</button>
+                                                <span> {data.report_file.name}</span>
+                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1"></button>
                                             </div>
                   }
                                     </div>
@@ -903,23 +849,23 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             <div className="lg:col-span-6 flex flex-col bg-gray-50 dark:bg-gray-950 p-4 rounded-2xl border border-gray-200 dark:border-gray-800 h-[600px] sticky top-4">
                                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200 dark:border-gray-800">
                                     <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">
-                                        👁️ LIVE DOCUMENT PREVIEW {previewUrl && <span className="normal-case text-gray-500 text-[11px] font-normal ml-1">({data.report_file?.name || existingFile})</span>}
+                                         LIVE DOCUMENT PREVIEW {previewUrl && <span className="normal-case text-gray-500 text-[11px] font-normal ml-1">({data.report_file?.name || existingFile})</span>}
                                     </h4>
-                                    {previewUrl && <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 hover:underline">Fullscreen ↗</a>}
+                                    {previewUrl && <a href={previewUrl} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 hover:underline">Fullscreen </a>}
                                 </div>
                                 <div className="flex-1 w-full bg-white dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-300 dark:border-gray-800 flex items-center justify-center">
-                                    {previewUrl ? <iframe src={previewUrl} title="Document Preview" className="w-full h-full border-0" /> : <div className="text-center p-6 text-gray-400 text-xs">📁 No file selected or available for preview</div>}
+                                    {previewUrl ? <iframe src={previewUrl} title="Document Preview" className="w-full h-full border-0" /> : <div className="text-center p-6 text-gray-400 text-xs"> No file selected or available for preview</div>}
                                 </div>
                             </div>
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             {auth.canDeleteAws ?
-            <button type="button" onClick={() => promptDelete(selectedRecord.id)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition">🗑️ Delete Record</button> :
+            <button type="button" onClick={() => promptDelete(selectedRecord.id)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition"> Delete Record</button> :
             <div></div>}
                             <div className="flex gap-2">
-                                <button type="button" onClick={() => {setIsEditModalOpen(false);openViewModal(selectedRecord);}} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
-                                <button type="submit" form="edit-aws-form" disabled={processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-md transition">💾 Save Changes</button>
+                                <button type="button" onClick={() => {setIsEditModalOpen(false);openViewModal(selectedRecord);}} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"> Back</button>
+                                <button type="submit" form="edit-aws-form" disabled={processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-md transition"> Save Changes</button>
                             </div>
                         </div>
                     </div>
@@ -931,7 +877,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       <ConfirmDialog
         open
         title="Delete Selected Raw Data?"
-        message={`Are you sure you want to delete ${selectedIds.length} selected record(s)? This cannot be undone.`}
+        message={`Are you sure you want to Delete this report? This cannot be undone.`}
         confirmLabel="Delete Selected"
         onConfirm={confirmBulkDelete}
         onCancel={() => setShowBulkDeleteConfirm(false)}
@@ -943,9 +889,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             {showBulkDeleteConfirm && activeTab !== 'raw-data' &&
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>
+                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl"></div>
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected Records?</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to delete {selectedIds.length} selected record(s)? This cannot be undone.</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to Delete this report? This cannot be undone.</p>
                         <div className="flex gap-3">
                             <button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
                             <button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">Yes, Delete All</button>
@@ -958,7 +904,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             {showDeleteConfirm &&
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">⚠️</div>
+                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl"></div>
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3>
                         <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record? This process cannot be undone.</p>
                         <div className="flex gap-3">

@@ -46,14 +46,14 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                             {/* Title */}
                             <div className="md:col-span-2">
 
-                                <FloatingInput id="edit-ppa-title-name" label="PPA Title / Name" required type="text" value={data.title} onChange={(e) => setData('title', e.target.value)} />
+                                <FloatingInput variant="legacy" id="edit-ppa-title-name" label="PPA Title / Name" required type="text" value={data.title} onChange={(e) => setData('title', e.target.value)} />
                                 {errors.title && <p className={errorClass}>{errors.title}</p>}
                             </div>
 
                             {/* Protected Area */}
                             <div>
 
-                                <FloatingSelect id="edit-protected-area-pamo" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
+                                <FloatingSelect variant="legacy" id="edit-protected-area-pamo" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
                                     <option value="">Select Protected Area</option>
                                     {protectedAreas.map((area) =>
                   <option key={area.id} value={area.id}>{area.name}</option>
@@ -65,7 +65,7 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                             {/* Category */}
                             <div>
 
-                                <FloatingSelect id="edit-category" label="Category" required value={data.category} onChange={(e) => setData('category', e.target.value)}>
+                                <FloatingSelect variant="legacy" id="edit-category" label="Category" required value={data.category} onChange={(e) => setData('category', e.target.value)}>
                                     {categories.map((cat) =>
                   <option key={cat} value={cat}>{cat}</option>
                   )}
@@ -76,35 +76,35 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                             {/* Budget */}
                             <div>
 
-                                <FloatingInput id="edit-allocated-budget-php" label="Allocated Budget (PHP)" required type="number" min="0" step="0.01" value={data.budget} onChange={(e) => setData('budget', e.target.value)} />
+                                <FloatingInput variant="legacy" id="edit-allocated-budget-php" label="Allocated Budget (PHP)" required type="number" min="0" step="0.01" value={data.budget} onChange={(e) => setData('budget', e.target.value)} />
                                 {errors.budget && <p className={errorClass}>{errors.budget}</p>}
                             </div>
 
                             {/* Source of Fund */}
                             <div>
 
-                                <FloatingInput id="edit-source-of-fund" label="Source of Fund" type="text" value={data.source_of_fund} onChange={(e) => setData('source_of_fund', e.target.value)} />
+                                <FloatingInput variant="legacy" id="edit-source-of-fund" label="Source of Fund" type="text" value={data.source_of_fund} onChange={(e) => setData('source_of_fund', e.target.value)} />
                                 {errors.source_of_fund && <p className={errorClass}>{errors.source_of_fund}</p>}
                             </div>
 
                             {/* Start Date */}
                             <div>
 
-                                <FloatingInput id="edit-start-date" label="Start Date" type="date" value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} />
+                                <FloatingInput variant="legacy" id="edit-start-date" label="Start Date" type="date" value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} />
                                 {errors.start_date && <p className={errorClass}>{errors.start_date}</p>}
                             </div>
 
                             {/* End Date */}
                             <div>
 
-                                <FloatingInput id="edit-end-date" label="End Date" type="date" value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} />
+                                <FloatingInput variant="legacy" id="edit-end-date" label="End Date" type="date" value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} />
                                 {errors.end_date && <p className={errorClass}>{errors.end_date}</p>}
                             </div>
 
                             {/* Status */}
                             <div>
 
-                                <FloatingSelect id="edit-status" label="Status" required value={data.status} onChange={(e) => setData('status', e.target.value)}>
+                                <FloatingSelect variant="legacy" id="edit-status" label="Status" required value={data.status} onChange={(e) => setData('status', e.target.value)}>
                                     {statuses.map((stat) =>
                   <option key={stat} value={stat}>{stat}</option>
                   )}
@@ -115,7 +115,7 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                             {/* Replacement File Upload */}
                             <div>
 
-                                <FileInput id="edit-replace-attachment-optional-pdf-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
+                                <FileInput variant="legacy" id="edit-replace-attachment-optional-pdf-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
                                 {ppa.attachment &&
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                         Current document: <span className="font-mono text-green-700 dark:text-green-400">{ppa.attachment.split('/').pop()}</span>
@@ -127,14 +127,14 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                             {/* Description */}
                             <div className="md:col-span-2">
 
-                                <FloatingTextarea id="edit-ppa-description-objectives" label="PPA Description / Objectives" rows="3" value={data.description} onChange={(e) => setData('description', e.target.value)} />
+                                <FloatingTextarea variant="legacy" id="edit-ppa-description-objectives" label="PPA Description / Objectives" rows="3" value={data.description} onChange={(e) => setData('description', e.target.value)} />
                                 {errors.description && <p className={errorClass}>{errors.description}</p>}
                             </div>
 
                             {/* Remarks */}
                             <div className="md:col-span-2">
 
-                                <FloatingTextarea id="edit-remarks-project-update-notes" label="Remarks / Project Update Notes" rows="3" value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} />
+                                <FloatingTextarea variant="legacy" id="edit-remarks-project-update-notes" label="Remarks / Project Update Notes" rows="3" value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} />
                                 {errors.remarks && <p className={errorClass}>{errors.remarks}</p>}
                             </div>
                         </div>

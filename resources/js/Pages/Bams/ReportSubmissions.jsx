@@ -1,2 +1,2 @@
 import StandardAReportSubmissionTracker from '@/Components/StandardAReportSubmissionTracker';
-export default function ReportSubmissions(props) { return <StandardAReportSubmissionTracker {...props} backRoute="bams.index" />; }
+export default function ReportSubmissions(props) { return <StandardAReportSubmissionTracker {...props} />; }

@@ -52,7 +52,7 @@ final readonly class OverdueReport
             'days_overdue' => $this->daysOverdue,
             'mov_required' => $this->movRequired,
             'mov_present' => $this->movPresent,
-            'mov_reference' => $this->movReference,
+            'mov_reference' => null,
             'mov_label' => $this->movLabel,
             'compliance_issue' => $this->complianceIssue,
             'submission_date' => $this->submissionDate,

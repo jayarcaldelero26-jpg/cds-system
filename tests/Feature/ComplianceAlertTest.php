@@ -5,6 +5,8 @@ use App\Models\BmsReportSubmission;
 use App\Models\ComplianceAlertRecipient;
 use App\Models\ComplianceAlertSetting;
 use App\Models\ComplianceDeliveryClaim;
+use App\Models\ConservationReportSubmission;
+use App\Models\EngpReportSubmission;
 use App\Models\ComplianceNotificationRun;
 use App\Models\ProtectedArea;
 use App\Models\ReportComplianceConfirmation;
@@ -93,16 +95,19 @@ function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string
 {
     $standardAStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -15)->toDateString();
     $standardBStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7)->toDateString();
+    $periodKey = substr($deadline, 0, 7);
+    $periodLabel = CarbonImmutable::parse($deadline)->format('F Y');
     $common = ['protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'Compliance activity', 'document_type' => 'Final Report', 'created_by' => $user->id, 'updated_by' => $user->id];
 
     $records = [
+        ConservationReportSubmission::class => ConservationReportSubmission::create([...$common, 'workflow_key' => 'regular_pamb', 'reporting_period' => 'Quarter 1', 'date_accomplished' => $standardBStart]),
+        EngpReportSubmission::class => EngpReportSubmission::create(['workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'section_name' => 'NGP', 'activity_name' => 'Community-Based Employment Program (CBEP)', 'document_type' => 'Monthly Report', 'reporting_year' => 2026, 'period_key' => $periodKey, 'period_label' => $periodLabel, 'deadline_submission' => $deadline, 'created_by' => $user->id, 'updated_by' => $user->id]),
         BmsReportSubmission::class => BmsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         \App\Models\BamsReportSubmission::class => \App\Models\BamsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         \App\Models\ImeaReportSubmission::class => \App\Models\ImeaReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         TechnicalReport::class => TechnicalReport::create([...$common, 'report_type' => 'Technical Report', 'status' => 'Pending', 'date_accomplished' => $standardBStart]),
         \App\Models\Aws::class => \App\Models\Aws::create([...$common, 'station_name' => 'Baganga AWS', 'location' => 'Baganga', 'status' => 'Active', 'date_accomplished' => $standardBStart]),
         \App\Models\ManagementPlan::class => \App\Models\ManagementPlan::create([...$common, 'plan_type' => 'Protected Area Management Plan', 'status' => 'Pending', 'date_accomplished' => $standardBStart]),
-        \App\Models\ImeaFacilityMaintenanceReport::class => \App\Models\ImeaFacilityMaintenanceReport::create([...$common, 'quarter' => 'Quarter 1', 'date_accomplished' => $standardBStart]),
         \App\Models\IpafManagementReport::class => \App\Models\IpafManagementReport::create([...$common, 'date_accomplished' => $standardBStart]),
         \App\Models\IpafRevenueCollection::class => \App\Models\IpafRevenueCollection::create([...$common, 'activity_name' => 'Revenue Collection', 'reporting_month' => 7, 'reporting_year' => 2026, 'total_collected' => '1000.00', 'deadline_submission' => $deadline]),
     ];
@@ -670,13 +675,14 @@ test('the compliance source registry covers every legitimate report submission t
     $definitions = app(OverdueReportService::class)->sourceDefinitions();
 
     expect(array_keys($definitions))->toBe([
+        ConservationReportSubmission::class,
+        EngpReportSubmission::class,
         BmsReportSubmission::class,
         \App\Models\BamsReportSubmission::class,
         \App\Models\ImeaReportSubmission::class,
         TechnicalReport::class,
         \App\Models\Aws::class,
         \App\Models\ManagementPlan::class,
-        \App\Models\ImeaFacilityMaintenanceReport::class,
         \App\Models\IpafManagementReport::class,
         \App\Models\IpafRevenueCollection::class,
     ])
@@ -686,13 +692,14 @@ test('the compliance source registry covers every legitimate report submission t
         expect($definition)->toHaveKeys(['module', 'submitted', 'activity', 'document']);
     }
 
-    expect($definitions[BmsReportSubmission::class]['submitted'])->toBe('date_received_penro')
+    expect($definitions[ConservationReportSubmission::class]['submitted'])->toBe('date_received_penro')
+        ->and($definitions[EngpReportSubmission::class]['submitted'])->toBe('date_received_penro')
+        ->and($definitions[BmsReportSubmission::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\BamsReportSubmission::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\ImeaReportSubmission::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[TechnicalReport::class]['submitted'])->toBe('submission_date')
         ->and($definitions[\App\Models\Aws::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\ManagementPlan::class]['submitted'])->toBe('date_received_penro')
-        ->and($definitions[\App\Models\ImeaFacilityMaintenanceReport::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\IpafManagementReport::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\IpafRevenueCollection::class]['submitted'])->toBe('date_received_penro');
 });
@@ -774,6 +781,7 @@ test('every registered source follows receipt-based alert eligibility and indepe
         'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id,
     ]);
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'cenrobaganga@denr.gov.ph', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'recipient_email' => 'cenrobaganga@denr.gov.ph', 'is_active' => true]);
     $records = recordsForEveryComplianceSource($area, $manager, '2026-08-24');
     $service = app(OverdueReportService::class);
     $definitions = $service->sourceDefinitions();
@@ -1289,12 +1297,12 @@ test('Overview exposes only active overdue sources while Settings retains full w
             ->has('activeOverdueSources', 1)
             ->where('activeOverdueSources.0.module', 'BMS Report Submission Tracker')
             ->where('activeOverdueSources.0.overdue_count', 2)
-            ->has('monitoredSources', 9));
+            ->has('monitoredSources', 10));
 
     $first->update(['date_received_penro' => '2026-08-25']);
     $second->update(['date_received_penro' => '2026-08-25']);
     $this->actingAs($manager)->get(route('compliance-alerts.index'))
-        ->assertInertia(fn (Assert $page) => $page->where('activeOverdueSources', [])->has('monitoredSources', 9));
+        ->assertInertia(fn (Assert $page) => $page->where('activeOverdueSources', [])->has('monitoredSources', 10));
 });
 
 test('dormant fallback settings remain stored but never resolve a delivery', function () {
@@ -1318,14 +1326,14 @@ test('the default memorandum footer matches receipt closure and separates Record
         ->and($footer)->not->toContain('confirmed by the Records Officer');
 });
 
-test('all nine monitored sources expose the universal MOV contract and distinguish submitted MOV not yet submitted', function () {
+test('all ten monitored sources expose the universal MOV contract and distinguish submitted MOV not yet submitted', function () {
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
     $records = recordsForEveryComplianceSource($area, $manager, '2026-08-24');
     $service = app(OverdueReportService::class);
     $definitions = $service->sourceDefinitions();
 
-    expect($definitions)->toHaveCount(9);
+    expect($definitions)->toHaveCount(10);
     foreach ($definitions as $sourceType => $definition) {
         expect($definition)->toHaveKeys(['mov', 'mov_label'])
             ->and($records[$sourceType])->not->toBeNull();
@@ -1346,8 +1354,9 @@ test('all nine monitored sources expose the universal MOV contract and distingui
 
     $overdue = $service->overdueReports();
     expect($overdue)->toHaveCount(9)
-        ->and($overdue->every(fn ($report) => $report->submitted && $report->complianceIssue === 'MOV Not Yet Submitted'))->toBeTrue()
-        ->and($overdue->map(fn ($report) => "{$report->sourceType}:{$report->sourceId}")->unique())->toHaveCount(9);
+        ->and($overdue->every(fn ($report) => $report->sourceType !== EngpReportSubmission::class && $report->submitted && $report->complianceIssue === 'MOV Not Yet Submitted'))->toBeTrue()
+        ->and($overdue->map(fn ($report) => "{$report->sourceType}:{$report->sourceId}")->unique())->toHaveCount(9)
+        ->and($overdue->pluck('sourceType')->all())->not->toContain(EngpReportSubmission::class);
 });
 
 test('submitted MOV not yet submitted is pending before deadline, overdue after deadline, and unaffected by Records confirmation', function () {
@@ -1390,7 +1399,7 @@ test('stale MOV database paths are normalized as MOV not yet submitted', functio
         ->and($report->complianceIssue)->toBe('MOV Not Yet Submitted');
 });
 
-test('all nine monitored report create workflows require and persist a valid MOV', function () {
+test('report workflows require an attachment at report data entry while routing dates stay separate', function () {
     $creator = complianceUser();
     $role = Role::findOrCreate('Universal MOV Creator', 'web');
     $permissions = ['bms.create', 'bams.create', 'imea.create', 'aws.create', 'management-plans.create', 'technical-reports.create'];
@@ -1419,9 +1428,8 @@ test('all nine monitored report create workflows require and persist a valid MOV
 
     foreach ($cases as $case) {
         $routeParameters = $case['route'] === 'management-plans.types.reports.store' ? [$type->slug] : [];
-        $this->actingAs($creator)
-            ->post(route($case['route'], $routeParameters), $case['payload'])
-            ->assertSessionHasErrors($case['field']);
+        $initialResponse = $this->actingAs($creator)->post(route($case['route'], $routeParameters), $case['payload']);
+        $initialResponse->assertSessionHasErrors($case['field']);
 
         $file = UploadedFile::fake()->create('supporting-document.pdf', 10, 'application/pdf');
         $payload = [...$case['payload'], $case['field'] => $case['field'] === 'attachments' ? [$file] : $file];

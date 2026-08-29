@@ -77,6 +77,39 @@ test('addWorkingDays excludes the start date, Friday, weekends, and active holid
     expect($calendar->addWorkingDays('2026-08-24', 7)->toDateString())->toBe('2026-09-07');
 });
 
+test('the same configured holiday is used by Standard A, Standard B, and days complied', function () {
+    $calendar = app(BusinessCalendarService::class);
+    NonWorkingDay::create([
+        'date' => '2026-08-05', 'name' => 'Wednesday holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+
+    $standardA = new BmsReportSubmission([
+        'date_accomplished' => '2026-08-03', 'date_received_penro' => '2026-08-31', 'target_office' => 'CENRO Mati',
+    ]);
+    $standardB = new TechnicalReport([
+        'date_accomplished' => '2026-08-03', 'submission_date' => '2026-08-17', 'target_office' => 'CENRO Mati',
+    ]);
+
+    expect($standardA->deadline_submission)->toBe('2026-08-31')
+        ->and($standardA->number_days_complied)->toBe(15)
+        ->and($standardB->deadline_submission)->toBe('2026-08-17')
+        ->and($standardB->number_days_complied)->toBe(7)
+        ->and($calendar->workingDaysBetween('2026-08-03', '2026-08-31'))->toBe(15);
+});
+
+test('a configured holiday on a standard weekend remains one non-working date', function () {
+    $calendar = app(BusinessCalendarService::class);
+    NonWorkingDay::create([
+        'date' => '2026-08-28', 'name' => 'Friday holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+
+    expect($calendar->isWorkingDay('2026-08-28'))->toBeFalse()
+        ->and($calendar->workingDaysBetween('2026-08-24', '2026-09-03'))->toBe(7)
+        ->and($calendar->addWorkingDays('2026-08-24', 7)->toDateString())->toBe('2026-09-03');
+});
+
 test('working days and signed differences preserve tracker boundaries and signs', function () {
     $calendar = app(BusinessCalendarService::class);
 

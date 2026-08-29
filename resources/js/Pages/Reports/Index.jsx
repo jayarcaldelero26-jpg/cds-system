@@ -35,7 +35,7 @@ export default function Index({ stats }) {
                 <h1 className="text-xl font-bold uppercase text-gray-900">Republic of the Philippines</h1>
                 <h2 className="text-lg font-semibold text-gray-800">Department of Environment and Natural Resources</h2>
                 <p className="text-sm text-gray-600">PENRO Davao Oriental - Conservation Development Section (CDS)</p>
-                <h3 className="text-md font-bold mt-4 uppercase tracking-wider text-green-800">CDS INFORMATION MANAGEMENT SYSTEM EXECUTIVE REPORT</h3>
+                <h3 className="text-md font-bold mt-4 uppercase tracking-wider text-green-800">eDATS EXECUTIVE REPORT</h3>
                 <p className="text-xs text-gray-500 mt-1">Generated Date: {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
             </div>
 
@@ -135,7 +135,7 @@ export default function Index({ stats }) {
             <div className="hidden print:block mt-16 text-right">
                 <p className="text-sm text-gray-700">Prepared by:</p>
                 <div className="mt-8 border-t border-gray-500 w-64 ml-auto pt-2 text-center">
-                    <p className="font-bold text-sm text-gray-900">CDS IMS System Administrator</p>
+                    <p className="font-bold text-sm text-gray-900">eDATS System Administrator</p>
                     <p className="text-xs text-gray-500">Conservation Development Section</p>
                 </div>
             </div>

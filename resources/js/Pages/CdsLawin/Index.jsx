@@ -109,7 +109,7 @@ export default function Index({ monitorings = { data: [] }, filters = {} }) {
                 <form onSubmit={(e) => {e.preventDefault();visit({ page: 1 });}} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-3">
                     <div className="md:col-span-2">
 
-            <FloatingInput id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search area, ecoregion, team leader, or threats..." size="sm" />
+            <FloatingInput variant="legacy" id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search area, ecoregion, team leader, or threats..." size="sm" />
                     </div>
                     <div className="flex items-end">
                         <button type="submit" className="w-full rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900">Search Filter</button>

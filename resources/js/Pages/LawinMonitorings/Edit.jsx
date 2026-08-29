@@ -43,7 +43,7 @@ export default function Edit({ monitoring, cenroList = [], statuses = [] }) {
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* CENRO / Station */}
                             <div className="md:col-span-2">
-                                <FloatingSelect id="lawin-cenro" label="CENRO / Station" required value={data.cenro} onChange={(e) => setData('cenro', e.target.value)} error={errors.cenro}>
+                                <FloatingSelect variant="legacy" id="lawin-cenro" label="CENRO / Station" required value={data.cenro} onChange={(e) => setData('cenro', e.target.value)} error={errors.cenro}>
                                     <option value="">Select CENRO / Station</option>
                                     {cenroList.map((cenro) =>
                   <option key={cenro} value={cenro}>{cenro}</option>
@@ -53,27 +53,27 @@ export default function Edit({ monitoring, cenroList = [], statuses = [] }) {
 
                             {/* Patrol Date */}
                             <div>
-                                <FloatingInput id="lawin-patrol-date" label="Patrol Date" required type="date" value={data.patrol_date} onChange={(e) => setData('patrol_date', e.target.value)} error={errors.patrol_date} />
+                                <FloatingInput variant="legacy" id="lawin-patrol-date" label="Patrol Date" required type="date" value={data.patrol_date} onChange={(e) => setData('patrol_date', e.target.value)} error={errors.patrol_date} />
                             </div>
 
                             {/* Patrol Members Count */}
                             <div>
-                                <FloatingInput id="lawin-members" label="No. of Patrol Members (Pax)" required type="number" min="1" value={data.patrol_members_count} onChange={(e) => setData('patrol_members_count', e.target.value)} error={errors.patrol_members_count} />
+                                <FloatingInput variant="legacy" id="lawin-members" label="No. of Patrol Members (Pax)" required type="number" min="1" value={data.patrol_members_count} onChange={(e) => setData('patrol_members_count', e.target.value)} error={errors.patrol_members_count} />
                             </div>
 
                             {/* Patrol Distance */}
                             <div>
-                                <FloatingInput id="lawin-distance" label="Total Distance Covered (km)" required type="number" step="0.01" min="0" value={data.patrol_distance} onChange={(e) => setData('patrol_distance', e.target.value)} error={errors.patrol_distance} />
+                                <FloatingInput variant="legacy" id="lawin-distance" label="Total Distance Covered (km)" required type="number" step="0.01" min="0" value={data.patrol_distance} onChange={(e) => setData('patrol_distance', e.target.value)} error={errors.patrol_distance} />
                             </div>
 
                             {/* Patrol Hours */}
                             <div>
-                                <FloatingInput id="lawin-hours" label="Total Patrol Hours (hrs)" required type="number" step="0.1" min="0" value={data.patrol_hours} onChange={(e) => setData('patrol_hours', e.target.value)} error={errors.patrol_hours} />
+                                <FloatingInput variant="legacy" id="lawin-hours" label="Total Patrol Hours (hrs)" required type="number" step="0.1" min="0" value={data.patrol_hours} onChange={(e) => setData('patrol_hours', e.target.value)} error={errors.patrol_hours} />
                             </div>
 
                             {/* Record Status */}
                             <div>
-                                <FloatingSelect id="lawin-status" label="Record Status" required value={data.status} onChange={(e) => setData('status', e.target.value)} error={errors.status}>
+                                <FloatingSelect variant="legacy" id="lawin-status" label="Record Status" required value={data.status} onChange={(e) => setData('status', e.target.value)} error={errors.status}>
                                     {statuses.map((status) =>
                   <option key={status} value={status}>{status}</option>
                   )}
@@ -83,7 +83,7 @@ export default function Edit({ monitoring, cenroList = [], statuses = [] }) {
                             {/* Replacement File Upload */}
                             <div>
 
-                                <FileInput id="edit-replace-attachment-optional-pdf-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
+                                <FileInput variant="legacy" id="edit-replace-attachment-optional-pdf-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
                                 {monitoring.attachment &&
                 <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
                                         Current file: <span className="font-mono text-green-700 dark:text-green-400">{monitoring.attachment.split('/').pop()}</span>
@@ -94,12 +94,12 @@ export default function Edit({ monitoring, cenroList = [], statuses = [] }) {
 
                             {/* Threats Observed */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="lawin-threats" label="Threats Observed / Detected" rows="3" value={data.threats_observed} onChange={(e) => setData('threats_observed', e.target.value)} error={errors.threats_observed} />
+                                <FloatingTextarea variant="legacy" id="lawin-threats" label="Threats Observed / Detected" rows="3" value={data.threats_observed} onChange={(e) => setData('threats_observed', e.target.value)} error={errors.threats_observed} />
                             </div>
 
                             {/* Remarks */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="lawin-remarks" label="Remarks / Notes" rows="3" value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} error={errors.remarks} />
+                                <FloatingTextarea variant="legacy" id="lawin-remarks" label="Remarks / Notes" rows="3" value={data.remarks} onChange={(e) => setData('remarks', e.target.value)} error={errors.remarks} />
                             </div>
                         </div>
 

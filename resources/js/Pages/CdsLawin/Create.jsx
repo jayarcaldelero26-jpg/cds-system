@@ -41,7 +41,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Patrol Area / Protected Area */}
                             <div className="md:col-span-2">
-                                <FloatingInput id="cds-lawin-area" label="Patrol Area / Protected Area"
+                                <FloatingInput variant="legacy" id="cds-lawin-area" label="Patrol Area / Protected Area"
                                     required
                                     type="text"
                                     placeholder="E.g., Mt. Hamiguitan Range Wildlife Sanctuary"
@@ -53,7 +53,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
                             {/* Patrol Date */}
                             <div>
-                                <FloatingInput id="cds-lawin-date" label="Patrol Date"
+                                <FloatingInput variant="legacy" id="cds-lawin-date" label="Patrol Date"
                                     required
                                     type="date"
                                     value={data.patrol_date}
@@ -64,7 +64,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
                             {/* Ecoregion */}
                             <div>
-                                <FloatingInput id="cds-lawin-ecoregion" label="Ecoregion"
+                                <FloatingInput variant="legacy" id="cds-lawin-ecoregion" label="Ecoregion"
                                     type="text"
                                     placeholder="E.g., Forest / Protected Zone"
                                     value={data.ecoregion}
@@ -75,7 +75,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
                             {/* Team Leader */}
                             <div>
-                                <FloatingInput id="cds-lawin-leader" label="Team Leader"
+                                <FloatingInput variant="legacy" id="cds-lawin-leader" label="Team Leader"
                                     type="text"
                                     placeholder="Enter Team Leader Name"
                                     value={data.team_leader}
@@ -86,7 +86,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
                             {/* Team Members Count */}
                             <div>
-                                <FloatingInput id="cds-lawin-members" label="No. of Patrol Members (Pax)"
+                                <FloatingInput variant="legacy" id="cds-lawin-members" label="No. of Patrol Members (Pax)"
                                     required
                                     type="number"
                                     min="1"
@@ -98,7 +98,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
                             {/* Threats Observed */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="cds-lawin-threats" label="Threats Observed / Detected"
+                                <FloatingTextarea variant="legacy" id="cds-lawin-threats" label="Threats Observed / Detected"
                                     rows="3"
                                     placeholder="E.g., 2 instances of illegal hunting, encroachment..."
                                     value={data.threats_observed}
@@ -109,7 +109,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
                             {/* Remarks */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="cds-lawin-remarks" label="Remarks / Notes"
+                                <FloatingTextarea variant="legacy" id="cds-lawin-remarks" label="Remarks / Notes"
                                     rows="3"
                                     placeholder="Additional observations, weather conditions, or local sightings..."
                                     value={data.remarks}

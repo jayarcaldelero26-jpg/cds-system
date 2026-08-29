@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ManagementPlanProfile;
 use App\Models\ManagementPlanType;
+use App\Services\Attachments\ProtectedAttachmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -16,6 +17,8 @@ use Throwable;
 
 class ManagementPlanProfileController extends Controller
 {
+    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+
     public const APPROVAL_STATUSES = [
         'Draft', 'For Technical Review', 'For Revision', 'For PAMB Approval', 'PAMB Approved',
         'For CENRO Endorsement', 'For PENRO Endorsement', 'For RED Endorsement',
@@ -71,14 +74,19 @@ class ManagementPlanProfileController extends Controller
             'removed_document_paths.*' => ['string', 'distinct'],
         ]);
 
-        $current = array_values(array_filter($profile->documents ?? [], fn ($document) => $this->documentPath($document) !== null));
+        $current = array_filter($profile->documents ?? [], fn ($document) => $this->documentPath($document) !== null);
+        $byKey = collect($current)->mapWithKeys(fn ($document, $index) => [(string) $index => $document]);
         $byPath = collect($current)->keyBy(fn ($document) => $this->documentPath($document));
         $requested = array_values($data['removed_document_paths'] ?? []);
-        if (collect($requested)->contains(fn (string $path) => ! $byPath->has($path))) {
+        $requestedPaths = collect($requested)->map(function (string $key) use ($byKey, $byPath): ?string {
+            $document = $byKey->get($key) ?? $byPath->get($key);
+            return $document ? $this->documentPath($document) : null;
+        })->filter()->values()->all();
+        if (collect($requested)->contains(fn (string $key) => ! $byKey->has($key) && ! $byPath->has($key))) {
             throw ValidationException::withMessages(['removed_document_paths' => 'One or more selected documents do not belong to this management plan.']);
         }
 
-        $retained = array_values(array_filter($current, fn ($document) => ! in_array($this->documentPath($document), $requested, true)));
+        $retained = array_values(array_filter($current, fn ($document) => ! in_array($this->documentPath($document), $requestedPaths, true)));
         $newDocuments = [];
 
         try {
@@ -93,7 +101,7 @@ class ManagementPlanProfileController extends Controller
             throw $exception;
         }
 
-        $this->deleteDocuments($requested);
+        $this->deleteDocuments($requestedPaths);
 
         return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Plan information updated successfully.');
     }
@@ -101,11 +109,7 @@ class ManagementPlanProfileController extends Controller
     public function viewDocument(ManagementPlanType $managementPlanType, ManagementPlanProfile $profile, string $document): BinaryFileResponse
     {
         $this->assertOwned($managementPlanType, $profile);
-        abort_unless(ctype_digit($document), 404);
-        $path = $this->documentPath(($profile->documents ?? [])[(int) $document] ?? null);
-        abort_unless($path && Storage::disk('public')->exists($path), 404);
-
-        return response()->file(Storage::disk('public')->path($path));
+        return $this->attachments->response('management-plan-profile', $profile, $document);
     }
 
     public static function profileData(ManagementPlanProfile $profile, ManagementPlanType $type): array
@@ -147,8 +151,8 @@ class ManagementPlanProfileController extends Controller
                 $path = $metadata['path'] ?? null;
                 $name = $metadata['original_name'] ?? $metadata['name'] ?? ($path ? basename($path) : 'Document');
                 $mimeType = $metadata['mime_type'] ?? $metadata['type'] ?? '';
-                return [...$metadata, 'path' => $path, 'original_name' => $name, 'name' => $name, 'mime_type' => $mimeType, 'type' => $mimeType, 'url' => $path ? route('management-plans.types.profiles.documents.view', [$type->slug, $profile, $index]) : null];
-            })->filter(fn (array $document) => $document['path'] !== null)->values()->all(),
+                return ['key' => (string) $index, 'path' => (string) $index, 'original_name' => $name, 'name' => $name, 'mime_type' => $mimeType, 'type' => $mimeType, 'size' => $metadata['size'] ?? null, 'url' => $path ? app(ProtectedAttachmentService::class)->url('management-plan-profile', $profile, (string) $index) : null, 'external' => false];
+            })->filter(fn (array $document) => $document['url'] !== null)->values()->all(),
         ];
     }
 
@@ -226,7 +230,7 @@ class ManagementPlanProfileController extends Controller
 
     private function storeDocument(UploadedFile $file, string $category): array
     {
-        $path = $file->store('management-plan-profiles', 'public');
+        $path = $this->attachments->store($file, 'management-plan-profile');
         if (! is_string($path)) {
             throw new RuntimeException('The supporting document could not be stored.');
         }
@@ -243,7 +247,7 @@ class ManagementPlanProfileController extends Controller
     {
         $paths = array_values(array_filter(array_map(fn ($document) => $this->documentPath($document), $documents)));
         if ($paths !== []) {
-            Storage::disk('public')->delete($paths);
+            foreach ($paths as $path) $this->attachments->delete($path);
         }
     }
 }

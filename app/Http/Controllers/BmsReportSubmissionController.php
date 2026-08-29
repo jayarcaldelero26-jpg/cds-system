@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\BmsReportSubmission;
+use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -10,9 +11,12 @@ use Illuminate\Validation\Rule;
 
 class BmsReportSubmissionController extends Controller
 {
+    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
     public function store(Request $request)
     {
-        $validated = $request->validate($this->rules(requireMov: true));
+        $validated = $request->validate($this->rules(requireMov: true), [
+            'mov.required' => 'A report attachment / MOV is required.',
+        ]);
         $validated = $this->storeMov($request, $validated);
         $validated['created_by'] = $request->user()?->id;
         $validated['updated_by'] = $request->user()?->id;
@@ -25,25 +29,25 @@ class BmsReportSubmissionController extends Controller
     public function update(Request $request, BmsReportSubmission $bmsReportSubmission)
     {
         $validated = $request->validate($this->rules($bmsReportSubmission->document_type));
-        if (! $request->hasFile('mov') && ($request->boolean('delete_mov') || ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path'))) {
+        if (! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }
-
-        if ($request->boolean('delete_mov')) {
-            $this->deleteMov($bmsReportSubmission);
-            $validated['mov_file_name'] = null;
-            $validated['mov_file_path'] = null;
+        $oldPath = $bmsReportSubmission->mov_file_path;
+        $newPath = null;
+        $replaceOld = $request->hasFile('mov');
+        try {
+            if ($request->hasFile('mov')) {
+                $validated = $this->storeMov($request, $validated);
+                $newPath = $validated['mov_file_path'] ?? null;
+            }
+            unset($validated['mov']);
+            $validated['updated_by'] = $request->user()?->id;
+            $bmsReportSubmission->update($validated);
+        } catch (\Throwable $exception) {
+            if ($newPath) $this->attachments->delete($newPath);
+            throw $exception;
         }
-
-        if ($request->hasFile('mov')) {
-            $this->deleteMov($bmsReportSubmission);
-            $validated = $this->storeMov($request, $validated);
-        }
-
-        unset($validated['mov'], $validated['delete_mov']);
-
-        $validated['updated_by'] = $request->user()?->id;
-        $bmsReportSubmission->update($validated);
+        if ($replaceOld && $oldPath) $this->attachments->delete($oldPath);
 
         return redirect()->back()->with('success', 'BMS report submission successfully updated.');
     }
@@ -73,23 +77,19 @@ class BmsReportSubmissionController extends Controller
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
-            'date_report_released_cenro' => ['nullable', 'date'],
-            'date_received_penro' => ['nullable', 'date'],
-            'date_endorsed_regional' => ['nullable', 'date'],
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
-            'delete_mov' => ['nullable', 'boolean'],
             'remarks' => ['nullable', 'string'],
         ];
     }
 
     private function storeMov(Request $request, array $validated): array
     {
-        unset($validated['mov'], $validated['delete_mov']);
+        unset($validated['mov']);
 
         if ($request->hasFile('mov')) {
             $file = $request->file('mov');
             $validated['mov_file_name'] = $file->getClientOriginalName();
-            $validated['mov_file_path'] = $file->store('bms-report-movs', 'public');
+            $validated['mov_file_path'] = $this->attachments->store($file, 'bms-report');
         }
 
         return $validated;
@@ -98,7 +98,8 @@ class BmsReportSubmissionController extends Controller
     private function deleteMov(BmsReportSubmission $submission): void
     {
         if ($submission->mov_file_path) {
-            Storage::disk('public')->delete($submission->mov_file_path);
+            $this->attachments->delete($submission->mov_file_path);
         }
     }
+
 }

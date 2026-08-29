@@ -2,6 +2,8 @@
 
 return [
 
+    'engp_iac_generator_url' => env('ENGP_IAC_GENERATOR_URL'),
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

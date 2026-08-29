@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\Notifications\EdatsInAppNotificationService;
 use Illuminate\Console\Command;
 
 class SendOverdueComplianceAlerts extends Command
@@ -11,8 +12,11 @@ class SendOverdueComplianceAlerts extends Command
     protected $signature = 'compliance:send-overdue-alerts {--dry-run : Scan and log without sending mail}';
     protected $description = 'Send the daily overdue PA-related report memorandum in compliance-alert safe mode.';
 
-    public function handle(ComplianceAlertDeliveryService $delivery, OverdueReportService $reports): int
+    public function handle(ComplianceAlertDeliveryService $delivery, OverdueReportService $reports, EdatsInAppNotificationService $inAppNotifications): int
     {
+        if (! $this->option('dry-run')) {
+            $inAppNotifications->syncDeadlineNotifications();
+        }
         $overdue = $reports->overdueReports();
         if ($overdue->isEmpty()) {
             $this->info('No overdue reports found. No email will be sent.');

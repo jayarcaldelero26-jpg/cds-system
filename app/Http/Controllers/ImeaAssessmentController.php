@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ImeaAssessment;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaFacility;
+use App\Services\Attachments\ProtectedAttachmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -14,11 +15,13 @@ use Inertia\Response;
 
 class ImeaAssessmentController extends Controller
 {
+    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+
     public function index(Request $request): Response
     {
         $assessments = ImeaAssessment::with('protectedArea')
             ->orderBy('assessment_year', 'desc')
-            ->paginate(15);
+            ->paginate(15)->through(fn (ImeaAssessment $assessment) => $this->assessmentData($assessment));
 
         $protectedAreaId = $request->input('protected_area_id');
 
@@ -70,7 +73,9 @@ class ImeaAssessmentController extends Controller
         $totalWaste = (clone $query)->sum('solid_waste_generation_kg');
         $avgSatisfaction = (clone $query)->avg('visitor_satisfaction_rate');
 
-        $assessmentsList = $query->orderBy('assessment_year', 'desc')->get();
+        $assessmentsList = $query->orderBy('assessment_year', 'desc')->get()
+            ->map(fn (ImeaAssessment $assessment) => $this->assessmentData($assessment))
+            ->values();
 
         $availableYears = ImeaAssessment::distinct()->orderBy('assessment_year', 'desc')->pluck('assessment_year');
         $protectedAreas = ProtectedArea::all();
@@ -169,17 +174,22 @@ class ImeaAssessmentController extends Controller
         $attachmentPaths = [];
         if ($request->hasFile('attachments')) {
             foreach ($request->file('attachments') as $file) {
-                $path = $file->store('imea-attachments', 'public');
+                $path = $this->attachments->store($file, 'imea-data');
                 $attachmentPaths[] = $path;
             }
         }
 
-        ImeaAssessment::create([
-            ...collect($validated)->except('attachments')->toArray(),
-            'attachments' => $attachmentPaths,
-            'created_by' => $request->user()->id,
-            'updated_by' => $request->user()->id,
-        ]);
+        try {
+            DB::transaction(fn () => ImeaAssessment::create([
+                ...collect($validated)->except('attachments')->toArray(),
+                'attachments' => $attachmentPaths,
+                'created_by' => $request->user()->id,
+                'updated_by' => $request->user()->id,
+            ]));
+        } catch (\Throwable $exception) {
+            foreach ($attachmentPaths as $path) $this->attachments->delete($path);
+            throw $exception;
+        }
 
         return to_route('imea.index')->with('success', 'IMEA assessment created successfully.');
     }
@@ -215,35 +225,67 @@ class ImeaAssessmentController extends Controller
             $currentAttachments = json_decode($currentAttachments, true) ?? [];
         }
 
+        $removedPaths = [];
         if ($request->has('removed_attachments')) {
             $removed = $request->input('removed_attachments', []);
-            $currentAttachments = array_values(array_filter($currentAttachments, function ($file) use ($removed) {
-                return !in_array($file, $removed);
-            }));
-            foreach ($removed as $remFile) {
-                \Illuminate\Support\Facades\Storage::disk('public')->delete($remFile);
-            }
+            $currentAttachments = array_values(array_filter($currentAttachments, function ($file, $index) use ($removed, &$removedPaths): bool {
+                $path = $this->attachmentPath($file);
+                $selected = in_array((string) $index, array_map('strval', $removed), true) || in_array($file, $removed, true) || ($path && in_array($path, $removed, true));
+                if ($selected && $path) $removedPaths[] = $path;
+                return ! $selected;
+            }, ARRAY_FILTER_USE_BOTH));
         }
 
+        $newPaths = [];
         if ($request->hasFile('attachments')) {
             foreach ($request->file('attachments') as $file) {
-                $path = $file->store('imea-attachments', 'public');
+                $path = $this->attachments->store($file, 'imea-data');
+                $newPaths[] = $path;
                 $currentAttachments[] = $path;
             }
         }
 
-        $imeaAssessment->update([
-            ...collect($validated)->except(['attachments', 'removed_attachments'])->toArray(),
-            'attachments' => $currentAttachments,
-            'updated_by' => $request->user()->id,
-        ]);
+        try {
+            DB::transaction(fn () => $imeaAssessment->update([
+                ...collect($validated)->except(['attachments', 'removed_attachments'])->toArray(),
+                'attachments' => $currentAttachments,
+                'updated_by' => $request->user()->id,
+            ]));
+        } catch (\Throwable $exception) {
+            foreach ($newPaths as $path) $this->attachments->delete($path);
+            throw $exception;
+        }
+        foreach ($removedPaths as $path) $this->attachments->delete($path);
 
         return to_route('imea.index')->with('success', 'IMEA assessment updated successfully.');
     }
 
+    private function assessmentData(ImeaAssessment $assessment): array
+    {
+        $data = collect($assessment->toArray())->except(['attachments'])->all();
+        $data['attachments'] = collect($assessment->attachments ?? [])
+            ->keys()
+            ->map(fn (int $index) => $this->attachments->descriptor('imea-data', $assessment, (string) $index))
+            ->filter()
+            ->values()
+            ->all();
+        return $data;
+    }
+
+    private function attachmentPath(mixed $attachment): ?string
+    {
+        $path = is_string($attachment) ? $attachment : (is_array($attachment) ? ($attachment['path'] ?? null) : null);
+        return is_string($path) && $path !== '' ? $path : null;
+    }
+
     public function destroy(ImeaAssessment $imeaAssessment): RedirectResponse
     {
+        $attachments = $imeaAssessment->attachments ?? [];
         $imeaAssessment->delete();
+        foreach ($attachments as $attachment) {
+            $path = $this->attachmentPath($attachment);
+            if ($path) $this->attachments->delete($path);
+        }
 
         return to_route('imea.index')->with('success', 'IMEA assessment deleted successfully.');
     }

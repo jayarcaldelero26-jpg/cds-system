@@ -114,25 +114,25 @@ export default function Index({ ppas, filters, protectedAreas, categories, statu
                 <form onSubmit={(e) => {e.preventDefault();visit({ page: 1 });}} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-4">
                     <div className="md:col-span-2">
 
-            <FloatingInput id="index-search-ppas" label="Search PPAs" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, source of fund, remarks..." size="sm" />
+            <FloatingInput variant="legacy" id="index-search-ppas" label="Search PPAs" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, source of fund, remarks..." size="sm" />
                     </div>
                     <div>
 
-            <FloatingSelect id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
                             <option value="">All protected areas</option>
                             {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
                         </FloatingSelect>
                     </div>
                     <div>
 
-            <FloatingSelect id="index-category" label="Category" value={filters.category || ''} onChange={(e) => visit({ category: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-category" label="Category" value={filters.category || ''} onChange={(e) => visit({ category: e.target.value, page: 1 })}>
                             <option value="">All categories</option>
                             {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                         </FloatingSelect>
                     </div>
                     <div>
 
-            <FloatingSelect id="index-status" label="Status" value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-status" label="Status" value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {statuses.map((stat) => <option key={stat} value={stat}>{stat}</option>)}
                         </FloatingSelect>

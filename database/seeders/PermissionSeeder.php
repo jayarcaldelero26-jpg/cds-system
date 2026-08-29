@@ -69,6 +69,12 @@ class PermissionSeeder extends Seeder
             'reports.export',
             'compliance-alerts.manage',
 
+            // Technical / general report submissions
+            'technical-reports.view',
+            'technical-reports.create',
+            'technical-reports.update',
+            'technical-reports.delete',
+
             // GIS
             'gis.view',
             'gis.manage',
@@ -143,6 +149,9 @@ class PermissionSeeder extends Seeder
             'reports.generate',
             'reports.export',
             'compliance-alerts.manage',
+            'technical-reports.view',
+            'technical-reports.create',
+            'technical-reports.update',
             'gis.view',
             'gis.manage',
             'protected-areas.view',
@@ -177,6 +186,7 @@ class PermissionSeeder extends Seeder
             'projects.view',
             'activities.view',
             'reports.view',
+            'technical-reports.view',
             'gis.view',
             'protected-areas.view',
             'management-plans.view',

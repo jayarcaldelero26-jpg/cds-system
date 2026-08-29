@@ -5,7 +5,8 @@ namespace App\Services\Compliance;
 use App\Models\Aws;
 use App\Models\BamsReportSubmission;
 use App\Models\BmsReportSubmission;
-use App\Models\ImeaFacilityMaintenanceReport;
+use App\Models\ConservationReportSubmission;
+use App\Models\EngpReportSubmission;
 use App\Models\ImeaReportSubmission;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
@@ -13,25 +14,50 @@ use App\Models\ManagementPlan;
 use App\Models\ReportComplianceConfirmation;
 use App\Models\TechnicalReport;
 use Carbon\CarbonImmutable;
+use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Attachments\ProtectedAttachmentService;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Collection;
 
 class OverdueReportService
 {
     private const TIMEZONE = 'Asia/Manila';
 
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments) {}
+
     /** @return array<class-string<Model>, array<string, mixed>> */
     public function sourceDefinitions(): array
     {
         return [
+            ConservationReportSubmission::class => [
+                'module' => 'Generic Conservation Report Workflows',
+                'module_resolver' => fn (Model $source): string => $this->workflows->find((string) $source->getAttribute('workflow_key'))['label'] ?? 'Conservation Report',
+                'submitted' => 'date_received_penro',
+                'activity' => 'activity_name',
+                'document' => 'document_type',
+                'mov_label' => 'MOV',
+                'mov' => fn (Model $source) => $source->getAttribute('mov_file_path'),
+            ],
+            EngpReportSubmission::class => [
+                'module' => 'ENGP Report Submission Tracker',
+                'module_resolver' => fn (Model $source): string => $this->engpWorkflows->find((string) $source->getAttribute('workflow_key'))['label'] ?? 'ENGP Report',
+                'submitted' => 'date_received_penro',
+                'target_office' => 'office',
+                'activity' => 'activity_name',
+                'document' => 'document_type',
+                'mov_label' => 'MOV',
+                'mov_required' => false,
+                'mov' => fn (Model $source) => $source->getAttribute('mov_file_path') ?: $source->getAttribute('mov_external_url'),
+                'query_column' => 'deadline_submission',
+                'reporting_period' => fn (Model $source): ?string => $source->getAttribute('period_label'),
+            ],
             BmsReportSubmission::class => ['module' => 'BMS Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             BamsReportSubmission::class => ['module' => 'BAMS Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             ImeaReportSubmission::class => ['module' => 'IMEA Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             TechnicalReport::class => ['module' => 'Technical Reports', 'submitted' => 'submission_date', 'activity' => 'activity_name', 'document' => 'report_type', 'mov_label' => 'Supporting Document', 'mov' => fn (Model $source) => $source->getAttribute('attachment')],
             Aws::class => ['module' => 'AWS Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'Report File', 'mov' => fn (Model $source) => $source->getAttribute('report_file_path')],
             ManagementPlan::class => ['module' => 'Management Plan Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'Supporting Document', 'mov' => fn (Model $source) => $source->getAttribute('attachments')],
-            ImeaFacilityMaintenanceReport::class => ['module' => 'IMEA Maintenance of Ecotourism Facilities Report', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             IpafManagementReport::class => ['module' => 'Management of IPAF Report', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             IpafRevenueCollection::class => [
                 'module' => 'IPAF Revenue Collection Report Submission Tracker',
@@ -60,8 +86,7 @@ class OverdueReportService
         $records = collect();
 
         foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $modelClass::query()
-                ->with('protectedArea')
+            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
                 ->whereNotNull($definition['query_column'] ?? 'date_accomplished')
                 ->get();
             foreach ($models as $model) {
@@ -78,14 +103,61 @@ class OverdueReportService
     }
 
     /** @return Collection<int, OverdueReport> */
+    public function dueSoonReports(int $days = 3, ?CarbonImmutable $today = null): Collection
+    {
+        $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $through = $today->addDays(max(0, $days));
+        $records = collect();
+
+        foreach ($this->sourceDefinitions() as $modelClass => $definition) {
+            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
+                ->whereNotNull($definition['query_column'] ?? 'date_accomplished')
+                ->get();
+            foreach ($models as $model) {
+                $deadlineValue = $model->getAttribute('deadline_submission');
+                if (! $deadlineValue || $this->dateString($model->getAttribute($definition['submitted']))) continue;
+                $deadline = CarbonImmutable::parse($deadlineValue, self::TIMEZONE)->startOfDay();
+                if ($deadline->lessThan($today) || $deadline->greaterThan($through)) continue;
+
+                $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
+                $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
+                $module = $this->moduleLabel($model, $definition);
+                $activity = trim((string) $model->getAttribute($definition['activity']));
+                $document = trim((string) $model->getAttribute($definition['document']));
+                $records->push(new OverdueReport(
+                    sourceType: $model::class,
+                    sourceId: (int) $model->getKey(),
+                    module: $module,
+                    protectedAreaId: $model->getAttribute('protected_area_id') ? (int) $model->getAttribute('protected_area_id') : null,
+                    protectedAreaName: $protectedArea?->name ?: 'Protected Area not specified',
+                    targetOffice: $targetOffice ?: ($protectedArea?->name ?: 'Unassigned office'),
+                    activity: $activity !== '' ? $activity : $module,
+                    documentType: $document !== '' ? $document : 'Report',
+                    deadline: $deadline->toDateString(),
+                    submitted: false,
+                    recordsConfirmed: false,
+                    daysOverdue: 0,
+                    reportingPeriod: $this->reportingPeriod($model, $definition),
+                    movRequired: $definition['mov_required'] ?? true,
+                    movPresent: $this->movPresent($model),
+                    movReference: $this->movReference($model, $definition),
+                    movLabel: $definition['mov_label'] ?? 'MOV',
+                    complianceIssue: 'Report Due Soon',
+                ));
+            }
+        }
+
+        return $records->sortBy([['deadline', 'asc'], ['targetOffice', 'asc']])->values();
+    }
+
+    /** @return Collection<int, OverdueReport> */
     public function pendingMovReports(?CarbonImmutable $today = null): Collection
     {
         $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
         $records = collect();
 
         foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $modelClass::query()
-                ->with('protectedArea')
+            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
                 ->whereNotNull($definition['query_column'] ?? 'date_accomplished')
                 ->get();
             foreach ($models as $model) {
@@ -118,8 +190,7 @@ class OverdueReportService
             ->map(fn (Collection $events): array => $events->pluck('source_id')->map(fn ($id): int => (int) $id)->all());
 
         foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $modelClass::query()
-                ->with('protectedArea')
+            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
                 ->whereNotNull($definition['submitted'])
                 ->when($confirmedSourceIds->get($modelClass), fn ($query, array $ids) => $query->whereNotIn($query->getModel()->getKeyName(), $ids))
                 ->get();
@@ -139,7 +210,7 @@ class OverdueReportService
             return null;
         }
 
-        return $sourceType::query()->with('protectedArea')->find($sourceId);
+        return $this->withProtectedArea($sourceType::query(), $sourceType)->find($sourceId);
     }
 
     public function sourceIsSubmitted(Model $source): bool
@@ -157,7 +228,9 @@ class OverdueReportService
             throw new \InvalidArgumentException('The source is not enrolled in Compliance Alerts.');
         }
 
-        $source->loadMissing('protectedArea');
+        if ($source::class !== EngpReportSubmission::class) {
+            $source->loadMissing('protectedArea');
+        }
         $payload = $this->recordsVerificationPayload($source, $definition);
 
         return collect($payload)->only([
@@ -233,12 +306,13 @@ class OverdueReportService
         $submittedAt = $this->dateString($model->getAttribute($definition['submitted']));
         $submitted = $submittedAt !== null;
         $movReference = $this->movReference($model, $definition);
-        $movPresent = $this->movPresent($movReference);
-        $issue = $submitted
+        $movPresent = $this->movPresent($model);
+        $movRequired = $definition['mov_required'] ?? true;
+        $issue = $submitted && $movRequired
             ? 'MOV Not Yet Submitted'
             : 'Report Not Yet Submitted';
 
-        if ($submitted && $movPresent) {
+        if ($submitted && ($movPresent || ! $movRequired)) {
             return null;
         }
 
@@ -246,24 +320,26 @@ class OverdueReportService
             return null;
         }
 
-        $protectedArea = $model->getRelation('protectedArea');
+        $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
+        $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
+        $module = $this->moduleLabel($model, $definition);
         $activity = trim((string) $model->getAttribute($definition['activity']));
         $document = trim((string) $model->getAttribute($definition['document']));
 
         return new OverdueReport(
             sourceType: $model::class,
             sourceId: (int) $model->getKey(),
-            module: $definition['module'],
+            module: $module,
             protectedAreaId: $model->getAttribute('protected_area_id') ? (int) $model->getAttribute('protected_area_id') : null,
             protectedAreaName: $protectedArea?->name ?: 'Protected Area not specified',
-            targetOffice: trim((string) $model->getAttribute('target_office')) ?: ($protectedArea?->name ?: 'Unassigned office'),
-            activity: $activity !== '' ? $activity : $definition['module'],
+            targetOffice: $targetOffice ?: ($protectedArea?->name ?: 'Unassigned office'),
+            activity: $activity !== '' ? $activity : $module,
             documentType: $document !== '' ? $document : 'Report',
             deadline: $deadline->toDateString(),
             submitted: $submitted,
             recordsConfirmed: false,
             daysOverdue: $deadline->lessThan($today) ? $deadline->diffInDays($today) : 0,
-            movRequired: true,
+            movRequired: $movRequired,
             movPresent: $movPresent,
             movReference: $movReference,
             movLabel: $definition['mov_label'] ?? 'MOV',
@@ -289,30 +365,52 @@ class OverdueReportService
         return is_string($value) && trim($value) !== '' ? $value : null;
     }
 
-    private function movPresent(string|array|null $reference): bool
+    private function movPresent(Model $model): bool
     {
-        if (is_string($reference)) {
-            return Storage::disk('public')->exists($reference);
+        if ($model instanceof EngpReportSubmission
+            && strtolower((string) parse_url((string) $model->getAttribute('mov_external_url'), PHP_URL_SCHEME)) === 'https') {
+            return true;
         }
 
-        if (! is_array($reference)) {
+        $source = match (true) {
+            $model instanceof ConservationReportSubmission => ['conservation-report', 'mov'],
+            $model instanceof EngpReportSubmission => ['engp-report', 'mov'],
+            $model instanceof BmsReportSubmission => ['bms-report', 'mov'],
+            $model instanceof BamsReportSubmission => ['bams-report', 'mov'],
+            $model instanceof ImeaReportSubmission => ['imea-report', 'mov'],
+            $model instanceof TechnicalReport => ['technical-report', 'attachment'],
+            $model instanceof Aws => ['aws', 'report_file'],
+            $model instanceof ManagementPlan => ['management-plan', 'attachments'],
+            $model instanceof IpafManagementReport => ['ipaf-management', 'mov'],
+            $model instanceof IpafRevenueCollection => ['ipaf-revenue', 'mov'],
+            default => null,
+        };
+        if ($source === null) {
             return false;
         }
 
-        foreach ($reference as $attachment) {
-            $path = is_string($attachment) ? $attachment : (is_array($attachment) ? ($attachment['path'] ?? null) : null);
-            if (is_string($path) && Storage::disk('public')->exists($path)) {
-                return true;
+        if ($source[1] === 'attachments') {
+            $attachments = $model->getAttribute('attachments');
+            if (! is_array($attachments)) {
+                return false;
             }
+            foreach (array_keys($attachments) as $key) {
+                if ($this->attachments->descriptor($source[0], $model, (string) $key) !== null) {
+                    return true;
+                }
+            }
+            return false;
         }
 
-        return false;
+        return $this->attachments->descriptor($source[0], $model, $source[1]) !== null;
     }
 
     /** @param array<string, mixed> $definition @return array<string, mixed> */
     private function recordsVerificationPayload(Model $model, array $definition): array
     {
-        $protectedArea = $model->getRelation('protectedArea');
+        $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
+        $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
+        $module = $this->moduleLabel($model, $definition);
         $deadline = $this->dateString($model->getAttribute('deadline_submission'));
         $submittedAt = $this->dateString($model->getAttribute($definition['submitted']));
         $activity = trim((string) $model->getAttribute($definition['activity']));
@@ -321,11 +419,11 @@ class OverdueReportService
         return [
             'source_type' => $model::class,
             'source_id' => (int) $model->getKey(),
-            'module' => $definition['module'],
+            'module' => $module,
             'protected_area_id' => $model->getAttribute('protected_area_id') ? (int) $model->getAttribute('protected_area_id') : null,
             'protected_area_name' => $protectedArea?->name ?: 'Protected Area not specified',
-            'target_office' => trim((string) $model->getAttribute('target_office')) ?: ($protectedArea?->name ?: 'Unassigned office'),
-            'activity' => $activity !== '' ? $activity : $definition['module'],
+            'target_office' => $targetOffice ?: ($protectedArea?->name ?: 'Unassigned office'),
+            'activity' => $activity !== '' ? $activity : $module,
             'document_type' => $document !== '' ? $document : 'Report',
             'reporting_period' => $this->reportingPeriod($model, $definition),
             'deadline' => $deadline,
@@ -336,11 +434,16 @@ class OverdueReportService
             'records_confirmed_at' => null,
             'records_confirmed_by' => null,
             'records_confirmation_remarks' => null,
-            'mov_required' => true,
-            'mov_present' => $this->movPresent($this->movReference($model, $definition)),
-            'mov_reference' => $this->movReference($model, $definition),
+            'mov_required' => $definition['mov_required'] ?? true,
+            'mov_present' => $this->movPresent($model),
+            'mov_reference' => null,
             'mov_label' => $definition['mov_label'] ?? 'MOV',
         ];
+    }
+
+    private function withProtectedArea($query, string $modelClass)
+    {
+        return $modelClass === EngpReportSubmission::class ? $query : $query->with('protectedArea');
     }
 
     private function dateString(mixed $value): ?string
@@ -352,6 +455,14 @@ class OverdueReportService
         return is_object($value) && method_exists($value, 'toDateString')
             ? $value->toDateString()
             : CarbonImmutable::parse($value, self::TIMEZONE)->toDateString();
+    }
+
+    /** @param array<string, mixed> $definition */
+    private function moduleLabel(Model $model, array $definition): string
+    {
+        $module = $definition['module_resolver'] ?? $definition['module'];
+
+        return is_callable($module) ? (string) $module($model) : (string) $module;
     }
 
     /** @param array<string, mixed> $definition */

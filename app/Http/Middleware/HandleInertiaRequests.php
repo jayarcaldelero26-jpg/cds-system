@@ -6,6 +6,7 @@ use App\Models\ManagementPlanType;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
@@ -32,18 +33,21 @@ class HandleInertiaRequests extends Middleware
     {
         $user = $request->user();
 
-        // Check kon Admin ba o Staff ba ang user
-        $isAdmin = $user?->hasAnyRole(['Super Admin', 'CDS Admin', 'Admin']) ?? false;
-        $isStaff = $user?->hasAnyRole(['Staff', 'staff']) ?? false;
+        // CDS Admin is the only role with a global bypass. All other UI
+        // visibility must follow the same named abilities enforced by routes.
+        $isAdmin = $user?->hasRole('CDS Admin') ?? false;
 
         // Susiha ang section sa user ('CDS' o 'MES')
         $userSection = $user?->section ?? '';
         $isMes = ($userSection === 'MES'); // Monitoring and Enforcement Section
         $isCds = ($userSection === 'CDS'); // Conservation Development Section
 
-        // Susiha kung Technical Staff ba ang nag-log in
-        $isTechnicalStaff = $user?->hasRole('Technical Staff') ?? false;
-        $canViewManagementPlans = $isAdmin || (! $isMes && ($isStaff || ($user?->can('management-plans.view') ?? false)));
+        $can = static fn (?string $ability): bool => $isAdmin || ($user?->can($ability) ?? false);
+        $canViewManagementPlans = ! $isMes && $can('management-plans.view');
+        $engpIacGeneratorUrl = config('services.engp_iac_generator_url');
+        $engpIacGeneratorUrl = is_string($engpIacGeneratorUrl) && str_starts_with($engpIacGeneratorUrl, 'https://')
+            ? $engpIacGeneratorUrl
+            : null;
 
         return [
             ...parent::share($request),
@@ -57,51 +61,51 @@ class HandleInertiaRequests extends Middleware
                     'is_active' => $user->is_active,
                 ] : null,
                 'canManageUsers' => $isAdmin,
-                'canManageAdministration' => $isAdmin || (!$isMes && ($user?->can('compliance-alerts.manage') ?? false)),
+                'canManageAdministration' => $isAdmin || (!$isMes && $can('compliance-alerts.manage')),
 
                 // 🚀 SECTION-BASED PERMISSIONS FILTERING
 
                 // Protected Areas (CDS ra)
-                'canViewProtectedAreas' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('protected-areas.view') ?? false))),
-                'canCreateProtectedAreas' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('protected-areas.create') ?? false))),
-                'canUpdateProtectedAreas' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('protected-areas.update') ?? false))),
-                'canDeleteProtectedAreas' => $isAdmin,
+                'canViewProtectedAreas' => !$isMes && $can('protected-areas.view'),
+                'canCreateProtectedAreas' => !$isMes && $can('protected-areas.create'),
+                'canUpdateProtectedAreas' => !$isMes && $can('protected-areas.update'),
+                'canDeleteProtectedAreas' => $can('protected-areas.delete'),
 
                 // Management Plans (CDS ra)
                 'canViewManagementPlans' => $canViewManagementPlans,
-                'canCreateManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.create') ?? false))),
-                'canUpdateManagementPlans' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('management-plans.update') ?? false))),
-                'canDeleteManagementPlans' => $isAdmin,
+                'canCreateManagementPlans' => !$isMes && $can('management-plans.create'),
+                'canUpdateManagementPlans' => !$isMes && $can('management-plans.update'),
+                'canDeleteManagementPlans' => $can('management-plans.delete'),
 
                 // Technical Reports (CDS ra)
-                'canViewTechnicalReports' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('technical-reports.view') ?? false))),
-                'canCreateTechnicalReports' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('technical-reports.create') ?? false))),
-                'canUpdateTechnicalReports' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('technical-reports.update') ?? false))),
-                'canDeleteTechnicalReports' => $isAdmin,
+                'canViewTechnicalReports' => !$isMes && $can('technical-reports.view'),
+                'canCreateTechnicalReports' => !$isMes && $can('technical-reports.create'),
+                'canUpdateTechnicalReports' => !$isMes && $can('technical-reports.update'),
+                'canDeleteTechnicalReports' => $can('technical-reports.delete'),
 
                 // Ecotourism Impact Monitoring (CDS ra)
-                'canViewEcotourismMonitoring' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('ecotourism-monitoring.view') ?? false))),
-                'canCreateEcotourismMonitoring' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('ecotourism-monitoring.create') ?? false))),
-                'canUpdateEcotourismMonitoring' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('ecotourism-monitoring.update') ?? false))),
-                'canDeleteEcotourismMonitoring' => $isAdmin,
+                'canViewEcotourismMonitoring' => !$isMes && $can('ecotourism-monitoring.view'),
+                'canCreateEcotourismMonitoring' => !$isMes && $can('ecotourism-monitoring.create'),
+                'canUpdateEcotourismMonitoring' => !$isMes && $can('ecotourism-monitoring.update'),
+                'canDeleteEcotourismMonitoring' => $can('ecotourism-monitoring.delete'),
 
                 // Issues Monitoring (Pwede sa MES ug CDS)
-                'canViewIssueMonitoring' => $isAdmin || $isStaff || ($user?->can('issue-monitoring.view') ?? false),
-                'canCreateIssueMonitoring' => $isAdmin || $isStaff || ($user?->can('issue-monitoring.create') ?? false),
-                'canUpdateIssueMonitoring' => $isAdmin || $isStaff || ($user?->can('issue-monitoring.update') ?? false),
-                'canDeleteIssueMonitoring' => $isAdmin,
+                'canViewIssueMonitoring' => $can('issue-monitoring.view'),
+                'canCreateIssueMonitoring' => $can('issue-monitoring.create'),
+                'canUpdateIssueMonitoring' => $can('issue-monitoring.update'),
+                'canDeleteIssueMonitoring' => $can('issue-monitoring.delete'),
 
                 // LAWIN Monitoring (GI-BLOCK DIRI PARA SA TECHNICAL STAFF)
-                'canViewLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.view') ?? false))),
-                'canCreateLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.create') ?? false))),
-                'canUpdateLawinMonitoring' => $isAdmin || (!$isTechnicalStaff && ($isStaff || ($user?->can('lawin-monitoring.update') ?? false))),
-                'canDeleteLawinMonitoring' => $isAdmin,
+                'canViewLawinMonitoring' => $can('lawin-monitoring.view'),
+                'canCreateLawinMonitoring' => $can('lawin-monitoring.create'),
+                'canUpdateLawinMonitoring' => $can('lawin-monitoring.update'),
+                'canDeleteLawinMonitoring' => $can('lawin-monitoring.delete'),
 
                 // Automated Weather Station (AWS)
-                'canViewAws' => $isAdmin || ($user?->can('aws.view') ?? false),
-                'canCreateAws' => $isAdmin || ($user?->can('aws.create') ?? false),
-                'canUpdateAws' => $isAdmin || ($user?->can('aws.update') ?? false),
-                'canDeleteAws' => $isAdmin || ($user?->can('aws.delete') ?? false),
+                'canViewAws' => $can('aws.view'),
+                'canCreateAws' => $can('aws.create'),
+                'canUpdateAws' => $can('aws.update'),
+                'canDeleteAws' => $can('aws.delete'),
 
                 // Biodiversity Monitoring System (BMS)
                 'canViewBms' => $user?->can('bms.view') ?? false,
@@ -125,18 +129,18 @@ class HandleInertiaRequests extends Middleware
                 'canUpdateImea' => $user?->can('imea.update') ?? false,
                 'canDeleteImea' => $user?->can('imea.delete') ?? false,
                 'canImportImea' => $user?->can('imea.import') ?? false,
-                'canExportImea' => $user?->can('imea.export') ?? false,
+                'canExportImea' => $can('imea.export'),
 
                 // PPA (CDS ra)
-                'canViewPPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.view') ?? false))),
-                'canCreatePPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.create') ?? false))),
-                'canUpdatePPA' => $isAdmin || (!$isMes && ($isStaff || ($user?->can('programs-projects-activities.update') ?? false))),
-                'canDeletePPA' => $isAdmin,
+                'canViewPPA' => !$isMes && $can('programs-projects-activities.view'),
+                'canCreatePPA' => !$isMes && $can('programs-projects-activities.create'),
+                'canUpdatePPA' => !$isMes && $can('programs-projects-activities.update'),
+                'canDeletePPA' => $can('programs-projects-activities.delete'),
 
                 // Reports (CDS ra)
-                'canViewReports' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
-                'canViewComplianceAlerts' => $isAdmin || (!$isMes && ($user?->can('reports.view') ?? false)),
-                'canManageComplianceAlerts' => $isAdmin || (!$isMes && ($user?->can('compliance-alerts.manage') ?? false)),
+                'canViewReports' => !$isMes && $can('reports.view'),
+                'canViewComplianceAlerts' => !$isMes && $can('reports.view'),
+                'canManageComplianceAlerts' => !$isMes && $can('compliance-alerts.manage'),
             ],
             'managementPlanTypes' => fn () => $canViewManagementPlans
                 ? ManagementPlanType::query()
@@ -146,6 +150,21 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
                 : [],
+            'engpIacGeneratorUrl' => $engpIacGeneratorUrl,
+            'notificationBell' => fn () => $user && Schema::hasTable('notifications') ? [
+                'unread_count' => $user->unreadNotifications()->count(),
+                'notifications' => $user->notifications()->latest()->take(8)->get()->map(fn ($notification): array => [
+                    'id' => $notification->id,
+                    'title' => $notification->data['title'] ?? 'System notification',
+                    'message' => $notification->data['message'] ?? '',
+                    'severity' => $notification->data['severity'] ?? 'info',
+                    'category' => $notification->data['category'] ?? 'submission_updates',
+                    'source_label' => $notification->data['source_label'] ?? 'Report',
+                    'url' => $notification->data['url'] ?? null,
+                    'read_at' => $notification->read_at?->toIso8601String(),
+                    'created_at' => $notification->created_at?->toIso8601String(),
+                ]),
+            ] : ['unread_count' => 0, 'notifications' => []],
             'flash' => [
                 'status' => fn () => $request->session()->get('status'),
                 'success' => fn () => $request->session()->get('success'),

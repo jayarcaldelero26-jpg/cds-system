@@ -26,17 +26,47 @@ use App\Http\Controllers\AwsController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\SpatialLayerController;
 use App\Http\Controllers\ComplianceAlertController;
+use App\Http\Controllers\ConservationReportSubmissionController;
+use App\Http\Controllers\SubmissionTrackingController;
+use App\Http\Controllers\EngpReportController;
+use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\ProtectedAttachmentController;
+use App\Services\Dashboard\DashboardMonitoringService;
 
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
-Route::get('/', function () {
-    return Inertia::render('Welcome');
+Route::get('/', function (DashboardMonitoringService $monitoring) {
+    // The public page deliberately receives aggregates only. The dashboard
+    // service remains the single source of report-monitoring calculations.
+    $dashboard = $monitoring->overview();
+    $summary = $dashboard['summary'];
+
+    return Inertia::render('Welcome', [
+        'overview' => [
+            'tracked_reports' => $summary['tracked_reports'],
+            'submitted' => $summary['submitted'],
+            'overdue' => $summary['overdue'],
+            'reports_due' => $summary['reports_due'],
+            'compliant' => $summary['compliant'],
+            'monitoring_sources' => collect($dashboard['rows'])
+                ->pluck('source')
+                ->filter()
+                ->unique()
+                ->count(),
+        ],
+    ]);
 });
 
 Route::get('/dashboard', [DashboardController::class, 'index'])->middleware(['auth', 'verified'])->name('dashboard');
 
 Route::middleware('auth')->group(function () {
+    Route::get('notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    Route::get('notifications/recent', [NotificationController::class, 'recent'])->name('notifications.recent');
+    Route::patch('notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
+    Route::patch('notifications/{notification}/unread', [NotificationController::class, 'markUnread'])->name('notifications.unread');
+    Route::post('notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.read-all');
+
     // PROFILE ROUTES
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
@@ -51,12 +81,27 @@ Route::middleware('auth')->group(function () {
     Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])->middleware('can:protected-areas.delete')->name('protected-areas.destroy');
 
     Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
+    Route::get('engp-reports/summary', [EngpReportController::class, 'index'])->middleware('can:technical-reports.view')->name('engp-reports.summary');
+    Route::get('engp-reports/{workflow}', [EngpReportController::class, 'index'])->middleware('can:technical-reports.view')->name('engp-reports.index');
+    Route::post('engp-reports/{workflow}', [EngpReportController::class, 'store'])->middleware('can:technical-reports.create')->name('engp-reports.store');
+    Route::put('engp-reports/{workflow}/{engpReportSubmission}', [EngpReportController::class, 'update'])->middleware('can:technical-reports.update')->name('engp-reports.update');
+    Route::delete('engp-reports/{workflow}/{engpReportSubmission}', [EngpReportController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('engp-reports.destroy');
+    Route::get('engp-reports/{workflow}/{engpReportSubmission}/mov', [EngpReportController::class, 'mov'])->middleware('can:technical-reports.view')->name('engp-reports.mov');
+    // Protected active-module attachment endpoint. The source registry resolves
+    // the record and path; clients never provide a filesystem path.
+    Route::get('attachments/{source}/{record}/{attachment}', [ProtectedAttachmentController::class, 'show'])
+        ->whereNumber('record')
+        ->where('source', '[a-z0-9-]+')
+        ->where('attachment', '[A-Za-z0-9_-]+')
+        ->name('attachments.show');
+    Route::get('submission-tracking', [SubmissionTrackingController::class, 'index'])->middleware('can:reports.view')->name('submission-tracking.index');
+    Route::post('submission-tracking/{source}/{record}/{stage}', [SubmissionTrackingController::class, 'transition'])->middleware('can:reports.view')->name('submission-tracking.transition');
     Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:reports.view')->name('compliance-alerts.index');
     Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
     Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');
     Route::get('settings/compliance-alerts', [ComplianceAlertController::class, 'settings'])->middleware('can:compliance-alerts.manage')->name('settings.compliance-alerts');
     Route::get('admin/recipient-mapping', [ComplianceAlertController::class, 'recipientMapping'])->middleware('can:compliance-alerts.manage')->name('compliance-alert-recipients.index');
-    Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:compliance-alerts.manage')->name('business-calendar.index');
+    Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:reports.view')->name('business-calendar.index');
     Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:reports.view')->name('compliance-alerts.preview');
     Route::post('compliance-alerts/send', [ComplianceAlertController::class, 'send'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send');
     Route::post('compliance-alerts/send-test', [ComplianceAlertController::class, 'sendTest'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send-test');
@@ -67,6 +112,7 @@ Route::middleware('auth')->group(function () {
     Route::put('compliance-alerts/settings', [ComplianceAlertController::class, 'updateSettings'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.settings.update');
     Route::post('compliance-alerts/non-working-days', [ComplianceAlertController::class, 'storeNonWorkingDay'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.non-working-days.store');
     Route::put('compliance-alerts/non-working-days/{nonWorkingDay}', [ComplianceAlertController::class, 'updateNonWorkingDay'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.non-working-days.update');
+    Route::delete('compliance-alerts/non-working-days/{nonWorkingDay}', [ComplianceAlertController::class, 'destroyNonWorkingDay'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.non-working-days.destroy');
     Route::post('compliance-alerts/confirmations', [ComplianceAlertController::class, 'confirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.confirm');
     Route::delete('compliance-alerts/confirmations', [ComplianceAlertController::class, 'unconfirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.unconfirm');
 
@@ -188,6 +234,12 @@ Route::middleware('auth')->group(function () {
     Route::get('management-plans/{managementPlan}/edit', [ManagementPlanController::class, 'legacyEdit'])->middleware('can:management-plans.update')->name('management-plans.edit');
     Route::get('management-plans/{managementPlan}/attachments/{attachment}', [ManagementPlanController::class, 'viewAttachment'])->middleware('can:management-plans.view')->whereNumber('attachment')->name('management-plans.attachments.view');
 
+    // CONSERVATION UNIT REPORT WORKFLOWS
+    Route::get('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'index'])->middleware('can:technical-reports.view')->name('conservation-reports.index');
+    Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware('can:technical-reports.create')->name('conservation-reports.store');
+    Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware('can:technical-reports.update')->name('conservation-reports.update');
+    Route::delete('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('conservation-reports.destroy');
+    Route::get('conservation-reports/{workflow}/{submission}/mov', [ConservationReportSubmissionController::class, 'showMov'])->middleware('can:technical-reports.view')->name('conservation-reports.mov');
     // TECHNICAL REPORTS ROUTES
     Route::get('ipaf', [IpafController::class, 'index'])->middleware('can:technical-reports.view')->name('ipaf.index');
     Route::redirect('ipaf-collection', '/ipaf')->middleware('can:technical-reports.view')->name('ipaf-collection.index');

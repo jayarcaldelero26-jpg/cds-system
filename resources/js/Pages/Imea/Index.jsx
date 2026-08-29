@@ -1,10 +1,9 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { Link, useForm, usePage, router } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import StatusBadge from '@/Components/StatusBadge';
 import PageHeader from '@/Components/PageHeader';
-import WorkflowTabs from './WorkflowTabs';
 import Tooltip from '@/Components/Tooltip';
 
 export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
@@ -16,6 +15,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
   const [activeTab, setActiveTab] = useState('facilities');
   const [selectedFacilityPA, setSelectedFacilityPA] = useState(filters.protected_area_id || '');
+  useEffect(() => setSelectedFacilityPA(filters.protected_area_id || ''), [filters.protected_area_id]);
 
   // IMEA Assessment Modal States
   const [selectedAssessment, setSelectedAssessment] = useState(null);
@@ -100,10 +100,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
     }
     const formattedExisting = rawFiles.map((file, idx) => {
-      const filePath = typeof file === 'string' ? file : file.url || file.path || file.file_path || file.file_name;
       const fileName = typeof file === 'string' ? file.split('/').pop() : file.name || file.original_name || `Document ${idx + 1}`;
-      const fileUrl = filePath && filePath.startsWith('http') ? filePath : `/storage/${filePath}`;
-      return { id: file.id || idx, name: fileName, url: fileUrl, original: file };
+      return { id: file.id || file.key || idx, key: file.key ?? String(idx), name: fileName, url: file.url || null, original: file };
     });
     setExistingFiles(formattedExisting);
     setActivePreview(formattedExisting.length > 0 ? formattedExisting[0] : null);
@@ -244,7 +242,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
     setSelectedFacilityPA(value);
     setSelectedFacilityIds([]);
 
-    const query = value ? { protected_area_id: value } : {};
+    const query = { ...filters, protected_area_id: value || undefined };
 
     router.get('/imea', query, {
       preserveState: true,
@@ -304,45 +302,6 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
         } />
 
-
-            <WorkflowTabs active="facilities" />
-            <div className="hidden">
-
-                <button
-          type="button"
-          onClick={() => setActiveTab('assessments')}
-          className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
-          activeTab === 'assessments' ?
-          'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800' :
-          'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'}`
-          }>
-
-                    <span>📊</span>
-                    <span>IMEA Assessments</span>
-                </button>
-
-                <button
-          type="button"
-          onClick={() => setActiveTab('facilities')}
-          className={`inline-flex shrink-0 items-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition-all duration-200 ${
-          activeTab === 'facilities' ?
-          'border-green-700 bg-green-700 text-white shadow-md hover:bg-green-800' :
-          'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400'}`
-          }>
-
-                    <span>🏗️</span>
-                    <span>Facilities & Infrastructures Inventory</span>
-                </button>
-
-                <Link
-          href={route('imea.report-submissions.index')}
-          className="inline-flex shrink-0 items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-bold text-gray-700 shadow-sm transition-all duration-200 hover:border-green-300 hover:bg-green-50 hover:text-green-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-green-950/30 dark:hover:text-green-400">
-
-                    <span>📋</span>
-                    <span>Report Submission Tracker</span>
-                </Link>
-
-            </div>
 
             {/* TAB 1: IMEA ASSESSMENTS */}
             {activeTab === 'assessments' &&
@@ -695,7 +654,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                           type="button"
                           onClick={() => {
                             setExistingFiles(existingFiles.filter((_, i) => i !== idx));
-                            setData('removed_attachments', [...data.removed_attachments, file.original]);
+                            setData('removed_attachments', [...data.removed_attachments, file.key]);
                             if (activePreview?.url === file.url) setActivePreview(null);
                           }}
                           className="text-white/80 hover:text-white font-bold ml-1" aria-label={`Remove ${file.name}`}>

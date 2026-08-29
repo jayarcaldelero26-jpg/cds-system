@@ -102,18 +102,18 @@ export default function Index({ issues, filters, protectedAreas, statuses }) {
                 <form onSubmit={(e) => {e.preventDefault();visit({ page: 1 });}} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-4">
                     <div className="md:col-span-2">
 
-            <FloatingInput id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search issues, findings, or PAMOs..." size="sm" />
+            <FloatingInput variant="legacy" id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search issues, findings, or PAMOs..." size="sm" />
                     </div>
                     <div>
 
-            <FloatingSelect id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
                             <option value="">All protected areas</option>
                             {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
                         </FloatingSelect>
                     </div>
                     <div>
 
-            <FloatingSelect id="index-status" label="Status" value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-status" label="Status" value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
                         </FloatingSelect>

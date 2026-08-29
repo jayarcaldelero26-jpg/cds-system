@@ -8,6 +8,8 @@ use App\Models\BmsReportSubmission;
 use App\Models\BmsThreat;
 use App\Models\ProtectedArea;
 use App\Services\SpatialLayerService;
+use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
@@ -70,12 +72,15 @@ class BmsController extends Controller
 
         $spatialLayers = $selectedPa?->spatialLayers()->latest('id')->get() ?? collect();
 
-        $bmsRecords = $query->get()->each(function (BmsRecord $record): void {
-            $record->setAttribute('attachment_name', $record->attachment ? basename($record->attachment) : null);
-            $record->setAttribute('attachment_url', $record->attachment
-                ? route('bms.attachment.show', $record)
-                : null);
-        });
+        $attachmentService = app(ProtectedAttachmentService::class);
+        $bmsRecords = $query->get()->map(function (BmsRecord $record) use ($attachmentService): array {
+            $data = $record->toArray();
+            unset($data['attachment']);
+            $data['attachment'] = $attachmentService->descriptor('bms-data', $record, 'attachment');
+            $data['attachment_name'] = $data['attachment']['name'] ?? null;
+            $data['attachment_url'] = $data['attachment']['url'] ?? null;
+            return $data;
+        })->values();
 
         return Inertia::render('Bms/Index', [
             'bmsRecords' => $bmsRecords,
@@ -90,10 +95,12 @@ class BmsController extends Controller
                 ->paginate(10, ['*'], 'report_page')
                 ->withQueryString()
                 ->through(function (BmsReportSubmission $submission) {
-                    $data = $submission->toArray();
-                    $data['mov_url'] = $submission->mov_file_path
-                        ? Storage::disk('public')->url($submission->mov_file_path)
-                        : null;
+                    $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
+                    $data['mov'] = app(ProtectedAttachmentService::class)->descriptor('bms-report', $submission, 'mov');
+                    $data['mov_url'] = $data['mov']['url'] ?? null;
+                    $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
+                    $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
+                    $data['cenro_release_applicable'] = ! $directPenro;
 
                     return $data;
                 }),
@@ -143,14 +150,14 @@ class BmsController extends Controller
 
         try {
             if ($request->hasFile('attachment')) {
-                $newAttachment = $request->file('attachment')->store('bms-attachments', 'public');
+                $newAttachment = app(ProtectedAttachmentService::class)->store($request->file('attachment'), 'bms-data');
                 $validated['attachment'] = $newAttachment;
             }
 
             DB::transaction(fn () => BmsRecord::create($validated));
         } catch (Throwable $exception) {
             if ($newAttachment) {
-                Storage::disk('public')->delete($newAttachment);
+                app(ProtectedAttachmentService::class)->delete($newAttachment);
             }
 
             throw $exception;
@@ -464,7 +471,7 @@ class BmsController extends Controller
 
         try {
             if ($request->hasFile('attachment')) {
-                $newAttachment = $request->file('attachment')->store('bms-attachments', 'public');
+                $newAttachment = app(ProtectedAttachmentService::class)->store($request->file('attachment'), 'bms-data');
                 $validated['attachment'] = $newAttachment;
             } else {
                 unset($validated['attachment']);
@@ -473,14 +480,14 @@ class BmsController extends Controller
             DB::transaction(fn () => $bmsRecord->update($validated));
         } catch (Throwable $exception) {
             if ($newAttachment) {
-                Storage::disk('public')->delete($newAttachment);
+                app(ProtectedAttachmentService::class)->delete($newAttachment);
             }
 
             throw $exception;
         }
 
         if ($newAttachment && $oldAttachment && $oldAttachment !== $newAttachment) {
-            Storage::disk('public')->delete($oldAttachment);
+            app(ProtectedAttachmentService::class)->delete($oldAttachment);
         }
 
         return redirect()->back()->with('success', 'Record updated successfully!');
@@ -568,7 +575,7 @@ class BmsController extends Controller
         DB::transaction(fn () => $bmsRecord->delete());
 
         if ($attachment) {
-            Storage::disk('public')->delete($attachment);
+            app(ProtectedAttachmentService::class)->delete($attachment);
         }
 
         return redirect()->back()->with('success', 'Record deleted successfully!');
@@ -576,11 +583,7 @@ class BmsController extends Controller
 
     public function showAttachment(BmsRecord $bmsRecord)
     {
-        abort_unless($bmsRecord->attachment && Storage::disk('public')->exists($bmsRecord->attachment), 404);
-
-        return response()->file(Storage::disk('public')->path($bmsRecord->attachment), [
-            'Content-Disposition' => 'inline; filename="'.basename($bmsRecord->attachment).'"',
-        ]);
+        return app(ProtectedAttachmentService::class)->response('bms-data', $bmsRecord, 'attachment');
     }
 
     public function bulkDestroy(Request $request)
@@ -596,7 +599,7 @@ class BmsController extends Controller
 
         $attachments = $records->pluck('attachment')->filter()->all();
         if ($attachments !== []) {
-            Storage::disk('public')->delete($attachments);
+            foreach ($attachments as $path) app(ProtectedAttachmentService::class)->delete($path);
         }
 
         return redirect()->back()->with('success', 'Selected records deleted successfully!');

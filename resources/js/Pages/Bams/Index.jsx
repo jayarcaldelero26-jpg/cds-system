@@ -250,12 +250,6 @@ export default function BamsIndex({
 
                             🌐 Spatial File Import
                         </button>}
-                        <Link
-              href={route('bams.report-submissions.index')}
-              className="px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-green-50 hover:text-green-700 border border-gray-200 dark:border-gray-700">
-
-                            📋 Report Submission Tracker
-                        </Link>
                     </div>
 
                     {/* TAB 1: RECORDS VIEW */}

@@ -1,5 +1,5 @@
 import { FloatingSelect } from "@/Components/Form";import { Link, router } from '@inertiajs/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
@@ -20,6 +20,11 @@ export default function ImeaReport({
   const [selectedYear, setSelectedYear] = useState(filters.year || '');
   const [selectedPeriod, setSelectedPeriod] = useState(filters.period || '');
   const [selectedPA, setSelectedPA] = useState(filters.protected_area_id || '');
+  useEffect(() => {
+    setSelectedYear(filters.year || '');
+    setSelectedPeriod(filters.period || '');
+    setSelectedPA(filters.protected_area_id || '');
+  }, [filters.year, filters.period, filters.protected_area_id]);
 
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
@@ -46,7 +51,7 @@ export default function ImeaReport({
     setSelectedYear('');
     setSelectedPeriod('');
     setSelectedPA('');
-    router.get('/imea/report', {}, { preserveState: true });
+    router.get('/imea/report', {}, { preserveState: true, preserveScroll: true, replace: true });
   };
 
   const openModal = (row) => {

@@ -14,7 +14,8 @@ class ComplianceMovService
     {
         $path = $record->getAttribute($pathField);
 
-        return is_string($path) && trim($path) !== '' && Storage::disk('public')->exists($path);
+        return is_string($path) && trim($path) !== ''
+            && (Storage::disk('local')->exists($path) || Storage::disk('public')->exists($path));
     }
 
     /** @param array<int, mixed> $attachments */
@@ -22,7 +23,8 @@ class ComplianceMovService
     {
         foreach ($attachments as $attachment) {
             $path = is_string($attachment) ? $attachment : (is_array($attachment) ? ($attachment['path'] ?? null) : null);
-            if (is_string($path) && ! in_array($path, $removedPaths, true) && Storage::disk('public')->exists($path)) {
+            if (is_string($path) && ! in_array($path, $removedPaths, true)
+                && (Storage::disk('local')->exists($path) || Storage::disk('public')->exists($path))) {
                 return true;
             }
         }

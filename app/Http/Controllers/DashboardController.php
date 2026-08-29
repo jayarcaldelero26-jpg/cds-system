@@ -16,17 +16,32 @@ use App\Models\LawinMonitoring;
 use App\Models\CdsLawinMonitoring;
 use App\Models\TechnicalReport;
 use App\Models\Aws;
+use App\Services\Dashboard\DashboardMonitoringService;
 use Carbon\Carbon;
 use Inertia\Inertia;
 
 class DashboardController extends Controller
 {
+    public function __construct(private readonly DashboardMonitoringService $monitoring) {}
+
     public function index(Request $request)
     {
         $user = $request->user();
 
         if ($user->hasRole('no_role') || !$user->is_active) {
             return Inertia::render('Auth/WaitingApproval');
+        }
+
+        if ($user->section !== 'MES') {
+            $dashboard = $this->monitoring->overview($request->only([
+                'year', 'program', 'office', 'period', 'page',
+            ]));
+
+            // Retained for existing authorized-navigation consumers; the new
+            // monitoring dashboard itself uses the normalized live report rows.
+            $dashboard['protectedAreasCount'] = ProtectedArea::count();
+
+            return Inertia::render('Dashboard', $dashboard);
         }
 
         // ============================================================

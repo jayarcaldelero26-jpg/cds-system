@@ -127,18 +127,18 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
                 <form onSubmit={(e) => {e.preventDefault();visit({ page: 1 });}} className="grid gap-3 border-b border-gray-200 p-4 dark:border-gray-700 md:grid-cols-4">
                     <div className="md:col-span-2">
 
-            <FloatingInput id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search threats, remarks, or CENRO..." size="sm" />
+            <FloatingInput variant="legacy" id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search threats, remarks, or CENRO..." size="sm" />
                     </div>
                     <div>
 
-            <FloatingSelect id="index-cenro-station" label="CENRO / Station" value={filters?.cenro || ''} onChange={(e) => visit({ cenro: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-cenro-station" label="CENRO / Station" value={filters?.cenro || ''} onChange={(e) => visit({ cenro: e.target.value, page: 1 })}>
                             <option value="">All CENRO / Stations</option>
                             {safeCenroList.map((cenro) => <option key={cenro} value={cenro}>{cenro}</option>)}
                         </FloatingSelect>
                     </div>
                     <div>
 
-            <FloatingSelect id="index-status" label="Status" value={filters?.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
+            <FloatingSelect variant="legacy" id="index-status" label="Status" value={filters?.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {safeStatuses.map((st) => <option key={st} value={st}>{st}</option>)}
                         </FloatingSelect>

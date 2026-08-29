@@ -5,13 +5,27 @@ import Card from '../../Components/Card';
 import FilePreviewPanel from '../../Components/Crud/FilePreviewPanel';
 import PageHeader from '../../Components/PageHeader';
 import { FloatingInput, FloatingSelect, FloatingTextarea } from '../../Components/Form';
+import { isTimelinessValue, timelinessClass } from '../../Components/TimelinessBadge';
 
-const empty = { protected_area_id: '', target_office: '', activity_name: '', report_type: '', semester: '1st Semester', date_conducted: '', date_accomplished: '', date_report_released_cenro: '', date_received_penro: '', date_endorsed_regional: '', attachment: null, remove_attachment: false, remarks: '' };
-const badgeClass = (value) => ({ Outstanding: 'bg-emerald-500 text-white', 'Very Satisfactory': 'bg-green-600 text-white', Satisfactory: 'bg-amber-400 text-amber-950', Unsatisfactory: 'bg-orange-500 text-white', Poor: 'bg-red-600 text-white', 'No Rating': 'bg-gray-500 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700';
+const empty = { protected_area_id: '', target_office: '', activity_name: '', report_type: '', semester: '1st Semester', date_conducted: '', date_accomplished: '', attachment: null, remarks: '' };
+const badgeClass = (value) => isTimelinessValue(value) ? timelinessClass(value) : ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700';
 
 export default function Form({ technicalReport, protectedAreas, reportTypes }) {
   const isEdit = Boolean(technicalReport);
-  const form = useForm({ ...empty, ...(technicalReport || {}), attachment: null, remove_attachment: false });
+  const form = useForm({
+    ...empty,
+    ...(technicalReport ? {
+      protected_area_id: technicalReport.protected_area_id || '',
+      target_office: technicalReport.target_office || '',
+      activity_name: technicalReport.activity_name || '',
+      report_type: technicalReport.report_type || '',
+      semester: technicalReport.semester || '1st Semester',
+      date_conducted: technicalReport.date_conducted || '',
+      date_accomplished: technicalReport.date_accomplished || '',
+      remarks: technicalReport.remarks || '',
+    } : {}),
+    attachment: null,
+  });
   const existingFile = technicalReport?.attachment || null;
   const [preview, setPreview] = useState(existingFile);
   const objectUrlRef = useRef(null);
@@ -21,18 +35,18 @@ export default function Form({ technicalReport, protectedAreas, reportTypes }) {
   const selectFile = (file) => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = file ? URL.createObjectURL(file) : null;
-    form.setData((data) => ({ ...data, attachment: file, remove_attachment: false }));
+    form.setData((data) => ({ ...data, attachment: file }));
     setPreview(file ? { name: file.name, type: file.type, size: file.size, url: objectUrlRef.current } : existingFile);
   };
   const removeFile = () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = null;
     if (form.data.attachment) {
-      form.setData((data) => ({ ...data, attachment: null, remove_attachment: false }));
+      form.setData((data) => ({ ...data, attachment: null }));
       setPreview(existingFile);
     } else {
-      form.setData((data) => ({ ...data, remove_attachment: Boolean(existingFile) }));
-      setPreview(null);
+      form.setData((data) => ({ ...data, attachment: null }));
+      setPreview(existingFile);
     }
   };
   const submit = (event) => {
@@ -60,9 +74,9 @@ export default function Form({ technicalReport, protectedAreas, reportTypes }) {
                     <FloatingSelect id="technical-semester" label="Semester" required value={form.data.semester || ''} onChange={(event) => form.setData('semester', event.target.value)} error={form.errors.semester}><option value="">Select Semester</option><option>1st Semester</option><option>2nd Semester</option></FloatingSelect>
                     <div className="sm:col-span-2">{field('date_conducted', 'Date Conducted / Coverage Period')}</div>
                 </div></Section>
-                <Section title="Submission Timeline"><div className="grid gap-4 sm:grid-cols-2">{field('date_accomplished', 'Date Accomplished', 'date')}{field('date_report_released_cenro', 'Date Report Released by CENRO Records', 'date')}{field('date_received_penro', 'Date Received by PENRO Records', 'date')}{field('date_endorsed_regional', 'Date Endorsed to Regional Office', 'date')}</div></Section>
+                <Section title="Submission Information"><div className="grid gap-4 sm:grid-cols-2">{field('date_accomplished', 'Date Accomplished', 'date')}</div></Section>
                 <Section title="Calculated Compliance"><div className="grid gap-3 sm:grid-cols-2">{calculations.length ? calculations.map(([label, value]) => <div key={label} className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">{label}</p><span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${badgeClass(value)}`}>{value ?? '—'}</span></div>) : <p className="text-sm text-gray-500 sm:col-span-2">Compliance values are calculated by the server after the report is saved.</p>}</div></Section>
-                <Section title="MOV & Remarks"><div className="space-y-4"><div className="block text-sm font-medium text-gray-700 dark:text-gray-300"><p className="mb-1 text-xs font-semibold text-amber-700 dark:text-amber-300">{(!isEdit || !existingFile) && 'An MOV / supporting document is required.'}</p><FileInput id="form-mov-supporting-document-pdf-doc-docx-xls-or-xlsx-maximum-20-mb" type="file" required={!isEdit || !existingFile} accept=".pdf,.doc,.docx,.xls,.xlsx" onChange={(event) => selectFile(event.target.files?.[0] || null)} /></div>{preview && <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"><button type="button" onClick={() => setPreview(preview)} className="truncate font-semibold">{preview.name}</button><button type="button" onClick={removeFile} className="font-bold text-red-600">Remove</button></div>}{form.errors.attachment && <span className="text-xs text-red-600">{form.errors.attachment}</span>}<FloatingTextarea id="technical-remarks" label="Remarks" rows="4" value={form.data.remarks || ''} onChange={(event) => form.setData('remarks', event.target.value)} error={form.errors.remarks} /></div></Section>
+                <Section title="MOV & Remarks"><div className="space-y-4"><div className="block text-sm font-medium text-gray-700 dark:text-gray-300"><label htmlFor="form-mov-supporting-document-pdf-doc-docx-xls-or-xlsx-maximum-20-mb" className="mb-1 block text-xs font-semibold text-gray-700 dark:text-gray-300">Report Attachment / MOV{(!isEdit || !existingFile) && <span className="ml-0.5 text-xs leading-4 text-red-500">*</span>}</label><p className="mb-1 text-xs font-semibold text-amber-700 dark:text-amber-300">{(!isEdit || !existingFile) && 'An MOV / supporting document is required.'}</p><FileInput id="form-mov-supporting-document-pdf-doc-docx-xls-or-xlsx-maximum-20-mb" type="file" required={!isEdit || !existingFile} accept=".pdf,.doc,.docx,.xls,.xlsx" onChange={(event) => selectFile(event.target.files?.[0] || null)} /></div>{preview && <div className="flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-800"><button type="button" onClick={() => setPreview(preview)} className="truncate font-semibold">{preview.name}</button>{form.data.attachment && <button type="button" onClick={removeFile} className="font-bold text-red-600">Cancel replacement</button>}</div>}{form.errors.attachment && <span className="text-xs text-red-600">{form.errors.attachment}</span>}<FloatingTextarea id="technical-remarks" label="Remarks" rows="4" value={form.data.remarks || ''} onChange={(event) => form.setData('remarks', event.target.value)} error={form.errors.remarks} /></div></Section>
                 <div className="flex justify-end gap-3 border-t pt-4"><Link href={route('technical-reports.index')} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">Cancel</Link><button type="submit" disabled={form.processing} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">{form.processing ? 'Saving…' : isEdit ? 'Save Changes' : 'Save Report'}</button></div>
             </form></Card>
             <div className="sticky top-6 xl:col-span-5"><FilePreviewPanel file={preview} title="MOV / Supporting Document" heightClass="h-[650px]" /></div>

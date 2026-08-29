@@ -11,7 +11,7 @@
                 <section class="max-w-xl">
                     <header>
                         <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">{{ __('User Information') }}</h3>
-                        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ __('Create a CDS system user and assign their access role.') }}</p>
+                        <p class="mt-1 text-sm text-gray-600 dark:text-gray-400">{{ __('Create an eDATS user and assign their access role.') }}</p>
                     </header>
 
                     <form method="POST" action="{{ route('admin.users.store') }}" class="mt-6 space-y-6">

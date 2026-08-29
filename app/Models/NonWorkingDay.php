@@ -12,6 +12,7 @@ class NonWorkingDay extends Model
     public const TYPE_LOCAL_HOLIDAY = 'LOCAL_HOLIDAY';
     public const TYPE_SPECIAL_NON_WORKING_DAY = 'SPECIAL_NON_WORKING_DAY';
     public const TYPE_OFFICE_DECLARED_NON_WORKING_DAY = 'OFFICE_DECLARED_NON_WORKING_DAY';
+    public const TYPE_OTHER = 'OTHER';
 
     public const SCOPE_NATIONAL = 'NATIONAL';
     public const SCOPE_DAVAO_ORIENTAL = 'DAVAO_ORIENTAL';

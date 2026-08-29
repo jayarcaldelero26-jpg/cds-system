@@ -2,6 +2,7 @@ import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect,
 import PageHeader from '@/Components/PageHeader';
 import { Head, router, useForm } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
+import { parseDateOnly } from '@/Utils/dateFormatters';
 
 // Leaflet Map Marker Icons Import
 import 'leaflet/dist/leaflet.css';
@@ -472,7 +473,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         return;
       }
       if (!r.monitoring_date) return;
-      const dateObj = new Date(r.monitoring_date);
+      const dateObj = parseDateOnly(r.monitoring_date);
+      if (!dateObj) return;
       const year = dateObj.getFullYear();
       const month = dateObj.getMonth() + 1;
       const sem = month <= 6 ? 1 : 2;
@@ -542,7 +544,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
 
   const checkIsNewSpeciesRecord = (record) => {
     if (!record.monitoring_date || !record.species_scientific_name) return false;
-    const dateObj = new Date(record.monitoring_date);
+    const dateObj = parseDateOnly(record.monitoring_date);
+    if (!dateObj) return false;
     const year = dateObj.getFullYear();
     const month = dateObj.getMonth() + 1;
     const sem = month <= 6 ? 1 : 2;
@@ -564,7 +567,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
         return;
       }
       if (r.monitoring_date) {
-        yearsSet.add(new Date(r.monitoring_date).getFullYear().toString());
+        const dateObj = parseDateOnly(r.monitoring_date);
+        if (dateObj) yearsSet.add(dateObj.getFullYear().toString());
       }
     });
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
@@ -733,16 +737,12 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     <div className="no-print">
                     <PageHeader
               title="Biodiversity Monitoring System (BMS)"
-              description="Comprehensive Species Database, Transect Observation Records, and Semestral Population Trends."
-              actions={
-              <span className="bg-white/10 backdrop-blur-md text-white border border-white/20 px-4 py-2 rounded-xl text-xs font-bold tracking-wider uppercase">
-                                BMS Operations
-                            </span>
-              } />
+              description="Comprehensive Species Database, Transect Observation Records, and Semestral Population Trends." />
 
                     </div>
 
                     {/* Navigation Tabs */}
+{activeTab !== 'report-tracker' && (
                     <div className="no-print flex flex-col gap-2 border-b border-gray-200 pb-3 dark:border-gray-700 xl:flex-row xl:items-center xl:justify-between">
                         <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 xl:pb-0">
                         <button onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
@@ -757,9 +757,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         <button onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️ Map View
                         </button>
-                        <button onClick={() => setActiveTab('report-tracker')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'report-tracker' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
-                            📑 Report Submission Tracker
-                        </button>
+
                         </div>
                         {(canCreateBms || canManageBmsSpatial) && <div className="flex shrink-0 items-center gap-2 overflow-x-auto xl:justify-end">
                         {canCreateBms && <button onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
@@ -769,7 +767,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                             🗺️📁 Import GeoJSON Spatial File
                         </button>}
                         </div>}
-                    </div>
+                    </div>                    )}
 
                     {activeTab === 'report-tracker' &&
           <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} filters={reportFilters} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} />
@@ -815,14 +813,14 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                                     <div className="w-52">
 
-                                        <FloatingSelect id="index-protected-area" label="Protected Area" value={filters?.protected_area_id || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, protected_area_id: e.target.value }, { preserveState: true, replace: true });}}>
+                                        <FloatingSelect id="index-protected-area" label="Protected Area" value={filters?.protected_area_id || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, protected_area_id: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}}>
                                             <option value="">🌐 All Protected Areas</option>
                                             {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                         </FloatingSelect>
                                     </div>
                                     <div className="w-36">
 
-                                        <FloatingSelect id="index-category" label="Category" value={filters?.category || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, category: e.target.value }, { preserveState: true, replace: true });}}>
+                                        <FloatingSelect id="index-category" label="Category" value={filters?.category || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, category: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}}>
                                             <option value="">🌿 All Categories</option>
                                             <option value="Flora">Flora</option>
                                             <option value="Fauna">Fauna</option>
@@ -831,9 +829,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     <div>
                                         <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Date Range</label>
                                         <div className="flex items-center gap-1">
-                                            <FloatingInput id="bms-filter-start-date" label="Start Date" size="sm" type="date" value={filters?.start_date || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, start_date: e.target.value }, { preserveState: true, replace: true });}} />
+                                            <FloatingInput id="bms-filter-start-date" label="Start Date" size="sm" type="date" value={filters?.start_date || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, start_date: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}} />
                                             <span className="text-gray-400 text-xs font-bold">to</span>
-                                            <FloatingInput id="bms-filter-end-date" label="End Date" size="sm" type="date" value={filters?.end_date || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, end_date: e.target.value }, { preserveState: true, replace: true });}} />
+                                            <FloatingInput id="bms-filter-end-date" label="End Date" size="sm" type="date" value={filters?.end_date || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, end_date: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}} />
                                         </div>
                                     </div>
                                 </div>

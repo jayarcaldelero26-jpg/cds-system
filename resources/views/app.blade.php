@@ -3,10 +3,10 @@
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title inertia>{{ config('app.name', 'CDS Information Management System') }}</title>
+        <title inertia>{{ config('app.name', 'eDATS') }}</title>
 
-        <!-- 🚀 Gi-add nato dinhi ang Favicon gamit ang imong CDS Logo.png -->
-        <link rel="icon" type="image/png" href="{{ asset('images/CDS Logo.png') }}">
+        <!-- DENR is the primary authenticated-application mark. -->
+        <link rel="icon" type="image/png" href="{{ asset('images/DENR LOGO.png') }}">
 
         @routes
         @viteReactRefresh

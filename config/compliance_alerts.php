@@ -5,7 +5,7 @@ return [
     'test_email_enabled' => filter_var(env('COMPLIANCE_TEST_EMAIL_ENABLED', false), FILTER_VALIDATE_BOOL),
     'send_time' => env('COMPLIANCE_ALERTS_SEND_TIME', '08:00'),
     'timezone' => 'Asia/Manila',
-    'sender_display_name' => env('COMPLIANCE_ALERTS_SENDER_NAME', 'CDS Information Management System'),
+    'sender_display_name' => env('COMPLIANCE_ALERTS_SENDER_NAME', 'eDATS'),
     'to_label' => env('COMPLIANCE_ALERTS_TO_LABEL', 'Protected Area Management Office'),
     'attention_line' => env('COMPLIANCE_ALERTS_ATTENTION', 'The Protected Area Superintendent / Concerned Officer'),
     'from_line' => env('COMPLIANCE_ALERTS_FROM', 'The PENR Officer'),
@@ -28,7 +28,7 @@ return [
     'approved_fallback_cc_emails' => array_values(array_filter(array_map('trim', explode(',', (string) env('COMPLIANCE_ALERTS_APPROVED_CC_RECIPIENTS', 'penromaticds@gmail.com,benemerito.RB@gmail.com,nely.maimad11@gmail.com,hingpitelmarie@gmail.com,duayelmarie@gmail.com,edhingpit01@gmail.com'))))),
     'test_recipient_email' => env('COMPLIANCE_ALERTS_TEST_RECIPIENT_EMAIL', ''),
     // Backward-compatible aliases for Phase 1 integrations.
-    'sender_name' => env('COMPLIANCE_ALERTS_SENDER_NAME', 'CDS Information Management System'),
+    'sender_name' => env('COMPLIANCE_ALERTS_SENDER_NAME', 'eDATS'),
     'attention' => env('COMPLIANCE_ALERTS_ATTENTION', 'The Protected Area Superintendent / Concerned Officer'),
     'from' => env('COMPLIANCE_ALERTS_FROM', 'The PENR Officer'),
     'subject' => env('COMPLIANCE_ALERTS_SUBJECT', 'PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports'),

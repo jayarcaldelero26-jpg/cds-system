@@ -41,7 +41,7 @@ export default function Create({ protectedAreas, statuses }) {
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Protected Area */}
                             <div className="md:col-span-2">
-                                <FloatingSelect id="issue-pa" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)} error={errors.protected_area_id}>
+                                <FloatingSelect variant="legacy" id="issue-pa" label="Protected Area / PAMO" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)} error={errors.protected_area_id}>
                                     <option value="">Select Protected Area</option>
                                     {protectedAreas.map((area) =>
                   <option key={area.id} value={area.id}>{area.name}</option>
@@ -51,12 +51,12 @@ export default function Create({ protectedAreas, statuses }) {
 
                             {/* Date Observed */}
                             <div>
-                                <FloatingInput id="issue-date" label="Date Observed / Reported" required type="date" value={data.date_observed} onChange={(e) => setData('date_observed', e.target.value)} error={errors.date_observed} />
+                                <FloatingInput variant="legacy" id="issue-date" label="Date Observed / Reported" required type="date" value={data.date_observed} onChange={(e) => setData('date_observed', e.target.value)} error={errors.date_observed} />
                             </div>
 
                             {/* Status */}
                             <div>
-                                <FloatingSelect id="issue-status" label="Issue Status" required value={data.status} onChange={(e) => setData('status', e.target.value)} error={errors.status}>
+                                <FloatingSelect variant="legacy" id="issue-status" label="Issue Status" required value={data.status} onChange={(e) => setData('status', e.target.value)} error={errors.status}>
                                     {statuses.map((status) =>
                   <option key={status} value={status}>{status}</option>
                   )}
@@ -66,28 +66,28 @@ export default function Create({ protectedAreas, statuses }) {
                             {/* PDF Attachment */}
                             <div className="md:col-span-2">
 
-                                <FileInput id="create-upload-pdf-report-evidence-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
+                                <FileInput variant="legacy" id="create-upload-pdf-report-evidence-max-20mb" type="file" accept=".pdf" onChange={(e) => setData('attachment', e.target.files[0])} />
                                 {errors.attachment && <p className={errorClass}>{errors.attachment}</p>}
                             </div>
 
                             {/* Issue Description */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="issue-description" label="Issue Description" required rows="3" placeholder="E.g., Illegal logging activities detected near Buffer Zone 3..." value={data.issue_description} onChange={(e) => setData('issue_description', e.target.value)} error={errors.issue_description} />
+                                <FloatingTextarea variant="legacy" id="issue-description" label="Issue Description" required rows="3" placeholder="E.g., Illegal logging activities detected near Buffer Zone 3..." value={data.issue_description} onChange={(e) => setData('issue_description', e.target.value)} error={errors.issue_description} />
                             </div>
 
                             {/* Findings */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="issue-findings" label="Findings / Details" required rows="3" placeholder="E.g., Cutting of 5 Dipterocarp trees, chainsaws heard, tire tracks found..." value={data.findings} onChange={(e) => setData('findings', e.target.value)} error={errors.findings} />
+                                <FloatingTextarea variant="legacy" id="issue-findings" label="Findings / Details" required rows="3" placeholder="E.g., Cutting of 5 Dipterocarp trees, chainsaws heard, tire tracks found..." value={data.findings} onChange={(e) => setData('findings', e.target.value)} error={errors.findings} />
                             </div>
 
                             {/* Recommendations */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="issue-recommendations" label="Recommendations" rows="3" placeholder="E.g., Deploy more forest rangers, install surveillance cameras..." value={data.recommendations} onChange={(e) => setData('recommendations', e.target.value)} error={errors.recommendations} />
+                                <FloatingTextarea variant="legacy" id="issue-recommendations" label="Recommendations" rows="3" placeholder="E.g., Deploy more forest rangers, install surveillance cameras..." value={data.recommendations} onChange={(e) => setData('recommendations', e.target.value)} error={errors.recommendations} />
                             </div>
 
                             {/* Action Taken */}
                             <div className="md:col-span-2">
-                                <FloatingTextarea id="issue-action" label="Action Taken (If any)" rows="3" placeholder="E.g., Coordinate with local PNP, filed case report..." value={data.action_taken} onChange={(e) => setData('action_taken', e.target.value)} error={errors.action_taken} />
+                                <FloatingTextarea variant="legacy" id="issue-action" label="Action Taken (If any)" rows="3" placeholder="E.g., Coordinate with local PNP, filed case report..." value={data.action_taken} onChange={(e) => setData('action_taken', e.target.value)} error={errors.action_taken} />
                             </div>
                         </div>
 

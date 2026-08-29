@@ -8,14 +8,21 @@ import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import CrudTable from '@/Components/Crud/CrudTable';
 import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
+import { useReportDetails } from '@/Components/Crud/ReportDetailsContext';
 import PageHeader from '@/Components/PageHeader';
 import { formatReportDate } from '@/Utils/dateFormatters';
 import PlanInformation from './PlanInformation';
+import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
 
 const show = (value) => value === null || value === undefined || value === '' ? '—' : value;
-const badgeClass = (value) => ({ Outstanding: 'bg-emerald-500 text-white', 'Very Satisfactory': 'bg-green-600 text-white', Satisfactory: 'bg-amber-400 text-amber-950', Unsatisfactory: 'bg-orange-500 text-white', Poor: 'bg-red-600 text-white', 'Report Submitted': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
-const Badge = ({ value }) => <span className={`inline-flex max-w-52 whitespace-normal rounded-full px-2.5 py-1 text-xs font-bold leading-5 ${badgeClass(value)}`}>{show(value)}</span>;
-const Detail = ({ label, children }) => <div><span className="block text-xs text-gray-500">{label}:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{children}</span></div>;
+const badgeClass = (value) => ({ 'Report Submitted': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
+const Badge = ({ value }) => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className={`inline-flex max-w-52 whitespace-normal rounded-full px-2.5 py-1 text-xs font-bold leading-5 ${badgeClass(value)}`}>{show(value)}</span>;
+const Detail = ({ label, children }) => {
+  const reportDetails = useReportDetails();
+  const inSummary = /^(plan|plan type|reporting period|semester|quarter|deadline|deadline for submission to penro|timeliness(?: rating)?|submission status|status of submission|report status|number of days complied|days complied)$/i.test(label);
+  if (reportDetails && inSummary) return null;
+  return <div><span className="block text-xs text-gray-500">{label}:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{children}</span></div>;
+};
 const actionClass = 'rounded-xl px-4 py-2.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-500 disabled:cursor-not-allowed disabled:opacity-50';
 
 export default function Index(props) {
@@ -29,9 +36,10 @@ export default function Index(props) {
 
   if (selectedType) {
     return <AuthenticatedLayout title={`${selectedType.name} Management Plan Workspace`}>
-            <PageHeader title={`${selectedType.name} Report Submission Tracker`} description={selectedType.description || `Plan information and report submissions for ${selectedType.name}.`} actions={<div className="flex flex-wrap gap-2"><Link href={route('management-plans.index')} className={`${actionClass} bg-white/10 text-white hover:bg-white/20`}>← All Plans</Link>{canCreate && <Link href={route('management-plans.types.reports.create', selectedType.slug)} className={`${actionClass} bg-green-700 text-white shadow-md hover:bg-green-800`}>+ Add Report</Link>}</div>} />
+            <PageHeader title={`${selectedType.name} Report Submission Tracker`} description={selectedType.description || `Plan information and report submissions for ${selectedType.name}.`} actions={<div className="flex flex-wrap gap-2"><Link href={route('management-plans.index')} className={`${actionClass} bg-white/10 text-white hover:bg-white/20`}>Back to All Plans</Link></div>} />
             <div className="mt-5"><PlanInformation selectedPlanType={selectedType} planProfile={props.planProfile} protectedAreas={props.protectedAreas || []} approvalStatuses={props.approvalStatuses || []} documentCategories={props.documentCategories || {}} /></div>
-            <ReportTracker {...props} />
+            {canCreate && <div className="mt-4 flex justify-end rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"><Link href={route('management-plans.types.reports.create', selectedType.slug)} className={`${actionClass} bg-green-700 text-white shadow-sm hover:bg-green-800`}>+ Add Report</Link></div>}
+            <ReportTracker {...props} canCreate={canCreate} />
         </AuthenticatedLayout>;
   }
 
@@ -44,22 +52,19 @@ export default function Index(props) {
     </AuthenticatedLayout>;
 }
 
-function ReportTracker({ selectedPlanType, managementPlans = {}, filters = {}, protectedAreas = [] }) {
+function ReportTracker({ selectedPlanType, managementPlans = {}, filters = {}, protectedAreas = [], canCreate = false }) {
   const { auth = {} } = usePage().props;
   const canView = Boolean(auth.canViewManagementPlans);
   const canUpdate = Boolean(auth.canUpdateManagementPlans);
   const canDelete = Boolean(auth.canDeleteManagementPlans);
   const rows = Array.isArray(managementPlans.data) ? managementPlans.data : [];
   const links = Array.isArray(managementPlans.links) ? managementPlans.links : [];
-  const [search, setSearch] = useState(filters.search || '');
   const [selected, setSelected] = useState(null);
   const [activeAttachment, setActiveAttachment] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [deleteProcessing, setDeleteProcessing] = useState(false);
-  useEffect(() => setSearch(filters.search || ''), [filters.search]);
   useEffect(() => {if (!selected) return;const refreshed = rows.find((row) => row.id === selected.id);if (refreshed) {setSelected(refreshed);setActiveAttachment((current) => refreshed.attachments?.find((file) => file.path === current?.path) || refreshed.attachments?.[0] || null);}}, [managementPlans.data]);
-  const visit = (changes) => router.get(route('management-plans.types.show', selectedPlanType.slug), { ...filters, search, ...changes }, { preserveState: true, preserveScroll: true, replace: true });
-  const resetFilters = () => {setSearch('');router.get(route('management-plans.types.show', selectedPlanType.slug), {}, { preserveState: true, preserveScroll: true, replace: true });};
+  const visit = (changes) => router.get(route('management-plans.types.show', selectedPlanType.slug), { ...filters, search: undefined, ...changes }, { preserveState: true, preserveScroll: true, replace: true });
   const openDetails = (report) => {setSelected(report);setActiveAttachment(report.attachments?.[0] || null);};
   const closeDetails = () => {setSelected(null);setActiveAttachment(null);};
   const remove = () => {if (!deleting || deleteProcessing) return;router.delete(route('management-plans.types.reports.destroy', [selectedPlanType.slug, deleting.id]), { preserveScroll: true, onStart: () => setDeleteProcessing(true), onSuccess: () => {setDeleting(null);closeDetails();}, onFinish: () => setDeleteProcessing(false) });};
@@ -74,10 +79,10 @@ function ReportTracker({ selectedPlanType, managementPlans = {}, filters = {}, p
   { key: 'submission_status', label: 'Status of Submission', render: (row) => <Badge value={row.submission_status} /> }];
 
   const pagination = links.length > 3 ? <div className="flex flex-wrap gap-1">{links.map((link, index) => <button key={`${link.label}-${index}`} type="button" disabled={!link.url || link.active} onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${link.active ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-green-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'} disabled:cursor-not-allowed disabled:opacity-50`} dangerouslySetInnerHTML={{ __html: link.label }} />)}</div> : null;
-  const filtersUi = <form onSubmit={(event) => {event.preventDefault();visit({ page: 1 });}} className="grid gap-3 md:grid-cols-6"><div className="md:col-span-2"><FloatingInput id="index-search" label="Search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} size="sm" /></div><Filter label="Protected Area" value={filters.protected_area_id || ''} onChange={(value) => visit({ protected_area_id: value, page: 1 })} options={protectedAreas.map((area) => [area.id, area.name])} /><Filter label="Semester" value={filters.semester || ''} onChange={(value) => visit({ semester: value, page: 1 })} options={[['1st Semester', '1st Semester'], ['2nd Semester', '2nd Semester']]} /><div className="flex items-end gap-2 md:col-span-2"><button type="submit" className={`${actionClass} bg-green-700 text-white hover:bg-green-800`}>Search</button><button type="button" onClick={resetFilters} className={`${actionClass} border border-gray-300 text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800`}>Reset</button></div></form>;
+  const filtersUi = <div className="grid gap-3 sm:grid-cols-2"><Filter label="Reporting Period" value={filters.semester || ''} onChange={(value) => visit({ semester: value || undefined, page: 1 })} options={[['1st Semester', '1st Semester'], ['2nd Semester', '2nd Semester']]} /><Filter label="Protected Area" value={filters.protected_area_id || ''} onChange={(value) => visit({ protected_area_id: value || undefined, page: 1 })} options={protectedAreas.map((area) => [area.id, area.name])} /></div>;
   const attachmentPanel = selected ? <div className="space-y-3">{selected.attachments?.length ? <div className="flex flex-wrap gap-2">{selected.attachments.map((file) => <button key={file.path} type="button" onClick={() => setActiveAttachment(file)} className={`rounded-lg border px-3 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${activeAttachment?.path === file.path ? 'border-green-700 bg-green-700 text-white' : 'border-gray-300 bg-gray-50 text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200'}`}>{file.name}</button>)}</div> : <p className="text-xs text-gray-500">No attachments.</p>}<FilePreviewPanel file={activeAttachment} title="Management Plan Attachment" heightClass="h-[480px]" /></div> : null;
 
-  return <div className="mt-4"><CrudTable title={`${selectedPlanType.name} Report Submission Tracker`} subtitle={`${managementPlans.total ?? rows.length} report submissions`} helperText="Click any row to view full details" caption="Report submission tracker" columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} filters={filtersUi} pagination={pagination} emptyTitle="No report submissions found" emptyDescription={`No report submissions have been added to ${selectedPlanType.name}.`} tableClassName="min-w-[1100px]" /><CrudDetailsModal open={canView && Boolean(selected)} icon="📋" title={`${selectedPlanType.name} Report Submission Details`} subtitle={selected?.protected_area_name || ''} onClose={closeDetails} canEdit={canUpdate} canDelete={canDelete} onEdit={() => selected && router.visit(route('management-plans.types.reports.edit', [selectedPlanType.slug, selected.id]))} onDelete={() => setDeleting(selected)} editLabel="Edit This Report" deleteLabel="Delete Report" summary={selected && <CrudSummaryGrid items={[{ label: 'Plan', value: selectedPlanType.name }, { label: 'Semester', value: show(selected.semester) }, { label: 'Timeliness', render: () => <Badge value={selected.timeliness} /> }, { label: 'Submission Status', render: () => <Badge value={selected.submission_status} /> }]} />} attachments={attachmentPanel}><ReportDetails report={selected} /></CrudDetailsModal><ConfirmDialog open={canDelete && Boolean(deleting)} variant="danger" title="Delete Report Submission?" message={`Delete “${deleting?.activity_name || 'this report'}”?`} confirmLabel="Delete Report" processing={deleteProcessing} onConfirm={remove} onCancel={() => !deleteProcessing && setDeleting(null)} /></div>;
+  return <div className="mt-4"><CrudTable compactEmpty={true} title={rows.length > 0 ? `${selectedPlanType.name} Report Submission Tracker` : undefined} subtitle={rows.length > 0 ? `${managementPlans.total ?? rows.length} report submissions` : undefined} helperText={rows.length > 0 ? 'Click any row to view full details' : undefined} caption="Report submission tracker" columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} filters={filtersUi} pagination={rows.length > 0 ? pagination : null} emptyTitle="No report submissions found" emptyDescription={`No report submissions have been added to ${selectedPlanType.name}.`} tableClassName="min-w-[1100px]" /><CrudDetailsModal open={canView && Boolean(selected)} icon="📋" title={`${selectedPlanType.name} Report Submission Details`} subtitle={selected?.protected_area_name || ''} onClose={closeDetails} canEdit={canUpdate} canDelete={canDelete} onEdit={() => selected && router.visit(route('management-plans.types.reports.edit', [selectedPlanType.slug, selected.id]))} onDelete={() => setDeleting(selected)} editLabel="Edit This Report" deleteLabel="Delete Report" summary={selected && <CrudSummaryGrid items={[{ label: 'Plan', value: selectedPlanType.name }, { label: 'Semester', value: show(selected.semester) }, { label: 'Timeliness', render: () => <Badge value={selected.timeliness} /> }, { label: 'Submission Status', render: () => <Badge value={selected.submission_status} /> }]} />} attachments={attachmentPanel}><ReportDetails report={selected} /></CrudDetailsModal><ConfirmDialog open={canDelete && Boolean(deleting)} variant="danger" title="Delete Report Submission?" message={`Delete “${deleting?.activity_name || 'this report'}”?`} confirmLabel="Delete Report" processing={deleteProcessing} onConfirm={remove} onCancel={() => !deleteProcessing && setDeleting(null)} /></div>;
 }
 
 function ReportDetails({ report }) {

@@ -6,6 +6,7 @@ use App\Models\ManagementPlan;
 use App\Models\ManagementPlanType;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\ComplianceMovService;
+use App\Services\Attachments\ProtectedAttachmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -22,6 +23,8 @@ use Throwable;
 
 class ManagementPlanController extends Controller
 {
+    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+
     public function index(): Response
     {
         return Inertia::render('ManagementPlans/Index', [
@@ -115,6 +118,7 @@ class ManagementPlanController extends Controller
     public function storeReport(Request $request, ManagementPlanType $managementPlanType): RedirectResponse
     {
         abort_unless($managementPlanType->is_active, 404);
+        $this->rejectRoutingFields($request);
         $data = $request->validate($this->reportRules(requireAttachments: true));
         $newAttachments = [];
 
@@ -153,26 +157,32 @@ class ManagementPlanController extends Controller
     public function updateReport(Request $request, ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): RedirectResponse
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
+        $this->rejectRoutingFields($request);
         $data = $request->validate([
             ...$this->reportRules(),
             'removed_attachments' => ['nullable', 'array'],
             'removed_attachments.*' => ['string', 'distinct'],
         ]);
 
-        $currentAttachments = array_values(array_filter($managementPlan->attachments ?? [], fn ($attachment) => $this->attachmentPath($attachment) !== null));
+        $currentAttachments = array_filter($managementPlan->attachments ?? [], fn ($attachment) => $this->attachmentPath($attachment) !== null);
+        $attachmentsByKey = collect($currentAttachments)->mapWithKeys(fn ($attachment, $index) => [(string) $index => $attachment]);
         $attachmentsByPath = collect($currentAttachments)->keyBy(fn ($attachment) => $this->attachmentPath($attachment));
         $requestedRemovals = array_values($data['removed_attachments'] ?? []);
         $uploadedAttachments = $request->file('attachments', []);
-        if ($uploadedAttachments === [] && ! app(ComplianceMovService::class)->hasValidAttachments($currentAttachments, $requestedRemovals)) {
+        $requestedPaths = collect($requestedRemovals)->map(function (string $key) use ($attachmentsByKey, $attachmentsByPath): ?string {
+            $attachment = $attachmentsByKey->get($key) ?? $attachmentsByPath->get($key);
+            return $attachment ? $this->attachmentPath($attachment) : null;
+        })->filter()->values()->all();
+        if ($uploadedAttachments === [] && ! app(ComplianceMovService::class)->hasValidAttachments(array_values($currentAttachments), $requestedPaths)) {
             throw ValidationException::withMessages(['attachments' => 'At least one supporting document is required.']);
         }
-        $unownedRemovals = array_values(array_filter($requestedRemovals, fn (string $path) => ! $attachmentsByPath->has($path)));
+        $unownedRemovals = array_values(array_filter($requestedRemovals, fn (string $key) => ! $attachmentsByKey->has($key) && ! $attachmentsByPath->has($key)));
 
         if ($unownedRemovals !== []) {
             throw ValidationException::withMessages(['removed_attachments' => 'One or more selected attachments do not belong to this management plan report.']);
         }
 
-        $retainedAttachments = array_values(array_filter($currentAttachments, fn ($attachment) => ! in_array($this->attachmentPath($attachment), $requestedRemovals, true)));
+        $retainedAttachments = array_values(array_filter($currentAttachments, fn ($attachment) => ! in_array($this->attachmentPath($attachment), $requestedPaths, true)));
         $newAttachments = [];
 
         try {
@@ -191,7 +201,7 @@ class ManagementPlanController extends Controller
             throw $exception;
         }
 
-        $this->deleteAttachments($requestedRemovals);
+        $this->deleteAttachments($requestedPaths);
 
         return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report updated successfully.');
     }
@@ -236,11 +246,7 @@ class ManagementPlanController extends Controller
 
     private function attachmentResponse(ManagementPlan $plan, string $attachment): BinaryFileResponse
     {
-        abort_unless(ctype_digit($attachment), 404);
-        $path = $this->attachmentPath(($plan->attachments ?? [])[(int) $attachment] ?? null);
-        abort_unless($path && Storage::disk('public')->exists($path), 404);
-
-        return response()->file(Storage::disk('public')->path($path));
+        return $this->attachments->response('management-plan', $plan, $attachment);
     }
 
     private function reportRules(bool $requireAttachments = false): array
@@ -253,13 +259,23 @@ class ManagementPlanController extends Controller
             'semester' => ['required', 'string', 'in:1st Semester,2nd Semester'],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
-            'date_report_released_cenro' => ['nullable', 'date'],
-            'date_received_penro' => ['nullable', 'date'],
-            'date_endorsed_regional' => ['nullable', 'date'],
             'remarks' => ['nullable', 'string'],
             'attachments' => [$requireAttachments ? 'required' : 'nullable', 'array', ...($requireAttachments ? ['min:1'] : [])],
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
         ];
+    }
+
+    private function rejectRoutingFields(Request $request): void
+    {
+        $fields = collect(['date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional'])
+            ->filter(fn (string $field): bool => $request->exists($field))
+            ->values();
+
+        if ($fields->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                'routing' => 'Routing dates are recorded through Submission Tracking only.',
+            ]);
+        }
     }
 
     private function typeData(ManagementPlanType $type): array
@@ -314,8 +330,8 @@ class ManagementPlanController extends Controller
                 $metadata = is_array($attachment) ? $attachment : [];
                 $name = $metadata['original_name'] ?? $metadata['name'] ?? ($path ? basename($path) : 'Attachment');
                 $mimeType = $metadata['mime_type'] ?? $metadata['type'] ?? '';
-                return [...$metadata, 'path' => $path, 'original_name' => $name, 'name' => $name, 'mime_type' => $mimeType, 'type' => $mimeType, 'url' => $path ? route('management-plans.types.reports.attachments.view', [$type->slug, $plan, $index]) : null];
-            })->filter(fn (array $attachment) => $attachment['path'] !== null)->values()->all(),
+                return ['key' => (string) $index, 'path' => (string) $index, 'original_name' => $name, 'name' => $name, 'mime_type' => $mimeType, 'type' => $mimeType, 'size' => $metadata['size'] ?? null, 'url' => $path ? $this->attachments->url('management-plan', $plan, (string) $index) : null, 'external' => false];
+            })->filter(fn (array $attachment) => $attachment['url'] !== null)->values()->all(),
         ];
     }
 
@@ -326,7 +342,7 @@ class ManagementPlanController extends Controller
 
     private function storeAttachment(UploadedFile $file): array
     {
-        $path = $file->store('management-plans', 'public');
+        $path = $this->attachments->store($file, 'management-plan');
         if (! is_string($path)) {
             throw new RuntimeException('The attachment could not be stored.');
         }
@@ -343,7 +359,7 @@ class ManagementPlanController extends Controller
     {
         $paths = array_values(array_filter(array_map(fn ($attachment) => $this->attachmentPath($attachment), $attachments)));
         if ($paths !== []) {
-            Storage::disk('public')->delete($paths);
+            foreach ($paths as $path) $this->attachments->delete($path);
         }
     }
 }
