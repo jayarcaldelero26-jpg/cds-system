@@ -10,6 +10,8 @@ use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceAlertSettingsService;
 use App\Services\Compliance\ComplianceConfirmationService;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\CalendarMovEventService;
+use App\Services\BusinessCalendarService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
@@ -131,10 +133,49 @@ class ComplianceAlertController extends Controller
         ]);
     }
 
-    public function businessCalendar(): Response
+    public function businessCalendar(Request $request, CalendarMovEventService $calendarEvents): Response
     {
+        $view = $request->string('view')->toString() === 'year' ? 'year' : 'month';
+        $monthValue = $request->string('month')->toString();
+        $month = preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $monthValue)
+            ? CarbonImmutable::createFromFormat('!Y-m', $monthValue, BusinessCalendarService::TIMEZONE)
+            : CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->startOfMonth();
+        $yearValue = $request->string('year')->toString();
+        $year = preg_match('/^\d{4}$/', $yearValue) ? (int) $yearValue : $month->year;
+        if ($view === 'year') {
+            $month = $month->setYear($year);
+        }
+        $modules = collect($calendarEvents->modules($request->user()));
+        $module = $request->string('module')->toString();
+        $module = $modules->contains('key', $module) ? $module : null;
+        $protectedAreaId = $request->filled('protected_area_id') && ProtectedArea::query()->whereKey($request->integer('protected_area_id'))->exists()
+            ? $request->integer('protected_area_id')
+            : null;
+
+        $nonWorkingDays = NonWorkingDay::query()
+            ->whereBetween('date', [
+                $view === 'year' ? CarbonImmutable::create($year, 1, 1, 0, 0, 0, BusinessCalendarService::TIMEZONE)->toDateString() : $month->startOfMonth()->toDateString(),
+                $view === 'year' ? CarbonImmutable::create($year, 12, 31, 0, 0, 0, BusinessCalendarService::TIMEZONE)->toDateString() : $month->endOfMonth()->toDateString(),
+            ])
+            ->orderBy('date')->orderBy('id')->get()
+            ->map(fn (NonWorkingDay $day) => $this->nonWorkingDayPayload($day))->values();
+        $yearSummary = $view === 'year'
+            ? $calendarEvents->yearSummary($request->user(), CarbonImmutable::create($year, 1, 1, 0, 0, 0, BusinessCalendarService::TIMEZONE), $module, $protectedAreaId)
+            : null;
+        if ($yearSummary !== null) {
+            $yearSummary['overview']['non_working_days'] = $nonWorkingDays->count();
+        }
+
         return Inertia::render('Calendar/Index', [
-            'nonWorkingDays' => NonWorkingDay::query()->latest('date')->latest('id')->get()->map(fn (NonWorkingDay $day) => $this->nonWorkingDayPayload($day))->values(),
+            'view' => $view,
+            'year' => $year,
+            'month' => $month->format('Y-m'),
+            'filters' => ['module' => $module, 'protected_area_id' => $protectedAreaId],
+            'modules' => $modules->values(),
+            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name'])->values(),
+            'movEvents' => $view === 'month' ? $calendarEvents->events($request->user(), $month, $module, $protectedAreaId) : [],
+            'yearSummary' => $yearSummary,
+            'nonWorkingDays' => $nonWorkingDays,
         ]);
     }
 

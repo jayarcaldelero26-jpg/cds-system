@@ -31,6 +31,35 @@ test('an accomplished conservation report enters the CENRO release queue and tra
     expect(ConservationReportSubmission::count())->toBe(2);
 });
 
+test('History contains each completed routing workflow once and excludes intermediate active stages', function () {
+    $released = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Released only', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $received = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Received only', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $completedEarlier = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed earlier', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-04', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $completedLater = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed later', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+
+    $queues = app(SubmissionTrackingService::class)->queues();
+    $history = $queues['history']->where('source', 'conservation')->values();
+
+    expect($queues[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->toContain($released->id)
+        ->and($queues[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->pluck('source_id'))->toContain($received->id)
+        ->and($history->pluck('source_id')->all())->toBe([$completedLater->id, $completedEarlier->id])
+        ->and($history->pluck('source_id'))->not->toContain($released->id, $received->id)
+        ->and($history->firstWhere('source_id', $completedLater->id)['completed_at'])->toBe('2026-08-05')
+        ->and($history->where('source_id', $completedLater->id))->toHaveCount(1);
+});
+
 test('submission tracking rejects impossible receipt and endorsement chronology', function () {
     $report = ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB', 'date_accomplished' => '2026-08-03', 'date_report_released_cenro' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
 
@@ -129,7 +158,8 @@ test('history uses authoritative ENGP period labels and clean non-applicable fie
         ->and($row['reporting_period'])->toBe('Quarter 1')
         ->and($row['protected_area'])->toBeNull()
         ->and($row['date_accomplished'])->toBeNull()
-        ->and($row['stage'])->toBe('endorsed');
+        ->and($row['stage'])->toBe('endorsed')
+        ->and($row['completed_at'])->toBe('2026-03-11');
 });
 
 test('history preserves Conservation reporting period, protected area, and accomplished date', function () {

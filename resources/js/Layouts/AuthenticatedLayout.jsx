@@ -1,6 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Icon as IconifyIcon } from '@iconify/react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 import Tooltip from '../Components/Tooltip';
@@ -196,13 +196,46 @@ function matchesNavigationItem(item, url) {
     return Object.entries(item.activeQuery || {}).every(([key, value]) => value === null ? !currentParams.has(key) : currentParams.get(key) === value);
 }
 
-function Sidebar({ open, onClose, auth, engpIacGeneratorUrl }) {
+function withGenericModuleNavigation(navigation, modules) {
+    if (!modules?.length) return navigation;
+
+    const areas = {
+        protected_area_management_and_development: { label: 'Protected Area Management and Development', icon: 'protected-area' },
+        wildlife_conservation_and_protection: { label: 'Wildlife Conservation and Protection', icon: 'wildlife' },
+        community_based_forest_management: { label: 'Community-Based Forest Management', icon: 'forest' },
+        integrated_watershed_management: { label: 'Integrated Watershed Management', icon: 'watershed' },
+        engp: { label: 'National Greening Program', icon: 'sprout' },
+        conservation: { label: 'Conservation', icon: 'wildlife' },
+        development: { label: 'Development', icon: 'sprout' },
+    };
+    const grouped = modules.reduce((result, module) => {
+        (result[module.program_area] ||= []).push({ label: module.label, href: module.href, permission: 'canViewTechnicalReports' });
+        return result;
+    }, {});
+    const represented = new Set();
+    const merged = navigation.map(item => {
+        const area = Object.entries(areas).find(([, value]) => value.label === item.label)?.[0];
+        if (!area || !grouped[area]) return item;
+        represented.add(area);
+        return { ...item, groupOnly: false, comingSoon: false, children: [...(item.children || []), ...grouped[area]] };
+    });
+
+    Object.entries(grouped).forEach(([area, children]) => {
+        if (represented.has(area)) return;
+        const config = areas[area];
+        if (config) merged.splice(merged.findIndex(item => item.label === 'eDATS MONITORING'), 0, { ...config, section: 'CDS', children });
+    });
+
+    return merged;
+}
+
+function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [] }) {
     const { url } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
     const [openDropdowns, setOpenDropdowns] = useState({});
     const navigationRef = useRef(null);
-    const navigation = allNavigation;
+    const navigation = useMemo(() => withGenericModuleNavigation(allNavigation, genericModuleNavigation), [genericModuleNavigation]);
 
     const toggleDropdown = (label) => {
         setOpenDropdowns((prev) => ({
@@ -413,7 +446,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl }) {
 }
 
 export function AuthenticatedShell({ children }) {
-    const { auth, engpIacGeneratorUrl, notificationBell } = usePage().props;
+    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation } = usePage().props;
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [darkMode, setDarkMode] = useState(() => {
@@ -451,7 +484,7 @@ export function AuthenticatedShell({ children }) {
         <>
             <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} />
+                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation">

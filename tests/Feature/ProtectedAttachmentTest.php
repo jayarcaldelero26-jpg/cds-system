@@ -136,3 +136,20 @@ test('protected attachment responses reject missing files and path traversal att
         ->get('/attachments/bms-data/'.$record->id.'/../attachment')
         ->assertNotFound();
 });
+
+test('protected preview responses use inline headers for pdf and images and attachment fallback for docx', function () {
+    Storage::fake('local');
+    Storage::fake('public');
+    $user = protectedAttachmentUser();
+
+    foreach ([
+        ['bms-attachments/preview.pdf', "%PDF-1.4\npreview", 'inline'],
+        ['bms-attachments/preview.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='), 'inline'],
+        ['bms-attachments/preview.docx', "not-a-real-docx", 'attachment'],
+    ] as [$path, $contents, $disposition]) {
+        $record = protectedAttachmentRecord($path);
+        Storage::disk('local')->put($path, $contents);
+        $response = $this->actingAs($user)->get(route('attachments.show', ['source' => 'bms-data', 'record' => $record->id, 'attachment' => 'attachment']));
+        $response->assertOk()->assertHeader('Content-Disposition', $disposition.'; filename="'.basename($path).'"');
+    }
+});

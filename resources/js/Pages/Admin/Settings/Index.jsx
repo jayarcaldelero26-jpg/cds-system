@@ -4,6 +4,7 @@ import PageHeader from '@/Components/PageHeader';
 import Card from '@/Components/Card';
 
 const cards = [
+    { title: 'Module Management', description: 'Program Areas, module definitions, reporting configuration, and deadline policies.', href: '/settings/module-management', tone: 'border-emerald-200 hover:border-emerald-400' },
     { title: 'Compliance Alerts', description: 'Email alerts, memorandum, scheduling, and operational alert configuration.', href: '/settings/compliance-alerts', tone: 'border-blue-200 hover:border-blue-400' },
 ];
 

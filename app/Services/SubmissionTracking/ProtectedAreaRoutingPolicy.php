@@ -8,6 +8,8 @@ use Illuminate\Database\Eloquent\Model;
 /** Centralized routing-origin rules for protected-area submissions. */
 final class ProtectedAreaRoutingPolicy
 {
+    public const TERMINAL_STAGE = 'regional_endorsement';
+
     private const DIRECT_PENRO_NAME = 'Mt. Hamiguitan Range Wildlife Sanctuary';
 
     private const DIRECT_PENRO_CANONICAL_NAMES = [
@@ -50,6 +52,15 @@ final class ProtectedAreaRoutingPolicy
     public function label(): string
     {
         return self::DIRECT_PENRO_NAME;
+    }
+
+    /**
+     * Protected-area submissions always close when Regional Endorsement is
+     * recorded. MHRWS changes the routing origin, not the terminal stage.
+     */
+    public function terminalStage(Model $record): string
+    {
+        return self::TERMINAL_STAGE;
     }
 
     private function resolveCanonicalId(): void

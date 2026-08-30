@@ -98,10 +98,13 @@ test('MHRWS receipt advances to endorsement and then history without requiring a
     $report->refresh();
     expect($report->date_report_released_cenro)->toBeNull()
         ->and($tracking->queues()[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->not->toContain($report->id)
-        ->and($tracking->queues()[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->pluck('source_id'))->toContain($report->id);
+        ->and($tracking->queues()[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->pluck('source_id'))->toContain($report->id)
+        ->and($tracking->queues()['history']->where('source', 'conservation')->pluck('source_id'))->not->toContain($report->id);
 
     $tracking->transition('conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT, '2026-08-07', $this->user->id);
-    expect($tracking->queues()['history']->pluck('source_id'))->toContain($report->id);
+    $history = $tracking->queues()['history']->where('source', 'conservation');
+    expect($history->pluck('source_id'))->toContain($report->id)
+        ->and($history->firstWhere('source_id', $report->id)['completed_at'])->toBe('2026-08-07');
 });
 
 test('the MHRWS routing rule applies to another protected-area report source', function () {

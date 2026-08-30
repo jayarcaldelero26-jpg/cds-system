@@ -31,7 +31,17 @@ export default function NotificationBell({ initial = { unread_count: 0, notifica
     }, []);
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     const request = async (url, method = 'PATCH') => {
-        const response = await fetch(url, { method, credentials: 'same-origin', headers: { Accept: 'application/json', 'X-CSRF-TOKEN': csrf() } });
+        const response = await fetch(url, {
+            method,
+            credentials: 'same-origin',
+            headers: {
+                Accept: 'application/json',
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrf(),
+                'X-Requested-With': 'XMLHttpRequest',
+            },
+            body: JSON.stringify({}),
+        });
         if (response.ok) await refresh();
     };
     const openNotification = async notification => {

@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\ManagementPlanType;
+use App\Models\ModuleDefinition;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -149,6 +150,12 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('sort_order')
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
+                : [],
+            'genericModuleNavigation' => fn () => ! $isMes && $can('technical-reports.view')
+                ? ModuleDefinition::query()->active()->generic()->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
+                    ->get(['name', 'code', 'program_area'])
+                    ->map(fn (ModuleDefinition $module): array => ['label' => $module->name, 'href' => route('conservation-reports.index', $module->code), 'program_area' => $module->program_area->value])
+                    ->values()
                 : [],
             'engpIacGeneratorUrl' => $engpIacGeneratorUrl,
             'notificationBell' => fn () => $user && Schema::hasTable('notifications') ? [

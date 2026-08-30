@@ -42,6 +42,12 @@ class PermissionSeeder extends Seeder
             'roles.manage',
             'permissions.manage',
 
+            // Module Registry
+            'module-definitions.view',
+            'module-definitions.create',
+            'module-definitions.update',
+            'module-definitions.activate',
+
             // Audit
             'audit-logs.view',
 

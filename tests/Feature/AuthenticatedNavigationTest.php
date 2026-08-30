@@ -45,9 +45,10 @@ test('all expandable sidebar groups use the reusable chevron disclosure icon', f
 test('sidebar scopes the current Inertia URL for active navigation checks', function () {
     $sidebar = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
 
-    expect($sidebar)->toContain("function Sidebar({ open, onClose, auth, engpIacGeneratorUrl }) {\n    const { url } = usePage();")
+    expect($sidebar)->toContain('const { url } = usePage();')
         ->and($sidebar)->toContain('matchesNavigationItem(item, url)')
-        ->and($sidebar)->toContain('matchesNavigationItem(child, url)');
+        ->and($sidebar)->toContain('matchesNavigationItem(child, url)')
+        ->and($sidebar)->toContain('genericModuleNavigation');
 });
 
 test('sidebar preserves desktop scroll without active-item auto-scrolling', function () {

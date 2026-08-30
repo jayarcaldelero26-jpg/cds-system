@@ -31,6 +31,7 @@ use App\Http\Controllers\SubmissionTrackingController;
 use App\Http\Controllers\EngpReportController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProtectedAttachmentController;
+use App\Http\Controllers\ModuleDefinitionController;
 use App\Services\Dashboard\DashboardMonitoringService;
 
 use Illuminate\Support\Facades\Route;
@@ -99,6 +100,10 @@ Route::middleware('auth')->group(function () {
     Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:reports.view')->name('compliance-alerts.index');
     Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
     Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');
+    Route::get('settings/module-management', [ModuleDefinitionController::class, 'index'])->middleware('can:module-definitions.view')->name('module-definitions.index');
+    Route::post('settings/module-management', [ModuleDefinitionController::class, 'store'])->middleware('can:module-definitions.create')->name('module-definitions.store');
+    Route::put('settings/module-management/{moduleDefinition}', [ModuleDefinitionController::class, 'update'])->middleware('can:module-definitions.update')->name('module-definitions.update');
+    Route::patch('settings/module-management/{moduleDefinition}/status', [ModuleDefinitionController::class, 'toggle'])->middleware('can:module-definitions.activate')->name('module-definitions.status');
     Route::get('settings/compliance-alerts', [ComplianceAlertController::class, 'settings'])->middleware('can:compliance-alerts.manage')->name('settings.compliance-alerts');
     Route::get('admin/recipient-mapping', [ComplianceAlertController::class, 'recipientMapping'])->middleware('can:compliance-alerts.manage')->name('compliance-alert-recipients.index');
     Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:reports.view')->name('business-calendar.index');

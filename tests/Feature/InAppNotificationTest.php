@@ -37,6 +37,27 @@ test('unread count, read state, and mark all as read are user-specific', functio
     expect($this->user->fresh()->unreadNotifications()->count())->toBe(0);
 });
 
+test('authenticated user can mark their own notification as read', function () {
+    $this->user->notify(new EdatsInAppNotification(notificationPayload('mark-one')));
+    $notification = $this->user->notifications()->first();
+
+    $this->actingAs($this->user)
+        ->withHeader('Accept', 'application/json')
+        ->patch(route('notifications.read', $notification))
+        ->assertOk()
+        ->assertJson(['ok' => true]);
+
+    expect($notification->fresh()->read_at)->not->toBeNull();
+});
+
+test('unauthenticated users cannot mark notifications as read', function () {
+    $this->user->notify(new EdatsInAppNotification(notificationPayload('guest-read')));
+    $notification = $this->user->notifications()->first();
+
+    $this->patch(route('notifications.read', $notification))->assertRedirect(route('login'));
+    expect($notification->fresh()->read_at)->toBeNull();
+});
+
 test('overdue and due soon in-app notifications are derived once from the live alert source', function () {
     notificationConservationReport(notificationProtectedArea('Pujada Bay Protected Landscape', $this->user), $this->user, ['date_accomplished' => '2026-08-03']);
     notificationEngpReport($this->user, ['deadline_submission' => '2026-09-01']);

@@ -52,11 +52,9 @@ final class SubmissionTrackingService
             self::CENRO_RELEASE => $records->where('stage', self::CENRO_RELEASE)->values(),
             self::PENRO_RECEIPT => $records->where('stage', self::PENRO_RECEIPT)->values(),
             self::REGIONAL_ENDORSEMENT => $records->where('stage', self::REGIONAL_ENDORSEMENT)->values(),
-            'history' => $records->filter(fn (array $record) => $record['source'] === 'engp'
-                ? $record['date_received_penro'] !== null
-                : (($record['submission_origin'] ?? 'CENRO') === 'PENRO'
-                    ? $record['date_endorsed_regional'] !== null
-                    : $record['date_report_released_cenro'] !== null))->values(),
+            'history' => $records->filter(fn (array $record) => $record['routing_complete'])
+                ->sortByDesc(fn (array $record) => $record['completed_at'] ?? '')
+                ->values(),
         ];
     }
 
@@ -195,8 +193,40 @@ final class SubmissionTrackingService
         $data['date_endorsed_regional'] = $isEngp ? null : ($data['date_endorsed_regional'] ?? null);
         $data['release_events'] = $isEngp ? $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values()->all() : [];
         $data['stage'] = $this->stage($record);
+        $data['routing_complete'] = $this->isRoutingComplete($record);
+        $data['completed_at'] = $data['routing_complete'] ? $this->routingCompletedAt($record) : null;
         $data['can_transition'] = auth()->user()?->can($source['ability']) ?? false;
         return $data;
+    }
+
+    /**
+     * Resolve completion from the same source-routing policy that determines
+     * the next active queue. It intentionally does not treat intermediate
+     * routing dates as completed workflow records.
+     */
+    public function isRoutingComplete(Model $record): bool
+    {
+        return $this->stage($record) === 'endorsed'
+            && $this->routingCompletedAt($record) !== null;
+    }
+
+    private function routingCompletedAt(Model $record): ?string
+    {
+        $terminalStage = $this->terminalStage($record);
+        $value = match ($terminalStage) {
+            self::PENRO_RECEIPT => $record->getAttribute('date_received_penro'),
+            self::REGIONAL_ENDORSEMENT => $record->getAttribute('date_endorsed_regional'),
+            default => null,
+        };
+
+        return $value ? Carbon::parse($value)->toDateString() : null;
+    }
+
+    private function terminalStage(Model $record): string
+    {
+        return $record instanceof EngpReportSubmission
+            ? self::PENRO_RECEIPT
+            : $this->routingPolicy->terminalStage($record);
     }
 
     private function stage(Model $record): string

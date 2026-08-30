@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             PermissionSeeder::class,
             ComplianceAlertBossDefaultsSeeder::class,
+            ModuleDefinitionSeeder::class,
         ]);
 
         // 2. Siguraduhon nga naa ang basic roles

@@ -72,10 +72,11 @@ function CalendarSelect({ value, onChange, children, required = false }) {
     return <div className="relative"><select required={required} value={value} onChange={onChange} className="h-11 w-full appearance-none !bg-none rounded-lg border border-gray-300 bg-white px-3 pr-9 text-sm leading-5 text-gray-800 outline-none transition focus:border-green-700 focus:ring-2 focus:ring-green-700/15 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:focus:border-green-500 dark:focus:ring-green-500/20">{children}</select><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></div>;
 }
 
-export default function CalendarIndex({ nonWorkingDays = [] }) {
+export default function CalendarIndex({ view = 'month', year, month, filters = {}, modules = [], protectedAreas = [], movEvents = [], yearSummary = null, nonWorkingDays = [] }) {
     const { auth } = usePage().props;
     const canManage = Boolean(auth?.canManageComplianceAlerts);
     const [selected, setSelected] = useState(null);
+    const [selectedMov, setSelectedMov] = useState(null);
     const [editing, setEditing] = useState(null);
     const [formOpen, setFormOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
@@ -97,10 +98,12 @@ export default function CalendarIndex({ nonWorkingDays = [] }) {
 
     return <AuthenticatedLayout title="Calendar">
         <Head title="Calendar" />
-        <PageHeader title="Calendar" description="Manage holidays and declared non-working days used by the centralized report business calendar." />
+        <PageHeader title="Calendar" description="Visual monitoring of submitted reports, MOVs, and non-working days." />
         <div className="mt-5">
-            <BusinessCalendarMonth nonWorkingDays={nonWorkingDays} onSelectEvent={setSelected} onAdd={openCreate} canManage={canManage} />
+            <BusinessCalendarMonth view={view} year={year} month={month} filters={filters} modules={modules} protectedAreas={protectedAreas} movEvents={movEvents} yearSummary={yearSummary} nonWorkingDays={nonWorkingDays} onSelectMov={setSelectedMov} onSelectHoliday={setSelected} onAdd={openCreate} canManage={canManage} />
         </div>
+
+        <MovDetailsModal event={selectedMov} onClose={() => setSelectedMov(null)} />
 
         {selected && <CalendarEventDrawer event={selected} canManage={canManage} processing={form.processing} onClose={() => setSelected(null)} onEdit={() => openEdit(selected)} onToggleActive={() => toggleActive(selected)} onDelete={() => setDeleteTarget(selected)} />}
 
@@ -114,6 +117,18 @@ export default function CalendarIndex({ nonWorkingDays = [] }) {
 
         <ConfirmDialog open={Boolean(deleteTarget)} title="Delete non-working day?" message={`Delete ${deleteTarget?.name || 'this configured non-working day'}? This removes the event from the business calendar.`} confirmLabel="Delete" variant="danger" processing={form.processing} onConfirm={remove} onCancel={() => !form.processing && setDeleteTarget(null)} />
     </AuthenticatedLayout>;
+}
+
+function MovDetailsModal({ event, onClose }) {
+    useEffect(() => {
+        if (!event) return undefined;
+        const close = keyEvent => keyEvent.key === 'Escape' && onClose();
+        document.addEventListener('keydown', close);
+        return () => document.removeEventListener('keydown', close);
+    }, [event, onClose]);
+    if (!event) return null;
+    const rows = [['Module / Workflow', event.module], ['Protected Area', event.protected_area_name], ['Office', event.office], ['Reporting Period', event.reporting_period], ['Date Accomplished', event.date_accomplished ? formatReportDate(event.date_accomplished) : null], ['Date Submitted', event.submission_date ? formatReportDate(event.submission_date) : null], ['Timeliness', event.timeliness], ['Status', event.status]].filter(([, value]) => value);
+    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[1px]" role="presentation"><section role="dialog" aria-modal="true" aria-label="Submitted report details" className="flex max-h-[calc(100vh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900"><header className="flex items-start justify-between gap-4 border-b border-gray-100 px-5 py-4 dark:border-gray-800"><div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-green-700 dark:text-green-300">Submitted MOV</p><h2 className="mt-1 truncate text-base font-bold text-gray-900 dark:text-white">{event.title}</h2><p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{event.source_name || event.office || event.module}</p></div><button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:hover:bg-gray-800" aria-label="Close">&times;</button></header><div className="min-h-0 flex-1 overflow-y-auto p-5"><div className="grid gap-3 rounded-xl border border-gray-200 p-4 dark:border-gray-800">{rows.map(([label, value]) => <DetailRow key={label} label={label} value={value} />)}</div>{event.remarks && <div className="mt-5"><p className="text-xs font-bold text-gray-500 dark:text-gray-400">Remarks</p><p className="mt-1 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{event.remarks}</p></div>}{event.attachment?.exists && <div className="mt-5 rounded-xl bg-green-50 p-4 dark:bg-green-950/25"><p className="text-[10px] font-extrabold uppercase tracking-[0.14em] text-green-800 dark:text-green-300">MOV / Attachment</p><p className="mt-1 truncate text-xs text-gray-600 dark:text-gray-300">{event.attachment.name || 'Attached MOV'}</p></div>}</div><footer className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 px-5 py-4 dark:border-gray-800">{event.attachment?.exists && event.attachment.url && <a href={event.attachment.url} target="_blank" rel="noreferrer" className="rounded-lg border border-green-700 px-3.5 py-2 text-xs font-bold text-green-800 hover:bg-green-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-green-300 dark:hover:bg-green-950/30">View MOV</a>}{event.detail_url && <a href={event.detail_url} className="rounded-lg bg-green-700 px-3.5 py-2 text-xs font-bold text-white hover:bg-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600">Open Full Report</a>}<button type="button" onClick={onClose} className="rounded-lg border border-gray-200 px-3.5 py-2 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">Close</button></footer></section></div>;
 }
 
 function CalendarEventDrawer({ event, canManage, processing, onClose, onEdit, onToggleActive, onDelete }) {

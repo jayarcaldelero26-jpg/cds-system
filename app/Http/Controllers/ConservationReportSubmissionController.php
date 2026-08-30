@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ConservationReportSubmission;
+use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
 use App\Models\TechnicalReport;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
@@ -141,7 +142,26 @@ class ConservationReportSubmissionController extends Controller
     /** @return array<string, mixed> */
     private function workflow(string $key): array
     {
-        return $this->workflows->find($key) ?? abort(404);
+        if ($workflow = $this->workflows->find($key)) {
+            return $workflow;
+        }
+
+        $module = ModuleDefinition::query()->generic()->where('code', $key)->firstOrFail();
+        $period = match ($module->reporting_frequency) {
+            'weekly' => ['Weekly'], 'monthly' => ['Monthly'], 'quarterly' => ['Quarter 1', 'Quarter 2', 'Quarter 3', 'Quarter 4'],
+            'semestral' => ['1st Semester', '2nd Semester'], 'annual' => ['Annual'], 'custom' => ['Custom'], default => [],
+        };
+
+        return [
+            'key' => $module->code, 'label' => $module->name, 'description' => $module->description,
+            'period_field' => 'reporting_period', 'period_label' => 'Reporting Period', 'periods' => $period,
+            'activities' => ['General Report'], 'documents' => ['Progress Report', 'Final Report'],
+            'activity_documents' => ['General Report' => ['Progress Report', 'Final Report']],
+            'days_complied_field' => 'days_complied', 'penro_delay_field' => 'penro_delay',
+            'deadline_mode' => $module->deadline_mode, 'default_deadline_days' => $module->default_deadline_days,
+            'allow_deadline_override' => $module->allow_deadline_override,
+            'module_definition_code' => $module->code,
+        ];
     }
 
     private function ensureWorkflow(string $workflow, ConservationReportSubmission $submission): void

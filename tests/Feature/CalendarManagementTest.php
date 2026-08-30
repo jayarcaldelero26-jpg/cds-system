@@ -1,6 +1,9 @@
 <?php
 
 use App\Models\NonWorkingDay;
+use App\Models\BmsReportSubmission;
+use App\Models\BamsReportSubmission;
+use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -68,4 +71,59 @@ test('duplicate configured dates for the same scope and location are rejected by
     $this->actingAs($manager)->post(route('compliance-alerts.non-working-days.store'), $payload)->assertRedirect();
     $this->actingAs($manager)->post(route('compliance-alerts.non-working-days.store'), $payload)
         ->assertSessionHasErrors('date');
+});
+
+test('calendar projects submitted reports by actual submission month and combines module and protected area filters', function () {
+    $viewer = User::factory()->create();
+    $viewer->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'),
+        Permission::findOrCreate('bms.view', 'web'),
+    ]);
+    $otherUser = User::factory()->create();
+    $area = ProtectedArea::query()->create(['name' => 'Mount Hamiguitan Range Wildlife Sanctuary', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $otherUser->id, 'updated_by' => $otherUser->id]);
+    $otherArea = ProtectedArea::query()->create(['name' => 'Pujada Bay Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $otherUser->id, 'updated_by' => $otherUser->id]);
+    BmsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '1st Semester', 'activity_name' => 'BMS Report', 'date_accomplished' => '2026-07-30', 'date_received_penro' => '2026-08-20']);
+    BmsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '1st Semester', 'activity_name' => 'Outside Month', 'date_received_penro' => '2026-07-31']);
+    BmsReportSubmission::query()->create(['protected_area_id' => $otherArea->id, 'semester' => '1st Semester', 'activity_name' => 'Other PA', 'date_received_penro' => '2026-08-21']);
+
+    $this->actingAs($viewer)->get(route('business-calendar.index', ['month' => '2026-08', 'module' => 'bms', 'protected_area_id' => $area->id]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('Calendar/Index')
+            ->where('month', '2026-08')
+            ->where('filters.module', 'bms')
+            ->where('filters.protected_area_id', $area->id)
+            ->has('movEvents', 1)
+            ->where('movEvents.0.submission_date', '2026-08-20')
+            ->where('movEvents.0.date_accomplished', '2026-07-30')
+            ->where('movEvents.0.protected_area_name', $area->name));
+});
+
+test('calendar year view groups permitted submissions by month and respects protected area and module filters', function () {
+    $viewer = User::factory()->create();
+    $viewer->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'),
+        Permission::findOrCreate('bms.view', 'web'),
+        Permission::findOrCreate('bams.view', 'web'),
+    ]);
+    $owner = User::factory()->create();
+    $area = ProtectedArea::query()->create(['name' => 'Mount Hamiguitan Range Wildlife Sanctuary', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $owner->id, 'updated_by' => $owner->id]);
+    $otherArea = ProtectedArea::query()->create(['name' => 'Pujada Bay Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $owner->id, 'updated_by' => $owner->id]);
+    BmsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-20']);
+    BmsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '2nd Semester', 'date_received_penro' => '2026-09-10']);
+    BamsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-21']);
+    BmsReportSubmission::query()->create(['protected_area_id' => $otherArea->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-22']);
+    NonWorkingDay::query()->create(['date' => '2026-08-21', 'name' => 'Foundation Day', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
+
+    $this->actingAs($viewer)->get(route('business-calendar.index', ['view' => 'year', 'year' => 2026, 'protected_area_id' => $area->id]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->component('Calendar/Index')->where('view', 'year')->where('year', 2026)->has('yearSummary.months', 12)->where('yearSummary.months.08.submitted_movs', 2)->where('yearSummary.months.08.modules.0.key', 'bams')->where('yearSummary.months.08.modules.0.count', 1)->where('yearSummary.months.08.modules.1.key', 'bms')->where('yearSummary.months.08.modules.1.count', 1)->where('yearSummary.months.08.days.20.0.source_type', 'bms')->where('yearSummary.months.08.days.21.0.source_type', 'bams')->where('yearSummary.months.09.submitted_movs', 1)->where('yearSummary.overview.submitted_movs', 3)->where('yearSummary.overview.active_modules', 2)->where('yearSummary.overview.months_with_submissions', 2)->where('yearSummary.overview.non_working_days', 1));
+
+    $this->actingAs($viewer)->get(route('business-calendar.index', ['view' => 'year', 'year' => 2026, 'protected_area_id' => $area->id, 'module' => 'bms']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('yearSummary.months.08.submitted_movs', 1)->where('yearSummary.months.08.days.20.0.source_type', 'bms')->missing('yearSummary.months.08.days.21')->where('yearSummary.months.09.submitted_movs', 1)->where('yearSummary.overview.submitted_movs', 2)->where('yearSummary.overview.active_modules', 1));
+
+    $this->actingAs($viewer)->get(route('business-calendar.index', ['view' => 'month', 'month' => '2026-08', 'protected_area_id' => $area->id, 'module' => 'bms']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('view', 'month')->where('month', '2026-08')->where('filters.module', 'bms')->where('filters.protected_area_id', $area->id)->has('movEvents', 1));
 });
