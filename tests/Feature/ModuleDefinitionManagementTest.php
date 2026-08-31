@@ -135,7 +135,7 @@ test('a dynamic generic report keeps one module policy and presentation contract
             ->where('submissions.data.0.target_office', $record->target_office)
             ->where('submissions.data.0.date_accomplished', '2026-08-03')
             ->where('submissions.data.0.deadline_submission', $record->deadline_submission)
-            ->where('submissions.data.0.submission_status', 'Report Submitted')
+            ->where('submissions.data.0.submission_status', 'Pending Submission by CENRO')
             ->where('submissions.data.0.timeliness', $record->timeliness));
 
     $event = app(CalendarMovEventService::class)->events($viewer, \Carbon\CarbonImmutable::parse('2026-08-01'), 'conservation-reports')->firstWhere('id', $record->id);

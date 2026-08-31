@@ -13,6 +13,7 @@ use App\Models\ReportComplianceConfirmation;
 use App\Models\TechnicalReport;
 use App\Models\User;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
+use App\Services\Compliance\ComplianceAlertTemplateResolver;
 use App\Services\Compliance\ComplianceConfirmationService;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\BusinessCalendarService;
@@ -68,6 +69,16 @@ function bmsForDeadline(ProtectedArea $area, User $user, string $deadline, array
     return $report->fresh();
 }
 
+function engpForDeadline(User $user, string $deadline, array $overrides = []): EngpReportSubmission
+{
+    return EngpReportSubmission::create([...[
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'section_name' => 'NGP',
+        'activity_name' => 'ENGP Site Visit Report', 'document_type' => 'Monthly Report',
+        'reporting_year' => 2026, 'period_key' => 'SEP', 'period_label' => 'September',
+        'deadline_submission' => $deadline, 'created_by' => $user->id, 'updated_by' => $user->id,
+    ], ...$overrides]);
+}
+
 function complianceManager(User $user): User
 {
     $role = Role::findOrCreate('Compliance Manager', 'web');
@@ -90,6 +101,37 @@ function enabledComplianceSettings(array $overrides = []): ComplianceAlertSettin
     ], ...$overrides]);
 }
 
+test('CDS Admin can change automatic delivery only with the current password and the change is audited', function () {
+    config()->set('compliance_alerts.enabled', true);
+    $admin = User::factory()->create(['password' => 'secret-password']);
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    ComplianceAlertSetting::create(['alerts_enabled' => true, 'automatic_send_enabled' => false, 'send_time' => '08:00', 'timezone' => 'Asia/Manila']);
+    $payload = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective();
+    $payload['automatic_send_enabled'] = true;
+    $payload['current_password'] = 'wrong-password';
+
+    $wrongPasswordResponse = $this->actingAs($admin)->put(route('compliance-alerts.settings.update'), $payload);
+    expect($wrongPasswordResponse->status())->toBe(302)
+        ->and($wrongPasswordResponse->baseResponse->getSession()->get('errors'))->not->toBeNull();
+    expect(ComplianceAlertSetting::query()->first()->automatic_send_enabled)->toBeFalse();
+
+    $payload['current_password'] = 'secret-password';
+    $successResponse = $this->actingAs($admin)->put(route('compliance-alerts.settings.update'), $payload);
+    expect($successResponse->status())->toBe(302);
+    expect(ComplianceAlertSetting::query()->first()->automatic_send_enabled)->toBeTrue();
+
+    $audit = \App\Models\AuditLog::query()->where('action', 'Automatic Compliance Alert Delivery Enabled')->latest('id')->firstOrFail();
+    expect($audit->metadata)->toMatchArray(['previous' => false, 'new' => true])
+        ->and($audit->metadata)->not->toHaveKey('password')
+        ->and($audit->metadata)->not->toHaveKey('current_password');
+
+    $manager = complianceManager(User::factory()->create(['password' => 'manager-password']));
+    $payload['automatic_send_enabled'] = false;
+    $payload['current_password'] = 'manager-password';
+    $nonAdminResponse = $this->actingAs($manager)->put(route('compliance-alerts.settings.update'), $payload);
+    expect($nonAdminResponse->status())->toBe(403);
+});
+
 /** @return array<class-string, \Illuminate\Database\Eloquent\Model> */
 function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string $deadline): array
 {
@@ -105,7 +147,7 @@ function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string
         BmsReportSubmission::class => BmsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         \App\Models\BamsReportSubmission::class => \App\Models\BamsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         \App\Models\ImeaReportSubmission::class => \App\Models\ImeaReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
-        TechnicalReport::class => TechnicalReport::create([...$common, 'report_type' => 'Technical Report', 'status' => 'Pending', 'date_accomplished' => $standardBStart]),
+        \App\Models\ImeaFacilityMaintenanceReport::class => \App\Models\ImeaFacilityMaintenanceReport::create([...$common, 'quarter' => 'Quarter 1', 'date_accomplished' => $standardBStart]),
         \App\Models\Aws::class => \App\Models\Aws::create([...$common, 'station_name' => 'Baganga AWS', 'location' => 'Baganga', 'status' => 'Active', 'date_accomplished' => $standardBStart]),
         \App\Models\ManagementPlan::class => \App\Models\ManagementPlan::create([...$common, 'plan_type' => 'Protected Area Management Plan', 'status' => 'Pending', 'date_accomplished' => $standardBStart]),
         \App\Models\IpafManagementReport::class => \App\Models\IpafManagementReport::create([...$common, 'date_accomplished' => $standardBStart]),
@@ -163,8 +205,8 @@ test('multiple tracker models normalize into the same overdue DTO', function () 
 
     $reports = app(OverdueReportService::class)->overdueReports();
 
-    expect($reports->pluck('sourceId')->all())->toContain($bms->id, $technical->id)
-        ->and($reports->pluck('module')->all())->toContain('BMS Report Submission Tracker', 'Technical Reports');
+    expect($reports->pluck('sourceId')->all())->toContain($bms->id)
+        ->and($reports->pluck('module')->all())->not->toContain('Technical Reports');
 });
 
 test('authoritative PENRO receipt closes the active alert immediately and sends the report to Records verification', function () {
@@ -176,7 +218,7 @@ test('authoritative PENRO receipt closes the active alert immediately and sends 
         ->and($service->pendingRecordsVerification())->toHaveCount(1)
         ->and($service->pendingRecordsVerification()->first()['source_id'])->toBe($report->id)
         ->and($service->pendingRecordsVerification()->first()['submission_date'])->toBe('2026-08-25')
-        ->and($service->pendingRecordsVerification()->first()['submission_status'])->toBe('Report Submitted');
+        ->and($service->pendingRecordsVerification()->first()['submission_status'])->toBe('Pending Submission by CENRO');
 
     app(ComplianceConfirmationService::class)->confirm($report, $user, 'Received by Records');
 
@@ -270,25 +312,135 @@ test('automatic runs deduplicate a sent memorandum for the same recipient and lo
     expect(ComplianceNotificationRun::query()->where('is_manual', false)->where('status', 'sent')->count())->toBe(1);
 });
 
-test('automatic delivery is eligible on Monday and Friday but skips Saturday and Sunday', function () {
+test('recipient mapping is per-candidate while production Send Now remains guarded during the preview phase', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
-    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-20');
-    ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
+    $manager = complianceManager(complianceUser());
+    $mappedArea = complianceArea($manager);
+    $mhrws = ProtectedArea::create(['name' => 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'short_name' => 'MHRWS', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
+    bmsForDeadline($mappedArea, $manager, '2026-08-24');
+    bmsForDeadline($mhrws, $manager, '2026-08-24');
+    ComplianceAlertRecipient::create(['protected_area_id' => $mappedArea->id, 'recipient_email' => 'mapped@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
+
+    app(ComplianceAlertDeliveryService::class)->sendAutomatic();
+    expect(ComplianceNotificationRun::query()->where('run_type', 'automatic')->where('status', 'sent')->count())->toBe(1)
+        ->and(ComplianceNotificationRun::query()->where('run_type', 'automatic')->where('status', 'skipped')->where('error_message', 'Recipient mapping is missing for this Protected Area / office group.')->count())->toBe(1);
+
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
+    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
+    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->count())->toBe(0);
+});
+
+test('Compliance Alerts No Recipient Mapping card counts current candidates and has no help marker', function () {
+    $manager = complianceManager(complianceUser());
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page->where('summary.unmapped_recipients', 0));
+    $mapped = complianceArea($manager);
+    $unmapped = ProtectedArea::create(['name' => 'Unmapped Protected Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
+    bmsForDeadline($mapped, $manager, '2026-08-24');
+    bmsForDeadline($unmapped, $manager, '2026-08-24');
+    ComplianceAlertRecipient::create(['protected_area_id' => $mapped->id, 'recipient_email' => 'mapped-card@example.test', 'is_active' => true]);
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('summary.overdue_reports', 2)
+        ->where('summary.unmapped_recipients', 1));
+    $jsx = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
+    expect($jsx)->toContain('Card label="No Recipient Mapping" value={activeScope.summary?.unmapped_destinations ?? 0} tone="red" />')
+        ->not->toContain('No Recipient Mapping" value={activeScope.summary?.unmapped_destinations ?? 0} tone="red" help=');
+});
+
+
+test('destination coverage remains distinct and separate from current alert coverage', function () {
+    $manager = complianceManager(complianceUser());
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-1', 'office' => 'CENRO Baganga']);
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-2', 'office' => 'CENRO Cateel']);
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-1', 'office' => 'CENRO Manay']);
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-2', 'office' => 'CENRO Caraga']);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'recipient_email' => 'baganga@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Cateel', 'recipient_email' => 'cateel@example.test', 'is_active' => true]);
+
+    $delivery = app(ComplianceAlertDeliveryService::class);
+    expect($delivery->currentAlertReports())->toBeEmpty()
+        ->and($delivery->recipientReadiness($delivery->currentAlertReports()))->toBeEmpty();
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('summary.unmapped_recipients', 0)
+        ->where('summary.unmapped_destinations', 2));
+    $this->actingAs($manager)->get(route('compliance-alert-recipients.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('mappingMetrics.mapped', 2)
+        ->where('mappingMetrics.unmapped', 2)
+        ->where('mappingMetrics.total', 4));
+
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-1-DUPLICATE', 'office' => 'CENRO Manay']);
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('summary.unmapped_destinations', 2));
+
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Manay', 'recipient_email' => 'manay@example.test', 'is_active' => true]);
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('summary.unmapped_destinations', 1));
+
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Caraga', 'recipient_email' => 'caraga@example.test', 'is_active' => true]);
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('summary.unmapped_destinations', 0));
+});
+test('due-soon uses three calendar days across weekends and excludes completed or no-deadline records', function () {
+    $user = complianceUser();
+    $tuesday = engpForDeadline($user, '2026-09-08', ['period_key' => 'SEP-08-TUE']);
+    $wednesday = engpForDeadline($user, '2026-09-09', ['period_key' => 'SEP-09-WED']);
+    $monday = engpForDeadline($user, '2026-09-07', ['period_key' => 'SEP-07-MON']);
+    $completed = engpForDeadline($user, '2026-09-08', ['period_key' => 'SEP-08-COMPLETE', 'date_received_penro' => '2026-09-05']);
+    $withoutDeadline = BmsReportSubmission::create([
+        'protected_area_id' => complianceArea($user)->id, 'target_office' => 'PAMO Pujada Bay',
+        'activity_name' => 'No deadline configured', 'document_type' => 'Final Report', 'semester' => '1st Semester',
+        'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    $service = app(OverdueReportService::class);
+
+    $saturday = $service->dueSoonReports(3, CarbonImmutable::parse('2026-09-05 08:00:00', 'Asia/Manila'));
+    $sunday = $service->dueSoonReports(3, CarbonImmutable::parse('2026-09-06 08:00:00', 'Asia/Manila'));
+    $friday = $service->dueSoonReports(3, CarbonImmutable::parse('2026-09-04 08:00:00', 'Asia/Manila'));
+
+    expect($saturday->pluck('sourceId'))->toContain($tuesday->id)
+        ->and($saturday->pluck('sourceId'))->not->toContain($completed->id)
+        ->and($sunday->pluck('sourceId'))->toContain($wednesday->id)
+        ->and($friday->pluck('sourceId'))->toContain($monday->id)
+        ->and($friday->contains(fn ($report) => $report->sourceType === BmsReportSubmission::class && $report->sourceId === $withoutDeadline->id))->toBeFalse();
+});
+
+test('automatic due-soon delivery sends once when Saturday is three calendar days before a Tuesday deadline', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-05 08:00:00', 'Asia/Manila'));
+    $user = complianceUser();
+    engpForDeadline($user, '2026-09-08');
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'recipient_email' => 'weekend@example.test', 'is_active' => true]);
     enabledComplianceSettings();
     $delivery = app(ComplianceAlertDeliveryService::class);
 
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-24 08:00:00', 'Asia/Manila'));
-    $delivery->sendAutomatic();
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 08:00:00', 'Asia/Manila'));
-    $delivery->sendAutomatic();
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 08:00:00', 'Asia/Manila'));
-    $delivery->sendAutomatic();
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-30 08:00:00', 'Asia/Manila'));
-    $delivery->sendAutomatic();
+    $first = $delivery->sendAutomatic();
+    $second = $delivery->sendAutomatic();
 
-    Mail::assertSent(OverdueComplianceMemorandum::class, 2);
-    expect(ComplianceNotificationRun::query()->where('status', 'sent')->count())->toBe(2)
-        ->and(ComplianceNotificationRun::query()->where('status', 'skipped')->where('error_message', 'Automatic compliance alerts are scheduled Monday through Friday only.')->count())->toBe(2);
+    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
+    expect($first->where('alert_type', ComplianceNotificationRun::ALERT_DUE_SOON)->where('status', ComplianceNotificationRun::STATUS_SENT))->toHaveCount(1)
+        ->and($second->where('alert_type', ComplianceNotificationRun::ALERT_DUE_SOON)->where('status', ComplianceNotificationRun::STATUS_SKIPPED))->toHaveCount(1)
+        ->and(ComplianceDeliveryClaim::query()->where('status', ComplianceDeliveryClaim::STATUS_SENT)->count())->toBe(1);
+});
+
+test('production Send Now remains guarded during the preview phase', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-04 08:00:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    engpForDeadline($manager, '2026-09-07', ['period_key' => 'SEP-07-DUE-SOON']);
+    engpForDeadline($manager, '2026-09-04', ['period_key' => 'SEP-04-DUE-TODAY']);
+    engpForDeadline($manager, '2026-09-03', ['period_key' => 'SEP-03-OVERDUE']);
+    engpForDeadline($manager, '2026-09-20', ['period_key' => 'SEP-20-NOT-DUE']);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'recipient_email' => 'manual-current@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
+
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
+
+    Mail::assertNothingSent();
+    expect(ComplianceNotificationRun::query()->where('run_type', ComplianceNotificationRun::TYPE_MANUAL)->count())->toBe(0);
 });
 
 test('manual and test delivery remain available on weekends', function () {
@@ -477,6 +629,7 @@ test('a deactivated recipient is ignored and resolves again after reactivation',
 
     expect($service->deliveryPlan(app(OverdueReportService::class)->overdueReports())['unmapped'])->toHaveCount(1);
     $mapping->update(['is_active' => true]);
+    $service = app(ComplianceAlertDeliveryService::class);
     expect($service->deliveryPlan(app(OverdueReportService::class)->overdueReports())['deliveries']->first()['recipient']->email)->toBe('office@example.test');
 });
 
@@ -537,6 +690,24 @@ test('only submitted reports can be Records-confirmed and confirmation records u
     expect($confirmation->confirmed_by)->toBe($user->id)
         ->and($confirmation->confirmed_at->toDateString())->toBe('2026-08-25')
         ->and($confirmation->remarks)->toBe('Stamped received.');
+});
+
+test('Records Confirmation history exposes operational module and location labels', function () {
+    $user = complianceUser();
+    $report = EngpReportSubmission::create([
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'section_name' => 'NGP',
+        'activity_name' => 'ENGP Site Visit Report', 'document_type' => 'Quarterly Report',
+        'reporting_year' => 2026, 'period_key' => 'Q3', 'period_label' => 'Quarter 3',
+        'deadline_submission' => '2026-08-20', 'date_received_penro' => '2026-08-21',
+        'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    app(ComplianceConfirmationService::class)->confirm($report, $user);
+
+    $history = app(OverdueReportService::class)->confirmationHistory()->first();
+
+    expect($history['module_name'])->toBe('Site Visit')
+        ->and($history['location_label'])->toBe('CENRO Baganga')
+        ->and($history['reporting_period'])->toBe('Quarter 3');
 });
 
 test('settings editing and Records unconfirmation require compliance alert management authority', function () {
@@ -620,19 +791,18 @@ test('test email is isolated from production recipients and production CC addres
     expect($run->recipients)->toBe(['controlled-test@example.test'])
         ->and($run->cc_recipients)->toBe([])
         ->and($run->payload['recipient']['source'])->toBe('test')
-        ->and($run->subject)->toStartWith('[TEST]');
+        ->and($run->subject)->toBe("\u{26A0} PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports");
 });
 
-test('test email uses a controlled in-memory fixture when no reports are overdue', function () {
+test('test email is blocked when no reports are overdue', function () {
     Mail::fake(); config()->set('compliance_alerts.test_email_enabled', true);
     $user = complianceUser(); enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
 
-    app(ComplianceAlertDeliveryService::class)->sendTest(collect(), $user);
+    expect(fn () => app(ComplianceAlertDeliveryService::class)->sendTest(collect(), $user))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
 
-    $run = ComplianceNotificationRun::query()->where('run_type', 'test')->first();
-    expect($run->report_count)->toBe(1)
-        ->and($run->reports()->first()->snapshot['is_test_fixture'])->toBeTrue()
-        ->and($run->reports()->first()->snapshot['activity'])->toContain('Controlled memorandum layout test');
+    Mail::assertNothingSent();
+    expect(ComplianceNotificationRun::query()->where('run_type', 'test')->count())->toBe(0);
 });
 
 test('automatic delivery stays blocked unless both the environment and database gates are enabled', function () {
@@ -680,7 +850,7 @@ test('the compliance source registry covers every legitimate report submission t
         BmsReportSubmission::class,
         \App\Models\BamsReportSubmission::class,
         \App\Models\ImeaReportSubmission::class,
-        TechnicalReport::class,
+        \App\Models\ImeaFacilityMaintenanceReport::class,
         \App\Models\Aws::class,
         \App\Models\ManagementPlan::class,
         \App\Models\IpafManagementReport::class,
@@ -697,7 +867,7 @@ test('the compliance source registry covers every legitimate report submission t
         ->and($definitions[BmsReportSubmission::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\BamsReportSubmission::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\ImeaReportSubmission::class]['submitted'])->toBe('date_received_penro')
-        ->and($definitions[TechnicalReport::class]['submitted'])->toBe('submission_date')
+        ->and($definitions[\App\Models\ImeaFacilityMaintenanceReport::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\Aws::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\ManagementPlan::class]['submitted'])->toBe('date_received_penro')
         ->and($definitions[\App\Models\IpafManagementReport::class]['submitted'])->toBe('date_received_penro')
@@ -762,7 +932,7 @@ test('IPAF Revenue Collection with a PENRO receipt is excluded from alerts and r
         ->and($pending['module'])->toBe('IPAF Revenue Collection Report Submission Tracker')
         ->and($pending['deadline'])->toBe('2026-07-20')
         ->and($pending['submission_date'])->toBe('2026-07-29')
-        ->and($pending['submission_status'])->toBe('Report Submitted')
+        ->and($pending['submission_status'])->toBe('Pending Regional Endorsement')
         ->and($pending['reporting_period'])->toBe('July 2026')
         ->and($revenue->timeliness)->toBe('Poor');
 
@@ -801,7 +971,7 @@ test('every registered source follows receipt-based alert eligibility and indepe
     $pending = $service->pendingRecordsVerification();
     expect($service->overdueReports())->toBeEmpty()
         ->and($pending->map(fn (array $report) => $report['source_type'])->sort()->values()->all())->toBe(collect(array_keys($definitions))->sort()->values()->all())
-        ->and($pending->every(fn (array $report) => $report['submission_status'] === 'Report Submitted' && $report['records_confirmed'] === false));
+        ->and($pending->every(fn (array $report) => $report['submission_status'] === 'Pending Submission by CENRO' && $report['records_confirmed'] === false));
 
     foreach ($records as $record) {
         app(ComplianceConfirmationService::class)->confirm($record, $manager, 'Received by Records.');
@@ -828,6 +998,7 @@ test('recipient readiness classifies ready and unmapped groups without fallback 
     expect($delivery->recipientReadiness(app(OverdueReportService::class)->overdueReports())->first()['status'])->toBe('ready');
 
     ComplianceAlertRecipient::query()->update(['is_active' => false]); enabledComplianceSettings(['fallback_recipient_email' => 'fallback@example.test']);
+    $delivery = app(ComplianceAlertDeliveryService::class);
     expect($delivery->recipientReadiness(app(OverdueReportService::class)->overdueReports())->first()['status'])->toBe('unmapped');
 
     ComplianceAlertSetting::query()->delete(); config()->set('compliance_alerts.recipients', []); config()->set('compliance_alerts.fallback_recipient_email', '');
@@ -862,7 +1033,7 @@ test('boss default office mappings resolve exact recipients and presentation dat
 test('boss defaults include exact CC and signatory settings', function () {
     $settings = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective();
 
-    expect($settings['email_subject'])->toBe('PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports')
+    expect($settings['email_subject'])->toBe("⚠ PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports")
         ->and($settings['fallback_cc_emails'])->toBe([
             'penromaticds@gmail.com', 'benemerito.RB@gmail.com', 'nely.maimad11@gmail.com',
             'hingpitelmarie@gmail.com', 'duayelmarie@gmail.com', 'edhingpit01@gmail.com',
@@ -938,7 +1109,7 @@ test('known settings placeholders are corrected without changing official values
 
     app(\Database\Seeders\ComplianceAlertBossDefaultsSeeder::class)->run();
 
-    expect($settings->fresh()->email_subject)->toBe('PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports')
+    expect($settings->fresh()->email_subject)->toBe("⚠ PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports")
         ->and($settings->fresh()->to_label)->toBe('')
         ->and($settings->fresh()->attention_line)->toBe('')
         ->and($settings->fresh()->from_line)->toBe('The PENR Officer')
@@ -1019,6 +1190,41 @@ test('production preview is unavailable when overdue reports have no mapped reci
     Mail::assertNothingSent();
 });
 
+test('live test preview returns the canonical JSON contract without sending mail', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-24');
+    enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
+
+    $response = $this->actingAs($manager)->get(route('compliance-alerts.preview', ['test' => 1]), [
+        'Accept' => 'application/json',
+        'X-Requested-With' => 'XMLHttpRequest',
+    ]);
+
+    $response->assertOk();
+    expect($response->headers->get('Content-Type'))->toContain('application/json');
+    $response->assertJsonStructure(['subject', 'html', 'template_type', 'recipient', 'meta'])
+        ->assertJsonPath('subject', "\u{26A0} PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports")
+        ->assertJsonPath('template_type', 'protected_area_overdue')
+        ->assertJsonPath('recipient.email', 'controlled-test@example.test')
+        ->assertJsonPath('meta.report_count', 1);
+
+    $html = (string) $response->json('html');
+    expect($html)->toContain('MEMORANDUM')->toContain($area->name)->toContain('Days Overdue');
+    Mail::assertNothingSent();
+});
+
+test('template preview rejects an invalid variant with a JSON validation response', function () {
+    $manager = complianceManager(complianceUser());
+
+    $response = $this->actingAs($manager)->postJson(route('compliance-alerts.templates.preview'), ['template' => 'invalid_variant']);
+
+    expect($response->status())->toBe(422);
+    expect($response->json('errors.template'))->not->toBeEmpty();
+});
+
 test('production preview works with a current overdue report and resolvable recipient', function () {
     Mail::fake();
     $manager = complianceManager(complianceUser());
@@ -1032,14 +1238,14 @@ test('production preview works with a current overdue report and resolvable reci
     Mail::assertNothingSent();
 });
 
-test('preview test remains available with its controlled fixture when production preview has no reports', function () {
+test('preview reports no eligible overdue records when production preview has no reports', function () {
     $manager = complianceManager(complianceUser());
     enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
 
     Mail::fake();
     $this->actingAs($manager)->get(route('compliance-alerts.preview', ['test' => 1]))
-        ->assertOk()
-        ->assertSee('Controlled memorandum layout test');
+        ->assertRedirect()
+        ->assertSessionHasErrors(['preview' => 'No eligible overdue reports found for preview.']);
     Mail::assertNothingSent();
 });
 
@@ -1069,7 +1275,7 @@ test('repeated identical manual delivery sends each destination only once', func
         ->and(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'skipped')->count())->toBe(1);
 });
 
-test('repeated manual Send Now HTTP requests cannot duplicate a successful destination', function () {
+test('repeated production Send Now HTTP requests remain guarded during the preview phase', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser());
@@ -1078,14 +1284,13 @@ test('repeated manual Send Now HTTP requests cannot duplicate a successful desti
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'http-idempotent@example.test', 'is_active' => true]);
     enabledComplianceSettings();
 
-    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHas('success');
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
     $this->actingAs($manager)->post(route('compliance-alerts.send'))
         ->assertRedirect()
-        ->assertSessionHas('success', 'No duplicate was sent. 1 destination(s) were already delivered or are currently claimed by another request.');
+        ->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
 
-    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
-    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'sent')->count())->toBe(1)
-        ->and(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'skipped')->count())->toBe(1);
+    Mail::assertNothingSent();
+    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->count())->toBe(0);
 });
 
 test('manual partial failure retries only the failed destination and preserves successful history', function () {
@@ -1242,6 +1447,131 @@ test('database constraints enforce snapshot uniqueness active recipient scope an
         ->and($indexes('compliance_alert_settings'))->toContain('compliance_alert_settings_singleton_unique');
 });
 
+test('office recipient creation stores the canonical target office key', function () {
+    $manager = complianceManager(complianceUser());
+
+    $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'target_office' => 'CENRO Baganga',
+        'recipient_email' => 'baganga-create@example.test',
+        'is_active' => true,
+    ])->assertRedirect();
+
+    $mapping = ComplianceAlertRecipient::query()->where('recipient_email', 'baganga-create@example.test')->firstOrFail();
+    expect($mapping->target_office)->toBe('CENRO Baganga')
+        ->and($mapping->target_office_key)->toBe('cenro_baganga');
+});
+
+test('alternate office spelling stores the same canonical target office key', function () {
+    $manager = complianceManager(complianceUser());
+
+    $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'target_office' => 'CENRO Baganga', 'recipient_email' => 'baganga-one@example.test', 'is_active' => false,
+    ])->assertRedirect();
+    $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'target_office' => 'Baganga CENRO', 'recipient_email' => 'baganga-two@example.test', 'is_active' => false,
+    ])->assertRedirect();
+
+    expect(ComplianceAlertRecipient::query()->whereIn('recipient_email', ['baganga-one@example.test', 'baganga-two@example.test'])->pluck('target_office_key')->all())
+        ->toBe(['cenro_baganga', 'cenro_baganga']);
+});
+
+test('canonical-equivalent active office mappings return validation errors', function () {
+    $manager = complianceManager(complianceUser());
+
+    $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'target_office' => 'CENRO Baganga', 'recipient_email' => 'baganga-active@example.test', 'is_active' => true,
+    ])->assertRedirect();
+
+    $response = $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'target_office' => 'Baganga CENRO', 'recipient_email' => 'baganga-duplicate@example.test', 'is_active' => true,
+    ]);
+
+    $response->assertRedirect()->assertSessionHasErrors('target_office');
+    expect(ComplianceAlertRecipient::query()->where('is_active', true)->where('target_office_key', 'cenro_baganga')->count())->toBe(1);
+});
+
+test('inactive office mappings reactivate with a canonical key and no 500', function () {
+    $manager = complianceManager(complianceUser());
+    $mapping = ComplianceAlertRecipient::create([
+        'target_office' => 'Baganga CENRO', 'target_office_key' => null,
+        'recipient_email' => 'baganga-reactivate@example.test', 'is_active' => false,
+    ]);
+
+    $this->actingAs($manager)
+        ->patch(route('compliance-alerts.recipients.status', $mapping), ['is_active' => true])
+        ->assertStatus(302)
+        ->assertSessionDoesntHaveErrors();
+
+    expect($mapping->fresh()->is_active)->toBeTrue()
+        ->and($mapping->fresh()->target_office)->toBe('CENRO Baganga')
+        ->and($mapping->fresh()->target_office_key)->toBe('cenro_baganga');
+});
+
+test('reactivation of a canonical-equivalent active office mapping returns validation errors', function () {
+    $manager = complianceManager(complianceUser());
+    ComplianceAlertRecipient::create([
+        'target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga',
+        'recipient_email' => 'baganga-existing@example.test', 'is_active' => true,
+    ]);
+    $mapping = ComplianceAlertRecipient::create([
+        'target_office' => 'Baganga CENRO', 'target_office_key' => null,
+        'recipient_email' => 'baganga-inactive@example.test', 'is_active' => false,
+    ]);
+
+    $this->actingAs($manager)
+        ->patch(route('compliance-alerts.recipients.status', $mapping), ['is_active' => true])
+        ->assertRedirect()
+        ->assertSessionHasErrors('target_office');
+
+    expect($mapping->fresh()->is_active)->toBeFalse();
+});
+
+test('office recipient edits recanonicalize the target office key', function () {
+    $manager = complianceManager(complianceUser());
+    $mapping = ComplianceAlertRecipient::create([
+        'target_office' => 'CENRO Baganga', 'target_office_key' => null,
+        'recipient_email' => 'baganga-edit@example.test', 'is_active' => false,
+    ]);
+
+    $this->actingAs($manager)
+        ->put(route('compliance-alerts.recipients.update', $mapping), [
+            'target_office' => 'Baganga CENRO',
+            'recipient_email' => 'baganga-edit@example.test',
+            'is_active' => false,
+        ])
+        ->assertRedirect();
+
+    expect($mapping->fresh()->target_office)->toBe('CENRO Baganga')
+        ->and($mapping->fresh()->target_office_key)->toBe('cenro_baganga');
+});
+test('office readiness uses the same canonical key as the resolver and frontend group', function () {
+    $manager = complianceManager(complianceUser());
+    engpForDeadline($manager, '2026-08-24', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create([
+        'target_office' => 'Baganga CENRO', 'target_office_key' => 'cenro_baganga',
+        'recipient_email' => 'office-readiness@example.test', 'is_active' => true,
+    ]);
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('groups.0.readiness_key', 'office:cenro_baganga')
+            ->where('recipientReadiness.0.key', 'office:cenro_baganga')
+            ->where('recipientReadiness.0.status', 'ready'));
+});
+test('Compliance Alerts readiness groups expose the resolver logical key used by the UI', function () {
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-24');
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'readiness@example.test', 'is_active' => true]);
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('groups.0.readiness_key', 'pa:'.$area->id)
+            ->where('recipientReadiness.0.key', 'pa:'.$area->id)
+            ->where('recipientReadiness.0.status', 'ready'));
+});
 test('recipient validation returns field errors and malformed status cannot deactivate a mapping', function () {
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
@@ -1321,12 +1651,10 @@ test('dormant fallback settings remain stored but never resolve a delivery', fun
 test('the default memorandum footer matches receipt closure and separates Records verification', function () {
     $footer = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective()['system_generated_footer_text'];
 
-    expect($footer)->toContain('received or submitted by PENRO')
-        ->and($footer)->toContain('Records verification is a separate internal audit process')
-        ->and($footer)->not->toContain('confirmed by the Records Officer');
+    expect($footer)->toBe('This is a system-generated notification sent automatically by the Enhanced Digital Alert and Tracking System (eDATS). Notifications for a report will cease once the submission is recorded as compliant in eDATS.');
 });
 
-test('all ten monitored sources expose the universal MOV contract and distinguish submitted MOV not yet submitted', function () {
+test('all monitored sources expose the universal MOV contract and distinguish submitted MOV not yet submitted', function () {
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
     $records = recordsForEveryComplianceSource($area, $manager, '2026-08-24');
@@ -1343,8 +1671,6 @@ test('all ten monitored sources expose the universal MOV contract and distinguis
         $record->update([$definitions[$sourceType]['submitted'] => '2026-08-25']);
         if ($record instanceof \App\Models\ManagementPlan) {
             $record->update(['attachments' => null]);
-        } elseif ($record instanceof TechnicalReport) {
-            $record->update(['attachment' => null]);
         } elseif ($record instanceof \App\Models\Aws) {
             $record->update(['report_file_path' => null]);
         } else {
@@ -1418,7 +1744,7 @@ test('report workflows require an attachment at report data entry while routing 
         ['route' => 'bms.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],
         ['route' => 'bams.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],
         ['route' => 'imea.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],
-        ['route' => 'technical-reports.store', 'field' => 'attachment', 'payload' => [...$common, 'report_type' => 'Final Report']],
+
         ['route' => 'aws.store', 'field' => 'report_file', 'payload' => [...$common, 'station_name' => 'Baganga AWS', 'location' => 'Baganga', 'report_period_type' => 'Monthly', 'start_date' => '2026-08-01', 'end_date' => '2026-08-01', 'status' => 'Active']],
         ['route' => 'management-plans.types.reports.store', 'field' => 'attachments', 'payload' => [...$common]],
         ['route' => 'imea.maintenance-reports.store', 'field' => 'mov', 'payload' => [...$common, 'quarter' => 'Quarter 1']],
@@ -1440,10 +1766,272 @@ test('report workflows require an attachment at report data entry while routing 
     expect(BmsReportSubmission::query()->count())->toBe(1)
         ->and(\App\Models\BamsReportSubmission::query()->count())->toBe(1)
         ->and(\App\Models\ImeaReportSubmission::query()->count())->toBe(1)
-        ->and(TechnicalReport::query()->count())->toBe(1)
         ->and(\App\Models\Aws::query()->count())->toBe(1)
         ->and(\App\Models\ManagementPlan::query()->count())->toBe(1)
         ->and(\App\Models\ImeaFacilityMaintenanceReport::query()->count())->toBe(1)
         ->and(\App\Models\IpafManagementReport::query()->count())->toBe(1)
         ->and(\App\Models\IpafRevenueCollection::query()->count())->toBe(1);
+});
+
+test('Protected Area and ENGP recipient mapping scopes resolve separately without requiring a Protected Area for ENGP', function () {
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-24');
+    engpForDeadline($manager, '2026-08-24', ['office' => 'CENRO Baganga']);
+
+    $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'protected_area_id' => $area->id,
+        'recipient_email' => 'pa-scope@example.test',
+        'is_active' => true,
+    ])->assertRedirect();
+    $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+        'target_office' => 'Baganga CENRO',
+        'recipient_email' => 'engp-scope@example.test',
+        'is_active' => true,
+    ])->assertRedirect();
+
+    $officeMapping = ComplianceAlertRecipient::query()->where('recipient_email', 'engp-scope@example.test')->firstOrFail();
+    $plan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
+    $coverage = app(ComplianceAlertDeliveryService::class)->destinationCoverageSummary(app(OverdueReportService::class)->destinationReferences())['coverage'];
+
+    expect($officeMapping->protected_area_id)->toBeNull()
+        ->and($officeMapping->target_office_key)->toBe('cenro_baganga')
+        ->and($plan['deliveries']->pluck('recipient.email')->all())->toContain('pa-scope@example.test', 'engp-scope@example.test')
+        ->and($coverage->firstWhere('target_office', 'CENRO Baganga'))->toMatchArray(['scope' => 'target_office', 'type' => 'Implementing / Target Office'])
+        ->and($coverage->firstWhere('protected_area_id', $area->id))->toMatchArray(['scope' => 'protected_area', 'type' => 'Protected Area']);
+});
+
+test('one canonical ENGP office mapping serves multiple office-scoped ENGP workflows', function () {
+    $manager = complianceManager(complianceUser());
+    engpForDeadline($manager, '2026-08-24', ['workflow_key' => 'site_visit', 'period_key' => 'MULTI-A', 'office' => 'CENRO Baganga']);
+    engpForDeadline($manager, '2026-08-24', ['workflow_key' => 'cbep', 'period_key' => 'MULTI-B', 'office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'shared-engp@example.test', 'is_active' => true]);
+
+    $plan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
+
+    expect($plan['deliveries'])->toHaveCount(1)
+        ->and($plan['deliveries']->first()['reports'])->toHaveCount(2)
+        ->and($plan['deliveries']->first()['recipient']->email)->toBe('shared-engp@example.test');
+});
+
+test('PA and ENGP due-soon memoranda use their own approved destination presentation and real candidate values', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 10:00:00', 'Asia/Manila'));
+    $manager = complianceUser();
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-28');
+    engpForDeadline($manager, '2026-08-31', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa-reminder@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'engp-reminder@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
+
+    app(ComplianceAlertDeliveryService::class)->sendAutomatic();
+
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail) use ($area): bool {
+        $html = $mail->render();
+        return $mail->presentation['template'] === 'protected_area_due_soon'
+            && $mail->envelope()->subject === 'REMINDER: Upcoming Deadline for Submission of Protected Area Management Report'
+            && str_contains($html, 'Protected Area:</strong>')
+            && str_contains($html, $area->name)
+            && ! str_contains($html, 'Implementing Office:')
+            && ! str_contains($html, 'Baganga MSFR');
+    });
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail): bool {
+        $html = $mail->render();
+        return $mail->presentation['template'] === 'engp_due_soon'
+            && $mail->envelope()->subject === 'REMINDER: Upcoming Deadline for Submission of ENGP Report'
+            && str_contains($html, 'Implementing Office:</strong> CENRO Baganga')
+            && ! str_contains($html, 'Protected Area:</strong>')
+            && ! str_contains($html, 'Baganga MSFR');
+    });
+});
+
+test('PA and ENGP overdue memoranda use their own approved subject and memorandum wording', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 10:00:00', 'Asia/Manila'));
+    $manager = complianceUser();
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-20');
+    engpForDeadline($manager, '2026-08-31', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa-overdue@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'engp-overdue@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
+
+    app(ComplianceAlertDeliveryService::class)->sendAutomatic();
+
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail) use ($area): bool {
+        $html = $mail->render();
+        return $mail->presentation['template'] === 'protected_area_overdue'
+            && $mail->envelope()->subject === "\u{26A0} PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports"
+            && str_contains($html, 'This is to respectfully remind your office that the deadline for the submission of the Protected Area Management-related report has already lapsed. We reiterate the importance of submitting your report to the PENRO as soon as possible.')
+            && str_contains($html, $area->name);
+    });
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail): bool {
+        $html = $mail->render();
+        return $mail->presentation['template'] === 'engp_overdue'
+            && $mail->envelope()->subject === 'IMMEDIATE ACTION REQUIRED: Submission of Regular ENGP Monitoring and Accomplishment Reports'
+            && str_contains($html, 'The deadline for submission of the Regular ENGP Monitoring and Accomplishment/Progress Reports has already lapsed.')
+            && str_contains($html, 'Implementing Office: CENRO Baganga')
+            && ! str_contains($html, 'Protected Area Management-related');
+    });
+});
+
+test('Recipient Mapping UI keeps Protected Area and Development ENGP office configuration separate', function () {
+    $jsx = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
+
+    expect($jsx)->toContain('Protected Area Recipient Mappings')
+        ->toContain('Development / ENGP Office Recipient Mappings')
+        ->toContain('No Protected Area is required.')
+        ->toContain("recipientScope === 'protected_area'");
+});
+test('Compliance Alerts exposes PA and ENGP candidates in separate operational scopes without changing destination readiness', function () {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 10:00:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-28');
+    engpForDeadline($manager, '2026-08-31', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'scope-pa@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'scope-engp@example.test', 'is_active' => true]);
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('complianceScopes.protected_area.summary.overdue_reports', 1)
+            ->where('complianceScopes.engp.summary.overdue_reports', 1)
+            ->where('complianceScopes.protected_area.groups.0.protected_area_name', $area->name)
+            ->where('complianceScopes.engp.groups.0.target_office', 'CENRO Baganga')
+            ->where('complianceScopes.protected_area.summary.unmapped_destinations', 0)
+            ->where('complianceScopes.engp.summary.unmapped_destinations', 0)
+            ->where('complianceScopes.protected_area.summary.affected_groups', 1)
+            ->where('complianceScopes.engp.summary.affected_groups', 1));
+});
+
+test('template preview is admin-authorized, POST-only, and renders the submitted PA customization through the delivery Blade view', function () {
+    $manager = complianceManager(complianceUser());
+    $viewer = complianceUser();
+    $draft = ['protected_area_due_soon' => ['subject' => 'Custom PA Preview Subject', 'introductory_text' => 'Custom PA preview introduction.']];
+
+    $this->actingAs($viewer)->post(route('compliance-alerts.templates.preview'), ['template' => 'protected_area_due_soon'])
+        ->assertForbidden();
+    $this->actingAs($manager)->get(route('compliance-alerts.templates.preview'))
+        ->assertStatus(405);
+    $this->actingAs($manager)->post(route('compliance-alerts.templates.preview'), [
+        'template' => 'protected_area_due_soon', 'template_settings' => $draft,
+    ])->assertOk()
+        ->assertJsonPath('subject', 'Custom PA Preview Subject')
+        ->assertJsonPath('html', fn (string $html): bool => str_contains($html, 'Custom PA preview introduction.') && str_contains($html, 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)'));
+});
+
+test('saved PA and ENGP template customizations persist and are isolated in actual delivery', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 10:00:00', 'Asia/Manila'));
+    $manager = complianceUser();
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-20');
+    engpForDeadline($manager, '2026-08-31', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'persist-pa@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'persist-engp@example.test', 'is_active' => true]);
+    $settings = enabledComplianceSettings(['template_settings' => [
+        'protected_area_overdue' => ['subject' => 'Custom PA Overdue Subject'],
+        'engp_overdue' => ['subject' => 'Custom ENGP Overdue Subject'],
+    ]]);
+
+    expect($settings->fresh()->template_settings['protected_area_overdue']['subject'])->toBe('Custom PA Overdue Subject')
+        ->and($settings->fresh()->template_settings['engp_overdue']['subject'])->toBe('Custom ENGP Overdue Subject');
+
+    app(ComplianceAlertDeliveryService::class)->sendAutomatic();
+
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'protected_area_overdue' && $mail->envelope()->subject === "⚠ PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports" && str_contains($mail->render(), $area->name));
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'engp_overdue' && $mail->envelope()->subject === 'Custom ENGP Overdue Subject' && str_contains($mail->render(), 'Implementing Office: CENRO Baganga'));
+});
+
+test('template editor UI retains four independent PA and ENGP template contexts', function () {
+    $jsx = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
+
+    expect($jsx)->toContain('Protected Area Templates')
+        ->toContain('ENGP Templates')
+        ->toContain('protected_area_due_soon')
+        ->toContain('protected_area_overdue')
+        ->toContain('engp_due_soon')
+        ->toContain('engp_overdue')
+        ->toContain('Preview Notification');
+});
+test('PA and ENGP compliance mailables use the configured Laravel From identity while recipient mappings stay independent', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    config()->set('mail.from.address', 'configured-sender@example.test');
+    config()->set('mail.from.name', 'Configured eDATS Sender');
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 10:00:00', 'Asia/Manila'));
+    $user = complianceUser();
+    $area = complianceArea($user);
+    bmsForDeadline($area, $user, '2026-08-20');
+    engpForDeadline($user, '2026-08-31', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa-from@example.test', 'cc_emails' => ['pa-cc@example.test'], 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'engp-from@example.test', 'cc_emails' => ['engp-cc@example.test'], 'is_active' => true]);
+    enabledComplianceSettings(['sender_display_name' => 'Legacy settings sender that must not override config']);
+
+    app(ComplianceAlertDeliveryService::class)->sendAutomatic();
+
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail): bool {
+        $from = $mail->envelope()->from;
+        return $mail->presentation['template'] === 'protected_area_overdue'
+            && $from->address === 'configured-sender@example.test'
+            && $from->name === 'Enhanced Digital Alert and Tracking System (eDATS)'
+            && $mail->hasTo('pa-from@example.test')
+            && $mail->hasCc('pa-cc@example.test');
+    });
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail): bool {
+        $from = $mail->envelope()->from;
+        return $mail->presentation['template'] === 'engp_overdue'
+            && $from->address === 'configured-sender@example.test'
+            && $from->name === 'Enhanced Digital Alert and Tracking System (eDATS)'
+            && $mail->hasTo('engp-from@example.test')
+            && $mail->hasCc('engp-cc@example.test');
+    });
+});
+
+test('all PA and ENGP template previews use safe data and never send mail', function () {
+    Mail::fake();
+    $manager = complianceManager(complianceUser());
+    $cases = [
+        'protected_area_due_soon' => ['Protected Area', 'Protected Area Management-related report', 'Days Remaining'],
+        'protected_area_overdue' => ['PRIORITY ACTION REQUIRED', 'Overdue Submission of PA-related Reports', 'Protected Area'],
+        'engp_due_soon' => ['Enhanced National Greening Program (ENGP)', 'Implementing Office', 'Days Remaining'],
+        'engp_overdue' => ['IMMEDIATE ACTION REQUIRED', 'Submission of Regular ENGP Monitoring and Accomplishment Reports', 'Implementing Office'],
+    ];
+
+    foreach ($cases as $template => $needles) {
+        $response = $this->actingAs($manager)->post(route('compliance-alerts.templates.preview'), ['template' => $template]);
+        $response->assertOk();
+        $html = (string) $response->json('html');
+        foreach ($needles as $needle) {
+            expect($html)->toContain($needle);
+        }
+    }
+
+    Mail::assertNothingSent();
+});
+
+test('mail credentials are never exposed through compliance settings or retained as template content', function () {
+    config()->set('mail.mailers.smtp.password', 'unit-only-secret');
+    $manager = complianceManager(complianceUser());
+    enabledComplianceSettings();
+
+    $response = $this->actingAs($manager)->get(route('settings.compliance-alerts'));
+    $response->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->has('settings')
+        ->where('settings.mail_from_name', config('mail.from.name'))
+        ->missing('settings.sender_display_name')
+        ->missing('settings.mail_password')
+        ->missing('settings.password'));
+    expect($response->getContent())->not->toContain('unit-only-secret');
+
+    $templates = app(ComplianceAlertTemplateResolver::class)->templateSettings([
+        'template_settings' => ['protected_area_due_soon' => ['subject' => 'Safe subject', 'password' => 'must-not-persist']],
+    ]);
+    expect($templates['protected_area_due_soon'])->toHaveKey('subject', 'Safe subject')
+        ->not->toHaveKey('password');
 });

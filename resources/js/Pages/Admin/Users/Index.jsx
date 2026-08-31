@@ -41,7 +41,7 @@ export default function Index({ users, status }) {
         { key: 'role', label: 'Role', render: (user) => user.role || <span className="text-gray-400">No role</span> },
         { key: 'is_active', label: 'Status', render: (user) => <StatusBadge variant={user.is_active ? 'active' : 'inactive'}>{user.is_active ? 'Active' : 'Inactive'}</StatusBadge> },
         { key: 'created_at', label: 'Created' },
-        { key: 'actions', label: <span className="sr-only">Actions</span>, cellClassName: 'text-right', render: (user) => <div className="flex justify-end gap-3"><Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/admin/users/${user.id}/edit`}>Edit</Link>{user.role && <button type="button" className="font-medium text-amber-700 hover:text-amber-900 dark:text-amber-400" onClick={() => updateStatus(user)}>{user.is_active ? 'Deactivate' : 'Activate'}</button>}<button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-400" onClick={() => setUserToDelete(user)}>Delete</button></div> }
+        { key: 'actions', label: <span className="sr-only">Actions</span>, cellClassName: 'text-right', render: (user) => <div className="flex justify-end gap-3"><Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/admin/users/${user.id}/edit`}>Edit</Link>{user.role && <button type="button" className="font-medium text-amber-700 hover:text-amber-900 dark:text-amber-400" onClick={() => updateStatus(user)}>{user.is_active ? 'Deactivate' : 'Activate'}</button>}{user.can_delete && <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-400" onClick={() => setUserToDelete(user)}>Delete</button>}</div> }
     ];
 
     return (

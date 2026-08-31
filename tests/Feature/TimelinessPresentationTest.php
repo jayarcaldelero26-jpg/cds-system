@@ -23,8 +23,6 @@ test('active report surfaces use the shared timeliness presentation', function (
         resource_path('js/Pages/Imea/MaintenanceReports.jsx'),
         resource_path('js/Pages/ManagementPlans/Index.jsx'),
         resource_path('js/Pages/ManagementPlans/Form.jsx'),
-        resource_path('js/Pages/TechnicalReports/Index.jsx'),
-        resource_path('js/Pages/TechnicalReports/Form.jsx'),
         resource_path('js/Pages/SubmissionTracking/Index.jsx'),
         resource_path('js/Pages/Dashboard.jsx'),
         resource_path('js/Pages/Engp/Index.jsx'),
@@ -46,8 +44,6 @@ test('report modules no longer duplicate the old green timeliness mapping', func
         resource_path('js/Pages/Imea/MaintenanceReports.jsx'),
         resource_path('js/Pages/ManagementPlans/Index.jsx'),
         resource_path('js/Pages/ManagementPlans/Form.jsx'),
-        resource_path('js/Pages/TechnicalReports/Index.jsx'),
-        resource_path('js/Pages/TechnicalReports/Form.jsx'),
     ];
 
     foreach ($reportSurfaces as $file) {

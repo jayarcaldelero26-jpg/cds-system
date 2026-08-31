@@ -28,7 +28,10 @@ class RegisteredUserController extends Controller
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', 'unique:'.User::class],
             'password' => ['required', 'confirmed', Rules\Password::defaults()],
             'office_designated' => ['required', 'string', 'max:255'],
-            'section' => ['required', 'string', 'in:CDS,MES'],
+            // The persisted column remains section for compatibility. These
+            // values describe the applicant's category; access is assigned
+            // separately by an administrator after approval.
+            'section' => ['required', 'string', 'in:CDS,ENGP,PAMO'],
         ]);
 
         // Awtomatikong 'no_role' ug inactive pagka-register, lakip ang office ug section

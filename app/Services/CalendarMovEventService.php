@@ -13,7 +13,6 @@ use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
 use App\Models\ModuleDefinition;
-use App\Models\TechnicalReport;
 use App\Models\User;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
@@ -147,7 +146,6 @@ final class CalendarMovEventService
             'engp' => $this->source(EngpReportSubmission::class, 'ENGP', 'technical-reports.view', 'date_received_penro', 'engp-report', 'mov', 'period_label', null, null),
             'ipaf' => $this->source(IpafManagementReport::class, 'IPAF', 'technical-reports.view', 'date_received_penro', 'ipaf-management', 'mov', null, '/ipaf'),
             'revenue' => $this->source(IpafRevenueCollection::class, 'Revenue', 'technical-reports.view', 'date_received_penro', 'ipaf-revenue', 'mov', null, '/ipaf'),
-            'technical-reports' => $this->source(TechnicalReport::class, 'Technical Reports', 'technical-reports.view', 'submission_date', 'technical-report', 'attachment', 'semester', '/technical-reports'),
             'management-plans' => $this->source(ManagementPlan::class, 'Management Plans', 'management-plans.view', 'date_received_penro', 'management-plan', '0', 'semester', '/management-plans'),
         ];
     }
@@ -269,6 +267,6 @@ final class CalendarMovEventService
     /** @return Collection<int, ModuleDefinition> */
     private function moduleDefinitions(): Collection
     {
-        return $this->moduleDefinitions ??= ModuleDefinition::query()->get(['id', 'code', 'program_area', 'existing_source_key']);
+        return $this->moduleDefinitions ??= ModuleDefinition::query()->notRetired()->get(['id', 'code', 'program_area', 'existing_source_key']);
     }
 }

@@ -50,6 +50,7 @@ test('login and authenticated layouts follow the eDATS and DENR branding rules',
 test('login presentation keeps accessible icon input and theme controls', function () {
     $layout = File::get(resource_path('js/Layouts/AuthLayout.jsx'));
     $login = File::get(resource_path('js/Pages/Auth/Login.jsx'));
+    $authField = File::get(resource_path('js/Components/AuthField.jsx'));
 
     expect($layout)
         ->toContain('ThemeIcon')
@@ -60,7 +61,7 @@ test('login presentation keeps accessible icon input and theme controls', functi
         ->toContain('autoComplete="email"')
         ->toContain('icon="mail"')
         ->toContain('icon="lock"')
-        ->toContain('absolute inset-y-0 left-0')
+
         ->toContain('type="button"')
         ->toContain("showPassword ? 'text' : 'password'")
         ->toContain("showPassword ? 'Hide password' : 'Show password'")
@@ -68,6 +69,10 @@ test('login presentation keeps accessible icon input and theme controls', functi
         ->toContain('Need an account?')
         ->not->toContain("{showPassword ? 'Hide' : 'Show'}")
         ->not->toContain('flex items-center rounded-xl border bg-white');
+
+    expect($authField)
+        ->toContain('leadingIcon')
+        ->toContain('absolute inset-y-0 right-2');
 });
 
 test('ENGP remains a program within the authenticated eDATS navigation', function () {

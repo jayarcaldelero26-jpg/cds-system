@@ -6,7 +6,6 @@ Compliance Alerts scans the enrolled report trackers and prepares one memorandum
 
 An active overdue alert means the authoritative source deadline is before today **and** that source's authoritative PENRO receipt/submission field is empty. A populated authoritative receipt immediately removes the report from the Overview, Preview Memorandum, Send Now, and automatic memorandum eligibility—even if the report was late and even if Records has not yet confirmed it.
 
-The centralized source definitions retain the source-specific authoritative fields: BMS, BAMS, IMEA Report Submission, AWS, Management Plans, IMEA Maintenance, IPAF Management, and IPAF Revenue use `date_received_penro`; Technical Reports uses `submission_date`.
 
 Submitted reports without a current Records confirmation appear in **History → Pending Records Verification**. Confirmation creates an immutable event with a source snapshot. Revocation creates a second immutable event, preserves the original evidence, and returns the report to Pending Records Verification. It never reopens an overdue-submission memorandum while the authoritative receipt remains populated.
 

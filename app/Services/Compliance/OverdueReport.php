@@ -28,6 +28,10 @@ final readonly class OverdueReport
         public string $movLabel = 'MOV',
         public string $complianceIssue = 'Report Not Yet Submitted',
         public ?string $submissionDate = null,
+        public string $submissionStatus = 'Report Not Yet Submitted',
+        public ?string $moduleName = null,
+        public ?string $workflowKey = null,
+        public ?string $programArea = null,
     ) {}
 
     public function toArray(): array
@@ -36,6 +40,9 @@ final readonly class OverdueReport
             'source_type' => $this->sourceType,
             'source_id' => $this->sourceId,
             'module' => $this->module,
+            'module_name' => $this->moduleName ?: $this->module,
+            'workflow_key' => $this->workflowKey,
+            'program_area' => $this->programArea,
             'protected_area_id' => $this->protectedAreaId,
             'protected_area_name' => $this->protectedAreaName,
             'target_office' => $this->targetOffice,
@@ -56,6 +63,7 @@ final readonly class OverdueReport
             'mov_label' => $this->movLabel,
             'compliance_issue' => $this->complianceIssue,
             'submission_date' => $this->submissionDate,
+            'submission_status' => $this->submissionStatus,
         ];
     }
 }

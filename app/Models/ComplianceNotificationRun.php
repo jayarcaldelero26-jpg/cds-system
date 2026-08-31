@@ -16,9 +16,12 @@ class ComplianceNotificationRun extends Model
     public const TYPE_MANUAL = 'manual';
     public const TYPE_TEST = 'test';
     public const TYPE_DRY_RUN = 'dry_run';
+    public const ALERT_DUE_SOON = 'DUE_SOON';
+    public const ALERT_DUE_TODAY = 'DUE_TODAY';
+    public const ALERT_OVERDUE = 'OVERDUE';
 
     protected $fillable = [
-        'run_date', 'recipient_key', 'idempotency_key', 'recipients', 'cc_recipients', 'subject', 'report_count', 'status',
+        'run_date', 'recipient_key', 'idempotency_key', 'alert_type', 'recipients', 'cc_recipients', 'subject', 'report_count', 'status',
         'is_manual', 'run_type', 'sent_at', 'error_message', 'payload', 'created_by',
     ];
 

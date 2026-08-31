@@ -27,7 +27,7 @@ class IpafRevenueCollection extends Model
             default => 'Poor',
         };
     }
-    public function getSubmissionStatusAttribute(): string { return $this->date_received_penro ? 'Report Submitted' : 'Pending Submission by CENRO'; }
+    public function getSubmissionStatusAttribute(): string { return app(\App\Services\SubmissionTracking\RoutingStatusPresenter::class)->status($this, 'revenue'); }
     public static function split(string|int|float $total): array { $cents = self::toCents($total); $ria = self::roundedShareCents($cents, 75); return ['ipaf_ria' => self::centsToDecimal($ria), 'sagf' => self::centsToDecimal($cents - $ria)]; }
     public static function normalizeMoney(string|int|float|null $value): string { return self::centsToDecimal(self::toCents($value)); }
     public static function sumMoney(iterable $values): string { $cents = 0; foreach ($values as $value) $cents += self::toCents($value); return self::centsToDecimal($cents); }

@@ -48,12 +48,7 @@ class EngpReportSubmission extends Model
 
     public function getSubmissionStatusAttribute(): string
     {
-        if ($this->date_received_penro) {
-            return 'Report Submitted';
-        }
-        return CarbonImmutable::now('Asia/Manila')->startOfDay()->greaterThan(CarbonImmutable::parse($this->deadline_submission))
-            ? 'Report Not Yet Submitted'
-            : 'Within Allowable Preparation Period';
+        return app(\App\Services\SubmissionTracking\RoutingStatusPresenter::class)->status($this, 'engp');
     }
 
     public function workflow(): ?array

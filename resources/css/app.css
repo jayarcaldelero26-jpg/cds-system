@@ -45,6 +45,28 @@ textarea:-webkit-autofill {
         -webkit-appearance: none;
         background-image: none !important;
     }
+
+    select,
+    input[type="date"],
+    input[type="time"] {
+        color-scheme: light;
+    }
+
+    select option {
+        background-color: #ffffff;
+        color: #1f2937;
+    }
+
+    .dark select,
+    .dark input[type="date"],
+    .dark input[type="time"] {
+        color-scheme: dark;
+    }
+
+    .dark select option {
+        background-color: #1f2937;
+        color: #f3f4f6;
+    }
 }
 
 /* Modern Slim Green Scrollbar for Sidebar & Entire App */
@@ -89,4 +111,8 @@ textarea:-webkit-autofill {
 
 @media (prefers-reduced-motion: reduce) {
     .shared-tooltip { animation: none; }
+}
+
+.sidebar-monochrome-icon {
+    filter: grayscale(1) brightness(0) invert(1);
 }

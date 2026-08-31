@@ -112,14 +112,14 @@ test('notification routes do not allow a user to read another users notification
     $this->actingAs($this->user)->patch(route('notifications.read', $notification))->assertNotFound();
 });
 
-test('ENGP overdue reports use the same live Alerts source and removed IMEA Maintenance remains excluded', function () {
+test('ENGP overdue reports use the same live Alerts source and active IMEA Maintenance remains included', function () {
     $engp = notificationEngpReport($this->user, ['deadline_submission' => '2026-08-20']);
     app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
 
     $notification = $this->user->notifications()->first();
     expect($notification->data['type'])->toBe(EdatsInAppNotificationService::OVERDUE)
         ->and($notification->data['source_type'])->toBe(EngpReportSubmission::class)
-        ->and(app(OverdueReportService::class)->sourceDefinitions())->not->toHaveKey(ImeaFacilityMaintenanceReport::class)
+        ->and(app(OverdueReportService::class)->sourceDefinitions())->toHaveKey(ImeaFacilityMaintenanceReport::class)
         ->and($engp->date_received_penro)->toBeNull();
 });
 

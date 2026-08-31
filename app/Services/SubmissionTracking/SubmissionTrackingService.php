@@ -8,16 +8,22 @@ use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ImeaReportSubmission;
+use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\IpafManagementReport;
+use App\Models\IpafRevenueCollection;
+use App\Models\ManagementPlan;
+use App\Models\SubmissionRoutingCorrection;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Notifications\EdatsInAppNotificationService;
+use App\Services\Modules\ModuleMetadataResolver;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use App\Services\AuditLogService;
 
 final class SubmissionTrackingService
 {
@@ -25,28 +31,46 @@ final class SubmissionTrackingService
     public const PENRO_RECEIPT = 'penro_receipt';
     public const REGIONAL_ENDORSEMENT = 'regional_endorsement';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly EdatsInAppNotificationService $notifications, private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly EdatsInAppNotificationService $notifications, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver) {}
 
     /** @return Collection<int, array<string, mixed>> */
     public function records(array $filters = []): Collection
     {
-        return collect($this->sources())
+        $loaded = collect($this->sources())
             ->flatMap(function (array $source, string $key) {
                 $query = $source['model']::query();
                 if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
                 if ($key === 'engp') $query->with('releaseEvents');
                 if ($source['requires_date_accomplished'] ?? true) $query->whereNotNull('date_accomplished');
-                return $query->get()->map(fn (Model $record) => $this->normalize($record, $key, $source));
-            })
+                return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
+            });
+
+        $this->moduleResolver->prime($loaded->pluck('record'));
+        $correctionCounts = $this->correctionCounts($loaded);
+
+        return $loaded
+            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts))
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
             ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? '')
             ->values();
     }
 
-    /** @return array<string, array<string, mixed>> */
-    public function queues(array $filters = []): array
+    /** @return array{records: Collection<int,array<string,mixed>>, queues: array<string,Collection<int,array<string,mixed>>>, modules: list<string>} */
+    public function snapshot(array $filters = []): array
     {
         $records = $this->records($filters);
+
+        return [
+            'records' => $records,
+            'queues' => $this->queues($filters, $records),
+            'modules' => $this->modules($records),
+        ];
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    public function queues(array $filters = [], ?Collection $snapshotRecords = null): array
+    {
+        $records = $snapshotRecords ?? $this->records($filters);
 
         return [
             self::CENRO_RELEASE => $records->where('stage', self::CENRO_RELEASE)->values(),
@@ -59,9 +83,9 @@ final class SubmissionTrackingService
     }
 
     /** @return list<string> */
-    public function modules(): array
+    public function modules(?Collection $snapshotRecords = null): array
     {
-        return $this->records()->pluck('module')->unique()->sort()->values()->all();
+        return ($snapshotRecords ?? $this->records())->pluck('module')->unique()->sort()->values()->all();
     }
 
     public function transition(string $sourceKey, int $id, string $stage, string $date, ?int $userId): void
@@ -84,12 +108,14 @@ final class SubmissionTrackingService
                 if (! $component) throw ValidationException::withMessages(['date' => 'All CENRO release components are already recorded.']);
                 $record->releaseEvents()->create(['period_component' => $component['key'], 'component_label' => $component['label'], 'date_report_released_cenro' => $value]);
                 $this->notifyTransition($sourceKey, $record, $source, $stage, $value);
+                $this->auditTransition($sourceKey, $record, $source, $stage, $value);
                 return;
             }
             $release = $record->releaseEvents()->orderByDesc('date_report_released_cenro')->value('date_report_released_cenro');
             if ($release && $value < Carbon::parse($release)->toDateString()) throw ValidationException::withMessages(['date' => 'PENRO receipt cannot be earlier than CENRO release.']);
             $record->update(['date_received_penro' => $value, ...($userId ? ['updated_by' => $userId] : [])]);
             $this->notifyTransition($sourceKey, $record, $source, $stage, $value);
+            $this->auditTransition($sourceKey, $record, $source, $stage, $value);
             return;
         }
         $this->validateChronology($record, $stage, $value);
@@ -106,6 +132,7 @@ final class SubmissionTrackingService
         }
         DB::transaction(fn () => $record->update($changes));
         $this->notifyTransition($sourceKey, $record, $source, $stage, $value);
+        $this->auditTransition($sourceKey, $record, $source, $stage, $value);
     }
 
     /** @return array<string, mixed>|null */
@@ -124,11 +151,21 @@ final class SubmissionTrackingService
         $this->notifications->submissionTransition([
             'source' => $sourceKey,
             'source_id' => $record->getKey(),
-            'module' => ($source['module'])($record),
+            'module' => $this->moduleMetadata($record, $source)['module_name'],
             'target_office' => $record->getAttribute($source['target_office'] ?? 'target_office'),
             'protected_area' => $sourceKey === 'engp' ? null : $record->protectedArea?->name,
             'supports_regional_endorsement' => $source['supports_regional_endorsement'] ?? $sourceKey !== 'engp',
         ], $stage, $date);
+    }
+
+    private function auditTransition(string $sourceKey, Model $record, array $source, string $stage, string $date): void
+    {
+        $metadata = $this->moduleMetadata($record, $source);
+        $this->auditLogs->record('submission_tracking', match ($stage) {
+            self::CENRO_RELEASE => 'CENRO Release Recorded',
+            self::PENRO_RECEIPT => 'PENRO Receipt Recorded',
+            default => 'Regional Endorsement Recorded',
+        }, $sourceKey, $record->getKey(), $metadata['module_name'], 'Recorded '.$stage.' for '.$sourceKey.' record #'.$record->getKey().'.', ['date' => $date, 'stage' => $stage, 'program_area' => $metadata['program_area']]);
     }
 
     /** @return array<string, array<string, mixed>> */
@@ -142,12 +179,15 @@ final class SubmissionTrackingService
             'imea' => ['model' => ImeaReportSubmission::class, 'module' => fn () => 'IMEA Report', 'ability' => 'imea.update', 'url' => fn () => route('imea.report-submissions.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('imea.report-submissions.mov', $record) : null],
             'aws' => ['model' => Aws::class, 'module' => fn () => 'AWS Report', 'ability' => 'aws.update', 'url' => fn () => route('aws.index'), 'mov_url' => fn (Model $record) => $record->report_file_path ? route('aws.report-file.show', $record) : null],
             'ipaf-management' => ['model' => IpafManagementReport::class, 'module' => fn () => 'Management of IPAF', 'ability' => 'technical-reports.update', 'url' => fn () => route('ipaf.index', ['ipaf_tab' => 'management']), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('ipaf.management.mov', $record) : null],
+            'imea-maintenance' => ['model' => ImeaFacilityMaintenanceReport::class, 'module' => fn () => 'IMEA Facility Maintenance', 'ability' => 'imea.update', 'url' => fn () => route('imea.maintenance-reports.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('imea.maintenance-reports.mov', $record) : null],
+            'revenue' => ['model' => IpafRevenueCollection::class, 'module' => fn () => 'Revenue Collection', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'url' => fn () => route('ipaf.index', ['ipaf_tab' => 'revenue']), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('ipaf.revenue.mov', $record) : null],
+            'management-plans' => ['model' => ManagementPlan::class, 'module' => fn () => 'Management Plans', 'ability' => 'management-plans.update', 'url' => fn () => route('management-plans.index'), 'mov_url' => fn (Model $record) => data_get(collect($record->attachments ?? [])->first(), 'url')],
         ];
     }
 
     /** @param array<string, mixed> $source
      *  @return array<string, mixed> */
-    private function normalize(Model $record, string $sourceKey, array $source): array
+    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = []): array
     {
         $isEngp = $sourceKey === 'engp';
         $period = $isEngp
@@ -159,26 +199,29 @@ final class SubmissionTrackingService
         $directPenro = ! $isEngp && $this->routingPolicy->isDirectPenro($record);
         $releaseDate = $isEngp ? $record->releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last() : ($record->getAttribute('date_report_released_cenro') ? Carbon::parse($record->getAttribute('date_report_released_cenro'))->toDateString() : null);
         $dates = $isEngp ? ['date_received_penro'] : ['date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional'];
+        $metadata = $this->moduleMetadata($record, $source);
         $data = [
             'source' => $sourceKey,
             'source_id' => $record->getKey(),
-            'module' => ($source['module'])($record),
+            'module' => $metadata['module_name'],
+            'module_name' => $metadata['module_name'],
             'target_office' => $record->getAttribute($source['target_office'] ?? 'target_office'),
             'protected_area' => $isEngp ? null : $record->protectedArea?->name,
             'protected_area_id' => $record->getAttribute('protected_area_id'),
             'activity_name' => $record->getAttribute('activity_name') ?: $record->getAttribute('station_name'),
             'document_type' => $record->getAttribute('document_type') ?: $record->getAttribute('report_period_type'),
-            'program' => $isEngp ? 'ENGP' : 'Conservation / Protected Area',
+            'program' => $metadata['program_area'],
+            'program_area' => $metadata['program_area'],
             'reporting_year' => $record->getAttribute('reporting_year'),
             'date_conducted' => $record->getAttribute('date_conducted'),
             'date_accomplished' => null,
             'reporting_period' => $period,
             'deadline_submission' => $record->getAttribute('deadline_submission'),
             'days_complied' => $record->getAttribute('days_complied') ?? $record->getAttribute('number_days_complied'),
-            'submission_status' => $record->getAttribute('submission_status'),
+            'submission_status' => $this->statusPresenter->status($record, $sourceKey),
             'timeliness' => $record->getAttribute($isEngp ? 'timeliness_rating' : 'timeliness'),
             'penro_delay_days' => $record->getAttribute('penro_delay') ?? $record->getAttribute('total_days_delayed_penro'),
-            'mov_status' => ($record->getAttribute('mov_file_path') || $record->getAttribute('report_file_path') || $record->getAttribute('mov_external_url')) ? 'Complete' : ($record->getAttribute('date_received_penro') ? 'MOV Not Yet Submitted' : 'Not Yet Available'),
+            'mov_status' => ($record->getAttribute('mov_file_path') || $record->getAttribute('report_file_path') || $record->getAttribute('mov_external_url') || ! empty($record->getAttribute('attachments'))) ? 'Complete' : ($record->getAttribute('date_received_penro') ? 'MOV Not Yet Submitted' : 'Not Yet Available'),
             'mov_url' => isset($source['mov_url']) ? ($source['mov_url'])($record) : null,
             'mov_external' => isset($source['mov_external']) ? (bool) ($source['mov_external'])($record) : false,
             'source_url' => ($source['url'])($record),
@@ -191,12 +234,43 @@ final class SubmissionTrackingService
         }
         $data['date_report_released_cenro'] = $releaseDate;
         $data['date_endorsed_regional'] = $isEngp ? null : ($data['date_endorsed_regional'] ?? null);
-        $data['release_events'] = $isEngp ? $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values()->all() : [];
+        $data['release_events'] = $isEngp ? $record->releaseEvents->map(fn ($event) => ['id' => $event->id, 'period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values()->all() : [];
+        $data['routing_corrections_count'] = $correctionCounts[$sourceKey.':'.$record->getKey()] ?? 0;
         $data['stage'] = $this->stage($record);
         $data['routing_complete'] = $this->isRoutingComplete($record);
         $data['completed_at'] = $data['routing_complete'] ? $this->routingCompletedAt($record) : null;
         $data['can_transition'] = auth()->user()?->can($source['ability']) ?? false;
         return $data;
+    }
+
+
+    /** @param Collection<int,array{record: Model,key:string,source:array<string,mixed>}> $loaded @return array<string,int> */
+    private function correctionCounts(Collection $loaded): array
+    {
+        $idsBySource = $loaded->groupBy('key')->map(fn (Collection $items): array => $items->pluck('record')->map(fn (Model $record): int => (int) $record->getKey())->all());
+        if ($idsBySource->isEmpty()) return [];
+
+        return SubmissionRoutingCorrection::query()
+            ->where(function ($query) use ($idsBySource): void {
+                foreach ($idsBySource as $source => $ids) {
+                    $query->orWhere(fn ($inner) => $inner->where('source', $source)->whereIn('source_id', $ids));
+                }
+            })
+            ->select('source', 'source_id')
+            ->selectRaw('COUNT(*) AS aggregate')
+            ->groupBy('source', 'source_id')
+            ->get()
+            ->mapWithKeys(fn ($row): array => [$row->source.':'.$row->source_id => (int) $row->aggregate])
+            ->all();
+    }
+    /** @param array<string, mixed> $source @return array{module_name:string,program_area:?string,workflow_key:?string} */
+    private function moduleMetadata(Model $record, array $source): array
+    {
+        $fallback = isset($source['module']) && is_callable($source['module'])
+            ? (string) ($source['module'])($record)
+            : null;
+
+        return $this->moduleResolver->resolve($record, $fallback, $source['program_area'] ?? null);
     }
 
     /**
@@ -231,18 +305,7 @@ final class SubmissionTrackingService
 
     private function stage(Model $record): string
     {
-        if ($record instanceof EngpReportSubmission) {
-            $components = $this->engpWorkflows->releaseComponents((string) $record->workflow_key, (int) $record->reporting_year, (string) $record->period_key);
-            $released = $record->releaseEvents->pluck('period_component')->all();
-            if (count($released) < count($components)) return self::CENRO_RELEASE;
-            if (! $record->date_received_penro) return self::PENRO_RECEIPT;
-            return 'endorsed';
-        }
-        if (! $record->getAttribute('date_accomplished')) return 'not_ready';
-        if (! $this->routingPolicy->isDirectPenro($record) && ! $record->getAttribute('date_report_released_cenro')) return self::CENRO_RELEASE;
-        if (! $record->getAttribute('date_received_penro')) return self::PENRO_RECEIPT;
-        if (! $record->getAttribute('date_endorsed_regional')) return self::REGIONAL_ENDORSEMENT;
-        return 'endorsed';
+        return $this->statusPresenter->stage($record);
     }
 
     private function validateChronology(Model $record, string $stage, string $date): void

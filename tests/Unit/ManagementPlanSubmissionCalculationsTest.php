@@ -21,7 +21,7 @@ class ManagementPlanSubmissionCalculationsTest extends TestCase
         $this->assertSame('2026-04-02', $plan->deadline_submission);
         $this->assertSame(2, $plan->number_days_complied);
         $this->assertSame('Outstanding', $plan->timeliness);
-        $this->assertSame('Report Submitted', $plan->submission_status);
+        $this->assertSame('Pending Submission by CENRO', $plan->submission_status);
         $this->assertSame(5, $plan->total_days_delayed_penro);
     }
 

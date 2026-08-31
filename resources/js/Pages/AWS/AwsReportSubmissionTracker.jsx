@@ -13,7 +13,7 @@ import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge
 import { formatReportValue } from '@/Utils/dateFormatters';
 
 const empty = { protected_area_id: '', station_name: '', location: '', activity_name: '', document_type: '', semester: '1st Semester', report_period_type: 'Monthly', date_conducted: '', date_accomplished: '', start_date: '', end_date: '', status: 'Approve', recommendation_remarks: '', report_file: null };
-const badgeClass = (value) => ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-500 text-white';
+const badgeClass = (value) => ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-500 text-white';
 const Badge = ({ value }) => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className={`inline-flex max-w-52 whitespace-normal rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(value)}`}>{formatReportValue(value)}</span>;
 const Detail = ({ label, children }) => {
   const reportDetails = useReportDetails();

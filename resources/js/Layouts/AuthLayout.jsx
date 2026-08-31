@@ -14,7 +14,7 @@ function BrandDivider() {
     return <div className="mt-4 flex items-center justify-center gap-2 text-emerald-700/55 dark:text-emerald-300/50" aria-hidden="true"><span className="h-px w-9 bg-current" /><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5"><path d="M12 20V10" /><path d="M12 13c-4 0-6-2.4-6-6 4 0 6 2.4 6 6ZM12 16c4 0 6-2.4 6-6-4 0-6 2.4-6 6Z" /></svg><span className="h-px w-9 bg-current" /></div>;
 }
 
-export default function AuthLayout({ title, children }) {
+export default function AuthLayout({ title, children, contentClassName = '' }) {
     const [darkMode, setDarkMode] = useState(false);
 
     useEffect(() => {
@@ -35,7 +35,7 @@ export default function AuthLayout({ title, children }) {
         <>
             <Head title={title} />
             <FlashSuccessDialog />
-            <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-[#fbfdfb] via-[#f3faf5] to-[#e7f4ea] px-4 py-16 pt-20 dark:from-[#10231f] dark:via-[#132b25] dark:to-[#0d1d1a] sm:px-6 sm:py-12">
+            <main className="relative flex min-h-screen items-center justify-center overflow-x-hidden bg-gradient-to-b from-[#fbfdfb] via-[#f3faf5] to-[#e7f4ea] px-4 py-16 pt-20 dark:from-[#10231f] dark:via-[#132b25] dark:to-[#0d1d1a] sm:px-6 sm:py-12">
                 <div className="pointer-events-none absolute inset-0" aria-hidden="true">
                     <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(255,255,255,0.92)_0%,_rgba(255,255,255,0.35)_44%,_transparent_72%)] dark:bg-[radial-gradient(ellipse_at_center,_rgba(25,56,47,0.56)_0%,_transparent_68%)]" />
                     <svg className="absolute inset-x-0 bottom-[10%] hidden h-[46%] w-full text-emerald-800/[0.07] dark:text-emerald-200/[0.08] sm:block" viewBox="0 0 1440 420" preserveAspectRatio="none"><path d="M0 360C155 270 236 191 347 249c105 55 171-137 304-106 92 21 93 121 205 65 135-67 183-250 327-142 91 68 142 142 257 88v366H0Z" fill="currentColor" /><path d="M0 398c151-38 229-145 372-96 122 42 143-65 273-60 152 6 216 107 352 63 157-51 228-143 443-96v211H0Z" fill="currentColor" opacity=".55" /></svg>
@@ -50,7 +50,7 @@ export default function AuthLayout({ title, children }) {
                     <span>{darkMode ? 'Light' : 'Dark'}</span>
                 </button>
 
-                <section className="relative z-10 w-full max-w-[33.75rem]" aria-label="Authentication">
+                <section className={"relative z-10 w-full " + (contentClassName || "max-w-[33.75rem]")} aria-label="Authentication">
                     <div className="rounded-[1.65rem] border border-emerald-950/[0.10] bg-white/[0.96] p-5 shadow-[0_24px_65px_-34px_rgba(26,87,61,0.38)] dark:border-emerald-100/[0.14] dark:bg-[#172d27]/[0.96] dark:shadow-[0_24px_65px_-34px_rgba(0,0,0,0.8)] sm:p-7 md:p-8">
                         <header className="text-center">
                             <div className="flex items-center justify-center gap-4 sm:gap-5">

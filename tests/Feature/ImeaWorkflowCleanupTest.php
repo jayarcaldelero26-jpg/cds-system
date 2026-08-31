@@ -34,7 +34,7 @@ test('IMEA Data remains accessible from its existing route', function () {
         ->assertInertia(fn ($page) => $page->component('Imea/Index'));
 });
 
-test('IMEA Maintenance is preserved in storage but removed from active aggregators', function () {
+test('IMEA Maintenance remains active in storage and report aggregators', function () {
     $area = ProtectedArea::create([
         'name' => 'Test IMEA Protected Area',
         'category' => 'Protected Landscape',
@@ -54,12 +54,12 @@ test('IMEA Maintenance is preserved in storage but removed from active aggregato
     ]);
 
     expect(ImeaFacilityMaintenanceReport::query()->find($record->id))->not->toBeNull()
-        ->and(app(SubmissionTrackingService::class)->source('imea-maintenance'))->toBeNull()
-        ->and(app(OverdueReportService::class)->sourceDefinitions())->not->toHaveKey(ImeaFacilityMaintenanceReport::class)
+        ->and(app(SubmissionTrackingService::class)->source('imea-maintenance'))->not->toBeNull()
+        ->and(app(OverdueReportService::class)->sourceDefinitions())->toHaveKey(ImeaFacilityMaintenanceReport::class)
         ->and(app(SubmissionTrackingService::class)->source('imea')['model'])->toBe(ImeaReportSubmission::class)
         ->and(app(OverdueReportService::class)->sourceDefinitions())->toHaveKey(ImeaReportSubmission::class);
 
     $tabs = File::get(resource_path('js/Pages/Imea/WorkflowTabs.jsx'));
-    expect($tabs)->not->toContain('maintenance-reports')
-        ->and($tabs)->not->toContain('Maintenance of Ecotourism Facilities Report');
+    expect($tabs)->toContain('maintenance-reports')
+        ->and($tabs)->toContain('Facility Maintenance Reports');
 });

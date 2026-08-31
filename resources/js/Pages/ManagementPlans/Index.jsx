@@ -15,7 +15,7 @@ import PlanInformation from './PlanInformation';
 import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
 
 const show = (value) => value === null || value === undefined || value === '' ? '—' : value;
-const badgeClass = (value) => ({ 'Report Submitted': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
+const badgeClass = (value) => ({ 'Report Submitted': 'bg-emerald-600 text-white', 'Completed': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
 const Badge = ({ value }) => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className={`inline-flex max-w-52 whitespace-normal rounded-full px-2.5 py-1 text-xs font-bold leading-5 ${badgeClass(value)}`}>{show(value)}</span>;
 const Detail = ({ label, children }) => {
   const reportDetails = useReportDetails();

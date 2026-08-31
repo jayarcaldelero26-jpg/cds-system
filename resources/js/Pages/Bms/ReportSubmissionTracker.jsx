@@ -14,7 +14,7 @@ import Tooltip from '@/Components/Tooltip';
 import TimelinessBadge from '@/Components/TimelinessBadge';
 
 const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
-const badgeClass = (value) => ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+const badgeClass = (value) => ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
 const dateValue = (value) => value ? String(value).slice(0, 10) : '';
 const display = (value) => formatReportValue(value);
 const protectedAreaTableLabel = (protectedArea) => {
@@ -85,7 +85,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
 
   useEffect(() => () => {if (preview?.temporary) URL.revokeObjectURL(preview.url);}, [preview]);
 
-  const currentMov = (report) => report?.mov_url ? { url: submissionRoutes.mov(report), name: report.mov_file_name || 'Current MOV attachment', type: '', temporary: false } : null;
+  const currentMov = (report) => report?.mov ? { ...report.mov, url: report.mov.url || submissionRoutes.mov(report), temporary: false } : (report?.mov_url ? { url: submissionRoutes.mov(report), name: report.mov_file_name || 'Current MOV attachment', type: report.mov_mime_type || '', temporary: false } : null);
   const resetFormState = () => {setPreview(null);form.reset();form.clearErrors();};
   const closeAll = () => {setModal(null);setSelectedReport(null);resetFormState();};
   const openDetails = (report) => {setSelectedReport(report);setModal('details');};
@@ -188,7 +188,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
         <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canUpdate} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
     { label: 'Reporting Period', value: selectedReport[periodField] || '-' },
     { label: 'Report Status', render: () => <Badge value={selectedReport.submission_status} /> },
-    { label: 'Deadline', value: selectedReport.deadline_submission || '-' },
+    { label: 'Deadline', value: display(selectedReport.deadline_submission) },
     { label: 'Timeliness Rating', render: () => <TimelinessBadge value={selectedReport.timeliness} /> }]
     } />} attachments={selectedReport && (detailsMov ? <CrudSection title="Attachment / MOV"><div className="space-y-3"><div className="flex justify-end">{canUpdate && <button type="button" onClick={() => openMov(selectedReport)} className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100">Replace Attachment</button>}</div><FilePreviewPanel file={detailsMov} title="Report Attachment / MOV" heightClass="h-[480px]" /></div></CrudSection> : <CrudSection title="Attachment / MOV"><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canUpdate && <button type="button" onClick={() => openMov(selectedReport)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800">Attach MOV</button>}</CrudSection>)}>
             {selectedReport && <div className="space-y-6">

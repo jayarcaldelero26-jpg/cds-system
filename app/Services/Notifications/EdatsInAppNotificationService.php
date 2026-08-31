@@ -15,6 +15,7 @@ final class EdatsInAppNotificationService
 {
     public const OVERDUE = 'overdue';
     public const DUE_SOON = 'due_soon';
+    public const DUE_TODAY = 'due_today';
     public const CENRO_RELEASED = 'cenro_released';
     public const PENRO_RECEIVED = 'penro_received';
     public const FOR_REGIONAL_ENDORSEMENT = 'for_regional_endorsement';
@@ -24,9 +25,10 @@ final class EdatsInAppNotificationService
 
     public function syncDeadlineNotifications(?CarbonImmutable $today = null): void
     {
-        $today ??= CarbonImmutable::now('Asia/Manila')->startOfDay();
-        $this->alerts->overdueReports($today)->each(fn (OverdueReport $report) => $this->deliverReport($report, self::OVERDUE));
-        $this->alerts->dueSoonReports((int) config('notifications.due_soon_days', 3), $today)->each(fn (OverdueReport $report) => $this->deliverReport($report, self::DUE_SOON));
+       $today ??= CarbonImmutable::now('Asia/Manila')->startOfDay();
+       $this->alerts->overdueReports($today)->each(fn (OverdueReport $report) => $this->deliverReport($report, self::OVERDUE));
+        $this->alerts->dueTodayReports($today)->each(fn (OverdueReport $report) => $this->deliverReport($report, self::DUE_TODAY));
+       $this->alerts->dueSoonReports((int) config('notifications.due_soon_days', 3), $today)->each(fn (OverdueReport $report) => $this->deliverReport($report, self::DUE_SOON));
     }
 
     /** @param array<string, mixed> $report */
@@ -90,9 +92,17 @@ final class EdatsInAppNotificationService
         ];
         $this->deliver($context + [
             'type' => $type,
-            'category' => $type === self::OVERDUE ? 'overdue' : 'due_soon',
+            'category' => match ($type) {
+                self::OVERDUE => 'overdue',
+                self::DUE_TODAY => 'due_today',
+                default => 'due_soon',
+            },
             'severity' => $type === self::OVERDUE ? 'danger' : 'warning',
-            'title' => $type === self::OVERDUE ? 'Overdue Report' : 'Report Due Soon',
+            'title' => match ($type) {
+                self::OVERDUE => 'Overdue Report',
+                self::DUE_TODAY => 'Report Due Today',
+                default => 'Report Due Soon',
+            },
             'message' => $type === self::OVERDUE
                 ? "{$report->module} — {$context['location']}. Deadline was {$deadline}."
                 : "{$report->module} — {$context['location']}. Due {$deadline}.",

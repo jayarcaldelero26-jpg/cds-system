@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\ModuleDefinition;
 use App\Models\EngpReportSubmission;
 use App\Models\User;
 use App\Services\Compliance\OverdueReportService;
@@ -10,10 +11,118 @@ use Carbon\CarbonImmutable;
 use Inertia\Testing\AssertableInertia as Assert;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
     $this->user = User::factory()->create(['section' => 'CDS']);
     foreach (['reports.view', 'technical-reports.update'] as $ability) $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+});
+
+test('routing status is normalized across each required stage', function () {
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Status contract', 'date_accomplished' => '2026-08-03',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+
+    expect($report->submission_status)->toBe('Pending Submission by CENRO');
+    $report->update(['date_report_released_cenro' => '2026-08-04']);
+    expect($report->fresh()->submission_status)->toBe('Pending Receipt by PENRO');
+    $report->update(['date_received_penro' => '2026-08-05']);
+    expect($report->fresh()->submission_status)->toBe('Pending Regional Endorsement');
+    $report->update(['date_endorsed_regional' => '2026-08-06']);
+    expect($report->fresh()->submission_status)->toBe('Completed');
+});
+
+test('submission status overview exposes canonical module and program area metadata', function () {
+    $homestay = ConservationReportSubmission::create([
+        'workflow_key' => 'homestay', 'activity_name' => 'Training on Homestay Program',
+        'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $pamb = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB',
+        'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $dynamic = ModuleDefinition::query()->create([
+        'name' => 'Dynamic Status Overview Module', 'code' => 'dynamic_status_overview',
+        'program_area' => \App\Domain\Modules\ProgramArea::DEVELOPMENT->value,
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
+        'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET, 'reporting_frequency' => 'quarterly',
+        'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'is_active' => true,
+    ]);
+    $dynamicRecord = ConservationReportSubmission::create([
+        'workflow_key' => $dynamic->code, 'activity_name' => 'Dynamic activity',
+        'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $siteVisit = EngpReportSubmission::create([
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'section_name' => 'NGP',
+        'activity_name' => 'ENGP Site Visit Report', 'document_type' => 'Quarterly Report',
+        'reporting_year' => 2026, 'period_key' => 'Q1', 'period_label' => 'Quarter 1',
+        'deadline_submission' => '2026-09-01', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $unknown = ConservationReportSubmission::create([
+        'workflow_key' => 'unknown_overview_workflow', 'activity_name' => 'Unknown activity',
+        'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+
+    $rows = app(SubmissionTrackingService::class)->records();
+    $row = fn (string $source, int $id): array => $rows->first(fn (array $item): bool => $item['source'] === $source && (int) $item['source_id'] === $id);
+
+    expect($row('conservation', $homestay->id)['module_name'])->toBe('Homestay')
+        ->and($row('conservation', $homestay->id)['program_area'])->toBe('Protected Area Management and Development')
+        ->and($row('conservation', $pamb->id)['module_name'])->toBe('Regular PAMB Meetings')
+        ->and($row('conservation', $dynamicRecord->id)['module_name'])->toBe('Dynamic Status Overview Module')
+        ->and($row('conservation', $dynamicRecord->id)['program_area'])->toBe('Development')
+        ->and($row('engp', $siteVisit->id)['module_name'])->toBe('Site Visit')
+        ->and($row('engp', $siteVisit->id)['program_area'])->toBe('National Greening Program')
+        ->and($row('conservation', $unknown->id)['module_name'])->toBe('Conservation Report');
+
+    $this->actingAs($this->user)->get(route('submission-tracking.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('queues.cenro_release', fn ($queue): bool => collect($queue)->contains(fn (array $item): bool => $item['source'] === 'conservation' && $item['source_id'] === $homestay->id && $item['module_name'] === 'Homestay'))
+        ->where('queues.cenro_release', fn ($queue): bool => collect($queue)->contains(fn (array $item): bool => $item['source'] === 'conservation' && $item['source_id'] === $pamb->id && $item['module_name'] === 'Regular PAMB Meetings'))
+        ->where('queues.cenro_release', fn ($queue): bool => collect($queue)->contains(fn (array $item): bool => $item['source'] === 'engp' && $item['source_id'] === $siteVisit->id && $item['module_name'] === 'Site Visit'))
+    );
+});
+
+test('CDS Admin can correct routing dates and every correction is retained', function () {
+    $admin = User::factory()->create(['password' => 'secret-password', 'section' => 'CDS']);
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Correction test', 'date_accomplished' => '2026-08-03',
+        'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+
+    $payload = ['dates' => ['date_report_released_cenro' => '2026-08-06', 'date_received_penro' => '2026-08-07'], 'reason' => 'Incorrect dates entered during encoding.', 'password' => 'secret-password'];
+    $this->actingAs($admin)->patch(route('submission-tracking.correct-routing', ['conservation', $report->id]), $payload)->assertSessionHasNoErrors();
+    $this->assertDatabaseHas('conservation_report_submissions', ['id' => $report->id, 'date_report_released_cenro' => '2026-08-06', 'date_received_penro' => '2026-08-07']);
+    $this->assertDatabaseHas('submission_routing_corrections', ['source' => 'conservation', 'source_id' => $report->id, 'field' => 'date_report_released_cenro', 'reason' => 'Incorrect dates entered during encoding.', 'corrected_by' => $admin->id]);
+
+    $this->actingAs($admin)->patch(route('submission-tracking.correct-routing', ['conservation', $report->id]), [...$payload, 'dates' => ['date_received_penro' => '2026-08-08'], 'reason' => 'Second correction for the receipt date.'])->assertSessionHasNoErrors();
+    expect(\App\Models\SubmissionRoutingCorrection::query()->where('source_id', $report->id)->count())->toBe(3);
+    expect($report->fresh()->submission_status)->toBe('Pending Regional Endorsement');
+});
+
+test('routing correction rejects wrong password, non-admins, missing reason, and invalid chronology', function () {
+    $admin = User::factory()->create(['password' => 'secret-password', 'section' => 'CDS']);
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Correction validation', 'date_accomplished' => '2026-08-03',
+        'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $route = route('submission-tracking.correct-routing', ['conservation', $report->id]);
+    $dates = ['date_report_released_cenro' => '2026-08-06', 'date_received_penro' => '2026-08-07'];
+
+    $this->actingAs($admin)->patch($route, ['dates' => $dates, 'reason' => 'Wrong password check.', 'password' => 'wrong'])->assertSessionHasErrors('password');
+    $this->actingAs($admin)->patch($route, ['dates' => $dates, 'reason' => '', 'password' => 'secret-password'])->assertSessionHasErrors('reason');
+    $this->actingAs($admin)->patch($route, ['dates' => ['date_report_released_cenro' => '2026-08-09', 'date_received_penro' => '2026-08-07'], 'reason' => 'Chronology check.', 'password' => 'secret-password'])->assertSessionHasErrors('dates');
+
+    $staff = User::factory()->create(['section' => 'CDS']);
+    $staff->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $this->actingAs($staff)->patch($route, ['dates' => $dates, 'reason' => 'Unauthorized check.', 'password' => 'secret-password'])->assertForbidden();
+    expect(\App\Models\SubmissionRoutingCorrection::query()->count())->toBe(0);
 });
 
 test('an accomplished conservation report enters the CENRO release queue and transitions through routing without duplication', function () {

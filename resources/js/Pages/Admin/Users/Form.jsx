@@ -7,6 +7,12 @@ import FormField from '../../../Components/FormField';
 
 export default function Form({ title, user, roles }) {
   const isEdit = Boolean(user);
+  const sectionOptions = [
+    { value: 'CDS', label: 'CDS Staff' },
+    { value: 'ENGP', label: 'ENGP Coordinator' },
+    { value: 'PAMO', label: 'PAMO / Protected Area Staff' },
+    ...(user?.section === 'MES' ? [{ value: 'MES', label: 'Monitoring and Enforcement Section (legacy)' }] : []),
+  ];
   const form = useForm({
     name: user?.name || '',
     email: user?.email || '',
@@ -68,15 +74,14 @@ export default function Form({ title, user, roles }) {
 
                         <div className="block text-sm font-medium text-gray-700 dark:text-gray-200">
 
-              <FloatingSelect id="form-section" label="Section"
+              <FloatingSelect id="form-section" label="User category"
               required
 
               value={form.data.section}
               onChange={(event) => form.setData('section', event.target.value)}>
 
-                                <option value="">Select section</option>
-                                <option value="CDS">Conservation Development Section (CDS)</option>
-                                <option value="MES">Monitoring and Enforcement Section (MES)</option>
+                                <option value="">Select user category</option>
+                                {sectionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                             </FloatingSelect>
                             {form.errors.section && <p className="mt-1.5 text-sm text-red-700 dark:text-red-300">{form.errors.section}</p>}
                         </div>

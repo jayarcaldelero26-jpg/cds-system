@@ -31,10 +31,32 @@ export function formatReportDate(value, fallback = '—') {
     const date = parseDateOnly(value);
     if (!date) return fallback;
 
-    return new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).format(date);
+    return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 }
 
 export function formatReportValue(value, fallback = '—') {
     if (value === null || value === undefined || value === '') return fallback;
     return REPORT_DATE_PATTERN.test(String(value)) ? formatReportDate(value, fallback) : value;
+}
+
+export function formatReportDateTime(value, fallback = 'â€”') {
+    if (!value) return fallback;
+
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return fallback;
+
+    const datePart = new Intl.DateTimeFormat('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'Asia/Manila',
+    }).format(date);
+    const timePart = new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZone: 'Asia/Manila',
+    }).format(date);
+
+    return datePart + ', ' + timePart;
 }

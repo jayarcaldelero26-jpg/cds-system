@@ -31,7 +31,6 @@ test('specialized report trackers opt in without changing raw and monitoring tab
         resource_path('js/Pages/AWS/AwsReportSubmissionTracker.jsx'),
         resource_path('js/Pages/Imea/MaintenanceReports.jsx'),
         resource_path('js/Pages/Ipaf/Index.jsx'),
-        resource_path('js/Pages/TechnicalReports/Index.jsx'),
         resource_path('js/Pages/ManagementPlans/Index.jsx'),
     ];
 

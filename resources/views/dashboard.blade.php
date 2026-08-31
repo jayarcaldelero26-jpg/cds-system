@@ -32,9 +32,6 @@
                     Management Plans
                 </a>
 
-                <a href="#" class="block px-4 py-2 hover:bg-emerald-900 text-gray-200 rounded-md mx-2">
-                    Technical Reports
-                </a>
 
                 <a href="#" class="block px-4 py-2 hover:bg-emerald-900 text-gray-200 rounded-md mx-2">
                     Issues Monitoring

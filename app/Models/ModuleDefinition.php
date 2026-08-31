@@ -21,6 +21,7 @@ class ModuleDefinition extends Model
     public const DEADLINE_NONE = 'none';
 
     public const FREQUENCIES = ['weekly', 'monthly', 'quarterly', 'semestral', 'annual', 'custom'];
+    public const RETIRED_CODES = ['cds_lawin', 'lawin_monitoring', 'issue_monitoring', 'ppa', 'ecotourism_monitoring', 'technical_reports'];
 
     protected $fillable = [
         'name', 'code', 'program_area', 'implementation_type', 'module_type', 'reporting_frequency',
@@ -49,6 +50,27 @@ class ModuleDefinition extends Model
     {
         return $query->where('implementation_type', self::IMPLEMENTATION_GENERIC);
     }
+
+    public function scopeNotRetired(Builder $query): Builder
+    {
+        return $query->whereNotIn('code', self::RETIRED_CODES);
+    }
+
+    public static function isRetiredCode(?string $code): bool
+    {
+        return in_array($code, self::RETIRED_CODES, true);
+    }
+
+    public function isRetired(): bool
+    {
+        return self::isRetiredCode((string) $this->code);
+    }
+
+
+
+
+
+
 
     public static function codeFromName(string $name): string
     {

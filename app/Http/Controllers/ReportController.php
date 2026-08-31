@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
 use App\Models\ManagementPlan;
-use App\Models\TechnicalReport;
 use App\Models\EcotourismMonitoring;
 use App\Models\IssueMonitoring;
 use App\Models\LawinMonitoring;
@@ -19,7 +18,6 @@ class ReportController extends Controller
         // Pagkuha sa kinatibuk-ang ihap gikan sa matag table
         $paCount = ProtectedArea::count();
         $mpCount = ManagementPlan::count();
-        $trCount = TechnicalReport::count();
         $ecoCount = EcotourismMonitoring::count();
         $issueCount = IssueMonitoring::count();
         $lawinCount = LawinMonitoring::count();
@@ -43,7 +41,6 @@ class ReportController extends Controller
             'stats' => [
                 'protected_areas_count' => $paCount,
                 'management_plans_count' => $mpCount,
-                'technical_reports_count' => $trCount,
                 'ecotourism_count' => $ecoCount,
                 'issues_count' => $issueCount,
                 'lawin_count' => $lawinCount,

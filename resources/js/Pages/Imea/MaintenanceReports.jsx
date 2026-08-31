@@ -18,7 +18,7 @@ import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge
 const empty = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', quarter: 'Quarter 1', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
 const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
 const display = (value) => value === null || value === undefined || value === '' ? '—' : value;
-const badgeClass = (value) => ({ 'Report Submitted': 'bg-green-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
+const badgeClass = (value) => ({ 'Report Submitted': 'bg-green-600 text-white', 'Completed': 'bg-green-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
 const Badge = ({ value }) => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(value)}`}>{display(value)}</span>;
 const Detail = ({ label, children }) => {
   const reportDetails = useReportDetails();

@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class ComplianceAlertRecipient extends Model
 {
     protected $fillable = [
-        'protected_area_id', 'target_office', 'recipient_name', 'attention_line', 'recipient_email', 'cc_emails', 'is_active',
+        'protected_area_id', 'target_office', 'target_office_key', 'recipient_name', 'attention_line', 'recipient_email', 'cc_emails', 'is_active',
         'notes', 'created_by', 'updated_by',
     ];
 
@@ -23,7 +23,7 @@ class ComplianceAlertRecipient extends Model
             return 'pa:'.(int) $this->protected_area_id;
         }
 
-        $office = mb_strtolower(trim((string) $this->target_office));
+        $office = trim((string) $this->target_office_key);
 
         return $office === '' ? null : 'office:'.$office;
     }

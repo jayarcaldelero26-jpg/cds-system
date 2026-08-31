@@ -288,7 +288,7 @@ function getCalendarEventGroup(event) {
     if (event?.source_type === 'engp') return 'engp_report';
     if (PAMD_SOURCES.has(event?.source_type)) return 'protected_area_management';
     if (event?.source_type === 'aws') return 'conservation_report';
-    if (['technical-reports', 'management-plans'].includes(event?.source_type)) return 'development_report';
+    if (event?.source_type === 'management-plans') return 'development_report';
     return 'conservation_report';
 }
 

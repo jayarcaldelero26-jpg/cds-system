@@ -1,21 +1,34 @@
 <?php
 
+use App\Models\AuditLog;
+use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
 use App\Models\TechnicalReport;
 use App\Models\User;
-use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Storage;
+use App\Services\CalendarMovEventService;
+use App\Services\Compliance\OverdueReportService;
+use App\Services\GlobalSearchService;
+use App\Services\SubmissionTracking\SubmissionTrackingService;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Route;
+use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
-    $this->user = User::factory()->create();
-    foreach (['technical-reports.view', 'technical-reports.create', 'technical-reports.update', 'technical-reports.delete'] as $ability) {
+    $this->user = User::factory()->create(['section' => 'CDS']);
+    foreach ([
+        'technical-reports.view',
+        'reports.view',
+        'audit-logs.view',
+        'module-definitions.view',
+        'module-definitions.update',
+        'module-definitions.activate',
+    ] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }
-    Storage::fake('public');
     $this->area = ProtectedArea::create([
-        'name' => 'Aliwagwag Protected Landscape',
-        'short_name' => 'APL',
+        'name' => 'Retirement Compatibility PA',
+        'short_name' => 'RCPA',
         'category' => 'Protected Landscape',
         'municipality' => 'Baganga',
         'province' => 'Davao Oriental',
@@ -24,80 +37,133 @@ beforeEach(function (): void {
         'created_by' => $this->user->id,
         'updated_by' => $this->user->id,
     ]);
-    Storage::disk('public')->put('technical-reports/existing.pdf', 'existing report');
 });
 
-function technicalReportPayload(object $test, array $overrides = []): array
+function historicalTechnicalReport(User $user, ProtectedArea $area, array $overrides = []): TechnicalReport
 {
-    return [...[
-        'protected_area_id' => $test->area->id,
+    return TechnicalReport::create(array_merge([
+        'protected_area_id' => $area->id,
         'target_office' => 'CENRO Baganga',
-        'activity_name' => 'Technical Monitoring Report',
-        'report_type' => 'Final Report',
+        'report_type' => 'Historical Technical Report',
         'semester' => '1st Semester',
-        'date_conducted' => 'January 2026',
-        'date_accomplished' => '2026-02-01',
-        'remarks' => 'Updated remarks',
-    ], ...$overrides];
-}
-
-function existingTechnicalReport(object $test): TechnicalReport
-{
-    return TechnicalReport::create([
-        ...technicalReportPayload($test),
-        'date_report_released_cenro' => '2026-02-03',
-        'submission_date' => '2026-02-05',
-        'date_endorsed_regional' => '2026-02-06',
+        'activity_name' => 'Historical technical record',
+        'date_accomplished' => '2026-08-01',
+        'submission_date' => '2026-08-05',
         'status' => 'Submitted',
-        'attachment' => 'technical-reports/existing.pdf',
-        'attachment_original_name' => 'existing.pdf',
-        'attachment_mime_type' => 'application/pdf',
-        'attachment_size' => 15,
-        'created_by' => $test->user->id,
-        'updated_by' => $test->user->id,
-    ]);
+        'created_by' => $user->id,
+        'updated_by' => $user->id,
+    ], $overrides));
 }
 
-test('technical report store and update reject direct routing-date payloads', function () {
-    $this->actingAs($this->user)
-        ->post(route('technical-reports.store'), [
-            ...technicalReportPayload($this),
-            'date_received_penro' => '2026-02-05',
-            'attachment' => UploadedFile::fake()->create('report.pdf', 10, 'application/pdf'),
-        ])
-        ->assertRedirect()
-        ->assertSessionHasErrors('routing');
+test('Technical Reports user-facing routes are retired without a redirect', function () {
+    foreach ([
+        'technical-reports.index',
+        'technical-reports.create',
+        'technical-reports.store',
+        'technical-reports.edit',
+        'technical-reports.attachment.show',
+        'technical-reports.update',
+        'technical-reports.destroy',
+    ] as $name) {
+        expect(Route::getRoutes()->getByName($name))->toBeNull();
+    }
 
-    $report = existingTechnicalReport($this);
-
-    $this->actingAs($this->user)
-        ->patch(route('technical-reports.update', $report), [
-            ...technicalReportPayload($this),
-            'date_report_released_cenro' => '2026-02-04',
-            'date_received_penro' => '2026-02-06',
-            'date_endorsed_regional' => '2026-02-07',
-        ])
-        ->assertRedirect()
-        ->assertSessionHasErrors('routing');
-
-    $report->refresh();
-    expect($report->date_report_released_cenro?->toDateString())->toBe('2026-02-03')
-        ->and($report->submission_date?->toDateString())->toBe('2026-02-05')
-        ->and($report->date_endorsed_regional?->toDateString())->toBe('2026-02-06');
+    $this->actingAs($this->user)->get('/technical-reports')->assertNotFound();
+    $this->actingAs($this->user)->post('/technical-reports')->assertNotFound();
 });
 
-test('ordinary technical report edits preserve routing dates', function () {
-    $report = existingTechnicalReport($this);
+test('historical Technical Report records remain intact and historical audit references remain readable', function () {
+    $report = historicalTechnicalReport($this->user, $this->area, ['attachment' => 'technical-reports/historical.pdf']);
+    $log = AuditLog::query()->create([
+        'event_type' => 'historical',
+        'action' => 'Historical Technical Report Reviewed',
+        'entity_type' => TechnicalReport::class,
+        'entity_id' => (string) $report->id,
+        'module' => 'Technical Reports',
+        'summary' => 'Historical Technical Report reference.',
+        'metadata' => ['source_id' => $report->id],
+        'user_id' => $this->user->id,
+    ]);
+
+    $this->assertDatabaseHas('technical_reports', [
+        'id' => $report->id,
+        'report_type' => 'Historical Technical Report',
+        'attachment' => 'technical-reports/historical.pdf',
+    ]);
+
+    $this->actingAs($this->user)->getJson(route('audit-logs.show', $log))
+        ->assertOk()
+        ->assertJsonPath('entity_type', TechnicalReport::class)
+        ->assertJsonPath('entity_id', (string) $report->id)
+        ->assertJsonPath('module', 'Technical Reports');
+});
+
+test('retired Technical Reports are excluded from tracking, compliance, calendar, and global search', function () {
+    $report = historicalTechnicalReport($this->user, $this->area, [
+        'activity_name' => 'Retired Technical Report Search Marker',
+        'date_accomplished' => '2026-08-01',
+        'submission_date' => null,
+    ]);
+
+    $tracking = app(SubmissionTrackingService::class);
+    $alerts = app(OverdueReportService::class);
+    $calendar = app(CalendarMovEventService::class);
+
+    expect($tracking->records()->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($alerts->sourceDefinitions())->not->toHaveKey(TechnicalReport::class)
+        ->and($alerts->overdueReports()->pluck('sourceType')->all())->not->toContain(TechnicalReport::class)
+        ->and($alerts->destinationReferences()->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($calendar->modules($this->user))->not->toContain(['key' => 'technical-reports', 'label' => 'Technical Reports'])
+        ->and($calendar->events($this->user, CarbonImmutable::parse('2026-08-01', 'Asia/Manila'))->pluck('source_type')->all())->not->toContain('technical-reports')
+        ->and(app(GlobalSearchService::class)->search($this->user, 'Retired Technical Report Search Marker')['total'])->toBe(0);
+});
+
+test('retired ModuleDefinition is hidden and cannot be reactivated or edited', function () {
+    $definition = ModuleDefinition::query()->create([
+        'name' => 'Technical Reports',
+        'code' => 'technical_reports',
+        'program_area' => 'development',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_SPECIALIZED,
+        'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'deadline_mode' => ModuleDefinition::DEADLINE_NONE,
+        'is_active' => true,
+    ]);
+
+    $this->actingAs($this->user)->get(route('module-definitions.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('definitions', fn ($definitions): bool => collect($definitions)->where('code', 'technical_reports')->isEmpty()));
 
     $this->actingAs($this->user)
-        ->patch(route('technical-reports.update', $report), technicalReportPayload($this, [
-            'activity_name' => 'Updated Technical Monitoring Report',
-        ]))
-        ->assertRedirect();
+        ->patch(route('module-definitions.status', $definition))
+        ->assertNotFound();
 
-    $report->refresh();
-    expect($report->activity_name)->toBe('Updated Technical Monitoring Report')
-        ->and($report->date_report_released_cenro?->toDateString())->toBe('2026-02-03')
-        ->and($report->submission_date?->toDateString())->toBe('2026-02-05')
-        ->and($report->date_endorsed_regional?->toDateString())->toBe('2026-02-06');
+    $this->actingAs($this->user)
+        ->put(route('module-definitions.update', $definition), [
+            'name' => 'Technical Reports',
+            'program_area' => 'development',
+            'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+            'deadline_mode' => ModuleDefinition::DEADLINE_NONE,
+            'is_active' => true,
+        ])
+        ->assertNotFound();
+
+    expect($definition->fresh()->is_active)->toBeTrue();
+});
+test('active navigation excludes retired Technical Reports', function () {
+    ModuleDefinition::query()->create([
+        'name' => 'Technical Reports',
+        'code' => 'technical_reports',
+        'program_area' => 'development',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
+        'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'quarterly',
+        'deadline_mode' => ModuleDefinition::DEADLINE_NONE,
+        'is_active' => true,
+    ]);
+
+    $this->actingAs($this->user)->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('genericModuleNavigation', fn ($items): bool => collect($items)->where('label', 'Technical Reports')->isEmpty()));
 });

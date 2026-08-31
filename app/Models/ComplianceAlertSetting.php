@@ -12,12 +12,12 @@ class ComplianceAlertSetting extends Model
         'strict_compliance_text', 'signatory_name', 'signatory_position', 'office_name', 'office_address',
         'focal_person_name', 'focal_person_position', 'focal_person_contact', 'do_not_reply_text',
         'system_generated_footer_text', 'sender_display_name', 'fallback_recipient_email', 'fallback_cc_emails',
-        'test_recipient_email', 'singleton_key',
+        'test_recipient_email', 'template_settings', 'singleton_key',
     ];
 
     protected function casts(): array
     {
-        return ['alerts_enabled' => 'boolean', 'automatic_send_enabled' => 'boolean', 'fallback_cc_emails' => 'array'];
+        return ['alerts_enabled' => 'boolean', 'automatic_send_enabled' => 'boolean', 'fallback_cc_emails' => 'array', 'template_settings' => 'array'];
     }
 
     protected static function booted(): void

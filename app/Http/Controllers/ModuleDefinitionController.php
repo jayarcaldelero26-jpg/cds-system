@@ -9,12 +9,14 @@ use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
+use App\Services\AuditLogService;
 
 class ModuleDefinitionController extends Controller
 {
     public function index(Request $request): Response
     {
         $definitions = ModuleDefinition::query()
+            ->notRetired()
             ->when($request->filled('search'), fn ($query) => $query->where(fn ($inner) => $inner->where('name', 'like', '%'.$request->string('search')->toString().'%')->orWhere('code', 'like', '%'.$request->string('search')->toString().'%')))
             ->when($request->filled('program_area'), fn ($query) => $query->where('program_area', $request->string('program_area')->toString()))
             ->when($request->filled('module_type'), fn ($query) => $query->where('module_type', $request->string('module_type')->toString()))
@@ -35,23 +37,33 @@ class ModuleDefinitionController extends Controller
         $data = $this->validated($request);
         $data['implementation_type'] = ModuleDefinition::IMPLEMENTATION_GENERIC;
         $data['code'] = ModuleDefinition::codeFromName($data['name']);
+        if (ModuleDefinition::isRetiredCode((string) $data['code'])) {
+            return back()->withErrors(['name' => 'This module is retired and cannot be created.'])->withInput();
+        }
         if (ModuleDefinition::query()->where('code', $data['code'])->exists()) {
             return back()->withErrors(['name' => 'A module with this generated code already exists.'])->withInput();
         }
-        ModuleDefinition::query()->create($data);
+        $definition = ModuleDefinition::query()->create($data);
+        app(AuditLogService::class)->record('module_management', 'Module Created', ModuleDefinition::class, $definition->id, $definition->name, 'Created module definition.', ['name' => $definition->name, 'code' => $definition->code, 'program_area' => $definition->program_area->value]);
         return back()->with('success', 'Module definition created.');
     }
 
     public function update(Request $request, ModuleDefinition $moduleDefinition): RedirectResponse
     {
+        abort_unless(! $moduleDefinition->isRetired(), 404);
         $data = $this->validated($request);
+        $before = $moduleDefinition->only(array_keys($data));
         $moduleDefinition->update($data);
+        app(AuditLogService::class)->record('module_management', 'Module Configuration Updated', ModuleDefinition::class, $moduleDefinition->id, $moduleDefinition->name, 'Updated module definition configuration.', ['before' => $before, 'after' => $moduleDefinition->fresh()->only(array_keys($data))]);
         return back()->with('success', 'Module definition updated. The module code remains stable.');
     }
 
     public function toggle(ModuleDefinition $moduleDefinition): RedirectResponse
     {
-        $moduleDefinition->update(['is_active' => ! $moduleDefinition->is_active]);
+        abort_unless(! $moduleDefinition->isRetired(), 404);
+        $old = $moduleDefinition->is_active;
+        $moduleDefinition->update(['is_active' => ! $old]);
+        app(AuditLogService::class)->record('module_management', $moduleDefinition->is_active ? 'Module Activated' : 'Module Deactivated', ModuleDefinition::class, $moduleDefinition->id, $moduleDefinition->name, 'Changed module active status.', ['old' => $old, 'new' => $moduleDefinition->is_active]);
         return back()->with('success', $moduleDefinition->is_active ? 'Module definition activated.' : 'Module definition deactivated. Historical records remain available.');
     }
 

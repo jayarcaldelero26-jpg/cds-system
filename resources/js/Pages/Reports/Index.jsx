@@ -116,10 +116,6 @@ export default function Index({ stats }) {
                 <Card title="Activity Log & System Records Summary" className="shadow-xs">
                     <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 text-sm">
                         <div className="p-4 border border-gray-100 dark:border-gray-800 rounded-lg">
-                            <span className="block text-xs font-medium text-gray-500">Technical Reports (AWS)</span>
-                            <span className="text-xl font-bold block mt-1">{stats.technical_reports_count}</span>
-                        </div>
-                        <div className="p-4 border border-gray-100 dark:border-gray-800 rounded-lg">
                             <span className="block text-xs font-medium text-gray-500">Ecotourism Impact Monitoring</span>
                             <span className="text-xl font-bold block mt-1">{stats.ecotourism_count}</span>
                         </div>

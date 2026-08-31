@@ -347,8 +347,9 @@ test('VTOL, BDFE, and BDFAP retain quarterly reporting and Standard B seven-day 
 
 test('standardized submission statuses are derived from the report lifecycle', function () {
     expect((new ConservationReportSubmission)->submission_status)->toBe('No Activity Conducted')
-        ->and((new ConservationReportSubmission(['date_accomplished' => now('Asia/Manila')->toDateString()]))->submission_status)->toBe('Ongoing Preparation at CENRO Level')
-        ->and((new ConservationReportSubmission(['date_accomplished' => '2026-01-05', 'date_received_penro' => '2026-01-06']))->submission_status)->toBe('Report Submitted');
+        ->and((new ConservationReportSubmission(['date_accomplished' => now('Asia/Manila')->toDateString()]))->submission_status)->toBe('Pending Submission by CENRO')
+        ->and((new ConservationReportSubmission(['date_accomplished' => '2026-01-05', 'date_report_released_cenro' => '2026-01-05']))->submission_status)->toBe('Pending Receipt by PENRO')
+        ->and((new ConservationReportSubmission(['date_accomplished' => '2026-01-05', 'date_report_released_cenro' => '2026-01-05', 'date_received_penro' => '2026-01-06']))->submission_status)->toBe('Pending Regional Endorsement');
 });
 
 test('the standard report form requires an attachment and leaves routing dates for submission tracking', function () {

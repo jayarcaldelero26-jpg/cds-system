@@ -7,10 +7,11 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
+use App\Services\AuditLogService;
 
 class ComplianceConfirmationService
 {
-    public function __construct(private readonly OverdueReportService $reports) {}
+    public function __construct(private readonly OverdueReportService $reports, private readonly AuditLogService $auditLogs) {}
 
     public function confirm(Model $source, User $user, ?string $remarks = null): ReportComplianceConfirmation
     {
@@ -27,7 +28,7 @@ class ComplianceConfirmationService
             ]);
         }
 
-        return ReportComplianceConfirmation::query()->create([
+        $confirmation = ReportComplianceConfirmation::query()->create([
             'source_type' => $source::class,
             'source_id' => $source->getKey(),
             'event_type' => ReportComplianceConfirmation::EVENT_CONFIRMED,
@@ -36,6 +37,9 @@ class ComplianceConfirmationService
             'remarks' => $remarks,
             'snapshot' => $this->reports->confirmationSnapshot($source),
         ]);
+        $this->auditLogs->record('compliance_alerts', 'Records Confirmation Recorded', $source::class, $source->getKey(), 'Compliance Alerts', 'Recorded Records confirmation for a submitted report.', ['confirmation_id' => $confirmation->id, 'remarks' => $remarks], $user->id);
+
+        return $confirmation;
     }
 
     public function unconfirm(Model $source, User $user, string $reason): ReportComplianceConfirmation
@@ -47,7 +51,7 @@ class ComplianceConfirmationService
             ]);
         }
 
-        return ReportComplianceConfirmation::query()->create([
+        $revocation = ReportComplianceConfirmation::query()->create([
             'source_type' => $source::class,
             'source_id' => $source->getKey(),
             'event_type' => ReportComplianceConfirmation::EVENT_REVOKED,
@@ -60,6 +64,9 @@ class ComplianceConfirmationService
             'revoked_by' => $user->id,
             'revocation_reason' => $reason,
         ]);
+        $this->auditLogs->record('compliance_alerts', 'Records Confirmation Revoked', $source::class, $source->getKey(), 'Compliance Alerts', 'Revoked Records confirmation for a submitted report.', ['confirmation_id' => $revocation->id, 'reason' => $reason], $user->id);
+
+        return $revocation;
     }
 
     private function latestEvent(Model $source): ?ReportComplianceConfirmation

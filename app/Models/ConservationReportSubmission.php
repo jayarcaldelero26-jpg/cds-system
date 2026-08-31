@@ -67,14 +67,7 @@ class ConservationReportSubmission extends Model
 
     public function getSubmissionStatusAttribute(): string
     {
-        if (! $this->date_accomplished && ! $this->date_received_penro) return 'No Activity Conducted';
-        if ($this->date_received_penro) return 'Report Submitted';
-        $deadline = $this->deadline_submission;
-        if ($deadline === null) return 'Ongoing Preparation at CENRO Level';
-
-        return now(BusinessCalendarService::TIMEZONE)->startOfDay()->greaterThan($deadline)
-            ? 'Report Not Yet Submitted'
-            : 'Ongoing Preparation at CENRO Level';
+        return app(\App\Services\SubmissionTracking\RoutingStatusPresenter::class)->status($this);
     }
 
     public function getPenroDelayAttribute(): int|string
@@ -99,6 +92,6 @@ class ConservationReportSubmission extends Model
             return null;
         }
 
-        return ModuleDefinition::query()->generic()->where('code', $this->workflow_key)->first();
+        return ModuleDefinition::query()->generic()->notRetired()->where('code', $this->workflow_key)->first();
     }
 }

@@ -14,7 +14,6 @@ use App\Models\ProgramProjectActivity;
 use App\Models\IssueMonitoring;
 use App\Models\LawinMonitoring;
 use App\Models\CdsLawinMonitoring;
-use App\Models\TechnicalReport;
 use App\Models\Aws;
 use App\Services\Dashboard\DashboardMonitoringService;
 use Carbon\Carbon;
@@ -256,9 +255,6 @@ class DashboardController extends Controller
 
         $ppaCount =
             ProgramProjectActivity::count();
-
-        $technicalReportsCount =
-            TechnicalReport::count();
 
         $cdsLawinCount =
             CdsLawinMonitoring::count();
@@ -948,9 +944,6 @@ class DashboardController extends Controller
 
             'cdsLawinCount' =>
                 $cdsLawinCount,
-
-            'technicalReportsCount' =>
-                $technicalReportsCount,
 
             // --------------------------------------------------------
             // RECENT ACTIVITIES

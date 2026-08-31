@@ -8,15 +8,18 @@ use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ImeaReportSubmission;
+use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
 use App\Models\ReportComplianceConfirmation;
-use App\Models\TechnicalReport;
 use Carbon\CarbonImmutable;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\SubmissionTracking\RoutingStatusPresenter;
+use App\Services\Modules\ModuleMetadataResolver;
+use App\Models\ModuleDefinition;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -24,7 +27,7 @@ class OverdueReportService
 {
     private const TIMEZONE = 'Asia/Manila';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly ModuleMetadataResolver $moduleResolver) {}
 
     /** @return array<class-string<Model>, array<string, mixed>> */
     public function sourceDefinitions(): array
@@ -55,7 +58,7 @@ class OverdueReportService
             BmsReportSubmission::class => ['module' => 'BMS Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             BamsReportSubmission::class => ['module' => 'BAMS Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             ImeaReportSubmission::class => ['module' => 'IMEA Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
-            TechnicalReport::class => ['module' => 'Technical Reports', 'submitted' => 'submission_date', 'activity' => 'activity_name', 'document' => 'report_type', 'mov_label' => 'Supporting Document', 'mov' => fn (Model $source) => $source->getAttribute('attachment')],
+            ImeaFacilityMaintenanceReport::class => ['module' => 'IMEA Facility Maintenance Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
             Aws::class => ['module' => 'AWS Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'Report File', 'mov' => fn (Model $source) => $source->getAttribute('report_file_path')],
             ManagementPlan::class => ['module' => 'Management Plan Report Submission Tracker', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'Supporting Document', 'mov' => fn (Model $source) => $source->getAttribute('attachments')],
             IpafManagementReport::class => ['module' => 'Management of IPAF Report', 'submitted' => 'date_received_penro', 'activity' => 'activity_name', 'document' => 'document_type', 'mov_label' => 'MOV', 'mov' => fn (Model $source) => $source->getAttribute('mov_file_path')],
@@ -79,21 +82,37 @@ class OverdueReportService
         ];
     }
 
+    /** @return Collection<int,array<string,mixed>> */
+    public function destinationReferences(): Collection
+    {
+        $references = collect();
+        $sources = $this->loadSourceModels(function ($query, array $definition): void {
+            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        });
+        foreach ($sources as $source) {
+            $model = $source['model'];
+            $definition = $source['definition'];
+            $area = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
+            $metadata = $this->moduleMetadata($model, $definition);
+            $references->push(['protected_area_id' => $model->getAttribute('protected_area_id') ? (int) $model->getAttribute('protected_area_id') : null,
+                'protected_area_name' => $area?->name, 'target_office' => trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office')),
+                'source_type' => $model::class, 'source_id' => (int) $model->getKey(), 'module_name' => $metadata['module_name'], 'program_area' => $metadata['program_area']]);
+        }
+        return $references;
+    }
+
     /** @return Collection<int, OverdueReport> */
     public function overdueReports(?CarbonImmutable $today = null): Collection
     {
         $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
         $records = collect();
 
-        foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
-                ->whereNotNull($definition['query_column'] ?? 'date_accomplished')
-                ->get();
-            foreach ($models as $model) {
-                $normalized = $this->normalize($model, $definition, $today);
-                if ($normalized !== null) {
-                    $records->push($normalized);
-                }
+        foreach ($this->loadSourceModels(function ($query, array $definition): void {
+            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        }) as $source) {
+            $normalized = $this->normalize($source['model'], $source['definition'], $today);
+            if ($normalized !== null) {
+                $records->push($normalized);
             }
         }
 
@@ -109,19 +128,20 @@ class OverdueReportService
         $through = $today->addDays(max(0, $days));
         $records = collect();
 
-        foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
-                ->whereNotNull($definition['query_column'] ?? 'date_accomplished')
-                ->get();
-            foreach ($models as $model) {
+        foreach ($this->loadSourceModels(function ($query, array $definition): void {
+            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        }) as $source) {
+            $model = $source['model'];
+            $definition = $source['definition'];
                 $deadlineValue = $model->getAttribute('deadline_submission');
                 if (! $deadlineValue || $this->dateString($model->getAttribute($definition['submitted']))) continue;
                 $deadline = CarbonImmutable::parse($deadlineValue, self::TIMEZONE)->startOfDay();
-                if ($deadline->lessThan($today) || $deadline->greaterThan($through)) continue;
+                if ($deadline->lessThan($today) || ! $deadline->isSameDay($today->addDays(max(0, $days)))) continue;
 
                 $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
                 $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
-                $module = $this->moduleLabel($model, $definition);
+                $metadata = $this->moduleMetadata($model, $definition);
+                $module = $metadata['module_name'];
                 $activity = trim((string) $model->getAttribute($definition['activity']));
                 $document = trim((string) $model->getAttribute($definition['document']));
                 $records->push(new OverdueReport(
@@ -143,11 +163,20 @@ class OverdueReportService
                     movReference: $this->movReference($model, $definition),
                     movLabel: $definition['mov_label'] ?? 'MOV',
                     complianceIssue: 'Report Due Soon',
+                    submissionStatus: $this->statusPresenter->status($model),
+                    moduleName: $metadata['module_name'],
+                    workflowKey: $metadata['workflow_key'],
+                    programArea: $metadata['program_area'],
                 ));
-            }
         }
 
         return $records->sortBy([['deadline', 'asc'], ['targetOffice', 'asc']])->values();
+    }
+
+    /** @return Collection<int, OverdueReport> */
+    public function dueTodayReports(?CarbonImmutable $today = null): Collection
+    {
+        return $this->dueSoonReports(0, $today);
     }
 
     /** @return Collection<int, OverdueReport> */
@@ -156,16 +185,13 @@ class OverdueReportService
         $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
         $records = collect();
 
-        foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
-                ->whereNotNull($definition['query_column'] ?? 'date_accomplished')
-                ->get();
-            foreach ($models as $model) {
-                $normalized = $this->normalize($model, $definition, $today, true);
-                if ($normalized && $normalized->complianceIssue === 'MOV Not Yet Submitted'
-                    && CarbonImmutable::parse($normalized->deadline, self::TIMEZONE)->greaterThanOrEqualTo($today)) {
-                    $records->push($normalized);
-                }
+        foreach ($this->loadSourceModels(function ($query, array $definition): void {
+            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        }) as $source) {
+            $normalized = $this->normalize($source['model'], $source['definition'], $today, true);
+            if ($normalized && $normalized->complianceIssue === 'MOV Not Yet Submitted'
+                && CarbonImmutable::parse($normalized->deadline, self::TIMEZONE)->greaterThanOrEqualTo($today)) {
+                $records->push($normalized);
             }
         }
 
@@ -189,15 +215,13 @@ class OverdueReportService
             ->groupBy('source_type')
             ->map(fn (Collection $events): array => $events->pluck('source_id')->map(fn ($id): int => (int) $id)->all());
 
-        foreach ($this->sourceDefinitions() as $modelClass => $definition) {
-            $models = $this->withProtectedArea($modelClass::query(), $modelClass)
-                ->whereNotNull($definition['submitted'])
-                ->when($confirmedSourceIds->get($modelClass), fn ($query, array $ids) => $query->whereNotIn($query->getModel()->getKeyName(), $ids))
-                ->get();
+        $sources = $this->loadSourceModels(function ($query, array $definition, string $modelClass) use ($confirmedSourceIds): void {
+            $query->whereNotNull($definition['submitted'])
+                ->when($confirmedSourceIds->get($modelClass), fn ($query, array $ids) => $query->whereNotIn($query->getModel()->getKeyName(), $ids));
+        });
 
-            foreach ($models as $model) {
-                $records->push($this->recordsVerificationPayload($model, $definition));
-            }
+        foreach ($sources as $source) {
+            $records->push($this->recordsVerificationPayload($source['model'], $source['definition']));
         }
 
         return $records->sortBy([['target_office', 'asc'], ['protected_area_name', 'asc'], ['deadline', 'asc']])
@@ -235,7 +259,7 @@ class OverdueReportService
 
         return collect($payload)->only([
             'source_type', 'source_id', 'module', 'protected_area_id', 'protected_area_name', 'target_office',
-            'activity', 'document_type', 'reporting_period', 'deadline', 'submission_date', 'submission_status',
+            'module_name', 'program_area', 'activity', 'document_type', 'reporting_period', 'deadline', 'submission_date', 'submission_status',
             'mov_required', 'mov_present', 'mov_reference', 'mov_label',
         ])->all();
     }
@@ -269,8 +293,11 @@ class OverdueReportService
                 'source_type' => $event->source_type,
                 'source_id' => (int) $event->source_id,
                 'module' => $snapshot['module'] ?? 'Unknown report source',
+                'module_name' => $snapshot['module_name'] ?? $snapshot['module'] ?? 'Unknown report source',
+                'program_area' => $snapshot['program_area'] ?? null,
                 'protected_area_name' => $snapshot['protected_area_name'] ?? 'Protected Area not specified',
                 'target_office' => $snapshot['target_office'] ?? 'Unassigned office',
+                'location_label' => $this->locationLabel($snapshot['protected_area_name'] ?? null, $snapshot['target_office'] ?? null),
                 'activity' => $snapshot['activity'] ?? 'Report',
                 'document_type' => $snapshot['document_type'] ?? 'Report',
                 'reporting_period' => $snapshot['reporting_period'] ?? null,
@@ -322,7 +349,8 @@ class OverdueReportService
 
         $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
         $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
-        $module = $this->moduleLabel($model, $definition);
+        $metadata = $this->moduleMetadata($model, $definition);
+        $module = $metadata['module_name'];
         $activity = trim((string) $model->getAttribute($definition['activity']));
         $document = trim((string) $model->getAttribute($definition['document']));
 
@@ -345,7 +373,11 @@ class OverdueReportService
             movLabel: $definition['mov_label'] ?? 'MOV',
             complianceIssue: $issue,
             submissionDate: $submittedAt,
+            submissionStatus: $this->statusPresenter->status($model),
             reportingPeriod: $this->reportingPeriod($model, $definition),
+            moduleName: $metadata['module_name'],
+            workflowKey: $metadata['workflow_key'],
+            programArea: $metadata['program_area'],
         );
     }
 
@@ -378,7 +410,7 @@ class OverdueReportService
             $model instanceof BmsReportSubmission => ['bms-report', 'mov'],
             $model instanceof BamsReportSubmission => ['bams-report', 'mov'],
             $model instanceof ImeaReportSubmission => ['imea-report', 'mov'],
-            $model instanceof TechnicalReport => ['technical-report', 'attachment'],
+            $model instanceof ImeaFacilityMaintenanceReport => ['imea-maintenance', 'mov'],
             $model instanceof Aws => ['aws', 'report_file'],
             $model instanceof ManagementPlan => ['management-plan', 'attachments'],
             $model instanceof IpafManagementReport => ['ipaf-management', 'mov'],
@@ -410,7 +442,8 @@ class OverdueReportService
     {
         $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
         $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
-        $module = $this->moduleLabel($model, $definition);
+        $metadata = $this->moduleMetadata($model, $definition);
+        $module = $metadata['module_name'];
         $deadline = $this->dateString($model->getAttribute('deadline_submission'));
         $submittedAt = $this->dateString($model->getAttribute($definition['submitted']));
         $activity = trim((string) $model->getAttribute($definition['activity']));
@@ -420,6 +453,9 @@ class OverdueReportService
             'source_type' => $model::class,
             'source_id' => (int) $model->getKey(),
             'module' => $module,
+            'module_name' => $metadata['module_name'],
+            'workflow_key' => $metadata['workflow_key'],
+            'program_area' => $metadata['program_area'],
             'protected_area_id' => $model->getAttribute('protected_area_id') ? (int) $model->getAttribute('protected_area_id') : null,
             'protected_area_name' => $protectedArea?->name ?: 'Protected Area not specified',
             'target_office' => $targetOffice ?: ($protectedArea?->name ?: 'Unassigned office'),
@@ -428,7 +464,7 @@ class OverdueReportService
             'reporting_period' => $this->reportingPeriod($model, $definition),
             'deadline' => $deadline,
             'submission_date' => $submittedAt,
-            'submission_status' => 'Report Submitted',
+            'submission_status' => $this->statusPresenter->status($model),
             'submitted' => true,
             'records_confirmed' => false,
             'records_confirmed_at' => null,
@@ -446,6 +482,31 @@ class OverdueReportService
         return $modelClass === EngpReportSubmission::class ? $query : $query->with('protectedArea');
     }
 
+    /**
+     * Load the source universe already requested by the caller, then prime
+     * request-local module metadata before row normalization starts.
+     *
+     * @param callable $configure receives the query, definition, and model class
+     * @return Collection<int, array{model: Model, definition: array<string,mixed>}>
+     */
+    private function loadSourceModels(callable $configure): Collection
+    {
+        $sources = collect();
+
+        foreach ($this->sourceDefinitions() as $modelClass => $definition) {
+            $query = $this->withProtectedArea($modelClass::query(), $modelClass);
+            $configure($query, $definition, $modelClass);
+
+            foreach ($query->get() as $model) {
+                $sources->push(['model' => $model, 'definition' => $definition]);
+            }
+        }
+
+        $this->moduleResolver->prime($sources->pluck('model'));
+
+        return $sources;
+    }
+
     private function dateString(mixed $value): ?string
     {
         if (! $value) {
@@ -460,9 +521,16 @@ class OverdueReportService
     /** @param array<string, mixed> $definition */
     private function moduleLabel(Model $model, array $definition): string
     {
-        $module = $definition['module_resolver'] ?? $definition['module'];
+        return $this->moduleMetadata($model, $definition)['module_name'];
+    }
 
-        return is_callable($module) ? (string) $module($model) : (string) $module;
+    /** @param array<string, mixed> $definition @return array{module_name:string,workflow_key:?string,program_area:?string} */
+    private function moduleMetadata(Model $model, array $definition): array
+    {
+        $module = $definition['module_resolver'] ?? $definition['module'];
+        $fallback = is_callable($module) ? (string) $module($model) : (string) $module;
+
+        return $this->moduleResolver->resolve($model, $fallback, $definition['program_area'] ?? null);
     }
 
     /** @param array<string, mixed> $definition */
@@ -471,5 +539,20 @@ class OverdueReportService
         $resolver = $definition['reporting_period'] ?? null;
 
         return is_callable($resolver) ? $resolver($model) : null;
+    }
+
+    private function locationLabel(?string $protectedArea, ?string $targetOffice): string
+    {
+        $protectedArea = trim((string) $protectedArea);
+        $targetOffice = trim((string) $targetOffice);
+        $hasProtectedArea = $protectedArea !== '' && ! in_array(mb_strtolower($protectedArea), ['protected area not specified', 'source record no longer exists'], true);
+        $hasOffice = $targetOffice !== '' && ! in_array(mb_strtolower($targetOffice), ['unassigned office', 'source record no longer exists'], true);
+
+        return match (true) {
+            $hasProtectedArea && $hasOffice => $protectedArea.' �w^~)�t '.$targetOffice,
+            $hasProtectedArea => $protectedArea,
+            $hasOffice => $targetOffice,
+            default => 'Office / Protected Area not specified',
+        };
     }
 }

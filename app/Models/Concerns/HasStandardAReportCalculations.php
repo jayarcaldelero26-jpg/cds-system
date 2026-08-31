@@ -53,18 +53,7 @@ trait HasStandardAReportCalculations
 
     public function getSubmissionStatusAttribute(): string
     {
-        if (! $this->date_accomplished && ! $this->date_received_penro) {
-            return 'No Activity Conducted';
-        }
-        if ($this->date_received_penro) {
-            return 'Report Submitted';
-        }
-
-        return now(BusinessCalendarService::TIMEZONE)->startOfDay()->greaterThan(
-            app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 15, $this->target_office ?? null)->startOfDay(),
-        )
-            ? 'Report Not Yet Submitted'
-            : 'Ongoing Preparation at CENRO Level';
+        return app(\App\Services\SubmissionTracking\RoutingStatusPresenter::class)->status($this);
     }
 
     public function getTotalDaysDelayedPenroAttribute(): int|string

@@ -119,66 +119,45 @@ const allNavigation = [
 
     { label: 'Administration', heading: true, permission: 'canManageAdministration', section: 'BOTH' },
     { label: 'User Management', href: '/admin/users', icon: 'users', permission: 'canManageUsers', section: 'BOTH' },
-    { label: 'Audit Logs', href: '#', icon: 'audit', comingSoon: true, permission: 'canManageUsers', section: 'BOTH' },
+    { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'audit', permission: 'canManageUsers', section: 'BOTH' },
     { label: 'Recipient Mapping', href: '/admin/recipient-mapping', icon: 'recipient-map', permission: 'canManageComplianceAlerts', section: 'BOTH' },
     { label: 'Settings', href: '/settings', icon: 'settings', permission: 'canManageUsers', section: 'BOTH' },
 ];
 
-const fluentSidebarIcons = {
-    dashboard: 'fluent-color:apps-32',
-    manual: 'fluent-color:book-32',
-    'protected-area': 'fluent-emoji-flat:mountain',
-    database: 'fluent-color:database-32',
-    wildlife: 'fluent-color:animal-paw-print-32',
-    sprout: 'fluent-emoji-flat:seedling',
-    forest: 'fluent-emoji-flat:evergreen-tree',
-    watershed: 'fluent-emoji-flat:droplet',
-    'submission-tracking': 'fluent-color:clipboard-task-24',
-    alerts: 'fluent-color:alert-32',
-    users: 'fluent-color:people-32',
-    audit: 'fluent-color:clipboard-text-edit-32',
-    'shield-alert': 'fluent-color:shield-checkmark-24',
-    'recipient-map': 'fluent-color:pin-32',
-    calendar: 'fluent-emoji-flat:calendar',
-    settings: 'fluent-color:settings-32',
-    projects: 'fluent-color:briefcase-32',
-    inspection: 'fluent-color:clipboard-checkmark-32',
-    activities: 'fluent-color:document-bullet-list-32',
-    photos: 'fluent-color:image-32',
-    reports: 'fluent-color:document-32',
+const lucideSidebarIcons = {
+    dashboard: 'lucide:layout-dashboard',
+    manual: 'lucide:clipboard-list',
+    'protected-area': 'lucide:map-pinned',
+    database: 'lucide:database',
+    wildlife: 'lucide:paw-print',
+    sprout: 'lucide:sprout',
+    forest: 'lucide:trees',
+    watershed: 'lucide:waves',
+    'submission-tracking': 'lucide:clipboard-check',
+    alerts: 'lucide:triangle-alert',
+    users: 'lucide:users',
+    audit: 'lucide:history',
+    'recipient-map': 'lucide:network',
+    calendar: 'lucide:calendar-days',
+    settings: 'lucide:settings',
+    projects: 'lucide:briefcase',
+    inspection: 'lucide:clipboard-check',
+    activities: 'lucide:clipboard-list',
+    photos: 'lucide:image',
+    reports: 'lucide:file-text',
 };
 
 function Icon({ name, className = 'h-6 w-6 shrink-0' }) {
-    const icons = {
-        dashboard: <><rect x="3" y="3" width="8" height="8" rx="2" fill="#38BDF8" /><rect x="13" y="3" width="8" height="8" rx="2" fill="#60A5FA" /><rect x="3" y="13" width="8" height="8" rx="2" fill="#34D399" /><rect x="13" y="13" width="8" height="8" rx="2" fill="#22C55E" /></>,
-        manual: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21V5.5Z" fill="#60A5FA" /><path d="M20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5A2.5 2.5 0 0 1 20 21V5.5Z" fill="#34D399" /><path d="M7 7h2.5M14.5 7H17M7 10h2.5M14.5 10H17" stroke="#fff" strokeWidth="1.4" strokeLinecap="round" /></>,
-        'protected-area': <><path d="M12 2.5 20 5v6.4c0 4.9-3.3 8.2-8 10.1-4.7-1.9-8-5.2-8-10.1V5l8-2.5Z" fill="#34D399" /><path d="m6.5 15 3.2-4 2.2 2.4 2.9-4.4 2.7 6H6.5Z" fill="#2563EB" /><circle cx="16.7" cy="7.7" r="1.5" fill="#FDE047" /></>,
-        database: <><ellipse cx="12" cy="5.2" rx="7.5" ry="3.2" fill="#818CF8" /><path d="M4.5 5.2v6.8c0 1.8 3.4 3.2 7.5 3.2s7.5-1.4 7.5-3.2V5.2" fill="#6366F1" /><path d="M4.5 12v6.8C4.5 20.6 7.9 22 12 22s7.5-1.4 7.5-3.2V12" fill="#38BDF8" /><path d="M7.5 5.2c1.2.7 2.8 1 4.5 1s3.3-.3 4.5-1" stroke="#E0E7FF" strokeWidth="1.2" fill="none" /></>,
-        wildlife: <><circle cx="7" cy="9" r="2.3" fill="#F59E0B" /><circle cx="12" cy="5.8" r="2.3" fill="#FBBF24" /><circle cx="17" cy="9" r="2.3" fill="#FB923C" /><path d="M12 11.2c-3.7 0-6 3.1-6 5.9 0 2.3 2.1 3.6 4.1 2.5.7-.4 1.2-.4 1.9 0 2 1.1 4.1-.2 4.1-2.5 0-2.8-2.3-5.9-6.1-5.9Z" fill="#F97316" /></>,
-        sprout: <><path d="M12 21v-7" stroke="#16A34A" strokeWidth="2" strokeLinecap="round" /><path d="M11.8 14C7.2 14 5 11.2 5 7c4.5 0 6.8 2.7 6.8 7Z" fill="#4ADE80" /><path d="M12.2 14C16.8 14 19 11.2 19 7c-4.5 0-6.8 2.7-6.8 7Z" fill="#22C55E" /><path d="M12 15.5c1.8-1.6 3-3.9 3.3-6.4M12 15.5C10.2 13.9 9 11.6 8.7 9.1" stroke="#15803D" strokeWidth="1" strokeLinecap="round" /></>,
-        forest: <><path d="m4 20 5-11 5 11H4Z" fill="#22C55E" /><path d="m10 20 5-15 5 15H10Z" fill="#16A34A" /><path d="M3 20h18" stroke="#86EFAC" strokeWidth="1.5" strokeLinecap="round" /><path d="M9 20v-3M15 20v-4" stroke="#854D0E" strokeWidth="1.5" strokeLinecap="round" /></>,
-        watershed: <><path d="M12 2.5S5.5 10.1 5.5 15a6.5 6.5 0 1 0 13 0c0-4.9-6.5-12.5-6.5-12.5Z" fill="#38BDF8" /><path d="M8.5 15.5c1.2-1.5 2.6-2.3 4.3-2.3 1.2 0 2.2.4 3.2 1.2" stroke="#E0F2FE" strokeWidth="1.5" strokeLinecap="round" /><path d="M16.5 5.5c2.2.4 3.7 1.8 4.2 4.2-2.4-.4-3.8-1.8-4.2-4.2Z" fill="#4ADE80" /></>,
-        users: <><circle cx="9" cy="8" r="3.3" fill="#38BDF8" /><circle cx="17" cy="9" r="2.5" fill="#34D399" /><path d="M3.5 20c.4-4 2.7-6.2 5.5-6.2s5.1 2.2 5.5 6.2H3.5Z" fill="#2563EB" /><path d="M14 19.5c.3-3 2-4.8 4.2-4.8 1.6 0 2.8.8 3.3 2.1V20H14v-.5Z" fill="#16A34A" /></>,
-        audit: <><path d="M6 2.8h8.1L19 7.7V20a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 20V4.3A1.5 1.5 0 0 1 6.5 2.8H6Z" fill="#818CF8" /><path d="M14 2.8v5h5" fill="#C4B5FD" /><path d="M8.3 12h7.4M8.3 15.2h5" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" /><circle cx="17.2" cy="17.2" r="3.3" fill="#2DD4BF" /><path d="M17.2 15.6v1.8l1.2.7" stroke="#fff" strokeWidth="1.2" strokeLinecap="round" /></>,
-        'shield-alert': <><path d="M12 2.5 20 5v6.4c0 4.9-3.3 8.2-8 10.1-4.7-1.9-8-5.2-8-10.1V5l8-2.5Z" fill="#22C55E" /><path d="M12 7.2v5.5M12 16.2h.01" stroke="#FEF08A" strokeWidth="2" strokeLinecap="round" /><path d="m15.6 16.4 1.3 1.3 2.5-3" stroke="#fff" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></>,
-        'recipient-map': <><path d="M3.5 6.2 9 3.8l6 2.4 5.5-2.4v14L15 20.2l-6-2.4-5.5 2.4v-14Z" fill="#60A5FA" /><path d="M9 3.8v14M15 6.2v14" stroke="#fff" strokeWidth="1.1" opacity=".85" /><path d="M15 7.5a3.2 3.2 0 0 0-3.2 3.2c0 2.4 3.2 5.7 3.2 5.7s3.2-3.3 3.2-5.7A3.2 3.2 0 0 0 15 7.5Z" fill="#F87171" /><circle cx="15" cy="10.7" r="1.1" fill="#fff" /></>,
-        calendar: <><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="#60A5FA" /><path d="M3.5 9.5h17" stroke="#fff" strokeWidth="1.5" /><path d="M7.5 3v4M16.5 3v4" stroke="#F87171" strokeWidth="2" strokeLinecap="round" /><rect x="7" y="12.5" width="3" height="3" rx=".7" fill="#FDE047" /><rect x="12" y="12.5" width="3" height="3" rx=".7" fill="#fff" /><rect x="17" y="12.5" width="1.5" height="3" rx=".7" fill="#BFDBFE" /></>,
-        settings: <><path d="m12 3 1.3 2.1 2.4.4.8 2.3 2.1 1.3-.7 2.3.7 2.3-2.1 1.3-.8 2.3-2.4.4L12 21l-1.3-2.1-2.4-.4-.8-2.3-2.1-1.3.7-2.3-.7-2.3 2.1-1.3.8-2.3 2.4-.4L12 3Z" fill="#60A5FA" /><circle cx="12" cy="12" r="3.1" fill="#E0F2FE" /><circle cx="12" cy="12" r="1.5" fill="#475569" /></>,
-    };
-
-    return <IconifyIcon icon={fluentSidebarIcons[name] || fluentSidebarIcons.dashboard} width="24" height="24" className={className} aria-hidden="true" />;
+    return <IconifyIcon icon={lucideSidebarIcons[name] || lucideSidebarIcons.dashboard} width="18" height="18" className={className + ' sidebar-outline-icon'} aria-hidden="true" />;
 }
+
 
 function DisclosureIcon({ expanded, className = 'h-4 w-4' }) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`${className} transition-transform duration-200 ${expanded ? 'rotate-90' : ''}`} aria-hidden="true"><path d="m9 6 6 6-6 6" /></svg>;
 }
 
-function MenuIcon({ name }) {
-    return <span className="flex h-7 w-7 shrink-0 items-center justify-center"><Icon name={name} /></span>;
-}
-
-function SubmenuIcon({ name }) {
-    return name ? <span className="flex h-5 w-5 shrink-0 items-center justify-center"><IconifyIcon icon={fluentSubmenuIcons[name]} width="19" height="19" className="shrink-0" aria-hidden="true" /></span> : null;
+function MenuIcon({ name, active = false, muted = false }) {
+    return <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${active ? 'opacity-95' : muted ? 'opacity-35' : 'opacity-55'}`}><Icon name={name} /></span>;
 }
 
 function matchesNavigationItem(item, url) {
@@ -393,7 +372,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                         }
 
                         if (item.groupOnly) {
-                            return <div key={item.label} className="mt-1 flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-green-100"><MenuIcon name={item.icon} /><span>{item.label}</span></div>;
+                            return <div key={item.label} className="mt-1 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-green-100/80"><MenuIcon name={item.icon} muted /><span>{item.label}</span></div>;
                         }
 
                         if (item.children) {
@@ -404,9 +383,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                                         onClick={() => toggleDropdown(item.label)}
                                         aria-expanded={isOpen}
                                         aria-label={`${item.label}: ${isOpen ? 'collapse' : 'expand'}`}
-                                        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition text-green-50 hover:bg-white/10 focus:outline-none"
+                                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition focus:outline-none ${matchesNavigationItem(item, url) ? 'bg-white/12 text-white' : 'text-green-100/85 hover:bg-white/8 hover:text-white'}`}
                                     >
-                                        <MenuIcon name={item.icon} />
+                                        <MenuIcon name={item.icon} active={matchesNavigationItem(item, url)} />
                                         <span className="flex-1 text-left">{item.label}</span>
                                         <DisclosureIcon expanded={isOpen} className="h-4 w-4 text-green-300" />
                                     </button>
@@ -420,20 +399,20 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
                         const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                             active
-                                ? 'bg-green-600 text-white shadow-md font-semibold'
-                                : 'text-green-50 hover:bg-white/10'
+                                ? 'bg-white/14 text-white font-semibold'
+                                : 'text-green-100/85 hover:bg-white/8 hover:text-white'
                         }`;
 
                         if (item.comingSoon) return (
                             <Tooltip key={item.label} content="Coming Soon" className="block w-full"><div className={`${common} cursor-not-allowed opacity-75`}>
-                                <MenuIcon name={item.icon} />
+                                <MenuIcon name={item.icon} muted />
                                 <span className="flex-1 text-left">{item.label}</span>
-                                <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-green-100">Coming Soon</span>
+                                <span className="rounded-full bg-white/8 px-2.5 py-0.5 text-[10px] font-semibold tracking-wide text-green-100/70">Coming Soon</span>
                             </div></Tooltip>
                         );
                         return (
                             <Link key={item.label} href={item.href} onClick={onClose} className={common}>
-                                <MenuIcon name={item.icon} />
+                                <MenuIcon name={item.icon} active={active} />
                                 <span>{item.label}</span>
                             </Link>
                         );

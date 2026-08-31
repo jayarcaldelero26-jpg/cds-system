@@ -33,7 +33,7 @@ class UpdateUserRequest extends FormRequest
                 Rule::unique('users', 'email')->ignore($user),
             ],
             'office_designated' => ['required', 'string', 'max:255'], // 🚀 Gidugang validation
-            'section' => ['required', 'string', 'in:CDS,MES'],         // 🚀 Gidugang validation (CDS o MES ra)
+            'section' => ['required', 'string', 'in:CDS,ENGP,PAMO,MES'],
             'password' => ['nullable', 'string', 'confirmed', Password::defaults()],
             'role' => [
                 'required',

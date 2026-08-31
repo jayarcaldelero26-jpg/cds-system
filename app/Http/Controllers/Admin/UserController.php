@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Inertia\Inertia;
 use Inertia\Response;
 use Spatie\Permission\Models\Role;
+use App\Services\AuditLogService;
 
 class UserController extends Controller
 {
@@ -38,6 +39,7 @@ class UserController extends Controller
                     'role' => $user->roles->first()?->name,
                     'is_active' => (bool) $user->is_active,
                     'created_at' => $user->created_at?->toDateString(),
+                    'can_delete' => request()->user()?->can('delete', $user) ?? false,
                 ]),
         ]);
     }
@@ -74,6 +76,7 @@ class UserController extends Controller
         if ($role) {
             $user->syncRoles([$role]);
         }
+        app(AuditLogService::class)->record('user_management', 'User Created', User::class, $user->id, 'User Management', 'Created a user account.', ['role' => $role, 'section' => $user->section]);
 
         return to_route('admin.users.index')->with('success', 'User created successfully.');
     }
@@ -107,6 +110,8 @@ class UserController extends Controller
         $this->authorize('update', $user);
 
         $data = $request->validated();
+        $oldRole = $user->roles()->first()?->name;
+        $before = $user->only(['name', 'email', 'office_designated', 'section', 'is_active']);
         $role = $data['role'] ?? null;
         if ($role) {
             unset($data['role']);
@@ -127,6 +132,7 @@ class UserController extends Controller
         if ($role) {
             $user->syncRoles([$role]);
         }
+        app(AuditLogService::class)->record('user_management', 'User Updated', User::class, $user->id, 'User Management', 'Updated a user account.', ['before' => $before, 'after' => $user->fresh()->only(array_keys($before)), 'old_role' => $oldRole, 'new_role' => $role]);
 
         return to_route('admin.users.index')->with('success', 'User updated successfully.');
     }
@@ -138,6 +144,7 @@ class UserController extends Controller
     {
         $this->authorize('delete', $user);
 
+        app(AuditLogService::class)->record('user_management', 'User Deleted', User::class, $user->id, 'User Management', 'Deleted a user account.');
         $user->delete();
 
         return to_route('admin.users.index')->with('success', 'User deleted successfully.');

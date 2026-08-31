@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\ConservationReportSubmission;
 use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
-use App\Models\TechnicalReport;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
@@ -43,7 +42,7 @@ class ConservationReportSubmissionController extends Controller
             'workflow' => $config,
             'submissions' => $submissions,
             'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name']),
-            'targetOffices' => TechnicalReport::query()->whereNotNull('target_office')->distinct()->orderBy('target_office')->pluck('target_office'),
+            'targetOffices' => ConservationReportSubmission::query()->whereNotNull('target_office')->distinct()->orderBy('target_office')->pluck('target_office'),
             'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type']),
         ]);
     }

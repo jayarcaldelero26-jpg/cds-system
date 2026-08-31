@@ -23,7 +23,7 @@ const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
 const tabClass = (active) => `inline-flex shrink-0 items-center rounded-xl border px-4 py-2.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${active ? 'border-green-700 bg-green-700 text-white shadow-md' : 'border-gray-200 bg-white text-gray-700 shadow-sm hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'}`;
 const show = (value) => value === null || value === undefined || value === '' ? '\u2014' : value;
 const money = (value) => value === null || value === undefined ? '\u2014' : `\u20B1${formatMoney(value)}`;
-const badgeClass = (value) => ({ 'Report Submitted': 'bg-green-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
+const badgeClass = (value) => ({ 'Report Submitted': 'bg-green-600 text-white', 'Completed': 'bg-green-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
 const Badge = ({ value }) => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(value)}`}>{show(value)}</span>;
 const Detail = ({ label: heading, children }) => {
   const reportDetails = useReportDetails();
