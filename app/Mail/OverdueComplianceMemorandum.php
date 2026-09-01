@@ -30,10 +30,6 @@ class OverdueComplianceMemorandum extends Mailable
     {
         $subject = $this->presentation['subject'] ?? ($this->settings['email_subject'] ?? $this->settings['subject']);
 
-        if (($this->presentation['template'] ?? null) === 'protected_area_overdue') {
-            $subject = self::PROTECTED_AREA_OVERDUE_SUBJECT;
-        }
-
         return new Envelope(
             from: new Address((string) config('mail.from.address'), self::SENDER_DISPLAY_NAME),
             subject: $subject,

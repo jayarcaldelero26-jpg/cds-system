@@ -90,6 +90,7 @@ test('an official registry activity value continues to save successfully', funct
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-24',
         'date_accomplished' => '2026-08-24',
         'mov' => UploadedFile::fake()->create('regular-pamb.pdf', 100, 'application/pdf'),
     ])->assertSessionHasNoErrors();

@@ -12,7 +12,7 @@ class ComplianceAlertSetting extends Model
         'strict_compliance_text', 'signatory_name', 'signatory_position', 'office_name', 'office_address',
         'focal_person_name', 'focal_person_position', 'focal_person_contact', 'do_not_reply_text',
         'system_generated_footer_text', 'sender_display_name', 'fallback_recipient_email', 'fallback_cc_emails',
-        'test_recipient_email', 'template_settings', 'singleton_key',
+        'template_settings', 'singleton_key',
     ];
 
     protected function casts(): array

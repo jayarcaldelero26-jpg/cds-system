@@ -15,11 +15,13 @@ use App\Models\User;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceAlertTemplateResolver;
 use App\Services\Compliance\ComplianceConfirmationService;
+use App\Services\Compliance\ComplianceRichTextSanitizer;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\BusinessCalendarService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Schema;
@@ -28,6 +30,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
+    BusinessCalendarService::forgetCache();
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-25 10:00:00', 'Asia/Manila'));
     config()->set('compliance_alerts.enabled', false);
     config()->set('compliance_alerts.recipients', ['alerts@example.test']);
@@ -54,10 +57,16 @@ function complianceArea(User $user): ProtectedArea
 
 function bmsForDeadline(ProtectedArea $area, User $user, string $deadline, array $overrides = []): BmsReportSubmission
 {
-    $report = BmsReportSubmission::create([...[ 
+    $calendar = app(BusinessCalendarService::class);
+    $referenceDate = CarbonImmutable::parse($deadline, 'Asia/Manila')->subDay();
+    for ($attempt = 0; $attempt < 60 && $calendar->addWorkingDays($referenceDate, 15)->toDateString() !== $deadline; $attempt++) {
+        $referenceDate = $referenceDate->subDay();
+    }
+
+    $report = BmsReportSubmission::create([...[
         'protected_area_id' => $area->id, 'target_office' => 'PAMO Pujada Bay', 'activity_name' => 'Monitoring on the Established BMS site',
         'document_type' => 'Final Report', 'semester' => '1st Semester',
-        'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays($deadline, -15)->toDateString(),
+        'date_accomplished' => $referenceDate->toDateString(),
         'created_by' => $user->id, 'updated_by' => $user->id,
     ], ...$overrides]);
     if (! array_key_exists('mov_file_path', $overrides)) {
@@ -142,7 +151,7 @@ function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string
     $common = ['protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'Compliance activity', 'document_type' => 'Final Report', 'created_by' => $user->id, 'updated_by' => $user->id];
 
     $records = [
-        ConservationReportSubmission::class => ConservationReportSubmission::create([...$common, 'workflow_key' => 'regular_pamb', 'reporting_period' => 'Quarter 1', 'date_accomplished' => $standardBStart]),
+        ConservationReportSubmission::class => ConservationReportSubmission::create([...$common, 'workflow_key' => 'regular_pamb', 'reporting_period' => 'Quarter 1', 'date_conducted' => $standardBStart, 'date_accomplished' => $standardBStart]),
         EngpReportSubmission::class => EngpReportSubmission::create(['workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'section_name' => 'NGP', 'activity_name' => 'Community-Based Employment Program (CBEP)', 'document_type' => 'Monthly Report', 'reporting_year' => 2026, 'period_key' => $periodKey, 'period_label' => $periodLabel, 'deadline_submission' => $deadline, 'created_by' => $user->id, 'updated_by' => $user->id]),
         BmsReportSubmission::class => BmsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         \App\Models\BamsReportSubmission::class => \App\Models\BamsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
@@ -302,7 +311,7 @@ test('confirmation history safely labels a missing source record', function () {
 test('automatic runs deduplicate a sent memorandum for the same recipient and local date', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-20');
-    ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'office@example.test', 'is_active' => true]);
     $delivery = app(ComplianceAlertDeliveryService::class);
 
     $delivery->sendAutomatic();
@@ -312,7 +321,7 @@ test('automatic runs deduplicate a sent memorandum for the same recipient and lo
     expect(ComplianceNotificationRun::query()->where('is_manual', false)->where('status', 'sent')->count())->toBe(1);
 });
 
-test('recipient mapping is per-candidate while production Send Now remains guarded during the preview phase', function () {
+test('recipient mapping is per-candidate and production Send Now uses mapped recipients', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser());
     $mappedArea = complianceArea($manager);
@@ -326,9 +335,9 @@ test('recipient mapping is per-candidate while production Send Now remains guard
     expect(ComplianceNotificationRun::query()->where('run_type', 'automatic')->where('status', 'sent')->count())->toBe(1)
         ->and(ComplianceNotificationRun::query()->where('run_type', 'automatic')->where('status', 'skipped')->where('error_message', 'Recipient mapping is missing for this Protected Area / office group.')->count())->toBe(1);
 
-    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
-    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
-    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->count())->toBe(0);
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasNoErrors();
+    Mail::assertSent(OverdueComplianceMemorandum::class, 2);
+    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'sent')->count())->toBe(1);
 });
 
 test('Compliance Alerts No Recipient Mapping card counts current candidates and has no help marker', function () {
@@ -406,6 +415,57 @@ test('due-soon uses three calendar days across weekends and excludes completed o
         ->and($friday->contains(fn ($report) => $report->sourceType === BmsReportSubmission::class && $report->sourceId === $withoutDeadline->id))->toBeFalse();
 });
 
+test('due-soon uses an upcoming calendar-date window and keeps today and overdue separate', function () {
+    $user = complianceUser();
+    $deadlines = [
+        'within-2' => '2026-09-02',
+        'within-3' => '2026-09-03',
+        'within-4' => '2026-09-04',
+        'outside-4' => '2026-09-05',
+        'today' => '2026-09-01',
+        'overdue' => '2026-08-31',
+    ];
+
+    $reports = collect($deadlines)->mapWithKeys(fn (string $deadline, string $period) => [
+        $period => engpForDeadline($user, $deadline, ['period_key' => strtoupper($period)]),
+    ]);
+    $today = CarbonImmutable::parse('2026-09-01 23:59:59', 'Asia/Manila');
+    $service = app(OverdueReportService::class);
+    $dueSoon = $service->dueSoonReports(3, $today);
+    $dueToday = $service->dueTodayReports($today);
+    $overdue = $service->overdueReports($today);
+    expect($dueSoon->pluck('sourceId')->all())
+        ->toContain($reports['within-2']->id, $reports['within-3']->id, $reports['within-4']->id)
+        ->not->toContain($reports['outside-4']->id)
+        ->not->toContain($reports['today']->id)
+        ->not->toContain($reports['overdue']->id)
+        ->and($dueToday->pluck('sourceId')->all())->toBe([$reports['today']->id])
+        ->and($overdue->pluck('sourceId')->all())->toContain($reports['overdue']->id)
+        ->not->toContain($reports['today']->id);
+});
+
+test('PENRO-managed PAMB reports with no PENRO receipt remain eligible for the due-soon window', function () {
+    $user = complianceUser();
+    $area = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary', 'short_name' => 'MHRWS', 'category' => 'Wildlife Sanctuary',
+        'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    \App\Models\NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => \App\Models\NonWorkingDay::TYPE_NATIONAL_HOLIDAY, 'scope' => \App\Models\NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
+    BusinessCalendarService::forgetCache();
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'Hamiguitan',
+        'activity_name' => 'Regular PAMB', 'document_type' => 'Reso', 'date_conducted' => '2026-08-20', 'date_accomplished' => null,
+        'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+
+    $dueSoon = app(OverdueReportService::class)->dueSoonReports(3, CarbonImmutable::parse('2026-09-01', 'Asia/Manila'));
+
+    expect($report->deadline_submission)->toBe('2026-09-03')
+        ->and($report->submission_status)->toBe('Pending Receipt by PENRO')
+        ->and($report->days_complied)->toBe('Pending Receipt by PENRO')
+        ->and($dueSoon->firstWhere('sourceId', $report->id))->not->toBeNull();
+});
+
 test('automatic due-soon delivery sends once when Saturday is three calendar days before a Tuesday deadline', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
@@ -425,7 +485,7 @@ test('automatic due-soon delivery sends once when Saturday is three calendar day
         ->and(ComplianceDeliveryClaim::query()->where('status', ComplianceDeliveryClaim::STATUS_SENT)->count())->toBe(1);
 });
 
-test('production Send Now remains guarded during the preview phase', function () {
+test('production Send Now sends current mapped alert buckets', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-04 08:00:00', 'Asia/Manila'));
@@ -437,44 +497,43 @@ test('production Send Now remains guarded during the preview phase', function ()
     ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'recipient_email' => 'manual-current@example.test', 'is_active' => true]);
     enabledComplianceSettings();
 
-    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasNoErrors();
 
-    Mail::assertNothingSent();
-    expect(ComplianceNotificationRun::query()->where('run_type', ComplianceNotificationRun::TYPE_MANUAL)->count())->toBe(0);
+    Mail::assertSent(OverdueComplianceMemorandum::class, 3);
+    expect(ComplianceNotificationRun::query()->where('run_type', ComplianceNotificationRun::TYPE_MANUAL)->where('status', 'sent')->count())->toBe(3);
 });
 
-test('manual and test delivery remain available on weekends', function () {
-    Mail::fake(); config()->set('compliance_alerts.enabled', true); config()->set('compliance_alerts.test_email_enabled', true);
+test('manual delivery remains available on weekends', function () {
+    Mail::fake(); config()->set('compliance_alerts.enabled', true);
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 08:00:00', 'Asia/Manila'));
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
-    ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
-    enabledComplianceSettings(['test_recipient_email' => 'test@example.test']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'office@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
     $delivery = app(ComplianceAlertDeliveryService::class);
 
     $delivery->sendManual(app(OverdueReportService::class)->overdueReports(), $user);
-    $delivery->sendTest(app(OverdueReportService::class)->overdueReports(), $user);
-
-    Mail::assertSent(OverdueComplianceMemorandum::class, 2);
+    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
     expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'sent')->exists())->toBeTrue()
-        ->and(ComplianceNotificationRun::query()->where('run_type', 'test')->where('status', 'sent')->exists())->toBeTrue();
+        ->and(ComplianceNotificationRun::query()->where('run_type', 'test')->count())->toBe(0);
 });
 
-test('one target office receives a single memorandum with its Protected Area sections', function () {
+test('Protected Area destinations sharing an office and email remain isolated', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $user = complianceUser();
     $baganga = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id]);
     $otherBagangaArea = ProtectedArea::create(['name' => 'Baganga Mangrove Reserve', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id]);
     bmsForDeadline($baganga, $user, '2026-08-24', ['target_office' => 'Baganga']);
     bmsForDeadline($otherBagangaArea, $user, '2026-08-24', ['target_office' => 'Baganga']);
-    ComplianceAlertRecipient::query()->where('target_office', 'Baganga')->firstOrFail()->update(['recipient_email' => 'baganga@example.test']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $baganga->id, 'recipient_email' => 'baganga@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $otherBagangaArea->id, 'recipient_email' => 'baganga@example.test', 'is_active' => true]);
     enabledComplianceSettings();
 
     $plan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
     app(ComplianceAlertDeliveryService::class)->sendAutomatic();
 
-    expect($plan['deliveries'])->toHaveCount(1)
-        ->and($plan['deliveries']->first()['reports'])->toHaveCount(2);
-    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail) => count($mail->groups) === 2);
+    expect($plan['deliveries'])->toHaveCount(2)
+        ->and($plan['deliveries']->every(fn (array $delivery) => $delivery['reports']->count() === 1))->toBeTrue();
+    Mail::assertSent(OverdueComplianceMemorandum::class, 2);
 });
 
 test('office recipient presentation rules are data-driven for Baganga, Mati, and Hamiguitan', function () {
@@ -484,9 +543,9 @@ test('office recipient presentation rules are data-driven for Baganga, Mati, and
     bmsForDeadline($baganga, $user, '2026-08-24', ['target_office' => 'Baganga']);
     bmsForDeadline($mati, $user, '2026-08-24', ['target_office' => 'Mati']);
     bmsForDeadline($hamiguitan, $user, '2026-08-24', ['target_office' => 'Hamiguitan']);
-    ComplianceAlertRecipient::query()->where('target_office', 'Baganga')->firstOrFail()->update(['recipient_email' => 'baganga@example.test']);
-    ComplianceAlertRecipient::query()->where('target_office', 'Mati')->firstOrFail()->update(['recipient_email' => 'mati@example.test']);
-    ComplianceAlertRecipient::query()->where('target_office', 'Hamiguitan')->firstOrFail()->update(['recipient_email' => 'hamiguitan@example.test']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $baganga->id, 'recipient_email' => 'baganga@example.test', 'recipient_name' => 'The Deputy PASu of Baganga', 'attention_line' => 'Chief, Conservation and Development Section', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $mati->id, 'recipient_email' => 'mati@example.test', 'recipient_name' => 'The Deputy PASu of Mati', 'attention_line' => 'Chief, Conservation and Development Section', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $hamiguitan->id, 'recipient_email' => 'hamiguitan@example.test', 'recipient_name' => 'The OIC, PASu of Hamiguitan', 'attention_line' => '', 'is_active' => true]);
 
     $deliveries = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports())['deliveries']->keyBy(fn (array $delivery) => $delivery['reports']->first()->targetOffice);
 
@@ -501,7 +560,7 @@ test('office recipient presentation rules are data-driven for Baganga, Mati, and
 test('manual send is audited separately from an automatic run', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
-    ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'office@example.test', 'is_active' => true]);
     $delivery = app(ComplianceAlertDeliveryService::class);
 
     $delivery->sendAutomatic();
@@ -524,7 +583,7 @@ test('disabled alerts do not send external mail and log a skipped run', function
 test('the mailable receives grouped overdue data', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
-    ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'office@example.test', 'is_active' => true]);
 
     app(ComplianceAlertDeliveryService::class)->sendAutomatic();
 
@@ -572,7 +631,7 @@ test('an exact Protected Area recipient mapping wins over office and fallback ma
         ->and($report)->toBeInstanceOf(BmsReportSubmission::class);
 });
 
-test('new memorandum recipient addressing uses institutional designations only', function () {
+test('new memorandum recipient addressing uses configured designations and attention lines', function () {
     $user = complianceUser();
     $area = complianceArea($user);
     bmsForDeadline($area, $user, '2026-08-24');
@@ -590,16 +649,36 @@ test('new memorandum recipient addressing uses institutional designations only',
         ->first()['recipient'];
 
     expect($recipient->email)->toBe('institutional@example.test')
-        ->and($recipient->name)->toBe('The OIC, PASu')
-        ->and($recipient->attentionLine)->toBe('');
+        ->and($recipient->name)->toBe('Jane Doe')
+        ->and($recipient->attentionLine)->toBe('John Smith');
 });
 
-test('office mapping is used when a PA mapping is absent and missing mappings remain unmapped', function () {
+test('overdue recipient fallbacks use the overdue template attention and resolved destination', function () {
+    $user = complianceUser();
+    $area = complianceArea($user);
+    bmsForDeadline($area, $user, '2026-08-24');
+    ComplianceAlertRecipient::create([
+        'protected_area_id' => $area->id,
+        'recipient_email' => 'overdue-fallback@example.test',
+        'is_active' => true,
+    ]);
+
+    $recipient = app(ComplianceAlertDeliveryService::class)
+        ->deliveryPlan(app(OverdueReportService::class)->overdueReports(), ComplianceNotificationRun::ALERT_OVERDUE)['deliveries']
+        ->first()['recipient'];
+
+    expect($recipient->name)->toBe('The OIC, PASu')
+        ->and($recipient->attentionLine)->toBe('Chief, Conservation and Development Section')
+        ->and($recipient->destination)->toBe($area->name);
+});
+
+test('office mapping does not satisfy a Protected Area destination when the PA mapping is absent', function () {
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
     ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]);
 
     $officePlan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
-    expect($officePlan['deliveries']->first()['recipient']->email)->toBe('office@example.test');
+    expect($officePlan['deliveries'])->toBeEmpty()
+        ->and($officePlan['unmapped'])->toHaveCount(1);
 
     ComplianceAlertRecipient::query()->update(['is_active' => false]);
     $fallbackPlan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
@@ -624,7 +703,7 @@ test('inactive mappings are ignored and unmapped automatic groups are safely ski
 test('a deactivated recipient is ignored and resolves again after reactivation', function () {
     config()->set('compliance_alerts.fallback_recipient_email', ''); config()->set('compliance_alerts.recipients', []);
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
-    $mapping = ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => false]);
+    $mapping = ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'office@example.test', 'is_active' => false]);
     $service = app(ComplianceAlertDeliveryService::class);
 
     expect($service->deliveryPlan(app(OverdueReportService::class)->overdueReports())['unmapped'])->toHaveCount(1);
@@ -636,7 +715,7 @@ test('a deactivated recipient is ignored and resolves again after reactivation',
 test('used recipient mappings cannot be deleted and notification history remains unchanged after deactivation', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser()); $area = complianceArea($manager); bmsForDeadline($area, $manager, '2026-08-24');
-    $mapping = ComplianceAlertRecipient::create(['target_office' => 'PAMO Pujada Bay', 'recipient_email' => 'office@example.test', 'is_active' => true]); enabledComplianceSettings();
+    $mapping = ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'office@example.test', 'is_active' => true]); enabledComplianceSettings();
     app(ComplianceAlertDeliveryService::class)->sendAutomatic();
     $run = ComplianceNotificationRun::query()->first();
 
@@ -719,22 +798,6 @@ test('settings editing and Records unconfirmation require compliance alert manag
     $this->actingAs($viewer)->delete(route('compliance-alerts.unconfirm'), ['source_type' => BmsReportSubmission::class, 'source_id' => $report->id])->assertForbidden();
 });
 
-test('test email goes only to the configured test recipient and does not block automatic delivery', function () {
-    Mail::fake(); config()->set('compliance_alerts.enabled', true); config()->set('compliance_alerts.test_email_enabled', true);
-    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
-    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'real-pa@example.test', 'is_active' => true]);
-    enabledComplianceSettings(['test_recipient_email' => 'test-only@example.test']);
-    $delivery = app(ComplianceAlertDeliveryService::class);
-
-    $delivery->sendTest(app(OverdueReportService::class)->overdueReports(), $user);
-    $delivery->sendAutomatic();
-
-    Mail::assertSent(OverdueComplianceMemorandum::class, 2);
-    expect(ComplianceNotificationRun::query()->where('run_type', 'automatic')->where('status', 'sent')->count())->toBe(1)
-        ->and(ComplianceNotificationRun::query()->where('run_type', 'test')->where('status', 'sent')->count())->toBe(1)
-        ->and(ComplianceNotificationRun::query()->where('run_type', 'test')->first()->recipients)->toBe(['test-only@example.test']);
-});
-
 test('manual delivery does not block automatic deduplication and safe mode blocks manual delivery', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
@@ -775,34 +838,8 @@ test('preview and history use the same memorandum data while snapshots remain st
     $snapshotActivity = $run->reports->first()->snapshot['activity'];
     $report->update(['activity_name' => 'Changed after sending']);
 
-    $this->actingAs($manager)->get(route('compliance-alerts.preview'))->assertOk()->assertSee('The OIC, PASu')->assertDontSee('Pujada Office')->assertSee('Changed after sending')->assertSee('MEMORANDUM');
+    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))->assertOk()->assertSee('Pujada Office')->assertSee($area->name)->assertSee('Changed after sending')->assertSee('MEMORANDUM');
     expect($run->fresh()->reports->first()->snapshot['activity'])->toBe($snapshotActivity);
-});
-
-test('test email is isolated from production recipients and production CC addresses', function () {
-    Mail::fake(); config()->set('compliance_alerts.test_email_enabled', true);
-    $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
-    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'production-pa@example.test', 'cc_emails' => ['production-cc@example.test'], 'is_active' => true]);
-    enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test', 'fallback_cc_emails' => ['fallback-cc@example.test']]);
-
-    app(ComplianceAlertDeliveryService::class)->sendTest(app(OverdueReportService::class)->overdueReports(), $user);
-
-    $run = ComplianceNotificationRun::query()->where('run_type', 'test')->first();
-    expect($run->recipients)->toBe(['controlled-test@example.test'])
-        ->and($run->cc_recipients)->toBe([])
-        ->and($run->payload['recipient']['source'])->toBe('test')
-        ->and($run->subject)->toBe("\u{26A0} PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports");
-});
-
-test('test email is blocked when no reports are overdue', function () {
-    Mail::fake(); config()->set('compliance_alerts.test_email_enabled', true);
-    $user = complianceUser(); enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
-
-    expect(fn () => app(ComplianceAlertDeliveryService::class)->sendTest(collect(), $user))
-        ->toThrow(\Illuminate\Validation\ValidationException::class);
-
-    Mail::assertNothingSent();
-    expect(ComplianceNotificationRun::query()->where('run_type', 'test')->count())->toBe(0);
 });
 
 test('automatic delivery stays blocked unless both the environment and database gates are enabled', function () {
@@ -827,18 +864,18 @@ test('automatic delivery stays blocked unless both the environment and database 
         ->and($delivery->automaticDeliveryState()['effective'])->toBeTrue();
 });
 
-test('dry run command never invokes mail and reports mapped destinations', function () {
+test('production command uses the automatic delivery policy', function () {
     Mail::fake(); config()->set('compliance_alerts.enabled', true);
     $user = complianceUser(); $area = complianceArea($user); bmsForDeadline($area, $user, '2026-08-24');
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa@example.test', 'is_active' => true]); enabledComplianceSettings();
 
-    $this->artisan('compliance:send-overdue-alerts', ['--dry-run' => true])
-        ->expectsOutputToContain('Mode: dry run (Mail is never called).')
+    $this->artisan('compliance:send-overdue-alerts')
+        ->expectsOutputToContain('Mode: automatic production delivery policy.')
         ->expectsOutputToContain('READY')
         ->assertExitCode(0);
 
-    Mail::assertNothingSent();
-    expect(ComplianceNotificationRun::query()->first()->run_type)->toBe('dry_run');
+    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
+    expect(ComplianceNotificationRun::query()->first()->run_type)->toBe(ComplianceNotificationRun::TYPE_AUTOMATIC);
 });
 
 test('the compliance source registry covers every legitimate report submission tracker exactly once', function () {
@@ -888,9 +925,9 @@ test('submitted reports are excluded from preview, manual, and automatic memoran
         ->and(app(ComplianceAlertDeliveryService::class)->deliveryPlan($reports)['deliveries'])->toBeEmpty()
         ->and(app(OverdueReportService::class)->pendingRecordsVerification())->toHaveCount(1);
 
-    $this->actingAs($manager)->get(route('compliance-alerts.preview'))
+    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:999999', 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))
         ->assertRedirect(route('compliance-alerts.index'))
-        ->assertSessionHasErrors(['preview' => 'No current overdue reports to preview.']);
+        ->assertSessionHasErrors(['preview' => 'No qualifying reports for this alert type.']);
 
     $delivery = app(ComplianceAlertDeliveryService::class);
     expect($delivery->sendManual($reports, $manager))->toBeEmpty()
@@ -1013,6 +1050,9 @@ test('boss default office mappings resolve exact recipients and presentation dat
     bmsForDeadline($baganga, $user, '2026-08-20', ['target_office' => 'Baganga']);
     bmsForDeadline($hamiguitan, $user, '2026-08-20', ['target_office' => 'Hamiguitan']);
     bmsForDeadline($mati, $user, '2026-08-20', ['target_office' => 'Mati']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $baganga->id, 'recipient_name' => 'The Deputy PASu of Baganga', 'attention_line' => 'Chief, Conservation and Development Section', 'recipient_email' => 'cenrobaganga@denr.gov.ph', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $hamiguitan->id, 'recipient_name' => 'The OIC, PASu of Hamiguitan', 'attention_line' => '', 'recipient_email' => 'mthamiguitan@denr.gov.ph', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $mati->id, 'recipient_name' => 'The Deputy PASu of Mati', 'attention_line' => 'Chief, Conservation and Development Section', 'recipient_email' => 'cenromati@denr.gov.ph', 'is_active' => true]);
 
     $plan = app(ComplianceAlertDeliveryService::class)->deliveryPlan(app(OverdueReportService::class)->overdueReports());
     $byOffice = $plan['deliveries']->keyBy(fn (array $delivery) => $delivery['reports']->first()->targetOffice);
@@ -1048,7 +1088,8 @@ test('boss defaults include exact CC and signatory settings', function () {
 });
 
 test('reapplying boss defaults preserves customized mappings and settings', function () {
-    $mapping = ComplianceAlertRecipient::query()->where('target_office', 'Baganga')->firstOrFail();
+    $area = complianceArea(complianceUser());
+    $mapping = ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'original@example.test', 'is_active' => true]);
     $mapping->update(['recipient_email' => 'custom@example.test', 'recipient_name' => 'Custom Recipient']);
     $settings = ComplianceAlertSetting::create(['alerts_enabled' => false, 'automatic_send_enabled' => false, 'send_time' => '08:00', 'timezone' => 'Asia/Manila']);
     $settings->update(['signatory_name' => 'Custom Signatory', 'fallback_cc_emails' => ['custom-cc@example.test']]);
@@ -1059,36 +1100,24 @@ test('reapplying boss defaults preserves customized mappings and settings', func
         ->and($mapping->fresh()->recipient_name)->toBe('Custom Recipient')
         ->and($settings->fresh()->signatory_name)->toBe('Custom Signatory')
         ->and($settings->fresh()->fallback_cc_emails)->toBe(['custom-cc@example.test'])
-        ->and(ComplianceAlertRecipient::query()->where('target_office', 'Baganga')->count())->toBe(1);
+        ->and(ComplianceAlertRecipient::query()->whereKey($mapping->id)->count())->toBe(1);
 });
 
 test('delivery failure records a safe history message and does not leak transport details to the browser', function () {
-    config()->set('compliance_alerts.enabled', true); config()->set('compliance_alerts.test_email_enabled', true);
+    config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser()); $area = complianceArea($manager); bmsForDeadline($area, $manager, '2026-08-24');
-    enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'production-recipient@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
     Mail::shouldReceive('to')->once()->andThrow(new \RuntimeException('SMTP password=super-secret-value'));
 
-    $this->actingAs($manager)->post(route('compliance-alerts.send-test'))->assertSessionHasErrors([
-        'test_email' => 'Test email delivery failed. No successful-send record was created. See notification history for status.',
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertSessionHasErrors([
+        'delivery' => 'One or more compliance alert deliveries failed. See notification history for status.',
     ]);
 
-    $run = ComplianceNotificationRun::query()->where('run_type', 'test')->first();
+    $run = ComplianceNotificationRun::query()->where('run_type', ComplianceNotificationRun::TYPE_MANUAL)->first();
     expect($run->status)->toBe('failed')
         ->and($run->error_message)->toBe('Email delivery failed. See application logs for technical details.')
         ->and($run->error_message)->not->toContain('super-secret-value');
-});
-
-test('the test email config gate is exposed to Inertia and remains independent of production alerts', function () {
-    $manager = complianceManager(complianceUser());
-    config()->set('compliance_alerts.enabled', false);
-    config()->set('compliance_alerts.test_email_enabled', false);
-
-    $this->actingAs($manager)->get(route('compliance-alerts.index'))
-        ->assertOk()->assertInertia(fn (Assert $page) => $page->where('testEmailEnabled', false));
-
-    config()->set('compliance_alerts.test_email_enabled', true);
-    $this->actingAs($manager)->get(route('compliance-alerts.index'))
-        ->assertOk()->assertInertia(fn (Assert $page) => $page->where('testEmailEnabled', true)->where('safeMode', true));
 });
 
 test('known settings placeholders are corrected without changing official values', function () {
@@ -1163,9 +1192,9 @@ test('production preview is unavailable when there are no current overdue report
             ->where('deliveryPlan.deliveries', []));
 
     Mail::fake();
-    $this->actingAs($manager)->get(route('compliance-alerts.preview'))
+    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:999999', 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))
         ->assertRedirect(route('compliance-alerts.index'))
-        ->assertSessionHasErrors(['preview' => 'No current overdue reports to preview.']);
+        ->assertSessionHasErrors(['preview' => 'No qualifying reports for this alert type.']);
     Mail::assertNothingSent();
 });
 
@@ -1184,21 +1213,22 @@ test('production preview is unavailable when overdue reports have no mapped reci
             ->where('deliveryPlan.deliveries', []));
 
     Mail::fake();
-    $this->actingAs($manager)->get(route('compliance-alerts.preview'))
+    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))
         ->assertRedirect(route('compliance-alerts.index'))
-        ->assertSessionHasErrors(['preview' => 'No mapped recipient is available for the current overdue reports.']);
+        ->assertSessionHasErrors(['preview' => 'No active recipient mapping is available for this destination.']);
     Mail::assertNothingSent();
 });
 
-test('live test preview returns the canonical JSON contract without sending mail', function () {
+test('production memorandum preview returns the canonical JSON contract without sending mail', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
     bmsForDeadline($area, $manager, '2026-08-24');
-    enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'production-pa@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
 
-    $response = $this->actingAs($manager)->get(route('compliance-alerts.preview', ['test' => 1]), [
+    $response = $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]), [
         'Accept' => 'application/json',
         'X-Requested-With' => 'XMLHttpRequest',
     ]);
@@ -1208,21 +1238,21 @@ test('live test preview returns the canonical JSON contract without sending mail
     $response->assertJsonStructure(['subject', 'html', 'template_type', 'recipient', 'meta'])
         ->assertJsonPath('subject', "\u{26A0} PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports")
         ->assertJsonPath('template_type', 'protected_area_overdue')
-        ->assertJsonPath('recipient.email', 'controlled-test@example.test')
+        ->assertJsonPath('recipient.email', 'production-pa@example.test')
+        ->assertJsonPath('recipient.destination', $area->name)
         ->assertJsonPath('meta.report_count', 1);
 
     $html = (string) $response->json('html');
-    expect($html)->toContain('MEMORANDUM')->toContain($area->name)->toContain('Days Overdue');
+    expect($html)->toContain('MEMORANDUM')->toContain('The OIC, PASu')->toContain($area->name)->toContain('Days Overdue');
     Mail::assertNothingSent();
 });
 
-test('template preview rejects an invalid variant with a JSON validation response', function () {
+test('destination preview rejects unsupported alert methods and variants', function () {
     $manager = complianceManager(complianceUser());
 
-    $response = $this->actingAs($manager)->postJson(route('compliance-alerts.templates.preview'), ['template' => 'invalid_variant']);
+    $response = $this->actingAs($manager)->post(route('compliance-alerts.preview', ['destination_key' => 'pa:1', 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]));
 
-    expect($response->status())->toBe(422);
-    expect($response->json('errors.template'))->not->toBeEmpty();
+    expect($response->status())->toBe(405);
 });
 
 test('production preview works with a current overdue report and resolvable recipient', function () {
@@ -1232,7 +1262,7 @@ test('production preview works with a current overdue report and resolvable reci
     bmsForDeadline($area, $manager, '2026-08-24');
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa@example.test', 'is_active' => true]);
 
-    $this->actingAs($manager)->get(route('compliance-alerts.preview'))
+    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))
         ->assertOk()
         ->assertSee('MEMORANDUM');
     Mail::assertNothingSent();
@@ -1240,12 +1270,12 @@ test('production preview works with a current overdue report and resolvable reci
 
 test('preview reports no eligible overdue records when production preview has no reports', function () {
     $manager = complianceManager(complianceUser());
-    enabledComplianceSettings(['test_recipient_email' => 'controlled-test@example.test']);
+    enabledComplianceSettings();
 
     Mail::fake();
-    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['test' => 1]))
+    $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:999999', 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))
         ->assertRedirect()
-        ->assertSessionHasErrors(['preview' => 'No eligible overdue reports found for preview.']);
+        ->assertSessionHasErrors(['preview' => 'No qualifying reports for this alert type.']);
     Mail::assertNothingSent();
 });
 
@@ -1275,7 +1305,7 @@ test('repeated identical manual delivery sends each destination only once', func
         ->and(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'skipped')->count())->toBe(1);
 });
 
-test('repeated production Send Now HTTP requests remain guarded during the preview phase', function () {
+test('repeated production Send Now HTTP requests are deduplicated', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser());
@@ -1284,13 +1314,14 @@ test('repeated production Send Now HTTP requests remain guarded during the previ
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'http-idempotent@example.test', 'is_active' => true]);
     enabledComplianceSettings();
 
-    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect()->assertSessionHasNoErrors();
     $this->actingAs($manager)->post(route('compliance-alerts.send'))
         ->assertRedirect()
-        ->assertSessionHasErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
+        ->assertSessionHasNoErrors();
 
-    Mail::assertNothingSent();
-    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->count())->toBe(0);
+    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
+    expect(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'sent')->count())->toBe(1)
+        ->and(ComplianceNotificationRun::query()->where('run_type', 'manual')->where('status', 'skipped')->count())->toBe(1);
 });
 
 test('manual partial failure retries only the failed destination and preserves successful history', function () {
@@ -1820,7 +1851,12 @@ test('PA and ENGP due-soon memoranda use their own approved destination presenta
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 10:00:00', 'Asia/Manila'));
     $manager = complianceUser();
     $area = complianceArea($manager);
-    bmsForDeadline($area, $manager, '2026-08-28');
+    ConservationReportSubmission::create([
+        'protected_area_id' => $area->id, 'target_office' => 'Pujada Bay', 'workflow_key' => 'regular_pamb',
+        'activity_name' => 'PA preview activity', 'document_type' => 'Final Report', 'reporting_period' => 'Quarter 3',
+        'date_conducted' => '2026-08-18', 'date_accomplished' => '2026-08-18',
+        'created_by' => $manager->id, 'updated_by' => $manager->id,
+    ]);
     engpForDeadline($manager, '2026-08-31', ['office' => 'CENRO Baganga']);
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa-reminder@example.test', 'is_active' => true]);
     ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'engp-reminder@example.test', 'is_active' => true]);
@@ -1873,7 +1909,9 @@ test('PA and ENGP overdue memoranda use their own approved subject and memorandu
         return $mail->presentation['template'] === 'engp_overdue'
             && $mail->envelope()->subject === 'IMMEDIATE ACTION REQUIRED: Submission of Regular ENGP Monitoring and Accomplishment Reports'
             && str_contains($html, 'The deadline for submission of the Regular ENGP Monitoring and Accomplishment/Progress Reports has already lapsed.')
-            && str_contains($html, 'Implementing Office: CENRO Baganga')
+            && str_contains($html, 'Implementing Office</div>')
+            && str_contains($html, 'CENRO Baganga')
+            && ! str_contains($html, 'Implementing Office: CENRO Baganga')
             && ! str_contains($html, 'Protected Area Management-related');
     });
 });
@@ -1905,23 +1943,57 @@ test('Compliance Alerts exposes PA and ENGP candidates in separate operational s
             ->where('complianceScopes.protected_area.summary.unmapped_destinations', 0)
             ->where('complianceScopes.engp.summary.unmapped_destinations', 0)
             ->where('complianceScopes.protected_area.summary.affected_groups', 1)
-            ->where('complianceScopes.engp.summary.affected_groups', 1));
+             ->where('complianceScopes.engp.summary.affected_groups', 1));
 });
 
-test('template preview is admin-authorized, POST-only, and renders the submitted PA customization through the delivery Blade view', function () {
+test('Protected Area readiness, mapped mail recipients, and Last Sent history use the same logical destination', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-24');
+    ComplianceAlertRecipient::create([
+        'protected_area_id' => $area->id,
+        'recipient_name' => 'Deputy PASu of Pujada Bay',
+        'attention_line' => 'Chief, Conservation and Development Section',
+        'recipient_email' => 'mapped-pa@example.test',
+        'cc_emails' => ['mapped-cc@example.test'],
+        'is_active' => true,
+    ]);
+    enabledComplianceSettings();
+
+    app(ComplianceAlertDeliveryService::class)->sendAutomatic();
+
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail): bool {
+        return $mail->hasTo('mapped-pa@example.test') && $mail->hasCc('mapped-cc@example.test');
+    });
+
+    $sentAt = ComplianceNotificationRun::query()->where('status', ComplianceNotificationRun::STATUS_SENT)->firstOrFail()->sent_at->toIso8601String();
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('complianceScopes.protected_area.readiness.0.status', 'ready')
+            ->where('complianceScopes.protected_area.readiness.0.recipient.email', 'mapped-pa@example.test')
+            ->where('complianceScopes.protected_area.groups.0.last_sent', $sentAt));
+});
+
+test('destination preview is permissioned, GET-only, and renders saved PA customization for a real mapped report', function () {
     $manager = complianceManager(complianceUser());
     $viewer = complianceUser();
-    $draft = ['protected_area_due_soon' => ['subject' => 'Custom PA Preview Subject', 'introductory_text' => 'Custom PA preview introduction.']];
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 10:00:00', 'Asia/Manila'));
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-31');
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'preview-pa@example.test', 'is_active' => true]);
+    enabledComplianceSettings(['template_settings' => ['protected_area_due_soon' => ['subject' => 'Custom PA Preview Subject', 'introductory_text' => 'Custom PA preview introduction.']]]);
 
-    $this->actingAs($viewer)->post(route('compliance-alerts.templates.preview'), ['template' => 'protected_area_due_soon'])
+    $this->actingAs($viewer)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON]))
         ->assertForbidden();
-    $this->actingAs($manager)->get(route('compliance-alerts.templates.preview'))
+    $this->actingAs($manager)->post(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON]))
         ->assertStatus(405);
-    $this->actingAs($manager)->post(route('compliance-alerts.templates.preview'), [
-        'template' => 'protected_area_due_soon', 'template_settings' => $draft,
-    ])->assertOk()
+    $this->actingAs($manager)->getJson(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON]))->assertOk()
         ->assertJsonPath('subject', 'Custom PA Preview Subject')
-        ->assertJsonPath('html', fn (string $html): bool => str_contains($html, 'Custom PA preview introduction.') && str_contains($html, 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)'));
+        ->assertJsonPath('html', fn (string $html): bool => str_contains($html, 'Custom PA preview introduction.') && str_contains($html, $area->name));
 });
 
 test('saved PA and ENGP template customizations persist and are isolated in actual delivery', function () {
@@ -1944,8 +2016,8 @@ test('saved PA and ENGP template customizations persist and are isolated in actu
 
     app(ComplianceAlertDeliveryService::class)->sendAutomatic();
 
-    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'protected_area_overdue' && $mail->envelope()->subject === "⚠ PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports" && str_contains($mail->render(), $area->name));
-    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'engp_overdue' && $mail->envelope()->subject === 'Custom ENGP Overdue Subject' && str_contains($mail->render(), 'Implementing Office: CENRO Baganga'));
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'protected_area_overdue' && $mail->envelope()->subject === 'Custom PA Overdue Subject' && str_contains($mail->render(), $area->name));
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'engp_overdue' && $mail->envelope()->subject === 'Custom ENGP Overdue Subject' && str_contains($mail->render(), 'Implementing Office</div>') && str_contains($mail->render(), 'CENRO Baganga') && ! str_contains($mail->render(), 'Implementing Office: CENRO Baganga'));
 });
 
 test('template editor UI retains four independent PA and ENGP template contexts', function () {
@@ -1957,7 +2029,8 @@ test('template editor UI retains four independent PA and ENGP template contexts'
         ->toContain('protected_area_overdue')
         ->toContain('engp_due_soon')
         ->toContain('engp_overdue')
-        ->toContain('Preview Notification');
+        ->toContain('Preview 3-Day')
+        ->toContain('Test Overdue');
 });
 test('PA and ENGP compliance mailables use the configured Laravel From identity while recipient mappings stay independent', function () {
     Mail::fake();
@@ -1993,25 +2066,108 @@ test('PA and ENGP compliance mailables use the configured Laravel From identity 
     });
 });
 
-test('all PA and ENGP template previews use safe data and never send mail', function () {
+test('all PA and ENGP destination previews use current mapped data and never send mail', function () {
     Mail::fake();
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 10:00:00', 'Asia/Manila'));
     $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-24');
+    bmsForDeadline($area, $manager, '2026-08-31', ['semester' => '2nd Semester']);
+    engpForDeadline($manager, '2026-08-24', ['period_key' => 'PREVIEW-OVERDUE']);
+    engpForDeadline($manager, '2026-08-31', ['period_key' => 'PREVIEW-DUE-SOON']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'preview-pa@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'preview-engp@example.test', 'is_active' => true]);
     $cases = [
-        'protected_area_due_soon' => ['Protected Area', 'Protected Area Management-related report', 'Days Remaining'],
-        'protected_area_overdue' => ['PRIORITY ACTION REQUIRED', 'Overdue Submission of PA-related Reports', 'Protected Area'],
-        'engp_due_soon' => ['Enhanced National Greening Program (ENGP)', 'Implementing Office', 'Days Remaining'],
-        'engp_overdue' => ['IMMEDIATE ACTION REQUIRED', 'Submission of Regular ENGP Monitoring and Accomplishment Reports', 'Implementing Office'],
+        ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON, 'needles' => ['Protected Area Management-related report', 'Days Remaining', $area->name]],
+        ['destination_key' => 'pa:'.$area->id, 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE, 'needles' => ['PRIORITY ACTION REQUIRED', 'Overdue Submission of PA-related Reports', $area->name]],
+        ['destination_key' => 'office:cenro_baganga', 'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON, 'needles' => ['Enhanced National Greening Program (ENGP)', 'Implementing Office', 'CENRO Baganga']],
+        ['destination_key' => 'office:cenro_baganga', 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE, 'needles' => ['IMMEDIATE ACTION REQUIRED', 'Submission of Regular ENGP Monitoring and Accomplishment Reports', 'CENRO Baganga']],
     ];
 
-    foreach ($cases as $template => $needles) {
-        $response = $this->actingAs($manager)->post(route('compliance-alerts.templates.preview'), ['template' => $template]);
+    foreach ($cases as $case) {
+        $response = $this->actingAs($manager)->getJson(route('compliance-alerts.preview', ['destination_key' => $case['destination_key'], 'alert_type' => $case['alert_type']]));
         $response->assertOk();
         $html = (string) $response->json('html');
-        foreach ($needles as $needle) {
+        foreach ($case['needles'] as $needle) {
             expect($html)->toContain($needle);
         }
     }
 
+    Mail::assertNothingSent();
+});
+
+test('destination-aware test delivery uses the mapped recipient and the same memorandum payload without production history', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 10:00:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-08-31');
+    ComplianceAlertRecipient::create([
+        'protected_area_id' => $area->id,
+        'recipient_name' => 'Deputy PASu of Pujada Bay',
+        'attention_line' => 'Chief, Conservation and Development Section',
+        'recipient_email' => 'mapped-test@example.test',
+        'cc_emails' => ['mapped-test-cc@example.test'],
+        'is_active' => true,
+    ]);
+    enabledComplianceSettings();
+
+    $run = app(ComplianceAlertDeliveryService::class)->sendTest('pa:'.$area->id, ComplianceNotificationRun::ALERT_DUE_SOON, $manager);
+
+    expect($run->run_type)->toBe(ComplianceNotificationRun::TYPE_TEST)
+        ->and($run->status)->toBe(ComplianceNotificationRun::STATUS_SENT)
+        ->and($run->recipients)->toBe(['mapped-test@example.test'])
+        ->and($run->cc_recipients)->toBe(['mapped-test-cc@example.test'])
+        ->and(ComplianceDeliveryClaim::query()->count())->toBe(0)
+        ->and(app(ComplianceAlertDeliveryService::class)->lastSentByLogicalKey(ComplianceNotificationRun::query()->get()))->toBe([]);
+
+    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail) use ($area): bool {
+        return $mail->hasTo('mapped-test@example.test')
+            && $mail->hasCc('mapped-test-cc@example.test')
+            && str_contains($mail->render(), 'Deputy PASu of Pujada Bay')
+            && str_contains($mail->render(), $area->name)
+            && str_contains($mail->render(), 'Chief, Conservation and Development Section')
+            && $mail->presentation['template'] === 'protected_area_due_soon';
+    });
+});
+
+test('destination cards expose each active mapped destination without selecting the first mapping implicitly', function () {
+    $manager = complianceManager(complianceUser());
+    $aliwagwag = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape (APL)', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
+    $hamiguitan = ProtectedArea::create(['name' => 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
+    bmsForDeadline($aliwagwag, $manager, '2026-08-24');
+    bmsForDeadline($hamiguitan, $manager, '2026-08-24');
+    ComplianceAlertRecipient::create(['protected_area_id' => $aliwagwag->id, 'recipient_name' => 'Deputy PASu of Baganga', 'recipient_email' => 'aliwagwag-card@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $hamiguitan->id, 'recipient_name' => 'OIC-PASu of Hamiguitan', 'recipient_email' => 'hamiguitan-card@example.test', 'is_active' => true]);
+
+    $response = $this->actingAs($manager)->get(route('settings.compliance-alerts'));
+
+    $response->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('destinationCards', fn ($cards): bool => collect($cards)->contains(fn (array $card): bool => $card['destination'] === $aliwagwag->name && $card['recipient']['email'] === 'aliwagwag-card@example.test'))
+        ->where('destinationCards', fn ($cards): bool => collect($cards)->contains(fn (array $card): bool => $card['destination'] === $hamiguitan->name && $card['recipient']['email'] === 'hamiguitan-card@example.test')));
+});
+
+test('selected destination preview never inherits the first Protected Area mapping', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    $manager = complianceManager(complianceUser());
+    $aliwagwag = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape (APL)', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
+    $hamiguitan = ProtectedArea::create(['name' => 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
+    bmsForDeadline($aliwagwag, $manager, '2026-08-24');
+    bmsForDeadline($hamiguitan, $manager, '2026-08-24');
+    ComplianceAlertRecipient::create(['protected_area_id' => $aliwagwag->id, 'recipient_name' => 'Aliwagwag TO', 'recipient_email' => 'aliwagwag-preview@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $hamiguitan->id, 'recipient_name' => 'Hamiguitan TO', 'attention_line' => 'Hamiguitan Attention', 'recipient_email' => 'hamiguitan-preview@example.test', 'is_active' => true]);
+
+    $response = $this->actingAs($manager)->getJson(route('compliance-alerts.preview', ['destination_key' => 'pa:'.$hamiguitan->id, 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]));
+
+    $response->assertOk()->assertJsonPath('recipient.email', 'hamiguitan-preview@example.test');
+    $html = (string) $response->json('html');
+    expect($html)->toContain('Hamiguitan TO')
+        ->toContain($hamiguitan->name)
+        ->toContain('Hamiguitan Attention')
+        ->not->toContain('Aliwagwag TO')
+        ->not->toContain($aliwagwag->name);
     Mail::assertNothingSent();
 });
 
@@ -2034,4 +2190,138 @@ test('mail credentials are never exposed through compliance settings or retained
     ]);
     expect($templates['protected_area_due_soon'])->toHaveKey('subject', 'Safe subject')
         ->not->toHaveKey('password');
+});
+
+test('compliance rich text sanitizer preserves the supported formatting and strips unsafe markup', function (): void {
+    $value = '<p>Plain <strong>bold</strong> <em>italic</em> <u>underlined</u> <span style="color:#b42318;background:url(javascript:alert(1))" onclick="alert(1)">red</span><script>alert(1)</script></p>';
+    $sanitized = app(ComplianceRichTextSanitizer::class)->sanitize($value);
+
+    expect($sanitized)
+        ->toContain('<strong>bold</strong>')
+        ->toContain('<em>italic</em>')
+        ->toContain('<u>underlined</u>')
+        ->toContain('<span style="color:#b42318">red</span>')
+        ->not->toContain('<script')
+        ->not->toContain('onclick')
+        ->not->toContain('background')
+        ->not->toContain('javascript:')
+        ->not->toContain('alert(1)');
+
+    expect(app(ComplianceRichTextSanitizer::class)->sanitize("Existing plain\ntext"))->toBe("Existing plain\ntext");
+});
+
+test('all PA and ENGP template contexts sanitize body fields while subjects remain plain text', function (): void {
+    $resolver = app(ComplianceAlertTemplateResolver::class);
+    $settings = $resolver->templateSettings([
+        'template_settings' => collect(['protected_area_due_soon', 'protected_area_overdue', 'engp_due_soon', 'engp_overdue'])
+            ->mapWithKeys(fn (string $key): array => [$key => [
+                'subject' => '<strong>Plain Subject</strong>',
+                'introductory_text' => '<strong>Bold introduction</strong>',
+                'instruction_text' => '<em>Italic instruction</em>',
+                'report_heading' => '<u>Underlined heading</u>',
+                'closing_text' => '<span style="color:#14532d">Green closing</span>',
+                'closing_directive' => '<span style="color:#b42318"><strong>Red directive</strong></span>',
+                'focal_footer_text' => '<strong>Footer</strong>',
+                'unsafe' => '<script>alert(1)</script>',
+            ]])->all(),
+    ]);
+
+    foreach ($settings as $template) {
+        expect($template['subject'])->toBe('Plain Subject')
+            ->and($template['introductory_text'])->toContain('<strong>Bold introduction</strong>')
+            ->and($template['instruction_text'])->toContain('<em>Italic instruction</em>')
+            ->and($template['report_heading'])->toContain('<u>Underlined heading</u>')
+            ->and($template['closing_text'])->toContain('<span style="color:#14532d">Green closing</span>')
+            ->and($template['closing_directive'])->toContain('<span style="color:#b42318"><strong>Red directive</strong></span>')
+            ->and($template)->not->toHaveKey('unsafe');
+    }
+});
+
+test('saved rich text survives settings save and reload and flows through PA and ENGP preview and delivery', function (): void {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 10:00:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-09-03');
+    engpForDeadline($manager, '2026-09-03', ['office' => 'CENRO Baganga']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'rich-pa@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'rich-engp@example.test', 'is_active' => true]);
+    $settings = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective();
+    $rich = '<p>Normal <strong>rating of 1 (Poor)</strong> <em>important</em> <u>underlined</u> <span style="color:#b42318"><strong>warning</strong></span>.</p>';
+    $templates = app(ComplianceAlertTemplateResolver::class)->templateSettings([
+        ...$settings,
+        'template_settings' => collect(['protected_area_due_soon', 'protected_area_overdue', 'engp_due_soon', 'engp_overdue'])
+            ->mapWithKeys(fn (string $key): array => [$key => [
+                'subject' => '<strong>Rich subject</strong>',
+                'introductory_text' => $rich,
+                'instruction_text' => $rich,
+                'report_heading' => '<span style="color:#14532d">Conservation and Development Section</span>',
+                'closing_text' => $rich,
+                'closing_directive' => '<strong>FOR INFORMATION AND STRICT COMPLIANCE, PLEASE.</strong>',
+                'focal_footer_text' => '<strong>Focal Person</strong>',
+            ]])->all(),
+    ]);
+    $payload = Arr::only($settings, ['alerts_enabled', 'automatic_send_enabled', 'send_time', 'timezone', 'email_subject', 'from_line', 'memorandum_subject', 'introductory_text', 'compliance_warning_text', 'strict_compliance_text', 'signatory_name', 'signatory_position', 'office_name', 'office_address', 'focal_person_name', 'focal_person_position', 'focal_person_contact', 'do_not_reply_text', 'system_generated_footer_text']);
+    $payload['template_settings'] = $templates;
+
+    $this->actingAs($manager)->put(route('compliance-alerts.settings.update'), $payload)->assertRedirect();
+    $saved = ComplianceAlertSetting::query()->firstOrFail()->fresh();
+    expect($saved->template_settings['protected_area_due_soon']['subject'])->toBe('Rich subject')
+        ->and($saved->template_settings['protected_area_due_soon']['closing_text'])->toContain('<strong>rating of 1 (Poor)</strong>')
+        ->and(app(ComplianceAlertTemplateResolver::class)->templateSettings(app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective())['engp_due_soon']['closing_directive'])->toContain('<strong>FOR INFORMATION AND STRICT COMPLIANCE, PLEASE.</strong>');
+
+    foreach ([['key' => 'pa:'.$area->id, 'recipient' => 'rich-pa@example.test'], ['key' => 'office:cenro_baganga', 'recipient' => 'rich-engp@example.test']] as $case) {
+        $preview = $this->actingAs($manager)->getJson(route('compliance-alerts.preview', ['destination_key' => $case['key'], 'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON]))->assertOk();
+        expect($preview->json('subject'))->toBe('Rich subject')
+            ->and($preview->json('html'))->toContain('<strong>rating of 1 (Poor)</strong>')
+            ->and($preview->json('html'))->toContain('color:#b42318');
+    }
+
+    $delivery = app(ComplianceAlertDeliveryService::class);
+    $testRun = $delivery->sendTest('pa:'.$area->id, ComplianceNotificationRun::ALERT_DUE_SOON, $manager);
+    expect($testRun->status)->toBe(ComplianceNotificationRun::STATUS_SENT);
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'protected_area_due_soon' && str_contains($mail->render(), '<strong>rating of 1 (Poor)</strong>'));
+
+    $delivery->sendAutomatic();
+    Mail::assertSent(OverdueComplianceMemorandum::class, 3);
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => str_contains($mail->render(), '<strong>rating of 1 (Poor)</strong>') && str_contains($mail->render(), 'color:#b42318'));
+});
+
+test('ENGP overdue report heading is configured green text without a destination suffix', function (): void {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-01 10:00:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    engpForDeadline($manager, '2026-08-29', ['office' => 'CENRO Baganga', 'period_key' => 'ENGP-HEADING-OVERDUE']);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga', 'recipient_email' => 'heading-engp@example.test', 'is_active' => true]);
+    enabledComplianceSettings(['template_settings' => ['engp_overdue' => [
+        'report_heading' => 'Conservation and Development Section',
+    ]]]);
+
+    $response = $this->actingAs($manager)->getJson(route('compliance-alerts.preview', [
+        'destination_key' => 'office:cenro_baganga',
+        'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE,
+    ]))->assertOk();
+
+    expect($response->json('html'))
+        ->toContain('Conservation and Development Section')
+        ->toContain('color:#14532d')
+        ->toContain('font-weight:700')
+        ->toContain('text-align:left')
+        ->not->toContain('Conservation and Development Section: CENRO Baganga')
+        ->toContain('CENRO Baganga');
+});
+
+test('rich text editor exposes the shared controlled toolbar for every template family', function (): void {
+    $jsx = file_get_contents(resource_path('js/Components/Compliance/ComplianceRichTextEditor.jsx'));
+    $page = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
+
+    expect($page)->toContain("import ComplianceRichTextEditor from '@/Components/Compliance/ComplianceRichTextEditor'")
+        ->and($jsx)->toContain('Remove formatting')
+        ->toContain("command('bold')")
+        ->toContain("command('italic')")
+        ->toContain("command('underline')")
+        ->toContain("command('foreColor'")
+        ->toContain("document.execCommand?.('removeFormat'")
+        ->toContain("'#14532d'")
+        ->toContain("'#b42318'");
 });

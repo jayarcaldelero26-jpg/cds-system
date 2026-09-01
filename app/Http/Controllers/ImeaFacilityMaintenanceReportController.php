@@ -43,6 +43,7 @@ class ImeaFacilityMaintenanceReportController extends Controller
         $wasExisting = $report->exists;
         $validated = $request->validate($this->rules(requireMov: ! $wasExisting), [
             'mov.required' => 'A report attachment / MOV is required.',
+            'mov.max' => 'The MOV attachment must not exceed 20 MB.',
         ]);
         if ($wasExisting && ! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($report, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
@@ -68,7 +69,7 @@ class ImeaFacilityMaintenanceReportController extends Controller
 
     private function rules(bool $requireMov = false): array
     {
-        return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'remarks' => ['nullable', 'string']];
+        return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:20480'], 'remarks' => ['nullable', 'string']];
     }
     private function data(ImeaFacilityMaintenanceReport $report): array { return [...collect($report->toArray())->except(['mov_file_path', 'mov_file_name', 'mov_mime_type', 'mov_size'])->all(), 'protected_area_name' => $report->protectedArea?->name, 'mov' => $report->mov_file_path ? $this->attachments->descriptor('imea-maintenance', $report, 'mov') : null]; }
 }

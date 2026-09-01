@@ -15,6 +15,7 @@ use App\Models\ManagementPlan;
 use App\Models\ReportComplianceConfirmation;
 use Carbon\CarbonImmutable;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\RoutingStatusPresenter;
@@ -86,8 +87,8 @@ class OverdueReportService
     public function destinationReferences(): Collection
     {
         $references = collect();
-        $sources = $this->loadSourceModels(function ($query, array $definition): void {
-            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        $sources = $this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
+            $this->scopeDeadlineCandidates($query, $definition, $modelClass);
         });
         foreach ($sources as $source) {
             $model = $source['model'];
@@ -104,11 +105,11 @@ class OverdueReportService
     /** @return Collection<int, OverdueReport> */
     public function overdueReports(?CarbonImmutable $today = null): Collection
     {
-        $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $today = ($today ?? CarbonImmutable::now(self::TIMEZONE))->setTimezone(self::TIMEZONE)->startOfDay();
         $records = collect();
 
-        foreach ($this->loadSourceModels(function ($query, array $definition): void {
-            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        foreach ($this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
+            $this->scopeDeadlineCandidates($query, $definition, $modelClass);
         }) as $source) {
             $normalized = $this->normalize($source['model'], $source['definition'], $today);
             if ($normalized !== null) {
@@ -124,19 +125,23 @@ class OverdueReportService
     /** @return Collection<int, OverdueReport> */
     public function dueSoonReports(int $days = 3, ?CarbonImmutable $today = null): Collection
     {
-        $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $today = ($today ?? CarbonImmutable::now(self::TIMEZONE))->setTimezone(self::TIMEZONE)->startOfDay();
         $through = $today->addDays(max(0, $days));
         $records = collect();
 
-        foreach ($this->loadSourceModels(function ($query, array $definition): void {
-            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        foreach ($this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
+            $this->scopeDeadlineCandidates($query, $definition, $modelClass);
         }) as $source) {
             $model = $source['model'];
             $definition = $source['definition'];
                 $deadlineValue = $model->getAttribute('deadline_submission');
                 if (! $deadlineValue || $this->dateString($model->getAttribute($definition['submitted']))) continue;
                 $deadline = CarbonImmutable::parse($deadlineValue, self::TIMEZONE)->startOfDay();
-                if ($deadline->lessThan($today) || ! $deadline->isSameDay($today->addDays(max(0, $days)))) continue;
+                if ($days === 0) {
+                    if (! $deadline->isSameDay($today)) continue;
+                } elseif (! $deadline->greaterThan($today) || $deadline->greaterThan($through)) {
+                    continue;
+                }
 
                 $protectedArea = $model->relationLoaded('protectedArea') ? $model->getRelation('protectedArea') : null;
                 $targetOffice = trim((string) $model->getAttribute($definition['target_office'] ?? 'target_office'));
@@ -182,11 +187,11 @@ class OverdueReportService
     /** @return Collection<int, OverdueReport> */
     public function pendingMovReports(?CarbonImmutable $today = null): Collection
     {
-        $today ??= CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $today = ($today ?? CarbonImmutable::now(self::TIMEZONE))->setTimezone(self::TIMEZONE)->startOfDay();
         $records = collect();
 
-        foreach ($this->loadSourceModels(function ($query, array $definition): void {
-            $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
+        foreach ($this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
+            $this->scopeDeadlineCandidates($query, $definition, $modelClass);
         }) as $source) {
             $normalized = $this->normalize($source['model'], $source['definition'], $today, true);
             if ($normalized && $normalized->complianceIssue === 'MOV Not Yet Submitted'
@@ -480,6 +485,25 @@ class OverdueReportService
     private function withProtectedArea($query, string $modelClass)
     {
         return $modelClass === EngpReportSubmission::class ? $query : $query->with('protectedArea');
+    }
+
+    private function scopeDeadlineCandidates($query, array $definition, string $modelClass): void
+    {
+        if ($modelClass === ConservationReportSubmission::class) {
+            $query->where(fn ($candidate) => $candidate
+                ->where(fn ($meeting) => $meeting
+                    ->whereIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
+                    ->whereNotNull('date_conducted'))
+                ->orWhere(fn ($other) => $other
+                    ->whereNotNull('date_accomplished')
+                    ->where(fn ($workflow) => $workflow
+                        ->whereNotIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
+                        ->orWhereNull('workflow_key'))));
+
+            return;
+        }
+
+        $query->whereNotNull($definition['query_column'] ?? 'date_accomplished');
     }
 
     /**

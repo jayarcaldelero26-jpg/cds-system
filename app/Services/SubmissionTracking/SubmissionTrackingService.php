@@ -14,6 +14,7 @@ use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
 use App\Models\SubmissionRoutingCorrection;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Notifications\EdatsInAppNotificationService;
@@ -41,7 +42,19 @@ final class SubmissionTrackingService
                 $query = $source['model']::query();
                 if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
                 if ($key === 'engp') $query->with('releaseEvents');
-                if ($source['requires_date_accomplished'] ?? true) $query->whereNotNull('date_accomplished');
+                if ($key === 'conservation') {
+                    $query->where(fn ($candidate) => $candidate
+                        ->where(fn ($meeting) => $meeting
+                            ->whereIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
+                            ->whereNotNull('date_conducted'))
+                        ->orWhere(fn ($other) => $other
+                            ->whereNotNull('date_accomplished')
+                            ->where(fn ($workflow) => $workflow
+                                ->whereNotIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
+                                ->orWhereNull('workflow_key'))));
+                } elseif ($source['requires_date_accomplished'] ?? true) {
+                    $query->whereNotNull('date_accomplished');
+                }
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
             });
 
@@ -51,7 +64,7 @@ final class SubmissionTrackingService
         return $loaded
             ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts))
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
-            ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? '')
+            ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
             ->values();
     }
 
@@ -198,7 +211,11 @@ final class SubmissionTrackingService
         }
         $directPenro = ! $isEngp && $this->routingPolicy->isDirectPenro($record);
         $releaseDate = $isEngp ? $record->releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last() : ($record->getAttribute('date_report_released_cenro') ? Carbon::parse($record->getAttribute('date_report_released_cenro'))->toDateString() : null);
-        $dates = $isEngp ? ['date_received_penro'] : ['date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional'];
+        $dates = $isEngp
+            ? ['date_received_penro']
+            : ($sourceKey === 'conservation'
+                ? ['date_conducted', 'date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional']
+                : ['date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional']);
         $metadata = $this->moduleMetadata($record, $source);
         $data = [
             'source' => $sourceKey,

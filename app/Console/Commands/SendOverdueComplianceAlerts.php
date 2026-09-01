@@ -2,31 +2,36 @@
 
 namespace App\Console\Commands;
 
+use App\Models\ComplianceNotificationRun;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
-use App\Services\Compliance\OverdueReportService;
 use App\Services\Notifications\EdatsInAppNotificationService;
 use Illuminate\Console\Command;
 
 class SendOverdueComplianceAlerts extends Command
 {
-    protected $signature = 'compliance:send-overdue-alerts {--dry-run : Scan and log without sending mail}';
-    protected $description = 'Send the daily overdue PA-related report memorandum in compliance-alert safe mode.';
+    protected $signature = 'compliance:send-overdue-alerts';
+    protected $description = 'Run the configured automated Compliance Alert delivery flow.';
 
-    public function handle(ComplianceAlertDeliveryService $delivery, OverdueReportService $reports, EdatsInAppNotificationService $inAppNotifications): int
+    public function handle(ComplianceAlertDeliveryService $delivery, EdatsInAppNotificationService $inAppNotifications): int
     {
-        if (! $this->option('dry-run')) {
-            $inAppNotifications->syncDeadlineNotifications();
-        }
-        $overdue = $reports->overdueReports();
-        if ($overdue->isEmpty()) {
-            $this->info('No overdue reports found. No email will be sent.');
+        $inAppNotifications->syncDeadlineNotifications();
+        $buckets = $delivery->currentAlertBuckets();
+        $currentAlerts = collect($buckets)->flatten(1)->values();
+        if ($currentAlerts->isEmpty()) {
+            $this->info('No due-soon, due-today, or overdue reports found. No email will be sent.');
 
             return self::SUCCESS;
         }
 
-        $this->info("Overdue reports: {$overdue->count()}");
-        $this->line($this->option('dry-run') ? 'Mode: dry run (Mail is never called).' : 'Mode: automatic delivery policy.');
-        foreach ($delivery->recipientReadiness($overdue) as $group) {
+        $this->info(sprintf(
+            'Current alert reports: %d (due soon: %d, due today: %d, overdue: %d)',
+            $currentAlerts->count(),
+            $buckets[ComplianceNotificationRun::ALERT_DUE_SOON]->count(),
+            $buckets[ComplianceNotificationRun::ALERT_DUE_TODAY]->count(),
+            $buckets[ComplianceNotificationRun::ALERT_OVERDUE]->count(),
+        ));
+        $this->line('Mode: automatic production delivery policy.');
+        foreach ($delivery->recipientReadiness($currentAlerts) as $group) {
             $destination = $group['recipient']['email'] ?? 'none';
             $this->line(sprintf(
                 '%s | %s | %s report(s) | %s | %s',
@@ -34,7 +39,7 @@ class SendOverdueComplianceAlerts extends Command
             ));
         }
 
-        $runs = $delivery->sendAutomatic((bool) $this->option('dry-run'));
+        $runs = $delivery->sendAutomatic();
 
         if ($runs->isEmpty()) {
             $this->info('No overdue reports require a new automatic notification today (already sent or no eligible delivery).');

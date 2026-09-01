@@ -180,32 +180,83 @@ test('a report persists its route workflow key and cannot appear in another work
     $this->actingAs($this->user)->get(route('conservation-reports.index', 'homestay'))->assertInertia(fn (Assert $page) => $page->component('ConservationReports/Index')->count('submissions.data', 1)->where('submissions.data.0.workflow_key', 'homestay'));
 });
 
-test('conservation reports preserve descriptive date conducted values while using date accomplished for deadlines and submission tracking', function (?string $dateConducted) {
+test('meeting PAMB stores independent dates and uses Date Accomplished when present', function () {
     Storage::fake('public');
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'regular_pamb'), [
         'target_office' => 'CENRO Mati',
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 1',
-        'date_conducted' => $dateConducted,
-        'date_accomplished' => '2026-08-10',
+        'date_conducted' => '2026-08-26',
+        'date_accomplished' => '2026-09-30',
         'mov' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
     ])->assertSessionHasNoErrors();
 
     $report = ConservationReportSubmission::query()->latest('id')->firstOrFail();
-    $expectedDeadline = app(BusinessCalendarService::class)->addWorkingDays('2026-08-10', 7, 'CENRO Mati')->toDateString();
     $cenroQueue = app(SubmissionTrackingService::class)->queues()[SubmissionTrackingService::CENRO_RELEASE];
 
-    expect($report->date_conducted)->toBe($dateConducted)
-        ->and($report->date_accomplished->toDateString())->toBe('2026-08-10')
-        ->and($report->deadline_submission)->toBe($expectedDeadline)
+    expect($report->date_conducted)->toBe('2026-08-26')
+        ->and($report->date_accomplished->toDateString())->toBe('2026-09-30')
+        ->and($report->deadline_submission)->toBe('2026-10-13')
         ->and($cenroQueue->pluck('source_id')->all())->toContain($report->id);
-})->with([
-    'single formatted date' => ['August 3, 2026'],
-    'date range' => ['May 12-14, 2026'],
-    'numeric date range' => ['6/23-24/2026'],
-    'empty descriptive date' => [null],
-]);
+});
+
+test('meeting PAMB falls back to Date Conducted when Date Accomplished is blank', function () {
+    $report = new ConservationReportSubmission([
+        'workflow_key' => 'regular_pamb',
+        'date_conducted' => '2026-08-26',
+        'date_accomplished' => null,
+    ]);
+
+    expect($report->deadline_submission)->toBe('2026-09-08');
+});
+
+test('all meeting PAMB workflows reject Date Accomplished earlier than Date Conducted', function (string $workflow): void {
+    Storage::fake('public');
+
+    $this->actingAs($this->user)->post(route('conservation-reports.store', $workflow), [
+        'target_office' => 'CENRO Mati',
+        'activity_name' => $workflow === 'twc_meetings' ? 'TWC Meeting' : ucfirst(str_replace('_', ' ', $workflow)),
+        'document_type' => 'Minutes',
+        'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-20',
+        'date_accomplished' => '2026-08-19',
+        'mov' => UploadedFile::fake()->create('report.pdf', 100, 'application/pdf'),
+    ])->assertSessionHasErrors(['date_accomplished' => 'Date Accomplished must be on or after Date Conducted.']);
+
+    expect(ConservationReportSubmission::query()->where('workflow_key', $workflow)->exists())->toBeFalse();
+})->with(['regular_pamb', 'special_pamb', 'twc_meetings']);
+
+test('meeting PAMB tracker keeps Date Accomplished visible and editable', function (): void {
+    $jsx = file_get_contents(resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'));
+
+    expect($jsx)
+        ->toContain('id="bms-report-date-accomplished"')
+        ->toContain('Date Accomplished')
+        ->not->toContain('{!isMeetingPamb && <CrudSection title="Compliance Basis">');
+});
+
+test('Regular PAMB August 19 deadline skips Friday through Sunday and configured August 31 when present', function () {
+    $withoutHoliday = new ConservationReportSubmission([
+        'workflow_key' => 'regular_pamb',
+        'date_conducted' => '2026-08-19',
+    ]);
+
+    expect($withoutHoliday->deadline_submission)->toBe('2026-09-01');
+
+    NonWorkingDay::create([
+        'date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    BusinessCalendarService::forgetCache();
+
+    $withHoliday = new ConservationReportSubmission([
+        'workflow_key' => 'regular_pamb',
+        'date_conducted' => '2026-08-19',
+    ]);
+
+    expect($withHoliday->deadline_submission)->toBe('2026-09-02');
+});
 
 test('conservation reports use the centralized seven-working-day deadline and exclude Friday through Sunday', function () {
     $report = new ConservationReportSubmission(['date_accomplished' => '2026-08-24', 'target_office' => 'CENRO Mati']);
@@ -229,8 +280,8 @@ test('Homestay deadline skips an active weekday holiday', function () {
 
     expect($report->deadline_submission)->toBe('2026-09-09');
 });
-test('Regular PAMB deadline counts seven valid days after Wednesday', function () {
-    $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_accomplished' => '2026-08-26']);
+test('Regular PAMB deadline counts seven valid days after Date Conducted', function () {
+    $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_conducted' => '2026-08-26']);
 
     expect($report->deadline_submission)->toBe('2026-09-08');
 });
@@ -238,12 +289,12 @@ test('Regular PAMB deadline counts seven valid days after Wednesday', function (
 test('Regular PAMB deadline excludes an active configured weekday holiday', function () {
     NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
-    $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_accomplished' => '2026-08-26']);
+    $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_conducted' => '2026-08-26']);
 
     expect($report->deadline_submission)->toBe('2026-09-09');
 });
-test('Special PAMB deadline counts seven valid days after Wednesday', function () {
-    $report = new ConservationReportSubmission(['workflow_key' => 'special_pamb', 'date_accomplished' => '2026-08-26']);
+test('Special PAMB deadline counts seven valid days after Date Conducted', function () {
+    $report = new ConservationReportSubmission(['workflow_key' => 'special_pamb', 'date_conducted' => '2026-08-26']);
 
     expect($report->deadline_submission)->toBe('2026-09-08');
 });
@@ -251,7 +302,7 @@ test('Special PAMB deadline counts seven valid days after Wednesday', function (
 test('Special PAMB deadline excludes an active configured weekday holiday', function () {
     NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
-    $report = new ConservationReportSubmission(['workflow_key' => 'special_pamb', 'date_accomplished' => '2026-08-26']);
+    $report = new ConservationReportSubmission(['workflow_key' => 'special_pamb', 'date_conducted' => '2026-08-26']);
 
     expect($report->deadline_submission)->toBe('2026-09-09');
 });
@@ -268,19 +319,87 @@ test('Maintenance of Monuments deadline excludes an active configured weekday ho
 
     expect($report->deadline_submission)->toBe('2026-09-09');
 });
-test('the four workflows use the seven-valid-working-day deadline', function (string $workflow) {
+test('non-meeting conservation workflows retain their seven-valid-working-day deadline', function (string $workflow) {
     $report = new ConservationReportSubmission(['workflow_key' => $workflow, 'date_accomplished' => '2026-08-26']);
 
     expect($report->deadline_submission)->toBe('2026-09-08');
-})->with(['maintenance_buoy', 'twc_meetings', 'updating_pamp', 'restoration_plan_5_year']);
+})->with(['maintenance_buoy', 'updating_pamp', 'restoration_plan_5_year']);
 
-test('the four workflows exclude an active configured weekday holiday', function (string $workflow) {
+test('non-meeting conservation workflows exclude an active configured weekday holiday', function (string $workflow) {
     NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => $workflow, 'date_accomplished' => '2026-08-26']);
 
     expect($report->deadline_submission)->toBe('2026-09-09');
-})->with(['maintenance_buoy', 'twc_meetings', 'updating_pamp', 'restoration_plan_5_year']);
+})->with(['maintenance_buoy', 'updating_pamp', 'restoration_plan_5_year']);
+
+test('TWC meetings use the same effective-date fallback and seven-working-day deadline', function () {
+    $report = new ConservationReportSubmission(['workflow_key' => 'twc_meetings', 'date_conducted' => '2026-08-26']);
+
+    expect($report->deadline_submission)->toBe('2026-09-08');
+});
+
+test('TWC meeting deadline skips configured non-working days', function () {
+    NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
+    BusinessCalendarService::forgetCache();
+    $report = new ConservationReportSubmission(['workflow_key' => 'twc_meetings', 'date_conducted' => '2026-08-26']);
+
+    expect($report->deadline_submission)->toBe('2026-09-09');
+});
+
+test('PAMB manual operations keep Date Accomplished and use fifteen working days for the final manual', function () {
+    $progress = new ConservationReportSubmission(['workflow_key' => 'updating_pamb_manual', 'activity_name' => 'Workshop / Writeshop', 'date_conducted' => '2026-08-20', 'date_accomplished' => '2026-08-26']);
+    $final = new ConservationReportSubmission(['workflow_key' => 'updating_pamb_manual', 'activity_name' => 'Final Updated Manual', 'date_conducted' => '2026-08-20', 'date_accomplished' => '2026-08-26']);
+
+    expect($progress->deadline_submission)->toBe('2026-09-08')
+        ->and($final->deadline_submission)->toBe('2026-09-22');
+});
+
+test('meeting PAMB Minutes and Reso use the same Date Conducted deadline rule', function (string $workflow, string $document) {
+    $report = new ConservationReportSubmission([
+        'workflow_key' => $workflow,
+        'activity_name' => $workflow === 'twc_meetings' ? 'TWC Meeting' : ucfirst(str_replace('_', ' ', $workflow)),
+        'document_type' => $document,
+        'date_conducted' => '2026-08-26',
+        'date_accomplished' => '2026-08-26',
+    ]);
+
+    expect($report->deadline_submission)->toBe('2026-09-08');
+})->with([
+    ['regular_pamb', 'Minutes'], ['regular_pamb', 'Reso'],
+    ['special_pamb', 'Minutes'], ['special_pamb', 'Reso'],
+    ['twc_meetings', 'Minutes'], ['twc_meetings', 'Report'],
+]);
+
+test('meeting PAMB days complied and timeliness use working days after Date Conducted', function (int $days, string $timeliness) {
+    $calendar = app(BusinessCalendarService::class);
+    $report = new ConservationReportSubmission([
+        'workflow_key' => 'regular_pamb',
+        'date_conducted' => '2026-01-05',
+        'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::PAMB_WORKING_WEEKDAYS)->toDateString(),
+    ]);
+
+    expect($report->days_complied)->toBe($days)
+        ->and($report->timeliness)->toBe($timeliness);
+})->with([[5, 'Outstanding'], [6, 'Very Satisfactory'], [7, 'Satisfactory'], [8, 'Unsatisfactory'], [13, 'Unsatisfactory'], [14, 'Poor']]);
+
+test('meeting PAMB uses Date Accomplished when a legacy row has no Date Conducted', function () {
+    $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_accomplished' => '2026-08-26']);
+
+    expect($report->deadline_submission)->toBe('2026-09-08');
+});
+
+test('final PAMB manual timeliness uses the full Standard A Poor range', function (int $days, string $timeliness) {
+    $calendar = app(BusinessCalendarService::class);
+    $report = new ConservationReportSubmission([
+        'workflow_key' => 'updating_pamb_manual',
+        'activity_name' => 'Final Updated Manual',
+        'date_accomplished' => '2026-01-05',
+        'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::PAMB_WORKING_WEEKDAYS)->toDateString(),
+    ]);
+
+    expect($report->timeliness)->toBe($timeliness);
+})->with([[11, 'Outstanding'], [13, 'Very Satisfactory'], [15, 'Satisfactory'], [29, 'Unsatisfactory'], [90, 'Poor'], [91, 'Poor']]);
 test('Additional BMS Site retains semester-only reporting and calculates its fifteenth valid working day', function () {
     $config = app(ConservationReportWorkflowRegistry::class)->find('additional_bms_site');
     $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);

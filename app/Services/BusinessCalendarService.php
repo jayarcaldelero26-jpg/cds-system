@@ -11,12 +11,16 @@ use Illuminate\Support\Collection;
 /**
  * The single source of truth for report-submission business dates.
  *
- * This application works Monday-Thursday only. Friday is intentionally
- * non-working; configured holidays are layered on top of that rule.
+ * Existing workflows retain the Monday-Thursday default calendar profile.
+ * PAMB calculations explicitly use the Monday-Thursday profile, with
+ * configured non-working days layered on top of either profile.
  */
 class BusinessCalendarService
 {
     public const TIMEZONE = 'Asia/Manila';
+
+    /** @var list<int> */
+    public const PAMB_WORKING_WEEKDAYS = [1, 2, 3, 4];
 
     public const SCOPE_NATIONAL = 'NATIONAL';
     public const SCOPE_DAVAO_ORIENTAL = 'DAVAO_ORIENTAL';
@@ -25,12 +29,12 @@ class BusinessCalendarService
     /** @var array<string, Collection<int, NonWorkingDay>> */
     private static array $activeDaysByYear = [];
 
-    public function isWorkingDay(CarbonInterface|string $date, ?string $office = null): bool
+    public function isWorkingDay(CarbonInterface|string $date, ?string $office = null, ?array $workingWeekdays = null): bool
     {
         $day = $this->date($date);
 
-        // Monday-Thursday are the only working weekdays for this system.
-        if ($day->dayOfWeekIso >= 5) {
+        $workingWeekdays ??= [1, 2, 3, 4];
+        if (! in_array($day->dayOfWeekIso, $workingWeekdays, true)) {
             return false;
         }
 
@@ -38,7 +42,7 @@ class BusinessCalendarService
             ->contains(fn (NonWorkingDay $holiday): bool => $holiday->date->isSameDay($day));
     }
 
-    public function addWorkingDays(CarbonInterface|string $startDate, int $numberOfDays, ?string $office = null): CarbonImmutable
+    public function addWorkingDays(CarbonInterface|string $startDate, int $numberOfDays, ?string $office = null, ?array $workingWeekdays = null): CarbonImmutable
     {
         $cursor = $this->date($startDate);
         $remaining = abs($numberOfDays);
@@ -46,7 +50,7 @@ class BusinessCalendarService
 
         while ($remaining > 0) {
             $cursor = $cursor->addDays($step);
-            if ($this->isWorkingDay($cursor, $office)) {
+            if ($this->isWorkingDay($cursor, $office, $workingWeekdays)) {
                 $remaining--;
             }
         }
@@ -64,6 +68,7 @@ class BusinessCalendarService
         CarbonInterface|string $endDate,
         string $countingSemantics = 'after_through',
         ?string $office = null,
+        ?array $workingWeekdays = null,
     ): int {
         if ($countingSemantics !== 'after_through') {
             throw new \InvalidArgumentException("Unsupported business-day counting semantics: {$countingSemantics}");
@@ -77,7 +82,7 @@ class BusinessCalendarService
 
         $days = 0;
         for ($cursor = $start->addDay(); $cursor->lessThanOrEqualTo($end); $cursor = $cursor->addDay()) {
-            if ($this->isWorkingDay($cursor, $office)) {
+            if ($this->isWorkingDay($cursor, $office, $workingWeekdays)) {
                 $days++;
             }
         }

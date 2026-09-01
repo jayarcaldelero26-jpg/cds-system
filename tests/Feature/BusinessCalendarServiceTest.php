@@ -29,6 +29,53 @@ test('the business calendar treats Monday through Thursday as working and Friday
         ->and($calendar->isWorkingDay('2026-08-30'))->toBeFalse();
 });
 
+test('the PAMB calendar profile uses Monday through Thursday and excludes configured weekday holidays', function () {
+    $calendar = app(BusinessCalendarService::class);
+    $profile = BusinessCalendarService::PAMB_WORKING_WEEKDAYS;
+
+    expect($calendar->isWorkingDay('2026-08-24', null, $profile))->toBeTrue()
+        ->and($calendar->isWorkingDay('2026-08-25', null, $profile))->toBeTrue()
+        ->and($calendar->isWorkingDay('2026-08-26', null, $profile))->toBeTrue()
+        ->and($calendar->isWorkingDay('2026-08-27', null, $profile))->toBeTrue()
+        ->and($calendar->isWorkingDay('2026-08-28', null, $profile))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-29', null, $profile))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-30', null, $profile))->toBeFalse();
+
+    foreach (['2026-08-24', '2026-08-25', '2026-08-26', '2026-08-27'] as $date) {
+        NonWorkingDay::create([
+            'date' => $date, 'name' => 'Configured PAMB holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+            'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+        ]);
+    }
+
+    expect($calendar->isWorkingDay('2026-08-24', null, $profile))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-25', null, $profile))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-26', null, $profile))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-27', null, $profile))->toBeFalse();
+});
+
+test('configured holidays on Friday through Sunday do not create duplicate PAMB working days', function () {
+    $calendar = app(BusinessCalendarService::class);
+    $profile = BusinessCalendarService::PAMB_WORKING_WEEKDAYS;
+
+    foreach (['2026-08-28', '2026-08-29', '2026-08-30'] as $date) {
+        NonWorkingDay::create([
+            'date' => $date, 'name' => 'Configured weekend holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+            'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+        ]);
+    }
+
+    expect($calendar->addWorkingDays('2026-08-24', 4, null, $profile)->toDateString())->toBe('2026-08-31');
+
+    NonWorkingDay::create([
+        'date' => '2026-08-31', 'name' => 'Configured Monday holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    BusinessCalendarService::forgetCache();
+
+    expect($calendar->addWorkingDays('2026-08-24', 4, null, $profile)->toDateString())->toBe('2026-09-01');
+});
+
 test('active holidays are skipped while inactive holidays remain working dates', function () {
     $calendar = app(BusinessCalendarService::class);
 

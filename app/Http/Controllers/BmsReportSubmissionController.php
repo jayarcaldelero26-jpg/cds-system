@@ -11,11 +11,14 @@ use Illuminate\Validation\Rule;
 
 class BmsReportSubmissionController extends Controller
 {
+    private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
+
     public function __construct(private readonly ProtectedAttachmentService $attachments) {}
     public function store(Request $request)
     {
         $validated = $request->validate($this->rules(requireMov: true), [
-            'mov.required' => 'A report attachment / MOV is required.',
+            'mov.required' => 'A primary report attachment is required.',
+            'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $validated = $this->storeMov($request, $validated);
         $validated['created_by'] = $request->user()?->id;
@@ -28,7 +31,9 @@ class BmsReportSubmissionController extends Controller
 
     public function update(Request $request, BmsReportSubmission $bmsReportSubmission)
     {
-        $validated = $request->validate($this->rules($bmsReportSubmission->document_type));
+        $validated = $request->validate($this->rules($bmsReportSubmission->document_type), [
+            'mov.max' => 'The report attachment must not exceed 100 MB.',
+        ]);
         if (! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }
@@ -77,7 +82,7 @@ class BmsReportSubmissionController extends Controller
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
-            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];
     }

@@ -11,6 +11,7 @@ use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceAlertSettingsService;
 use App\Services\Compliance\ComplianceConfirmationService;
 use App\Services\Compliance\ComplianceAlertTemplateResolver;
+use App\Services\Compliance\ComplianceRichTextSanitizer;
 use App\Services\Compliance\OverdueReport;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\CalendarMovEventService;
@@ -19,7 +20,6 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -37,13 +37,12 @@ class ComplianceAlertController extends Controller
         $dueToday = $reports->dueTodayReports();
         $pendingMov = $reports->pendingMovReports();
         $groups = $deliveryService->memorandumGroups($overdue);
-        $plan = $deliveryService->deliveryPlan($overdue);
+        $plan = $deliveryService->deliveryPlan($overdue, ComplianceNotificationRun::ALERT_OVERDUE);
         $manualPlan = $deliveryService->deliveryPlan($dueSoon->merge($dueToday)->merge($overdue)->values());
         $effectiveSettings = $settings->effective();
         $currentAlerts = $dueSoon->merge($dueToday)->merge($overdue)->values();
         $readiness = $deliveryService->recipientReadiness($currentAlerts);
         $destinationCoverage = $deliveryService->destinationCoverageSummary($reports->destinationReferences());
-        $testData = $deliveryService->testMemorandumData($overdue);
         $automaticState = $deliveryService->automaticDeliveryState();
         $today = now(ComplianceAlertSettingsService::TIMEZONE)->toDateString();
         $todayRuns = ComplianceNotificationRun::query()->whereDate('run_date', $today)->latest('id')->get();
@@ -51,6 +50,18 @@ class ComplianceAlertController extends Controller
             ComplianceNotificationRun::TYPE_AUTOMATIC,
             ComplianceNotificationRun::TYPE_MANUAL,
         ]);
+        $successfulProductionRuns = ComplianceNotificationRun::query()
+            ->whereIn('run_type', [ComplianceNotificationRun::TYPE_AUTOMATIC, ComplianceNotificationRun::TYPE_MANUAL])
+            ->where('status', ComplianceNotificationRun::STATUS_SENT)
+            ->whereNotNull('sent_at')
+            ->latest('sent_at')
+            ->get(['id', 'run_type', 'status', 'sent_at', 'payload']);
+        $lastSentByLogicalKey = $deliveryService->lastSentByLogicalKey($successfulProductionRuns);
+        $decorateGroups = fn (array $groups): array => collect($groups)
+            ->map(fn (array $group): array => [...$group, 'last_sent' => $lastSentByLogicalKey[$group['readiness_key'] ?? ''] ?? null])
+            ->values()
+            ->all();
+        $groups = $decorateGroups($groups);
         $runs = ComplianceNotificationRun::query()->with(['createdBy:id,name', 'reports'])->latest('id')->limit(100)->get();
         $pendingRecordsVerification = $reports->pendingRecordsVerification();
         $confirmationHistory = $reports->confirmationHistory();
@@ -65,13 +76,13 @@ class ComplianceAlertController extends Controller
         $activeOverdueSources = $overdue->groupBy('module')
             ->map(fn ($items, string $module): array => ['module' => $module, 'overdue_count' => $items->count(), 'report_not_submitted' => $items->where('complianceIssue', 'Report Not Yet Submitted')->count(), 'missing_mov' => $items->where('complianceIssue', 'MOV Not Yet Submitted')->count()])
             ->sortBy('module')->values();
-        $scopePayload = function (string $family) use ($templates, $dueSoon, $dueToday, $overdue, $pendingMov, $deliveryService, $productionRuns): array {
+        $scopePayload = function (string $family) use ($templates, $dueSoon, $dueToday, $overdue, $pendingMov, $deliveryService, $productionRuns, $decorateGroups): array {
             $filter = fn ($reports) => $reports->filter(fn (OverdueReport $report): bool => $templates->familyFor($report) === $family)->values();
             $scopeDueSoon = $filter($dueSoon); $scopeDueToday = $filter($dueToday); $scopeOverdue = $filter($overdue);
             $scopeCurrent = $scopeDueSoon->merge($scopeDueToday)->merge($scopeOverdue)->values();
             $scopeReadiness = $deliveryService->recipientReadiness($scopeCurrent);
             return [
-                'groups' => $deliveryService->memorandumGroups($scopeOverdue),
+                'groups' => $decorateGroups($deliveryService->memorandumGroups($scopeOverdue)),
                 'readiness' => $scopeReadiness,
                 'pending_mov_reports' => $filter($pendingMov)->map->toArray()->values(),
                 'active_overdue_sources' => $scopeOverdue->groupBy('module')->map(fn ($items, string $module): array => ['module' => $module, 'overdue_count' => $items->count(), 'report_not_submitted' => $items->where('complianceIssue', 'Report Not Yet Submitted')->count(), 'missing_mov' => $items->where('complianceIssue', 'MOV Not Yet Submitted')->count()])->sortBy('module')->values(),
@@ -108,11 +119,6 @@ class ComplianceAlertController extends Controller
                 ->map(fn (array $definition, string $sourceType) => ['source_type' => $sourceType, 'module' => $definition['module']])
                 ->values(),
             'activeOverdueSources' => $activeOverdueSources,
-            'testDelivery' => [
-                'destination' => filter_var($effectiveSettings['test_recipient_email'] ?? '', FILTER_VALIDATE_EMAIL) ? $effectiveSettings['test_recipient_email'] : null,
-                'reports_included' => $testData['reports']->count(),
-                'using_fixture' => $testData['using_fixture'],
-            ],
             'summary' => [
                 'overdue_reports' => $overdue->count(),
                 'due_soon' => $dueSoon->count(),
@@ -146,7 +152,6 @@ class ComplianceAlertController extends Controller
             'settings' => $requestUser ? $effectiveSettings : null,
             'nonWorkingDays' => $requestUser ? NonWorkingDay::query()->latest('date')->latest('id')->get()->map(fn (NonWorkingDay $day) => $this->nonWorkingDayPayload($day))->values() : [],
             'safeMode' => ! config('compliance_alerts.enabled') || ! (bool) $effectiveSettings['alerts_enabled'],
-            'testEmailEnabled' => $settings->testEmailEnabled(),
             'automaticDeliveryState' => $automaticState,
         ]);
     }
@@ -155,19 +160,25 @@ class ComplianceAlertController extends Controller
     {
         $savedSettings = $settings->effective();
         $effectiveSettings = [...$savedSettings, 'template_settings' => $templates->templateSettings($savedSettings)];
-        $activeAlerts = $reports->overdueReports();
+        $dueSoon = $reports->dueSoonReports((int) config('notifications.due_soon_days', 3));
+        $overdue = $reports->overdueReports();
+        $references = $reports->destinationReferences();
+        $coverage = $deliveryService->destinationCoverageSummary($references);
+        $destinationCards = $deliveryService->destinationCards($references, $dueSoon, $overdue);
+        $settingsPayload = Arr::except($effectiveSettings, [
+            'sender_display_name', 'to_label', 'attention_line', 'fallback_recipient_email', 'fallback_cc_emails',
+            'recipients', 'cc_recipients', 'attention',
+        ]);
 
         return Inertia::render('ComplianceAlerts/Index', [
             'view' => 'settings',
-            'settings' => [...Arr::except($effectiveSettings, ['sender_display_name']), 'mail_from_name' => config('mail.from.name')],
-            'testDelivery' => [
-                'destination' => filter_var($savedSettings['test_recipient_email'] ?? '', FILTER_VALIDATE_EMAIL) ? $savedSettings['test_recipient_email'] : null,
-                'reports_included' => $deliveryService->testMemorandumData($activeAlerts)['reports']->count(),
-                'using_fixture' => false,
-            ],
+            'settings' => [...$settingsPayload, 'mail_from_name' => config('mail.from.name')],
             'monitoredSources' => collect($reports->sourceDefinitions())->map(fn (array $definition, string $sourceType): array => ['source_type' => $sourceType, 'module' => $definition['module']])->values(),
             'automaticDeliveryState' => $deliveryService->automaticDeliveryState(),
-            'recipientReadiness' => $deliveryService->recipientReadiness($activeAlerts),
+            'recipientReadiness' => $deliveryService->recipientReadiness($dueSoon->merge($overdue)->values()),
+            'destinationCards' => $destinationCards,
+            'mappingCoverage' => $coverage['coverage'],
+            'mappingMetrics' => ['active_mappings' => $destinationCards->count(), 'mapped' => $coverage['mapped'], 'unmapped' => $coverage['unmapped'], 'total' => $coverage['total']],
         ]);
     }
 
@@ -229,80 +240,54 @@ class ComplianceAlertController extends Controller
         ]);
     }
 
-    public function preview(Request $request, OverdueReportService $reports, ComplianceAlertDeliveryService $deliveryService, ComplianceAlertSettingsService $settings, ComplianceAlertTemplateResolver $templates)
+    public function preview(Request $request, ComplianceAlertDeliveryService $deliveryService)
     {
-        $effectiveSettings = [...$settings->effective(), 'template_settings' => $templates->templateSettings($settings->effective())];
         $wantsJson = $request->expectsJson() || $request->ajax();
-
-        if ($request->boolean('test')) {
-            abort_unless($request->user()->can('compliance-alerts.manage'), 403);
-            $testData = $deliveryService->testMemorandumData($reports->overdueReports());
-            $testRecipient = trim((string) ($effectiveSettings['test_recipient_email'] ?? ''));
-            if (! filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
-                $message = 'Configure a valid test recipient email before previewing a test memorandum.';
-                return $wantsJson
-                    ? response()->json(['message' => $message], 422)
-                    : redirect()->route('compliance-alerts.index')->withErrors(['preview' => $message]);
-            }
-            if ($testData['reports']->isEmpty()) {
-                $message = 'No eligible overdue reports found for preview.';
-                return $wantsJson
-                    ? response()->json(['message' => $message], 422)
-                    : redirect()->route('compliance-alerts.index')->withErrors(['preview' => $message]);
-            }
-            $testPresentation = $templates->presentationFor($testData['reports'], ComplianceNotificationRun::ALERT_OVERDUE, $effectiveSettings);
-
-            return $this->memorandumPreviewResponse(
-                $wantsJson,
-                $deliveryService->memorandumGroups($testData['reports']),
-                [...Arr::except($effectiveSettings, ['sender_display_name']), 'mail_from_name' => config('mail.from.name')],
-                ['name' => $testPresentation['default_to'], 'email' => $testRecipient, 'attention_line' => $testPresentation['default_attention']],
-                ComplianceNotificationRun::ALERT_OVERDUE,
-                $testPresentation,
-            );
+        $data = $request->validate([
+            'destination_key' => ['required', 'string', 'max:191'],
+            'alert_type' => ['required', Rule::in([ComplianceNotificationRun::ALERT_DUE_SOON, ComplianceNotificationRun::ALERT_OVERDUE])],
+        ]);
+        $destinationReports = $deliveryService->reportsForDestination($data['destination_key'], $data['alert_type']);
+        if ($destinationReports->isEmpty()) {
+            $message = 'No qualifying reports for this alert type.';
+            return $wantsJson ? response()->json(['message' => $message], 422) : redirect()->route('compliance-alerts.index')->withErrors(['preview' => $message]);
         }
 
-        $overdue = $reports->overdueReports();
-        $plan = $deliveryService->deliveryPlan($overdue);
-        $selected = $plan['deliveries']->first(fn (array $deliveryItem) => $deliveryItem['recipient']->key === $request->query('recipient_key'))
-            ?? $plan['deliveries']->first();
-
-        if (! $selected) {
-            $message = $overdue->isEmpty()
-                ? 'No current overdue reports to preview.'
-                : 'No mapped recipient is available for the current overdue reports.';
-            return $wantsJson
-                ? response()->json(['message' => $message], 422)
-                : redirect()->route('compliance-alerts.index')->withErrors(['preview' => $message]);
+        $memorandum = $deliveryService->memorandumForDestination($data['destination_key'], $data['alert_type']);
+        if (! $memorandum) {
+            $message = 'No active recipient mapping is available for this destination.';
+            return $wantsJson ? response()->json(['message' => $message], 422) : redirect()->route('compliance-alerts.index')->withErrors(['preview' => $message]);
         }
 
-        $presentation = $templates->presentationFor($selected['reports'], ComplianceNotificationRun::ALERT_OVERDUE, $effectiveSettings);
-        return $this->memorandumPreviewResponse(
-            $wantsJson,
-            $deliveryService->memorandumGroups($selected['reports']),
-            [...Arr::except($effectiveSettings, ['sender_display_name']), 'mail_from_name' => config('mail.from.name')],
-            $selected['recipient']->toArray(),
-            ComplianceNotificationRun::ALERT_OVERDUE,
-            $presentation,
-        );
+        return $this->memorandumPreviewResponse($wantsJson, $memorandum);
     }
 
-    public function send(Request $request, OverdueReportService $reports, ComplianceAlertDeliveryService $delivery): RedirectResponse
+    public function send(Request $request, ComplianceAlertDeliveryService $delivery): RedirectResponse
     {
-        // This phase permits preview and controlled test delivery only.
-        return back()->withErrors(['delivery' => 'Production compliance delivery is disabled during the memorandum preview phase. Use Preview Notification or Send Test Email.']);
-    }
-
-    public function sendTest(Request $request, OverdueReportService $reports, ComplianceAlertDeliveryService $delivery): RedirectResponse
-    {
-        $runs = $delivery->sendTest($reports->overdueReports(), $request->user());
-        app(AuditLogService::class)->record('compliance_alerts', 'Compliance Alert Test Send', null, null, 'Compliance Alerts', 'Processed a controlled compliance alert test delivery request.', ['failed' => $runs->where('status', ComplianceNotificationRun::STATUS_FAILED)->count()], $request->user()->id);
+        $runs = $delivery->sendManualCurrentAlerts($request->user());
+        app(AuditLogService::class)->record('compliance_alerts', 'Manual Compliance Alert Delivery', null, null, 'Compliance Alerts', 'Processed a manual production compliance alert delivery request.', ['failed' => $runs->where('status', ComplianceNotificationRun::STATUS_FAILED)->count()], $request->user()->id);
 
         if ($runs->contains('status', ComplianceNotificationRun::STATUS_FAILED)) {
-            return back()->withErrors(['test_email' => 'Test email delivery failed. No successful-send record was created. See notification history for status.']);
+            return back()->withErrors(['delivery' => 'One or more compliance alert deliveries failed. See notification history for status.']);
         }
 
-        return back()->with('success', 'Test compliance notification sent successfully.');
+        return back()->with('success', 'Compliance notification delivery completed.');
+    }
+
+    public function test(Request $request, ComplianceAlertDeliveryService $delivery): RedirectResponse
+    {
+        $data = $request->validate([
+            'destination_key' => ['required', 'string', 'max:191'],
+            'alert_type' => ['required', Rule::in([ComplianceNotificationRun::ALERT_DUE_SOON, ComplianceNotificationRun::ALERT_OVERDUE])],
+        ]);
+        $run = $delivery->sendTest($data['destination_key'], $data['alert_type'], $request->user());
+        app(AuditLogService::class)->record('compliance_alerts', 'Compliance Alert Test Delivery', null, null, 'Compliance Alerts', 'Processed a mapped-destination compliance alert test delivery request.', ['alert_type' => $data['alert_type'], 'status' => $run->status], $request->user()->id);
+
+        if ($run->status === ComplianceNotificationRun::STATUS_FAILED) {
+            return back()->withErrors(['test' => $run->error_message ?: 'Test email delivery failed.']);
+        }
+
+        return back()->with('success', 'Compliance alert test delivery completed for the selected mapped destination.');
     }
 
     public function storeRecipient(Request $request): RedirectResponse
@@ -364,77 +349,22 @@ class ComplianceAlertController extends Controller
         return back()->with('success', 'Unused compliance alert recipient deleted.');
     }
 
-
-    public function previewTemplate(Request $request, ComplianceAlertSettingsService $settings, ComplianceAlertTemplateResolver $templates)
+    private function memorandumPreviewResponse(bool $json, array $memorandum)
     {
-        $validator = Validator::make($request->all(), [
-            'template' => ['required', Rule::in(array_keys($templates->defaults()))],
-            'template_settings' => ['nullable', 'array'],
-            'template_settings.*' => ['array'],
-            'template_settings.*.*' => ['nullable', 'string', 'max:5000'],
-        ]);
-        if ($validator->fails()) {
-            return response()->json([
-                'message' => 'The selected email template is invalid.',
-                'errors' => $validator->errors(),
-            ], 422);
-        }
-        $data = $validator->validated();
-        $isEngp = str_starts_with($data['template'], 'engp_');
-        $isDueSoon = str_ends_with($data['template'], 'due_soon');
-        $preview = new OverdueReport(
-            sourceType: $isEngp ? \App\Models\EngpReportSubmission::class : 'compliance-template-preview',
-            sourceId: 0,
-            module: $isEngp ? 'Regular ENGP Monitoring and Accomplishment Report' : 'Protected Area Management Report',
-            protectedAreaId: $isEngp ? null : 0,
-            protectedAreaName: $isEngp ? '' : 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)',
-            targetOffice: $isEngp ? 'CENRO Baganga' : 'PENRO Davao Oriental',
-            activity: $isEngp ? 'Sample ENGP Monitoring Report' : 'Sample PA Activity',
-            documentType: 'Sample Report',
-            deadline: '2026-08-31',
-            submitted: false,
-            recordsConfirmed: false,
-            daysOverdue: $isDueSoon ? 0 : 3,
-            programArea: $isEngp ? \App\Domain\Modules\ProgramArea::ENGP->value : \App\Domain\Modules\ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
-        );
-        $effective = [...$settings->effective(), 'template_settings' => $templates->templateSettings([...$settings->effective(), 'template_settings' => $data['template_settings'] ?? []])];
-        $alertType = $isDueSoon ? ComplianceNotificationRun::ALERT_DUE_SOON : ComplianceNotificationRun::ALERT_OVERDUE;
-        $presentation = $templates->presentationFor(collect([$preview]), $alertType, $effective);
-        $groups = [[
-            'target_office' => $preview->targetOffice,
-            'protected_area_name' => $preview->protectedAreaName,
-            'reports' => [$preview->toArray()],
-        ]];
-
-        return $this->memorandumPreviewResponse(
-            true,
-            $groups,
-            [...Arr::except($effective, ['sender_display_name']), 'mail_from_name' => config('mail.from.name')],
-            ['name' => $presentation['default_to'], 'email' => null, 'attention_line' => $presentation['default_attention']],
-            $alertType,
-            $presentation,
-        );
-    }
-
-    private function memorandumPreviewResponse(bool $json, array $groups, array $settings, array $recipient, string $alertType, array $presentation)
-    {
-        $html = view('emails.compliance.overdue-memorandum', [
-            'groups' => $groups,
-            'settings' => $settings,
-            'recipient' => $recipient,
-            'alertType' => $alertType,
-            'presentation' => $presentation,
-        ])->render();
+        $presentation = $memorandum['presentation'];
+        $recipient = $memorandum['recipient'];
+        $groups = $memorandum['groups'];
         $payload = [
-            'subject' => (string) ($presentation['subject'] ?? $settings['email_subject'] ?? 'Compliance Alert'),
-            'html' => $html,
+            'subject' => $memorandum['subject'],
+            'html' => $memorandum['html'],
             'template_type' => $presentation['template'] ?? null,
             'recipient' => [
                 'name' => $recipient['name'] ?? $recipient['recipient_name'] ?? null,
                 'email' => $recipient['email'] ?? $recipient['recipient_email'] ?? null,
+                'destination' => $recipient['destination'] ?? null,
             ],
             'meta' => [
-                'alert_type' => $alertType,
+                'alert_type' => $memorandum['alert_type'],
                 'group_count' => count($groups),
                 'report_count' => collect($groups)->sum(fn (array $group): int => count($group['reports'] ?? [])),
             ],
@@ -442,17 +372,16 @@ class ComplianceAlertController extends Controller
 
         return $json
             ? response()->json($payload)
-            : response($html)->header('Content-Type', 'text/html; charset=UTF-8');
+            : response($memorandum['html'])->header('Content-Type', 'text/html; charset=UTF-8');
     }
 
-    public function updateSettings(Request $request, ComplianceAlertSettingsService $settings, ComplianceAlertDeliveryService $deliveryService, ComplianceAlertTemplateResolver $templates): RedirectResponse
+    public function updateSettings(Request $request, ComplianceAlertSettingsService $settings, ComplianceAlertDeliveryService $deliveryService, ComplianceAlertTemplateResolver $templates, ComplianceRichTextSanitizer $richText): RedirectResponse
     {
         $current = $settings->effective();
         $data = $request->validate([
             'alerts_enabled' => ['required', 'boolean'], 'automatic_send_enabled' => ['required', 'boolean'],
             'send_time' => ['required', 'date_format:H:i'], 'timezone' => ['required', Rule::in([ComplianceAlertSettingsService::TIMEZONE])],
-            'email_subject' => ['required', 'string', 'max:255'], 'to_label' => ['nullable', 'string', 'max:255'],
-            'attention_line' => ['nullable', 'string', 'max:255'], 'from_line' => ['required', 'string', 'max:255'],
+            'email_subject' => ['required', 'string', 'max:255'], 'from_line' => ['required', 'string', 'max:255'],
             'memorandum_subject' => ['required', 'string', 'max:255'], 'introductory_text' => ['required', 'string', 'max:5000'],
             'compliance_warning_text' => ['required', 'string', 'max:5000'], 'strict_compliance_text' => ['required', 'string', 'max:5000'],
             'signatory_name' => ['required', 'string', 'max:255'], 'signatory_position' => ['required', 'string', 'max:255'],
@@ -460,8 +389,6 @@ class ComplianceAlertController extends Controller
             'focal_person_name' => ['nullable', 'string', 'max:255'], 'focal_person_position' => ['nullable', 'string', 'max:255'],
             'focal_person_contact' => ['nullable', 'string', 'max:2000'], 'do_not_reply_text' => ['required', 'string', 'max:1000'],
             'system_generated_footer_text' => ['required', 'string', 'max:2000'],
-            'fallback_recipient_email' => ['nullable', 'email:rfc', 'max:255'], 'fallback_cc_emails' => ['nullable'],
-            'test_recipient_email' => ['nullable', 'email:rfc', 'max:255'],
             'template_settings' => ['nullable', 'array'],
             'template_settings.*' => ['array'],
             'template_settings.*.*' => ['nullable', 'string', 'max:5000'],
@@ -481,7 +408,11 @@ class ComplianceAlertController extends Controller
             throw ValidationException::withMessages(['automatic_send_enabled' => 'Automatic delivery cannot be enabled because the mail configuration is unavailable or invalid.']);
         }
         unset($data['current_password']);
-        $data['fallback_cc_emails'] = $this->emails($data['fallback_cc_emails'] ?? '', 'fallback_cc_emails');
+        foreach (['introductory_text', 'compliance_warning_text', 'strict_compliance_text', 'do_not_reply_text', 'system_generated_footer_text'] as $field) {
+            $data[$field] = $richText->sanitize($data[$field]);
+        }
+        $data['email_subject'] = $richText->plainText($data['email_subject']);
+        $data['memorandum_subject'] = $richText->plainText($data['memorandum_subject']);
         $data['template_settings'] = $templates->templateSettings([...$current, 'template_settings' => $data['template_settings'] ?? []]);
         $settings->update($data);
         app(AuditLogService::class)->record('compliance_alerts', 'Compliance Alert Settings Updated', ComplianceAlertSetting::class, $settings->record()->id, 'Compliance Alerts', 'Updated compliance alert settings.', ['fields' => array_keys($data)]);

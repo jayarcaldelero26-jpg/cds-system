@@ -18,6 +18,8 @@ use Throwable;
 
 abstract class StandardAReportSubmissionController extends Controller
 {
+    protected const PRIMARY_ATTACHMENT_MAX_KB = 102400;
+
     /** @var class-string<Model> */
     protected string $modelClass;
     protected string $page;
@@ -57,7 +59,8 @@ abstract class StandardAReportSubmissionController extends Controller
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate($this->rules(requireMov: true), [
-            'mov.required' => 'A report attachment / MOV is required.',
+            'mov.required' => 'A primary report attachment is required.',
+            'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $newPath = null;
         try {
@@ -86,7 +89,9 @@ abstract class StandardAReportSubmissionController extends Controller
     public function update(Request $request, int $reportSubmission): RedirectResponse
     {
         $submission = $this->findSubmission($reportSubmission);
-        $validated = $request->validate($this->rules($submission->document_type));
+        $validated = $request->validate($this->rules($submission->document_type), [
+            'mov.max' => 'The report attachment must not exceed 100 MB.',
+        ]);
         $oldPath = $submission->mov_file_path;
         $newPath = null;
         $removeOld = $request->hasFile('mov');
@@ -138,7 +143,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
-            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];
     }

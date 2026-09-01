@@ -6,6 +6,7 @@ import ConfirmDialog from '../../Components/ConfirmDialog';
 import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
+import ProtectedAreaForm from './Form';
 
 const variants = {
   Active: 'active',
@@ -44,6 +45,7 @@ export default function Index({ protectedAreas, filters }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [protectedAreaToDelete, setProtectedAreaToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   useEffect(() => setSearch(filters.search || ''), [filters.search]);
   useEffect(() => {
@@ -301,12 +303,13 @@ export default function Index({ protectedAreas, filters }) {
         description="Master database of protected areas managed by DENR PENRO Mati."
         actions={
         auth.canCreateProtectedAreas &&
-        <Link
-          href="/protected-areas/create"
+        <button
+          type="button"
+          onClick={() => setCreateOpen(true)}
           className="inline-flex items-center justify-center rounded-xl bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-700 focus:ring-offset-2">
 
                             Add protected area
-                        </Link>
+                        </button>
 
         } />
 
@@ -652,6 +655,8 @@ export default function Index({ protectedAreas, filters }) {
         onCancel={() => setProtectedAreaToDelete(null)}
         onConfirm={deleteProtectedArea}
         processing={deleting} />
+
+            {createOpen && <ProtectedAreaForm modal onClose={() => setCreateOpen(false)} title="Add Protected Area" />}
 
         </AuthenticatedLayout>);
 

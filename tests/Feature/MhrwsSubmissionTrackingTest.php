@@ -33,17 +33,23 @@ beforeEach(function (): void {
 
 function mhrwsConservationReport(object $test, array $overrides = []): ConservationReportSubmission
 {
-    return ConservationReportSubmission::create(array_merge([
+    $data = array_merge([
         'workflow_key' => 'regular_pamb',
         'protected_area_id' => $test->mhrws->id,
         'target_office' => 'PENRO Mati',
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 3',
+        'date_conducted' => '2026-08-03',
         'date_accomplished' => '2026-08-03',
         'created_by' => $test->user->id,
         'updated_by' => $test->user->id,
-    ], $overrides));
+    ], $overrides);
+    if (array_key_exists('date_accomplished', $overrides) && ! array_key_exists('date_conducted', $overrides)) {
+        $data['date_conducted'] = $data['date_accomplished'];
+    }
+
+    return ConservationReportSubmission::create($data);
 }
 
 test('MHRWS reports bypass CENRO and enter PENRO receipt directly', function () {
@@ -64,6 +70,7 @@ test('normal protected-area reports still enter CENRO release first', function (
         'target_office' => 'CENRO Baganga',
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
+        'date_conducted' => '2026-08-03',
         'date_accomplished' => '2026-08-03',
         'created_by' => $this->user->id,
         'updated_by' => $this->user->id,

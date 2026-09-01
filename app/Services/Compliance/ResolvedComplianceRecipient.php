@@ -13,6 +13,7 @@ final readonly class ResolvedComplianceRecipient
         public string $source,
         public ?string $attentionLine = null,
         public ?int $mappingId = null,
+        public ?string $destination = null,
     ) {}
 
     /** @return array<string, mixed> */
@@ -26,6 +27,7 @@ final readonly class ResolvedComplianceRecipient
             'attention_line' => $this->attentionLine,
             'source' => $this->source,
             'mapping_id' => $this->mappingId,
+            'destination' => $this->destination,
         ];
     }
 }

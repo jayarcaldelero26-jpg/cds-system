@@ -9,11 +9,6 @@ class ComplianceAlertSettingsService
 {
     public const TIMEZONE = 'Asia/Manila';
 
-    public function testEmailEnabled(): bool
-    {
-        return (bool) config('compliance_alerts.test_email_enabled');
-    }
-
     /** @return array<string, mixed> */
     public function effective(): array
     {

@@ -6,6 +6,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use Illuminate\Http\RedirectResponse;
@@ -17,7 +18,9 @@ use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class ConservationReportSubmissionController extends Controller
 {
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments) {}
+    private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
+
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance) {}
 
     public function index(Request $request, string $workflow): Response
     {
@@ -50,9 +53,7 @@ class ConservationReportSubmissionController extends Controller
     public function store(Request $request, string $workflow): RedirectResponse
     {
         $config = $this->workflow($workflow);
-        $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), [
-            'mov.required' => 'A report attachment / MOV is required.',
-        ]);
+        $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
         $validated = $this->storeMov($request, $validated);
         ConservationReportSubmission::create([...$validated, 'workflow_key' => $workflow, 'created_by' => $request->user()?->id, 'updated_by' => $request->user()?->id]);
         return back()->with('success', 'Conservation report successfully added.');
@@ -62,7 +63,7 @@ class ConservationReportSubmissionController extends Controller
     {
         $config = $this->workflow($workflow);
         $this->ensureWorkflow($workflow, $submission);
-        $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()));
+        $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
         $oldPath = $submission->mov_file_path;
         $newPath = null;
         $replaceOld = $request->hasFile('mov');
@@ -111,10 +112,36 @@ class ConservationReportSubmissionController extends Controller
             'activity_name' => ['required', 'string', 'max:255'],
             'document_type' => ['nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
             'reporting_period' => ['nullable', 'string', Rule::in($config['periods'] ?? [])],
-            'date_conducted' => ['nullable', 'string', 'max:255'],
-            'date_accomplished' => ['nullable', 'date'],
-            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
+            'date_conducted' => $this->pambCompliance->isMeeting($config['key'] ?? null)
+                ? ['required', 'date']
+                : ['nullable', 'string', 'max:255'],
+            'date_accomplished' => $this->pambCompliance->isMeeting($config['key'] ?? null)
+                ? ['nullable', 'date', 'after_or_equal:date_conducted']
+                : ['nullable', 'date'],
+            'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
+        ];
+    }
+
+    /** @return array<string, string> */
+    private function attachmentMessages(?string $documentType): array
+    {
+        $label = match ($documentType) {
+            'Minutes' => 'Minutes',
+            'Reso', 'Resolution' => 'Resolution',
+            default => null,
+        };
+
+        $messages = [
+            'date_accomplished.after_or_equal' => 'Date Accomplished must be on or after Date Conducted.',
+        ];
+
+        return $label ? [...$messages,
+            'mov.required' => "A {$label} attachment is required.",
+            'mov.max' => "The {$label} attachment must not exceed 100 MB.",
+        ] : [...$messages,
+            'mov.required' => 'A report attachment / MOV is required.',
+            'mov.max' => 'The report attachment must not exceed 100 MB.',
         ];
     }
 

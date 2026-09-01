@@ -135,7 +135,12 @@ function notificationProtectedArea(string $name, User $user, ?string $shortName 
 
 function notificationConservationReport(ProtectedArea $area, User $user, array $overrides = []): ConservationReportSubmission
 {
-    return ConservationReportSubmission::create(array_merge(['workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'PENRO Davao Oriental', 'activity_name' => 'Regular PAMB Meetings', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_accomplished' => '2026-08-03', 'created_by' => $user->id, 'updated_by' => $user->id], $overrides));
+    $data = array_merge(['workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'PENRO Davao Oriental', 'activity_name' => 'Regular PAMB Meetings', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'created_by' => $user->id, 'updated_by' => $user->id], $overrides);
+    if (array_key_exists('date_accomplished', $overrides) && ! array_key_exists('date_conducted', $overrides)) {
+        $data['date_conducted'] = $data['date_accomplished'];
+    }
+
+    return ConservationReportSubmission::create($data);
 }
 
 function notificationEngpReport(User $user, array $overrides = []): EngpReportSubmission

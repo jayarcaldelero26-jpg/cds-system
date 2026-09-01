@@ -3,6 +3,8 @@
 namespace App\Services\SubmissionTracking;
 
 use App\Models\EngpReportSubmission;
+use App\Models\ConservationReportSubmission;
+use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use Illuminate\Database\Eloquent\Model;
 
@@ -23,6 +25,7 @@ final class RoutingStatusPresenter
     public function __construct(
         private readonly EngpReportWorkflowRegistry $engpWorkflows,
         private readonly ProtectedAreaRoutingPolicy $routingPolicy,
+        private readonly PambComplianceCalculator $pambCompliance,
     ) {}
 
     public function status(Model $record, ?string $sourceKey = null): string
@@ -63,7 +66,10 @@ final class RoutingStatusPresenter
             || $this->date($record, 'date_received_penro')
             || $this->date($record, 'date_endorsed_regional');
         $readyWithoutAccomplishment = $sourceKey === 'revenue';
-        if (! $readyWithoutAccomplishment && ! $record->getAttribute('date_accomplished') && ! $hasRoutingDate) {
+        $activityDate = $record instanceof ConservationReportSubmission && $this->pambCompliance->applies($record->workflow_key)
+            ? $this->pambCompliance->authoritativeDate($record)
+            : $record->getAttribute('date_accomplished');
+        if (! $readyWithoutAccomplishment && ! $activityDate && ! $hasRoutingDate) {
             return 'not_ready';
         }
 

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Modules\ModuleDeadlineService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -27,6 +28,11 @@ class ConservationReportSubmission extends Model
 
     public function getDeadlineSubmissionAttribute(): ?string
     {
+        $pamb = app(PambComplianceCalculator::class);
+        if ($pamb->applies($this->workflow_key)) {
+            return $pamb->deadline($this);
+        }
+
         if ($module = $this->moduleDefinition()) {
             return app(ModuleDeadlineService::class)->resolve($module, $this->date_accomplished, null, $this->date_received_penro, $this->target_office)['deadline_date'];
         }
@@ -38,6 +44,11 @@ class ConservationReportSubmission extends Model
 
     public function getDaysCompliedAttribute(): int|string|null
     {
+        $pamb = app(PambComplianceCalculator::class);
+        if ($pamb->applies($this->workflow_key)) {
+            return $pamb->daysComplied($this);
+        }
+
         if (! $this->date_accomplished) return null;
         if (! $this->date_received_penro) return 'Pending Submission by CENRO';
         if ($module = $this->moduleDefinition()) {
@@ -48,6 +59,11 @@ class ConservationReportSubmission extends Model
 
     public function getTimelinessAttribute(): string
     {
+        $pamb = app(PambComplianceCalculator::class);
+        if ($pamb->applies($this->workflow_key)) {
+            return $pamb->timeliness($this);
+        }
+
         $days = $this->days_complied;
         if ($days === null) return 'No Data';
         if (! is_int($days)) return $days;

@@ -8,7 +8,7 @@ import PageHeader from '../../Components/PageHeader';
 import PrimaryButton from '../../Components/PrimaryButton';
 
 
-export default function Form({ title, protectedArea }) {
+export default function Form({ title, protectedArea, modal = false, onClose }) {
   const isEdit = Boolean(protectedArea);
   const { auth } = usePage().props;
 
@@ -186,6 +186,7 @@ export default function Form({ title, protectedArea }) {
       onError: (errors) => {
         form.setError(errors);
       },
+      onSuccess: () => onClose?.(),
       onFinish: () => {
         setSubmitting(false);
       }
@@ -535,6 +536,30 @@ export default function Form({ title, protectedArea }) {
             </div>
         </div>;
 
+
+  if (modal && !isEdit) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-3 backdrop-blur-sm sm:p-4" role="presentation">
+        <div className="protected-area-modal relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="dialog" aria-modal="true" aria-labelledby="create-protected-area-title">
+          <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-6">
+            <div>
+              <h1 id="create-protected-area-title" className="text-base font-bold text-gray-900 dark:text-white sm:text-lg">Add Protected Area</h1>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a protected area to the PENRO Mati master database.</p>
+            </div>
+            <button type="button" onClick={onClose} className="rounded-lg p-1 text-2xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="Close create form">×</button>
+          </div>
+          {form.hasErrors && <div className="mx-5 mt-4 shrink-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:mx-6">Please review the highlighted fields before saving.</div>}
+          <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+            <div className="protected-area-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">{formFields}</div>
+            <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-gray-50 px-5 py-3 dark:border-gray-700 dark:bg-gray-800/50 sm:px-6">
+              <button type="button" onClick={onClose} className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">Cancel</button>
+              <PrimaryButton type="submit" disabled={submitting}>{form.processing ? 'Saving...' : 'Create protected area'}</PrimaryButton>
+            </div>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   if (isEdit) {
     return (

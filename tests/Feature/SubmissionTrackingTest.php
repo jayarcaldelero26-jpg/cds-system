@@ -20,7 +20,7 @@ beforeEach(function (): void {
 
 test('routing status is normalized across each required stage', function () {
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Status contract', 'date_accomplished' => '2026-08-03',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Status contract', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
@@ -40,7 +40,7 @@ test('submission status overview exposes canonical module and program area metad
     ]);
     $pamb = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB',
-        'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $dynamic = ModuleDefinition::query()->create([
         'name' => 'Dynamic Status Overview Module', 'code' => 'dynamic_status_overview',
@@ -88,7 +88,7 @@ test('CDS Admin can correct routing dates and every correction is retained', fun
     $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
     $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Correction test', 'date_accomplished' => '2026-08-03',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Correction test', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03',
         'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
@@ -108,7 +108,7 @@ test('routing correction rejects wrong password, non-admins, missing reason, and
     $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
     $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Correction validation', 'date_accomplished' => '2026-08-03',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Correction validation', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03',
         'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
@@ -127,7 +127,7 @@ test('routing correction rejects wrong password, non-admins, missing reason, and
 
 test('an accomplished conservation report enters the CENRO release queue and transitions through routing without duplication', function () {
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB', 'date_accomplished' => null, 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
 
@@ -142,19 +142,19 @@ test('an accomplished conservation report enters the CENRO release queue and tra
 
 test('History contains each completed routing workflow once and excludes intermediate active stages', function () {
     $released = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Released only', 'date_accomplished' => '2026-08-01',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Released only', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'date_report_released_cenro' => '2026-08-02', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $received = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Received only', 'date_accomplished' => '2026-08-01',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Received only', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $completedEarlier = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed earlier', 'date_accomplished' => '2026-08-01',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed earlier', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-04', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $completedLater = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed later', 'date_accomplished' => '2026-08-01',
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed later', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
@@ -170,7 +170,7 @@ test('History contains each completed routing workflow once and excludes interme
 });
 
 test('submission tracking rejects impossible receipt and endorsement chronology', function () {
-    $report = ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB', 'date_accomplished' => '2026-08-03', 'date_report_released_cenro' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
+    $report = ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'date_report_released_cenro' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
 
     $this->actingAs($this->user)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), ['stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-04'])->assertSessionHasErrors('date');
     $report->update(['date_received_penro' => '2026-08-06']);
@@ -184,12 +184,12 @@ test('generic conservation reports remain live in Alerts until PENRO receipt whi
     $today = CarbonImmutable::parse('2026-08-25', 'Asia/Manila');
 
     $future = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_accomplished' => '2026-08-24', 'mov_file_path' => 'conservation-report-movs/future.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-24', 'date_accomplished' => '2026-08-24', 'mov_file_path' => 'conservation-report-movs/future.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     Storage::disk('public')->put($future->mov_file_path, 'future MOV');
 
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 2', 'date_accomplished' => '2026-08-03', 'mov_file_path' => 'conservation-report-movs/overdue.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 2', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'mov_file_path' => 'conservation-report-movs/overdue.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     Storage::disk('public')->put($report->mov_file_path, 'overdue MOV');
 
@@ -217,8 +217,11 @@ test('generic conservation reports remain live in Alerts until PENRO receipt whi
 });
 
 test('Alerts consumes each generic conservation workflow deadline from its live report record', function (string $workflowKey, string $activity, string $document, string $expectedDeadline) {
+    $dateData = $workflowKey === 'regular_pamb'
+        ? ['date_conducted' => '2026-08-26', 'date_accomplished' => '2026-08-26']
+        : ['date_accomplished' => '2026-08-26'];
     $report = ConservationReportSubmission::create([
-        'workflow_key' => $workflowKey, 'target_office' => 'CENRO Mati', 'activity_name' => $activity, 'document_type' => $document, 'reporting_period' => $workflowKey === 'additional_bms_site' ? '1st Semester' : 'Quarter 3', 'date_accomplished' => '2026-08-26', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => $workflowKey, 'target_office' => 'CENRO Mati', 'activity_name' => $activity, 'document_type' => $document, 'reporting_period' => $workflowKey === 'additional_bms_site' ? '1st Semester' : 'Quarter 3', ...$dateData, 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
     $alert = app(OverdueReportService::class)->overdueReports(CarbonImmutable::parse('2026-09-23', 'Asia/Manila'))->firstWhere('sourceId', $report->id);
@@ -280,7 +283,7 @@ test('history preserves Conservation reporting period, protected area, and accom
     $report = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
         'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 2',
-        'date_accomplished' => '2026-08-03', 'date_report_released_cenro' => '2026-08-04',
+        'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'date_report_released_cenro' => '2026-08-04',
         'date_received_penro' => '2026-08-06', 'date_endorsed_regional' => '2026-08-07',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);

@@ -68,7 +68,7 @@ test('protected area search returns authorized protected area results', function
 test('report search returns only matching records available through an authorized workflow', function () {
     $user = searchUser(['technical-reports.view']);
     $area = ProtectedArea::create(['name' => 'Pujada Bay Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
-    ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'PENRO Mati', 'activity_name' => 'Regular PAMB Meetings', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_accomplished' => '2026-01-10', 'created_by' => $user->id, 'updated_by' => $user->id]);
+    ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'PENRO Mati', 'activity_name' => 'Regular PAMB Meetings', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-01-10', 'date_accomplished' => '2026-01-10', 'created_by' => $user->id, 'updated_by' => $user->id]);
 
     $results = searchGroup(globalSearch($user, 'Regular PAMB'), 'reports');
 

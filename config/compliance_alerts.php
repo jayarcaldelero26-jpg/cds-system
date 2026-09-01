@@ -2,7 +2,6 @@
 
 return [
     'enabled' => filter_var(env('COMPLIANCE_ALERTS_ENABLED', false), FILTER_VALIDATE_BOOL),
-    'test_email_enabled' => filter_var(env('COMPLIANCE_TEST_EMAIL_ENABLED', false), FILTER_VALIDATE_BOOL),
     'send_time' => env('COMPLIANCE_ALERTS_SEND_TIME', '08:00'),
     'timezone' => 'Asia/Manila',
     'sender_display_name' => 'Enhanced Digital Alert and Tracking System (eDATS)',
@@ -26,7 +25,6 @@ return [
     'fallback_recipient_email' => env('COMPLIANCE_ALERTS_RECIPIENTS', ''),
     'fallback_cc_emails' => env('COMPLIANCE_ALERTS_CC_RECIPIENTS', 'penromaticds@gmail.com,benemerito.RB@gmail.com,nely.maimad11@gmail.com,hingpitelmarie@gmail.com,duayelmarie@gmail.com,edhingpit01@gmail.com'),
     'approved_fallback_cc_emails' => array_values(array_filter(array_map('trim', explode(',', (string) env('COMPLIANCE_ALERTS_APPROVED_CC_RECIPIENTS', 'penromaticds@gmail.com,benemerito.RB@gmail.com,nely.maimad11@gmail.com,hingpitelmarie@gmail.com,duayelmarie@gmail.com,edhingpit01@gmail.com'))))),
-    'test_recipient_email' => env('COMPLIANCE_ALERTS_TEST_RECIPIENT_EMAIL', ''),
     // Backward-compatible aliases for Phase 1 integrations.
     'sender_name' => 'Enhanced Digital Alert and Tracking System (eDATS)',
     'attention' => env('COMPLIANCE_ALERTS_ATTENTION', 'Chief, Conservation and Development Section'),

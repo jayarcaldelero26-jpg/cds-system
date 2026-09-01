@@ -23,11 +23,11 @@ class ComplianceAlertDeliveryService
     ) {}
 
     /** @return Collection<int, ComplianceNotificationRun> */
-    public function sendAutomatic(bool $dryRun = false): Collection
+    public function sendAutomatic(): Collection
     {
         return collect($this->currentAlertBuckets())
             ->reduce(
-                fn (Collection $runs, Collection $reports, string $alertType): Collection => $runs->merge($this->dispatchAutomatic($reports, $dryRun, $alertType)),
+                fn (Collection $runs, Collection $reports, string $alertType): Collection => $runs->merge($this->dispatchAutomatic($reports, $alertType)),
                 collect(),
             );
     }
@@ -48,14 +48,131 @@ class ComplianceAlertDeliveryService
         return collect($this->currentAlertBuckets())->flatten(1)->values();
     }
 
+    /** @return Collection<int, OverdueReport> */
+    public function alertReportsFor(string $alertType): Collection
+    {
+        return $this->currentAlertBuckets()[$alertType] ?? collect();
+    }
+
+    /** @return Collection<int, OverdueReport> */
+    public function reportsForDestination(string $destinationKey, string $alertType): Collection
+    {
+        return $this->alertReportsFor($alertType)
+            ->filter(fn (OverdueReport $report): bool => $this->recipients->logicalKey($report) === $destinationKey)
+            ->values();
+    }
+
+    /** @param Collection<int,array<string,mixed>> $references @param Collection<int,OverdueReport> $dueSoon @param Collection<int,OverdueReport> $overdue */
+    public function destinationCards(Collection $references, Collection $dueSoon, Collection $overdue): Collection
+    {
+        return $this->recipients->destinationCards($references, $dueSoon, $overdue);
+    }
+
+    /**
+     * Build the exact memorandum payload consumed by preview, test, manual,
+     * and automatic delivery for one logical destination.
+     *
+     * @return array{groups:array<int,array<string,mixed>>,settings:array<string,mixed>,recipient:array<string,mixed>,alert_type:string,presentation:array<string,mixed>,subject:string,html:string}|null
+     */
+    public function memorandumForDestination(string $destinationKey, string $alertType): ?array
+    {
+        if (! in_array($alertType, [ComplianceNotificationRun::ALERT_DUE_SOON, ComplianceNotificationRun::ALERT_OVERDUE], true)) {
+            return null;
+        }
+
+        $plan = $this->deliveryPlan($this->alertReportsFor($alertType), $alertType);
+        $selected = $plan['deliveries']->first(fn (array $delivery): bool => $delivery['reports']->isNotEmpty()
+            && $this->recipients->logicalKey($delivery['reports']->first()) === $destinationKey);
+
+        return $selected
+            ? $this->buildMemorandum($selected['reports'], $selected['recipient'], $alertType)
+            : null;
+    }
+
+    /**
+     * Send a controlled test to the selected mapped destination. Tests use
+     * the same resolved payload and Mailable as production, but never acquire
+     * or complete a production delivery claim.
+     */
+    public function sendTest(string $destinationKey, string $alertType, User $user): ComplianceNotificationRun
+    {
+        if ($this->reportsForDestination($destinationKey, $alertType)->isEmpty()) {
+            throw ValidationException::withMessages(['test' => 'No qualifying reports for this alert type.']);
+        }
+
+        $memorandum = $this->memorandumForDestination($destinationKey, $alertType);
+        if (! $memorandum) {
+            throw ValidationException::withMessages(['test' => 'The selected destination mapping is inactive, unmapped, or has no valid recipient email.']);
+        }
+
+        $state = $this->automaticDeliveryState();
+        if (! $state['environment_gate'] || ! $state['mail_configured']) {
+            throw ValidationException::withMessages(['test' => 'Test delivery is unavailable because the server delivery gate or mail configuration is not ready.']);
+        }
+
+        $recipient = new ResolvedComplianceRecipient(
+            key: 'test:'.$destinationKey,
+            email: $memorandum['recipient']['email'],
+            ccEmails: $memorandum['recipient']['cc_emails'],
+            name: $memorandum['recipient']['name'],
+            source: $memorandum['recipient']['source'],
+            attentionLine: $memorandum['recipient']['attention_line'],
+            mappingId: $memorandum['recipient']['mapping_id'],
+            destination: $memorandum['recipient']['destination'],
+        );
+        $today = CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE)->toDateString();
+        $run = $this->createRun(
+            $today,
+            $recipient,
+            $memorandum['reports'],
+            $memorandum['groups'],
+            $memorandum['settings'],
+            ComplianceNotificationRun::TYPE_TEST,
+            $user,
+            alertType: $alertType,
+            memorandum: $memorandum,
+        );
+
+        try {
+            $pending = Mail::to($recipient->email);
+            if ($recipient->ccEmails !== []) {
+                $pending->cc($recipient->ccEmails);
+            }
+            $pending->send(new OverdueComplianceMemorandum(
+                $memorandum['groups'],
+                $memorandum['settings'],
+                $recipient->toArray(),
+                '',
+                $alertType,
+                $memorandum['presentation'],
+            ));
+        } catch (\Throwable $exception) {
+            Log::error('Compliance test email delivery failed.', [
+                'exception' => $exception::class,
+                'message' => $this->redactTransportMessage($exception->getMessage()),
+            ]);
+            $run->update(['status' => ComplianceNotificationRun::STATUS_FAILED, 'error_message' => 'Test email delivery failed. See application logs for technical details.']);
+
+            return $run->fresh();
+        }
+
+        $run->update([
+            'status' => ComplianceNotificationRun::STATUS_SENT,
+            'sent_at' => CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE),
+            'error_message' => null,
+        ]);
+
+        return $run->fresh();
+    }
+
     /** @return Collection<int, ComplianceNotificationRun> */
     public function sendManualCurrentAlerts(User $user): Collection
     {
         if (! $this->manualDeliveryEnabled()) {
-            throw ValidationException::withMessages(['delivery' => 'External delivery is disabled by safe mode. Use Preview Memorandum until alerts are explicitly enabled.']);
+            throw ValidationException::withMessages(['delivery' => 'Production delivery is unavailable because alerts, the server delivery gate, or mail configuration is not ready.']);
         }
 
-        $plans = collect($this->currentAlertBuckets())->map(fn (Collection $reports) => $this->deliveryPlan($reports));
+        $plans = collect($this->currentAlertBuckets())->mapWithKeys(fn (Collection $reports, string $alertType) => [$alertType => $this->deliveryPlan($reports, $alertType)]);
 
         return $plans->reduce(
             fn (Collection $runs, array $plan, string $alertType): Collection => $runs
@@ -68,56 +185,64 @@ class ComplianceAlertDeliveryService
     /** @param Collection<int, OverdueReport> $reports @return Collection<int, ComplianceNotificationRun> */
     public function sendManual(Collection $reports, User $user): Collection
     {
-        $plan = $this->deliveryPlan($reports);
+        $plan = $this->deliveryPlan($reports, ComplianceNotificationRun::ALERT_OVERDUE);
         if ($plan['unmapped']->isNotEmpty()) {
             throw ValidationException::withMessages(['recipients' => 'Recipient mapping is missing for one or more overdue Protected Area / office groups. Add a recipient mapping before sending.']);
         }
         if (! $this->manualDeliveryEnabled()) {
-            throw ValidationException::withMessages(['delivery' => 'External delivery is disabled by safe mode. Use Preview Memorandum until alerts are explicitly enabled.']);
+            throw ValidationException::withMessages(['delivery' => 'Production delivery is unavailable because alerts, the server delivery gate, or mail configuration is not ready.']);
         }
 
         return $this->dispatchDeliveries($plan['deliveries'], ComplianceNotificationRun::TYPE_MANUAL, $user, ComplianceNotificationRun::ALERT_OVERDUE);
     }
 
-    /** @param Collection<int, OverdueReport> $reports @return Collection<int, ComplianceNotificationRun> */
-    public function sendTest(Collection $reports, User $user): Collection
-    {
-        $settings = $this->settings->effective();
-        $testRecipient = trim((string) ($settings['test_recipient_email'] ?? ''));
-        if (! $this->settings->testEmailEnabled()) {
-            throw ValidationException::withMessages(['test_email' => 'Test email delivery is disabled. Enable COMPLIANCE_TEST_EMAIL_ENABLED only for a controlled test recipient.']);
-        }
-        if (! filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
-            throw ValidationException::withMessages(['test_recipient_email' => 'Configure a valid test recipient email before sending a test memorandum.']);
-        }
-
-        $testData = $this->testMemorandumData($reports);
-        if ($testData['reports']->isEmpty()) {
-            throw ValidationException::withMessages(['test_email' => 'No eligible overdue reports found.']);
-        }
-
-        $presentation = $this->templates->presentationFor($testData['reports'], ComplianceNotificationRun::ALERT_OVERDUE, $settings);
-        $recipient = new ResolvedComplianceRecipient(
-            key: 'test:'.hash('sha256', strtolower($testRecipient)),
-            email: $testRecipient,
-            ccEmails: [],
-            name: $presentation['default_to'] ?? 'The OIC, PASu',
-            source: 'test',
-            attentionLine: $presentation['default_attention'] ?? null,
-        );
-        return $this->dispatchDeliveries(collect([['recipient' => $recipient, 'reports' => $testData['reports']]]), ComplianceNotificationRun::TYPE_TEST, $user, ComplianceNotificationRun::ALERT_OVERDUE);
-    }
-
     /** @param Collection<int, OverdueReport> $reports @return array{deliveries: Collection<int, array<string,mixed>>, unmapped: Collection<int, OverdueReport>} */
-    public function deliveryPlan(Collection $reports): array
+    public function deliveryPlan(Collection $reports, ?string $alertType = null): array
     {
-        return $this->recipients->plans($reports);
+        return $this->recipients->plans($reports, $alertType);
     }
 
     /** @param Collection<int, OverdueReport> $reports @return Collection<int, array<string,mixed>> */
-    public function recipientReadiness(Collection $reports): Collection
+    public function recipientReadiness(Collection $reports, ?string $alertType = null): Collection
     {
-        return $this->recipients->readiness($reports);
+        return $this->recipients->readiness($reports, $alertType);
+    }
+
+    /**
+     * Return the latest successful production delivery timestamp for each
+     * logical destination represented in notification history.
+     *
+     * The run payload stores the same readiness key used by the current
+     * delivery plan, so the compliance table can join history to its rows
+     * without resolving recipients through a second, unrelated path.
+     *
+     * @param Collection<int, ComplianceNotificationRun> $runs
+     * @return array<string, string>
+     */
+    public function lastSentByLogicalKey(Collection $runs): array
+    {
+        $lastSent = [];
+
+        foreach ($runs
+            ->filter(fn (ComplianceNotificationRun $run): bool => in_array($run->run_type, [
+                ComplianceNotificationRun::TYPE_AUTOMATIC,
+                ComplianceNotificationRun::TYPE_MANUAL,
+            ], true) && $run->status === ComplianceNotificationRun::STATUS_SENT && $run->sent_at !== null)
+            ->sortByDesc(fn (ComplianceNotificationRun $run): int => $run->sent_at?->getTimestamp() ?? 0) as $run) {
+            $sentAt = $run->sent_at?->toIso8601String();
+            if ($sentAt === null) {
+                continue;
+            }
+
+            foreach (data_get($run->payload, 'groups', []) as $group) {
+                $key = trim((string) ($group['readiness_key'] ?? ''));
+                if ($key !== '' && ! array_key_exists($key, $lastSent)) {
+                    $lastSent[$key] = $sentAt;
+                }
+            }
+        }
+
+        return $lastSent;
     }
 
     /** @param Collection<int,array<string,mixed>> $references */
@@ -138,18 +263,6 @@ class ComplianceAlertDeliveryService
             'mapped' => $coverage->where('status', 'mapped')->count(),
             'unmapped' => $coverage->where('status', 'unmapped')->count(),
             'total' => $coverage->count(),
-        ];
-    }
-
-    /** @param Collection<int, OverdueReport> $reports @return array{reports: Collection<int, OverdueReport>,using_fixture: bool} */
-    public function testMemorandumData(Collection $reports): array
-    {
-        // A test must render an actual eligible PA overdue report, never a fixture.
-        return [
-            'reports' => $reports
-                ->filter(fn (OverdueReport $report): bool => $this->templates->familyFor($report) === ComplianceAlertTemplateResolver::FAMILY_PROTECTED_AREA)
-                ->values(),
-            'using_fixture' => false,
         ];
     }
 
@@ -175,20 +288,16 @@ class ComplianceAlertDeliveryService
     }
 
     /** @param Collection<int, OverdueReport> $reports @return Collection<int, ComplianceNotificationRun> */
-    private function dispatchAutomatic(Collection $reports, bool $dryRun, string $alertType): Collection
+    private function dispatchAutomatic(Collection $reports, string $alertType): Collection
     {
         if ($reports->isEmpty()) {
             return collect();
         }
 
-        $plan = $this->deliveryPlan($reports);
+        $plan = $this->deliveryPlan($reports, $alertType);
         $runs = collect();
         foreach ($this->groupUnmapped($plan['unmapped']) as $group) {
-            $runs->push($this->recordUnmapped($group, $dryRun, $alertType));
-        }
-
-        if ($dryRun) {
-            return $runs->merge($this->dispatchDeliveries($plan['deliveries'], ComplianceNotificationRun::TYPE_DRY_RUN, null, $alertType));
+            $runs->push($this->recordUnmapped($group, $alertType));
         }
 
         if (! $this->automaticDeliveryEnabled()) {
@@ -210,7 +319,8 @@ class ComplianceAlertDeliveryService
 
             $settings = $this->settings->effective();
             $today = CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE)->toDateString();
-            $groups = $this->memorandumGroups($reports);
+            $memorandum = $this->buildMemorandum($reports, $recipient, $alertType, $settings);
+            $groups = $memorandum['groups'];
             $idempotencyKey = null;
             if (in_array($type, [ComplianceNotificationRun::TYPE_MANUAL, ComplianceNotificationRun::TYPE_AUTOMATIC], true)) {
                 ['key' => $idempotencyKey, 'fingerprint' => $fingerprint] = $this->deliveryIdentity(
@@ -236,8 +346,8 @@ class ComplianceAlertDeliveryService
                         $user,
                         ComplianceNotificationRun::STATUS_SKIPPED,
                         $reason,
-                        $idempotencyKey, $alertType,
-                    );
+                         $idempotencyKey, $alertType,
+                     );
                 }
             }
 
@@ -250,7 +360,7 @@ class ComplianceAlertDeliveryService
                     $settings,
                     $type,
                     $user,
-                    idempotencyKey: $idempotencyKey, alertType: $alertType,
+                    idempotencyKey: $idempotencyKey, alertType: $alertType, memorandum: $memorandum,
                 );
             } catch (\Throwable $exception) {
                 if ($idempotencyKey !== null) {
@@ -259,17 +369,12 @@ class ComplianceAlertDeliveryService
                 throw $exception;
             }
 
-            if ($type === ComplianceNotificationRun::TYPE_DRY_RUN) {
-                $run->update(['status' => ComplianceNotificationRun::STATUS_SKIPPED, 'error_message' => 'Dry run: no email was sent.']);
-                return $run;
-            }
-
             try {
                 $pending = Mail::to($recipient->email);
                 if ($recipient->ccEmails !== []) {
                     $pending->cc($recipient->ccEmails);
                 }
-                $pending->send(new OverdueComplianceMemorandum($groups, $settings, $recipient->toArray(), '', $alertType, $this->templates->presentationFor($reports, $alertType, $settings)));
+                $pending->send(new OverdueComplianceMemorandum($memorandum['groups'], $memorandum['settings'], $recipient->toArray(), '', $alertType, $memorandum['presentation']));
             } catch (\Throwable $exception) {
                 Log::error('Compliance email delivery failed.', [
                     'exception' => $exception::class,
@@ -308,7 +413,7 @@ class ComplianceAlertDeliveryService
     }
 
     /** @param Collection<int, OverdueReport> $reports */
-    private function recordUnmapped(Collection $reports, bool $dryRun, string $alertType): ComplianceNotificationRun
+    private function recordUnmapped(Collection $reports, string $alertType): ComplianceNotificationRun
     {
         $settings = $this->settings->effective();
         $key = 'unmapped:'.hash('sha256', $reports->map(fn (OverdueReport $report) => $report->sourceType.':'.$report->sourceId)->join('|'));
@@ -316,7 +421,7 @@ class ComplianceAlertDeliveryService
 
         return $this->createRun(
             CarbonImmutable::now($settings['timezone'])->toDateString(), $recipient, $reports, $this->memorandumGroups($reports),
-            $settings, $dryRun ? ComplianceNotificationRun::TYPE_DRY_RUN : ComplianceNotificationRun::TYPE_AUTOMATIC, null,
+            $settings, ComplianceNotificationRun::TYPE_AUTOMATIC, null,
             ComplianceNotificationRun::STATUS_SKIPPED, 'Recipient mapping is missing for this Protected Area / office group.', alertType: $alertType,
         );
     }
@@ -332,10 +437,13 @@ class ComplianceAlertDeliveryService
     }
 
     /** @param Collection<int, OverdueReport> $reports @param array<int, array<string,mixed>> $groups @param array<string,mixed> $settings */
-    private function createRun(string $today, ResolvedComplianceRecipient $recipient, Collection $reports, array $groups, array $settings, string $type, ?User $user, string $status = ComplianceNotificationRun::STATUS_PENDING, ?string $error = null, ?string $idempotencyKey = null, ?string $alertType = null): ComplianceNotificationRun
+    private function createRun(string $today, ResolvedComplianceRecipient $recipient, Collection $reports, array $groups, array $settings, string $type, ?User $user, string $status = ComplianceNotificationRun::STATUS_PENDING, ?string $error = null, ?string $idempotencyKey = null, ?string $alertType = null, ?array $memorandum = null): ComplianceNotificationRun
     {
+        $memorandum ??= $this->buildMemorandum($reports, $recipient, $alertType, $settings);
+        $groups = $memorandum['groups'];
+        $settings = $memorandum['settings'];
+        $presentation = $memorandum['presentation'];
         $first = $reports->first();
-        $presentation = $this->templates->presentationFor($reports, $alertType, $settings);
         $subject = ($presentation['subject'] ?: match ($alertType) {
             ComplianceNotificationRun::ALERT_DUE_SOON => 'eDATS Reminder: '.($first?->module ?? 'Report').' Due on '.CarbonImmutable::parse($first?->deadline ?? $today)->format('F j, Y'),
             ComplianceNotificationRun::ALERT_DUE_TODAY => 'eDATS Due Today: '.($first?->module ?? 'Report').' — '.CarbonImmutable::parse($first?->deadline ?? $today)->format('F j, Y'),
@@ -351,7 +459,7 @@ class ComplianceAlertDeliveryService
             'subject' => $subject,
             'report_count' => $reports->count(),
             'status' => $status,
-            'is_manual' => in_array($type, [ComplianceNotificationRun::TYPE_MANUAL, ComplianceNotificationRun::TYPE_TEST], true),
+            'is_manual' => $type === ComplianceNotificationRun::TYPE_MANUAL,
             'run_type' => $type,
             'error_message' => $error,
             'payload' => ['alert_type' => $alertType, 'groups' => $groups, 'recipient' => $recipient->toArray(), 'presentation' => $presentation, 'settings' => $this->memorandumSettingsSnapshot($settings)],
@@ -373,19 +481,21 @@ class ComplianceAlertDeliveryService
 
     private function manualDeliveryEnabled(): bool
     {
-        return (bool) config('compliance_alerts.enabled') && (bool) $this->settings->effective()['alerts_enabled'];
+        $state = $this->automaticDeliveryState();
+
+        return $state['environment_gate'] && (bool) $this->settings->effective()['alerts_enabled'] && $state['mail_configured'];
     }
 
     /** @param Collection<int, OverdueReport> $reports @return array<int, Collection<int, OverdueReport>> */
     private function groupUnmapped(Collection $reports): array
     {
-        return $reports->groupBy(fn (OverdueReport $report) => $report->targetOffice.'|'.$report->protectedAreaName)->values()->all();
+        return $reports->groupBy(fn (OverdueReport $report) => $this->recipients->logicalKey($report))->values()->all();
     }
 
     /** @param Collection<int, OverdueReport> $reports @return array<int, array<string,mixed>> */
     public function memorandumGroups(Collection $reports): array
     {
-        return $reports->groupBy(fn (OverdueReport $report) => "{$report->targetOffice}|{$report->protectedAreaName}")
+        return $reports->groupBy(fn (OverdueReport $report) => $this->recipients->logicalKey($report))
             ->map(function (Collection $items): array {
                 $first = $items->first();
                 return [
@@ -394,14 +504,45 @@ class ComplianceAlertDeliveryService
                     'readiness_key' => $this->recipients->logicalKey($first),
                     'reports' => $items->sortBy('deadline')->map(fn (OverdueReport $report) => $report->toArray())->values()->all(),
                 ];
-            })->values()->all();
+             })->values()->all();
+    }
+
+    /** @return array{groups:array<int,array<string,mixed>>,settings:array<string,mixed>,recipient:array<string,mixed>,alert_type:string,presentation:array<string,mixed>,subject:string,html:string} */
+    private function buildMemorandum(Collection $reports, ResolvedComplianceRecipient $recipient, ?string $alertType, ?array $settings = null): array
+    {
+        if ($reports->isEmpty() || $alertType === null) {
+            throw new \InvalidArgumentException('A memorandum requires eligible reports and an alert type.');
+        }
+
+        $settings ??= $this->settings->effective();
+        $settings = [...$settings, 'template_settings' => $this->templates->templateSettings($settings)];
+        $presentation = $this->templates->presentationFor($reports, $alertType, $settings);
+        $groups = $this->memorandumGroups($reports);
+        $html = view('emails.compliance.overdue-memorandum', [
+            'groups' => $groups,
+            'settings' => $settings,
+            'recipient' => $recipient->toArray(),
+            'alertType' => $alertType,
+            'presentation' => $presentation,
+        ])->render();
+
+        return [
+            'groups' => $groups,
+            'settings' => $settings,
+            'recipient' => $recipient->toArray(),
+            'alert_type' => $alertType,
+            'presentation' => $presentation,
+            'subject' => (string) ($presentation['subject'] ?? $settings['email_subject'] ?? 'Compliance Alert'),
+            'html' => $html,
+            'reports' => $reports,
+        ];
     }
 
     /** @param array<string,mixed> $settings @return array<string,mixed> */
     private function memorandumSettingsSnapshot(array $settings): array
     {
         return array_intersect_key($settings, array_flip([
-            'email_subject', 'sender_display_name', 'to_label', 'attention_line', 'from_line', 'memorandum_subject', 'introductory_text', 'compliance_warning_text',
+            'email_subject', 'sender_display_name', 'from_line', 'memorandum_subject', 'introductory_text', 'compliance_warning_text',
             'strict_compliance_text', 'signatory_name', 'signatory_position', 'office_name', 'office_address',
             'focal_person_name', 'focal_person_position', 'focal_person_contact', 'do_not_reply_text', 'system_generated_footer_text',
         ]));
