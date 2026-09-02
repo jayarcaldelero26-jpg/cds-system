@@ -15,7 +15,7 @@ class EnsureUserIsCdsAdmin
      */
     public function handle(Request $request, Closure $next): Response
     {
-        abort_unless($request->user()?->hasRole('CDS Admin'), 403);
+        abort_unless($request->user()?->hasAnyRole(['CDS Admin', 'Super Admin']), 403);
 
         return $next($request);
     }

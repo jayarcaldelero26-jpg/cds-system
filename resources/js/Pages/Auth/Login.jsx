@@ -1,12 +1,19 @@
 import { Icon } from '@iconify/react';
-import { Link, useForm } from '@inertiajs/react';
-import { useState } from 'react';
+import { Link, useForm, usePage } from '@inertiajs/react';
+import { useEffect, useState } from 'react';
 import AuthField from '../../Components/AuthField';
 import AuthLayout from '../../Layouts/AuthLayout';
+import SuccessDialog from '../../Components/SuccessDialog';
 
 export default function Login() {
+    const { flash = {} } = usePage().props;
     const { data, setData, post, processing, errors } = useForm({ email: '', password: '', remember: false });
     const [showPassword, setShowPassword] = useState(false);
+    const [pendingApproval, setPendingApproval] = useState(Boolean(flash.pending_approval));
+
+    useEffect(() => {
+        if (flash.pending_approval) setPendingApproval(true);
+    }, [flash.pending_approval]);
 
     const submit = (event) => {
         event.preventDefault();
@@ -15,6 +22,12 @@ export default function Login() {
 
     return (
         <AuthLayout title="Sign in" contentClassName="max-w-[30rem]">
+            <SuccessDialog
+                open={pendingApproval}
+                title="Account Pending Approval"
+                message="Your registration request is still awaiting administrator approval. Please contact the system administrator if you need assistance with your account activation."
+                onClose={() => setPendingApproval(false)}
+            />
             <div className="mt-5">
                 <div className="border-b border-slate-200/80 pb-4 dark:border-emerald-100/15">
                     <h2 className="text-[1.45rem] font-semibold leading-[1.3] tracking-tight text-slate-900 dark:text-white">Sign in to continue</h2>

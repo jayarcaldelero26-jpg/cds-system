@@ -1,13 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 
 const sizeClasses = {
-    default: 'min-h-11 px-3 py-2.5 text-sm leading-5 font-normal',
-    sm: 'min-h-10 px-3 py-2 text-sm leading-5 font-normal',
+    default: 'h-11 px-3 py-2.5 text-sm leading-5 font-normal',
+    sm: 'h-10 px-3 py-2 text-sm leading-5 font-normal',
 };
 
 const legacySizeClasses = {
-    default: 'min-h-11 px-3 py-2.5 text-sm',
-    sm: 'min-h-9 px-2.5 py-1.5 text-xs',
+    default: 'h-11 px-3 py-2.5 text-sm',
+    sm: 'h-10 px-2.5 py-2 text-xs',
 };
 
 export function useFloatingValue({ value, defaultValue, alwaysFloat = false }) {
@@ -71,27 +71,22 @@ export default function FloatingField({
     const focusText = focusTone === 'green' ? 'text-green-700 dark:text-green-400' : 'text-blue-600 dark:text-blue-400';
     const border = invalid ? 'border-red-500' : focused ? focusBorder : 'border-gray-300 dark:border-gray-600';
     const labelColor = invalid ? 'text-red-600 dark:text-red-400' : focused ? focusText : 'text-gray-600 dark:text-gray-300';
-    const restingLabelLeft = hasLeadingIcon ? 'left-10' : 'left-3';
-    const floatedLabelLeft = 'left-3';
     const focusRingClass = showFocusRing && calendarStyle
         ? focusTone === 'green'
             ? ' focus-within:ring-1 focus-within:ring-green-700/20 dark:focus-within:ring-green-500/25'
             : ' focus-within:ring-1 focus-within:ring-blue-700/20 dark:focus-within:ring-blue-500/25'
         : '';
-    const labelPosition = floated
-        ? floatedLabelLeft + ' top-0 -translate-y-1/2 px-1 text-xs' + (calendarStyle ? ' leading-4' : '')
-        : multiline
-            ? restingLabelLeft + ' top-3 text-sm' + (calendarStyle ? ' leading-5' : '')
-            : restingLabelLeft + ' top-1/2 -translate-y-1/2 text-sm' + (calendarStyle ? ' leading-5' : '');
-
     return (
         <div
-            className={'relative ' + className}
+            className={'min-w-0 ' + className}
             onFocus={() => setFocused(true)}
             onAnimationStart={(event) => event.animationName === 'floating-field-autofill' && setNativeHasValue(event.target?.value !== undefined && event.target?.value !== '')}
             onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
         >
-            <div className={'relative border shadow-none transition-colors duration-150 ' + (calendarStyle ? 'rounded-lg' : 'rounded-ui') + focusRingClass + ' ' + background + ' ' + border}>
+            <label htmlFor={fieldId} className={'mb-1.5 block min-w-0 break-words text-xs font-semibold leading-4 ' + labelColor}>
+                {label}{required && <span className="ml-0.5 whitespace-nowrap text-red-500 dark:text-red-400">*</span>}
+            </label>
+            <div className={'relative min-w-0 border shadow-none transition-colors duration-150 ' + (calendarStyle ? 'rounded-lg' : 'rounded-ui') + focusRingClass + ' ' + background + ' ' + border}>
                 {children({
                     ref,
                     nativeProps: { id: fieldId, disabled, readOnly, required, 'aria-invalid': invalid || undefined, 'aria-describedby': error ? fieldId + '-error' : hint ? fieldId + '-hint' : undefined },
@@ -103,9 +98,6 @@ export default function FloatingField({
                     sizeClasses: (calendarStyle ? sizeClasses : legacySizeClasses)[size] || (calendarStyle ? sizeClasses.default : legacySizeClasses.default),
                     fieldShapeClass: calendarStyle ? 'rounded-lg' : 'rounded-ui',
                 })}
-                <label htmlFor={fieldId} className={'pointer-events-none absolute z-10 origin-left whitespace-nowrap font-medium transition-all duration-150 ' + background + ' ' + labelPosition + ' ' + labelColor}>
-                    {label}{required && <span className={'ml-0.5 text-red-500' + (calendarStyle ? ' text-xs leading-4 dark:text-red-400' : '')}>*</span>}
-                </label>
             </div>
             {hint && <p id={fieldId + '-hint'} className="mt-1 text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
             {error && <p id={fieldId + '-error'} className="mt-1 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}

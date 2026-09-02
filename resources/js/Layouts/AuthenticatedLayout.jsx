@@ -9,11 +9,12 @@ import NotificationBell from '../Components/Notifications/NotificationBell';
 const allNavigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', section: 'BOTH' },
 
-    { label: 'Conservation Unit', heading: true, section: 'CDS' },
+    { label: 'Conservation Unit', heading: true, section: 'CDS', unit: 'conservation' },
     {
         label: 'Manual Operation',
         icon: 'manual',
         section: 'CDS',
+        unit: 'conservation',
         children: [
             { label: 'PA Profiles & Baselines', href: '/protected-areas', permission: 'canViewProtectedAreas' },
         ]
@@ -22,6 +23,7 @@ const allNavigation = [
         label: 'Protected Area Management and Development',
         icon: 'protected-area',
         section: 'CDS',
+        unit: 'conservation',
         children: [
             { label: 'Homestay', href: '/conservation-reports/homestay', permission: 'canViewTechnicalReports' },
             { label: 'Regular PAMB Meetings', href: '/conservation-reports/regular_pamb', permission: 'canViewTechnicalReports' },
@@ -53,11 +55,12 @@ const allNavigation = [
             { label: 'MPAN', href: '/conservation-reports/mpan', permission: 'canViewTechnicalReports' },
         ]
     },
-    { label: 'Wildlife Conservation and Protection', icon: 'wildlife', groupOnly: true, section: 'CDS' },
+    { label: 'Wildlife Conservation and Protection', icon: 'wildlife', groupOnly: true, section: 'CDS', unit: 'conservation' },
     {
         label: 'Conservation Database',
         icon: 'database',
         section: 'CDS',
+        unit: 'conservation',
         children: [
             { label: 'BMS Data', href: '/bms', permission: 'canViewBms', activeQuery: { tracker: null } },
             { label: 'BAMS Data', href: '/bams', permission: 'canViewBams' },
@@ -66,11 +69,12 @@ const allNavigation = [
         ]
     },
 
-    { label: 'Development Unit', heading: true, section: 'CDS' },
+    { label: 'Development Unit', heading: true, section: 'CDS', unit: 'development' },
     {
         label: 'National Greening Program',
         icon: 'sprout',
         section: 'CDS',
+        unit: 'development',
         children: [
             { label: 'ENGP IAC Generator', externalConfig: 'engpIacGeneratorUrl' },
             {
@@ -109,8 +113,8 @@ const allNavigation = [
             },
         ]
     },
-    { label: 'Community-Based Forest Management', href: '#', icon: 'forest', comingSoon: true, section: 'CDS' },
-    { label: 'Integrated Watershed Management', href: '#', icon: 'watershed', comingSoon: true, section: 'CDS' },
+    { label: 'Community-Based Forest Management', href: '#', icon: 'forest', comingSoon: true, section: 'CDS', unit: 'development' },
+    { label: 'Integrated Watershed Management', href: '#', icon: 'watershed', comingSoon: true, section: 'CDS', unit: 'development' },
 
     { label: 'eDATS MONITORING', heading: true, section: 'BOTH' },
     { label: 'Submission Tracking', href: '/submission-tracking', icon: 'submission-tracking', permission: 'canViewReports', section: 'CDS' },
@@ -208,10 +212,21 @@ function withGenericModuleNavigation(navigation, modules) {
     return merged;
 }
 
+function filterNavigationByUnit(items, unit, inheritedUnit = null) {
+    return items.map((item) => {
+        const itemUnit = item.unit || inheritedUnit;
+        if (unit && itemUnit && itemUnit !== unit) return null;
+        const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit) : null;
+        if (item.children && !children?.length) return null;
+        return children ? { ...item, children } : item;
+    }).filter(Boolean);
+}
+
 function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [] }) {
     const { url } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
+    const userUnit = auth?.user?.unit_assignment || auth?.organizationalUnit || (userSection === 'ENGP' ? 'development' : null);
     const [openDropdowns, setOpenDropdowns] = useState({});
     const navigationRef = useRef(null);
     const navigation = useMemo(() => withGenericModuleNavigation(allNavigation, genericModuleNavigation), [genericModuleNavigation]);
@@ -274,8 +289,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     const systemTitle = "eDATS-CDS";
     const systemSubtitle = "Enhanced Digital Alert and Tracking System";
 
-    const filteredNavigation = navigation.filter(item =>
-        item.section === 'BOTH' || item.section === userSection
+    const filteredNavigation = filterNavigationByUnit(
+        navigation.filter(item => !userUnit || item.section === 'BOTH' || item.section === 'CDS'),
+        userUnit,
     );
 
     const renderChildren = (children, depth = 0, engpContext = false) => children.map((child) => {

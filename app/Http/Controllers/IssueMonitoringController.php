@@ -12,6 +12,7 @@ class IssueMonitoringController extends Controller
 {
     public function index(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $query = IssueMonitoring::with('protectedArea');
 
         // Search Filters
@@ -63,6 +64,7 @@ class IssueMonitoringController extends Controller
 
     public function create()
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('IssueMonitorings/Create', [
             'protectedAreas' => ProtectedArea::select('id', 'name')->get(),
             'statuses' => ['Pending', 'Ongoing', 'Resolved'],
@@ -71,6 +73,7 @@ class IssueMonitoringController extends Controller
 
     public function store(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'issue_description' => 'required|string',
@@ -95,6 +98,7 @@ class IssueMonitoringController extends Controller
 
     public function edit(IssueMonitoring $issueMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('IssueMonitorings/Edit', [
             'issue' => [
                 'id' => $issueMonitoring->id,
@@ -114,6 +118,7 @@ class IssueMonitoringController extends Controller
 
     public function update(Request $request, IssueMonitoring $issueMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'issue_description' => 'required|string',
@@ -142,6 +147,7 @@ class IssueMonitoringController extends Controller
 
     public function destroy(IssueMonitoring $issueMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         if ($issueMonitoring->attachment) {
             Storage::disk('public')->delete($issueMonitoring->attachment);
         }

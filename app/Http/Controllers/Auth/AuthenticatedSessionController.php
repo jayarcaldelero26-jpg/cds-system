@@ -37,9 +37,7 @@ class AuthenticatedSessionController extends Controller
 
             $request->session()->regenerateToken();
 
-            return back()->withErrors([
-                'email' => 'Your account has been deactivated or is currently pending administrator approval.',
-            ]);
+            return redirect()->route('login')->with('pending_approval', true);
         }
 
         $request->session()->regenerate();

@@ -12,7 +12,7 @@ export function AuthField({ icon, error, children, ...props }) {
     return (
         <div className="relative">
             <Input {...props} error={error} className={className} leadingIcon={<FieldIcon icon={icon} />} focusTone="blue" showFocusRing={false} />
-            {children && <span className="absolute inset-y-0 right-2 z-20 flex items-center">{children}</span>}
+            {children && <span className="absolute right-2 top-6 z-20 flex h-11 items-center">{children}</span>}
         </div>
     );
 }

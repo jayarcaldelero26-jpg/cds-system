@@ -20,6 +20,7 @@ class LawinMonitoringController extends Controller
 
     public function index(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $query = LawinMonitoring::query();
 
         // Search Filters
@@ -69,6 +70,7 @@ class LawinMonitoringController extends Controller
 
     public function create()
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('LawinMonitorings/Create', [
             'cenroList' => $this->cenroList,
             'statuses' => ['Under Review', 'Approved'],
@@ -77,6 +79,7 @@ class LawinMonitoringController extends Controller
 
     public function store(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'cenro' => 'required|string',
             'patrol_date' => 'required|date',
@@ -102,6 +105,7 @@ class LawinMonitoringController extends Controller
 
     public function edit(LawinMonitoring $lawinMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('LawinMonitorings/Edit', [
             'monitoring' => [
                 'id' => $lawinMonitoring->id,
@@ -122,6 +126,7 @@ class LawinMonitoringController extends Controller
 
     public function update(Request $request, LawinMonitoring $lawinMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'cenro' => 'required|string',
             'patrol_date' => 'required|date',
@@ -150,6 +155,7 @@ class LawinMonitoringController extends Controller
 
     public function destroy(LawinMonitoring $lawinMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         if ($lawinMonitoring->attachment) {
             Storage::disk('public')->delete($lawinMonitoring->attachment);
         }

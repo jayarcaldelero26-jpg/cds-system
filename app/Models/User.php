@@ -17,7 +17,9 @@ use Spatie\Permission\Traits\HasRoles;
     'password',
     'office_designated', // 🚀 Gidugang na diri
     'section',           // 🚀 Gidugang na diri
-    'is_active'
+    'unit_assignment',
+    'is_active',
+    'protected_area_id'
 ])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
@@ -37,5 +39,10 @@ class User extends Authenticatable
             'is_active' => 'boolean',
             'password' => 'hashed',
         ];
+    }
+
+    public function protectedArea(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(ProtectedArea::class);
     }
 }

@@ -67,6 +67,7 @@ Route::middleware('auth')->group(function () {
     Route::patch('notifications/{notification}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
     Route::patch('notifications/{notification}/unread', [NotificationController::class, 'markUnread'])->name('notifications.unread');
     Route::post('notifications/read-all', [NotificationController::class, 'markAllRead'])->name('notifications.read-all');
+    Route::post('notifications/clear', [NotificationController::class, 'clear'])->name('notifications.clear');
 
     // PROFILE ROUTES
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
@@ -82,12 +83,12 @@ Route::middleware('auth')->group(function () {
     Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])->middleware('can:protected-areas.delete')->name('protected-areas.destroy');
 
     Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
-    Route::get('engp-reports/summary', [EngpReportController::class, 'index'])->middleware('can:technical-reports.view')->name('engp-reports.summary');
-    Route::get('engp-reports/{workflow}', [EngpReportController::class, 'index'])->middleware('can:technical-reports.view')->name('engp-reports.index');
-    Route::post('engp-reports/{workflow}', [EngpReportController::class, 'store'])->middleware('can:technical-reports.create')->name('engp-reports.store');
-    Route::put('engp-reports/{workflow}/{engpReportSubmission}', [EngpReportController::class, 'update'])->middleware('can:technical-reports.update')->name('engp-reports.update');
-    Route::delete('engp-reports/{workflow}/{engpReportSubmission}', [EngpReportController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('engp-reports.destroy');
-    Route::get('engp-reports/{workflow}/{engpReportSubmission}/mov', [EngpReportController::class, 'mov'])->middleware('can:technical-reports.view')->name('engp-reports.mov');
+    Route::get('engp-reports/summary', [EngpReportController::class, 'index'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.summary');
+    Route::get('engp-reports/{workflow}', [EngpReportController::class, 'index'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.index');
+    Route::post('engp-reports/{workflow}', [EngpReportController::class, 'store'])->middleware(['unit:development', 'can:technical-reports.create'])->name('engp-reports.store');
+    Route::put('engp-reports/{workflow}/{engpReportSubmission}', [EngpReportController::class, 'update'])->middleware(['unit:development', 'can:technical-reports.update'])->name('engp-reports.update');
+    Route::delete('engp-reports/{workflow}/{engpReportSubmission}', [EngpReportController::class, 'destroy'])->middleware(['unit:development', 'can:technical-reports.delete'])->name('engp-reports.destroy');
+    Route::get('engp-reports/{workflow}/{engpReportSubmission}/mov', [EngpReportController::class, 'mov'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.mov');
     // Protected active-module attachment endpoint. The source registry resolves
     // the record and path; clients never provide a filesystem path.
     Route::get('attachments/{source}/{record}/{attachment}', [ProtectedAttachmentController::class, 'show'])
@@ -97,8 +98,11 @@ Route::middleware('auth')->group(function () {
         ->name('attachments.show');
     Route::get('submission-tracking', [SubmissionTrackingController::class, 'index'])->middleware('can:reports.view')->name('submission-tracking.index');
     Route::post('submission-tracking/{source}/{record}/{stage}', [SubmissionTrackingController::class, 'transition'])->middleware('can:reports.view')->name('submission-tracking.transition');
+    Route::post('submission-tracking/{source}/{record}/internal-routing/{stage}', [SubmissionTrackingController::class, 'internalRouting'])->middleware('can:reports.view')->name('submission-tracking.internal-routing');
+    Route::post('submission-tracking/{source}/{record}/mov/submit-review', [SubmissionTrackingController::class, 'submitMovForReview'])->middleware('can:technical-reports.update')->name('submission-tracking.mov.submit-review');
+    Route::post('submission-tracking/{source}/{record}/mov/review', [SubmissionTrackingController::class, 'reviewMov'])->middleware('can:technical-reports.update')->name('submission-tracking.mov.review');
     Route::patch('submission-tracking/{source}/{record}/correction', [SubmissionTrackingController::class, 'correctRouting'])->middleware(['admin', 'can:submission-tracking.correct-routing'])->name('submission-tracking.correct-routing');
-    Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:reports.view')->name('compliance-alerts.index');
+    Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.index');
     Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
     Route::get('admin/audit-logs', [AuditLogController::class, 'index'])->middleware('can:audit-logs.view')->name('audit-logs.index');
     Route::get('admin/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->middleware('can:audit-logs.view')->name('audit-logs.show');
@@ -110,7 +114,7 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/compliance-alerts', [ComplianceAlertController::class, 'settings'])->middleware('can:compliance-alerts.manage')->name('settings.compliance-alerts');
     Route::get('admin/recipient-mapping', [ComplianceAlertController::class, 'recipientMapping'])->middleware('can:compliance-alerts.manage')->name('compliance-alert-recipients.index');
     Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:reports.view')->name('business-calendar.index');
-    Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:reports.view')->name('compliance-alerts.preview');
+    Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.preview');
     Route::post('compliance-alerts/send', [ComplianceAlertController::class, 'send'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send');
     Route::post('compliance-alerts/test', [ComplianceAlertController::class, 'test'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.test');
     Route::post('compliance-alerts/recipients', [ComplianceAlertController::class, 'storeRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.store');
@@ -123,38 +127,6 @@ Route::middleware('auth')->group(function () {
     Route::delete('compliance-alerts/non-working-days/{nonWorkingDay}', [ComplianceAlertController::class, 'destroyNonWorkingDay'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.non-working-days.destroy');
     Route::post('compliance-alerts/confirmations', [ComplianceAlertController::class, 'confirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.confirm');
     Route::delete('compliance-alerts/confirmations', [ComplianceAlertController::class, 'unconfirm'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.unconfirm');
-
-    // ECOTOURISM IMPACT MONITORING ROUTES
-    Route::get('ecotourism-monitorings', [EcotourismMonitoringController::class, 'index'])->middleware('can:ecotourism-monitoring.view')->name('ecotourism-monitorings.index');
-    Route::get('ecotourism-monitorings/create', [EcotourismMonitoringController::class, 'create'])->middleware('can:ecotourism-monitoring.create')->name('ecotourism-monitorings.create');
-    Route::post('ecotourism-monitorings', [EcotourismMonitoringController::class, 'store'])->middleware('can:ecotourism-monitoring.create')->name('ecotourism-monitorings.store');
-    Route::get('ecotourism-monitorings/{ecotourismMonitoring}/edit', [EcotourismMonitoringController::class, 'edit'])->middleware('can:ecotourism-monitoring.update')->name('ecotourism-monitorings.edit');
-    Route::patch('ecotourism-monitorings/{ecotourismMonitoring}', [EcotourismMonitoringController::class, 'update'])->middleware('can:ecotourism-monitoring.update')->name('ecotourism-monitorings.update');
-    Route::delete('ecotourism-monitorings/{ecotourismMonitoring}', [EcotourismMonitoringController::class, 'destroy'])->middleware('can:ecotourism-monitoring.delete')->name('ecotourism-monitorings.destroy');
-
-    // ISSUES MONITORING ROUTES
-    Route::get('issue-monitorings', [IssueMonitoringController::class, 'index'])->middleware('can:issue-monitoring.view')->name('issue-monitorings.index');
-    Route::get('issue-monitorings/create', [IssueMonitoringController::class, 'create'])->middleware('can:issue-monitoring.create')->name('issue-monitorings.create');
-    Route::post('issue-monitorings', [IssueMonitoringController::class, 'store'])->middleware('can:issue-monitoring.create')->name('issue-monitorings.store');
-    Route::get('issue-monitorings/{issueMonitoring}/edit', [IssueMonitoringController::class, 'edit'])->middleware('can:issue-monitoring.update')->name('issue-monitorings.edit');
-    Route::patch('issue-monitorings/{issueMonitoring}', [IssueMonitoringController::class, 'update'])->middleware('can:issue-monitoring.update')->name('issue-monitorings.update');
-    Route::delete('issue-monitorings/{issueMonitoring}', [IssueMonitoringController::class, 'destroy'])->middleware('can:issue-monitoring.delete')->name('issue-monitorings.destroy');
-
-    // MES LAWIN MONITORING ROUTES
-    Route::get('lawin-monitorings', [LawinMonitoringController::class, 'index'])->middleware('can:lawin-monitoring.view')->name('lawin-monitorings.index');
-    Route::get('lawin-monitorings/create', [LawinMonitoringController::class, 'create'])->middleware('can:lawin-monitoring.create')->name('lawin-monitorings.create');
-    Route::post('lawin-monitorings', [LawinMonitoringController::class, 'store'])->middleware('can:lawin-monitoring.create')->name('lawin-monitorings.store');
-    Route::get('lawin-monitorings/{lawinMonitoring}/edit', [LawinMonitoringController::class, 'edit'])->middleware('can:lawin-monitoring.update')->name('lawin-monitorings.edit');
-    Route::patch('lawin-monitorings/{lawinMonitoring}', [LawinMonitoringController::class, 'update'])->middleware('can:lawin-monitoring.update')->name('lawin-monitorings.update');
-    Route::delete('lawin-monitorings/{lawinMonitoring}', [LawinMonitoringController::class, 'destroy'])->middleware('can:lawin-monitoring.delete')->name('lawin-monitorings.destroy');
-
-    // CDS LAWIN ROUTES
-    Route::get('cds-lawin', [CdsLawinMonitoringController::class, 'index'])->middleware('can:cds-lawin.view')->name('cds-lawin.index');
-    Route::get('cds-lawin/create', [CdsLawinMonitoringController::class, 'create'])->middleware('can:cds-lawin.create')->name('cds-lawin.create');
-    Route::post('cds-lawin', [CdsLawinMonitoringController::class, 'store'])->middleware('can:cds-lawin.create')->name('cds-lawin.store');
-    Route::get('cds-lawin/{cdsLawinMonitoring}/edit', [CdsLawinMonitoringController::class, 'edit'])->middleware('can:cds-lawin.update')->name('cds-lawin.edit');
-    Route::patch('cds-lawin/{cdsLawinMonitoring}', [CdsLawinMonitoringController::class, 'update'])->middleware('can:cds-lawin.update')->name('cds-lawin.update');
-    Route::delete('cds-lawin/{cdsLawinMonitoring}', [CdsLawinMonitoringController::class, 'destroy'])->middleware('can:cds-lawin.delete')->name('cds-lawin.destroy');
 
     // BIODIVERSITY MONITORING SYSTEM (BMS) ROUTES
     Route::get('bms', [BmsController::class, 'index'])->middleware('can:bms.view')->name('bms.index');
@@ -243,11 +215,11 @@ Route::middleware('auth')->group(function () {
     Route::get('management-plans/{managementPlan}/attachments/{attachment}', [ManagementPlanController::class, 'viewAttachment'])->middleware('can:management-plans.view')->whereNumber('attachment')->name('management-plans.attachments.view');
 
     // CONSERVATION UNIT REPORT WORKFLOWS
-    Route::get('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'index'])->middleware('can:technical-reports.view')->name('conservation-reports.index');
-    Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware('can:technical-reports.create')->name('conservation-reports.store');
-    Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware('can:technical-reports.update')->name('conservation-reports.update');
-    Route::delete('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'destroy'])->middleware('can:technical-reports.delete')->name('conservation-reports.destroy');
-    Route::get('conservation-reports/{workflow}/{submission}/mov', [ConservationReportSubmissionController::class, 'showMov'])->middleware('can:technical-reports.view')->name('conservation-reports.mov');
+    Route::get('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'index'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.index');
+    Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware(['unit:conservation', 'can:technical-reports.create'])->name('conservation-reports.store');
+    Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.update'])->name('conservation-reports.update');
+    Route::delete('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'destroy'])->middleware(['unit:conservation', 'can:technical-reports.delete'])->name('conservation-reports.destroy');
+    Route::get('conservation-reports/{workflow}/{submission}/mov', [ConservationReportSubmissionController::class, 'showMov'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.mov');
     // IPAF ROUTES
     Route::get('ipaf', [IpafController::class, 'index'])->middleware('can:technical-reports.view')->name('ipaf.index');
     Route::redirect('ipaf-collection', '/ipaf')->middleware('can:technical-reports.view')->name('ipaf-collection.index');
@@ -263,33 +235,15 @@ Route::middleware('auth')->group(function () {
     Route::delete('ipaf/management-reports/{managementReport}', [IpafController::class, 'destroyManagement'])->middleware('can:technical-reports.delete')->name('ipaf.management.destroy');
     Route::get('ipaf/management-reports/{managementReport}/mov', [IpafController::class, 'managementMov'])->middleware('can:technical-reports.view')->name('ipaf.management.mov');
 
-    // PROGRAMS, PROJECTS & ACTIVITIES (PPA) ROUTES
-    Route::get('program-project-activities', [ProgramProjectActivityController::class, 'index'])->middleware('can:programs-projects-activities.view')->name('program-project-activities.index');
-    Route::get('program-project-activities/create', [ProgramProjectActivityController::class, 'create'])->middleware('can:programs-projects-activities.create')->name('program-project-activities.create');
-    Route::post('program-project-activities', [ProgramProjectActivityController::class, 'store'])->middleware('can:programs-projects-activities.create')->name('program-project-activities.store');
-    Route::get('program-project-activities/{programProjectActivity}/edit', [ProgramProjectActivityController::class, 'edit'])->middleware('can:programs-projects-activities.update')->name('program-project-activities.edit');
-    Route::post('program-project-activities/{programProjectActivity}', [ProgramProjectActivityController::class, 'update'])->middleware('can:programs-projects-activities.update')->name('program-project-activities.update');
-    Route::delete('program-project-activities/{programProjectActivity}', [ProgramProjectActivityController::class, 'destroy'])->middleware('can:programs-projects-activities.delete')->name('program-project-activities.delete');
-
     Route::get('api/global-search', [GlobalSearchController::class, 'search'])->name('api.global-search');
-
-    // FILE VIEWER
-    Route::get('/view-file/{path}', function ($path) {
-        $baseDir = realpath(storage_path('app/public'));
-        $fullPath = realpath($baseDir . DIRECTORY_SEPARATOR . $path);
-
-        if ($fullPath === false || $baseDir === false || !str_starts_with($fullPath, $baseDir . DIRECTORY_SEPARATOR)) {
-            abort(404);
-        }
-
-        return response()->file($fullPath);
-    })->where('path', '.*')->name('view-file');
 });
 
 Route::middleware(['auth', 'admin'])
     ->prefix('admin')
     ->as('admin.')
     ->group(function (): void {
+        Route::patch('users/{user}/activate', [UserController::class, 'activate'])
+            ->name('users.activate');
         Route::resource('users', UserController::class)->except('show');
     });
 

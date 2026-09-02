@@ -72,7 +72,7 @@ test('overdue and due soon in-app notifications are derived once from the live a
         ->and($this->user->notifications()->count())->toBe(2);
 });
 
-test('submission tracking creates CENRO, PENRO, and regional endorsement updates without altering routing', function () {
+test('submission tracking records routing dates without creating bell notifications', function () {
     $report = notificationConservationReport(notificationProtectedArea('Pujada Bay Protected Landscape', $this->user), $this->user);
     $tracking = app(SubmissionTrackingService::class);
 
@@ -81,15 +81,11 @@ test('submission tracking creates CENRO, PENRO, and regional endorsement updates
     $tracking->transition('conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT, '2026-08-12', $this->user->id);
 
     $types = $this->user->notifications()->get()->pluck('data')->pluck('type');
-    expect($types)->toContain(
-        EdatsInAppNotificationService::CENRO_RELEASED,
-        EdatsInAppNotificationService::PENRO_RECEIVED,
-        EdatsInAppNotificationService::FOR_REGIONAL_ENDORSEMENT,
-        EdatsInAppNotificationService::REGION_ENDORSED,
-    );
+    expect($types)->not->toContain('cenro_released', 'penro_received', 'for_regional_endorsement', 'region_endorsed')
+        ->and($report->fresh()->date_endorsed_regional?->toDateString())->toBe('2026-08-12');
 });
 
-test('MHRWS bypasses CENRO notification and ENGP never generates regional endorsement notification', function () {
+test('MHRWS bypasses CENRO routing and ENGP never generates regional endorsement routing', function () {
     $mhrws = notificationConservationReport(notificationProtectedArea('Mt. Hamiguitan Range Wildlife Sanctuary', $this->user, 'MHRWS'), $this->user);
     $engp = notificationEngpReport($this->user, ['workflow_key' => 'cbep']);
     $tracking = app(SubmissionTrackingService::class);
@@ -98,10 +94,9 @@ test('MHRWS bypasses CENRO notification and ENGP never generates regional endors
     $tracking->transition('engp', $engp->id, SubmissionTrackingService::CENRO_RELEASE, '2026-08-10', $this->user->id);
     $tracking->transition('engp', $engp->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-11', $this->user->id);
 
-    $engpTypes = $this->user->notifications()->get()->filter(fn ($notification) => ($notification->data['source_type'] ?? null) === 'engp')->pluck('data')->pluck('type');
-    expect($engpTypes)->toContain(EdatsInAppNotificationService::CENRO_RELEASED, EdatsInAppNotificationService::PENRO_RECEIVED)
-        ->not->toContain(EdatsInAppNotificationService::FOR_REGIONAL_ENDORSEMENT)
-        ->and($tracking->queues()[SubmissionTrackingService::CENRO_RELEASE]->where('source_id', $mhrws->id))->toBeEmpty();
+    expect($this->user->notifications()->count())->toBe(0)
+        ->and($tracking->queues()[SubmissionTrackingService::CENRO_RELEASE]->where('source_id', $mhrws->id))->toBeEmpty()
+        ->and($engp->fresh()->date_received_penro?->toDateString())->toBe('2026-08-11');
 });
 
 test('notification routes do not allow a user to read another users notification', function () {
@@ -110,6 +105,64 @@ test('notification routes do not allow a user to read another users notification
     $notification = $other->notifications()->first();
 
     $this->actingAs($this->user)->patch(route('notifications.read', $notification))->assertNotFound();
+});
+
+test('bell shows only unread three-day and overdue alerts and clear preserves notification history', function () {
+    $this->user->notify(new EdatsInAppNotification([
+        'type' => EdatsInAppNotificationService::DUE_SOON,
+        'dedup_key' => 'due-soon-clear-test',
+        'title' => '3-Day Reminder',
+        'message' => 'A report is due on Sep 1, 2026.',
+        'severity' => 'warning',
+        'category' => 'due_soon',
+    ]));
+    $this->user->notify(new EdatsInAppNotification([
+        'type' => 'submission_updates',
+        'dedup_key' => 'routing-clear-test',
+        'title' => 'Report Received by PENRO',
+        'message' => 'Routing event.',
+        'severity' => 'info',
+        'category' => 'submission_updates',
+    ]));
+
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertJsonPath('unread_count', 1)
+        ->assertJsonCount(1, 'notifications')
+        ->assertJsonPath('notifications.0.title', '3-Day Reminder');
+
+    $this->actingAs($this->user)->withHeader('Accept', 'application/json')
+        ->post(route('notifications.clear'))
+        ->assertOk()
+        ->assertJson(['ok' => true, 'unread_count' => 0, 'notifications' => []]);
+
+    expect($this->user->fresh()->notifications()->count())->toBe(2)
+        ->and($this->user->fresh()->unreadNotifications()->count())->toBe(1);
+});
+
+test('a future compliance alert can appear after clear', function () {
+    $this->user->notify(new EdatsInAppNotification([
+        'type' => EdatsInAppNotificationService::DUE_SOON,
+        'dedup_key' => 'old-alert',
+        'title' => '3-Day Reminder',
+        'message' => 'Old report.',
+        'severity' => 'warning',
+        'category' => 'due_soon',
+    ]));
+
+    $this->actingAs($this->user)->withHeader('Accept', 'application/json')->post(route('notifications.clear'))->assertOk();
+
+    $this->user->notify(new EdatsInAppNotification([
+        'type' => EdatsInAppNotificationService::OVERDUE,
+        'dedup_key' => 'new-alert',
+        'title' => 'Overdue Report',
+        'message' => 'New overdue report.',
+        'severity' => 'danger',
+        'category' => 'overdue',
+    ]));
+
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertJsonPath('unread_count', 1)
+        ->assertJsonPath('notifications.0.title', 'Overdue Report');
 });
 
 test('ENGP overdue reports use the same live Alerts source and active IMEA Maintenance remains included', function () {
@@ -125,7 +178,7 @@ test('ENGP overdue reports use the same live Alerts source and active IMEA Maint
 
 function notificationPayload(string $key): array
 {
-    return ['dedup_key' => $key, 'title' => 'Test notification', 'message' => 'Test message', 'severity' => 'info', 'category' => 'submission_updates', 'source_label' => 'Test Report', 'url' => route('dashboard')];
+    return ['type' => EdatsInAppNotificationService::DUE_SOON, 'dedup_key' => $key, 'title' => 'Test notification', 'message' => 'Test message', 'severity' => 'warning', 'category' => 'due_soon', 'source_label' => 'Test Report', 'url' => route('dashboard')];
 }
 
 function notificationProtectedArea(string $name, User $user, ?string $shortName = null): ProtectedArea

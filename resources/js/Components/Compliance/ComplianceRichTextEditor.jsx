@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 const COLORS = [
     { label: 'Black', value: '#000000' },
@@ -119,7 +119,9 @@ function removeFormattingFromSelection(editor) {
     return true;
 }
 
-export default function ComplianceRichTextEditor({ label, value = '', onChange, disabled = false, placeholder = '', error = null, rows = 3 }) {
+export default function ComplianceRichTextEditor({ id, label, value = '', onChange, disabled = false, placeholder = '', error = null, rows = 3 }) {
+    const generatedId = useId();
+    const editorId = id || 'rich-text-editor-' + generatedId.replace(/:/g, '');
     const editorRef = useRef(null);
     const [colorMenuOpen, setColorMenuOpen] = useState(false);
     const [selectionState, setSelectionState] = useState({ bold: false, italic: false, underline: false });
@@ -173,8 +175,8 @@ export default function ComplianceRichTextEditor({ label, value = '', onChange, 
         className={`rounded px-2 py-1 text-xs font-bold transition ${active ? 'bg-green-700 text-white' : 'text-gray-700 hover:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-700'} disabled:cursor-not-allowed disabled:opacity-50`}
     >{text}</button>;
 
-    return <div className="space-y-1.5">
-        <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">{label}</label>
+    return <div className="min-w-0 space-y-1.5">
+        <label htmlFor={editorId} className="block min-w-0 break-words text-xs font-semibold leading-4 text-gray-700 dark:text-gray-300">{label}</label>
         <div className="overflow-visible rounded-xl border border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950">
             <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900">
                 {toolbarButton('Regular', 'Remove formatting', regular)}
@@ -192,10 +194,13 @@ export default function ComplianceRichTextEditor({ label, value = '', onChange, 
             </div>
             <div
                 ref={editorRef}
+                id={editorId}
                 contentEditable={!disabled}
                 suppressContentEditableWarning
                 role="textbox"
                 aria-multiline="true"
+                aria-invalid={error ? 'true' : undefined}
+                aria-describedby={error ? `${editorId}-error` : undefined}
                 data-placeholder={placeholder}
                 onInput={sync}
                 onKeyUp={refreshSelectionState}
@@ -205,6 +210,6 @@ export default function ComplianceRichTextEditor({ label, value = '', onChange, 
                 style={{ minHeight: `${Math.max(3, rows) * 1.5}rem` }}
             />
         </div>
-        {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p id={`${editorId}-error`} className="text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>}
     </div>;
 }

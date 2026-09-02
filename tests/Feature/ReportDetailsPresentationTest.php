@@ -58,6 +58,16 @@ it('does not reintroduce IMEA Maintenance into active tracking or alerts', funct
     expect($alerts)->not->toContain('IMEA Maintenance');
 });
 
+it('keeps Submission Tracking tables navigation-only and preserves Full Details actions', function () {
+    $tracking = File::get(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
+
+    expect($tracking)
+        ->not->toContain("{ key: 'action'")
+        ->toContain('onRowClick={setDetails}')
+        ->toContain('<PambMovProgress')
+        ->toContain('<PambRoutingTimeline');
+});
+
 it('uses a safe UTF-8 fallback throughout Submission Tracking', function () {
     $tracking = File::get(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
 

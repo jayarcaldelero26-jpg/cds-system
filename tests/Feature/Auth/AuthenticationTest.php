@@ -31,6 +31,33 @@ test('users can not authenticate with invalid password', function () {
     $this->assertGuest();
 });
 
+test('inactive users with correct credentials are redirected with a pending approval flash', function () {
+    $user = User::factory()->create(['is_active' => false]);
+
+    $response = $this->post('/login', [
+        'email' => $user->email,
+        'password' => 'password',
+    ]);
+
+    $response->assertRedirect(route('login'))
+        ->assertSessionHas('pending_approval', true)
+        ->assertSessionDoesntHaveErrors();
+    $this->assertGuest();
+});
+
+test('inactive users with an incorrect password retain normal credential failure behavior', function () {
+    $user = User::factory()->create(['is_active' => false]);
+
+    $response = $this->post('/login', [
+        'email' => $user->email,
+        'password' => 'wrong-password',
+    ]);
+
+    $response->assertSessionHasErrors('email');
+    $response->assertSessionMissing('pending_approval');
+    $this->assertGuest();
+});
+
 test('users can logout', function () {
     $user = User::factory()->create();
 

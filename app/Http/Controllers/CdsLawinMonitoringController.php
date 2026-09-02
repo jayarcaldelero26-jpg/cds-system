@@ -14,6 +14,7 @@ class CdsLawinMonitoringController extends Controller
 {
     public function index(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $query = CdsLawinMonitoring::query();
 
         if ($request->filled('search')) {
@@ -57,6 +58,7 @@ class CdsLawinMonitoringController extends Controller
 
     public function create()
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('CdsLawin/Create', [
             'statuses' => ['Under Review', 'Approved'],
         ]);
@@ -64,6 +66,7 @@ class CdsLawinMonitoringController extends Controller
 
     public function store(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate($this->validationRules());
         $newAttachment = null;
 
@@ -90,6 +93,7 @@ class CdsLawinMonitoringController extends Controller
 
     public function edit(CdsLawinMonitoring $cdsLawinMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('CdsLawin/Edit', [
             'lawin' => [
                 'id' => $cdsLawinMonitoring->id,
@@ -109,6 +113,7 @@ class CdsLawinMonitoringController extends Controller
 
     public function update(Request $request, CdsLawinMonitoring $cdsLawinMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate($this->validationRules());
         $oldAttachment = $cdsLawinMonitoring->attachment;
         $newAttachment = null;
@@ -138,6 +143,7 @@ class CdsLawinMonitoringController extends Controller
 
     public function destroy(CdsLawinMonitoring $cdsLawinMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $attachment = $cdsLawinMonitoring->attachment;
 
         DB::transaction(fn () => $cdsLawinMonitoring->delete());

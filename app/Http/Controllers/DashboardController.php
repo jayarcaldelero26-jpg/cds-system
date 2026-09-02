@@ -18,6 +18,7 @@ use App\Models\Aws;
 use App\Services\Dashboard\DashboardMonitoringService;
 use Carbon\Carbon;
 use Inertia\Inertia;
+use App\Services\Authorization\OrganizationalAccessService;
 
 class DashboardController extends Controller
 {
@@ -38,7 +39,13 @@ class DashboardController extends Controller
 
             // Retained for existing authorized-navigation consumers; the new
             // monitoring dashboard itself uses the normalized live report rows.
-            $dashboard['protectedAreasCount'] = ProtectedArea::count();
+            $organization = app(OrganizationalAccessService::class);
+            $dashboard['protectedAreasCount'] = match ($organization->unitFor($user)) {
+                OrganizationalAccessService::DEVELOPMENT => 0,
+                default => $user->section === 'PAMO' && $user->protected_area_id
+                    ? ProtectedArea::whereKey($user->protected_area_id)->count()
+                    : ProtectedArea::count(),
+            };
 
             return Inertia::render('Dashboard', $dashboard);
         }

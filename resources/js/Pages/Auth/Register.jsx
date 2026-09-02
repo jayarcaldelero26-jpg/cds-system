@@ -5,17 +5,32 @@ import { AuthField, AuthSelect } from '../../Components/AuthField';
 import PrimaryButton from '../../Components/PrimaryButton';
 import AuthLayout from '../../Layouts/AuthLayout';
 
-export default function Register() {
+export default function Register({ registrationOptions = {} }) {
+    const units = registrationOptions.units || [];
+    const categories = registrationOptions.categories || {};
+    const offices = registrationOptions.offices || { all: [], cenro: [], penro: [] };
+    const protectedAreas = registrationOptions.protectedAreas || [];
     const { data, setData, post, processing, errors } = useForm({
         name: '',
         email: '',
+        unit_assignment: '',
         office_designated: '',
         section: '',
+        protected_area_id: '',
         password: '',
         password_confirmation: '',
     });
     const [showPassword, setShowPassword] = useState(false);
     const [showPasswordConfirmation, setShowPasswordConfirmation] = useState(false);
+
+    const selectedCategory = (categories[data.unit_assignment] || []).find((item) => item.value === data.section);
+    const officeOptions = data.section?.startsWith('CENRO_') ? offices.cenro : data.section?.startsWith('PENRO_') ? offices.penro : offices.all;
+    const changeUnit = (event) => {
+        setData((current) => ({ ...current, unit_assignment: event.target.value, section: '', office_designated: '', protected_area_id: '' }));
+    };
+    const changeCategory = (event) => {
+        setData((current) => ({ ...current, section: event.target.value, office_designated: '', protected_area_id: '' }));
+    };
 
     const submit = (event) => {
         event.preventDefault();
@@ -31,61 +46,66 @@ export default function Register() {
                 </div>
 
                 <form onSubmit={submit} className="mt-5 space-y-4">
-                    <AuthField
-                        id="name"
-                        name="name"
-                        label="Full name"
-                        icon="user-round"
-                        value={data.name}
-                        onChange={(event) => setData('name', event.target.value)}
-                        error={errors.name}
-                        autoComplete="name"
-                        autoFocus
+                    <AuthField id="name" name="name" label="Full name" icon="user-round" value={data.name} onChange={(event) => setData('name', event.target.value)} error={errors.name} autoComplete="name" autoFocus required />
+                    <AuthField id="email" name="email" label="Email address" icon="mail" type="email" value={data.email} onChange={(event) => setData('email', event.target.value)} error={errors.email} autoComplete="username" required />
+                    <AuthSelect
+                        id="unit-assignment"
+                        label="Unit"
+                        name="unit_assignment"
+                        icon="building"
+                        value={data.unit_assignment}
+                        onChange={changeUnit}
                         required
-                    />
-
-                    <AuthField
-                        id="email"
-                        name="email"
-                        label="Email address"
-                        icon="mail"
-                        type="email"
-                        value={data.email}
-                        onChange={(event) => setData('email', event.target.value)}
-                        error={errors.email}
-                        autoComplete="username"
-                        required
-                    />
-
-                    <AuthField
-                        id="office_designated"
-                        name="office_designated"
-                        label="Office designated"
-                        icon="building-2"
-                        hint="Example: CENRO Mati or PENRO Davao Oriental"
-                        value={data.office_designated}
-                        onChange={(event) => setData('office_designated', event.target.value)}
-                        error={errors.office_designated}
-                        autoComplete="organization"
-                        required
-                    />
+                        error={errors.unit_assignment}
+                    >
+                        <option value="">Select operational unit</option>
+                        {units.map((unit) => <option key={unit.value} value={unit.value}>{unit.label}</option>)}
+                    </AuthSelect>
 
                     <AuthSelect
                         id="section"
-                        label="User category"
+                        label="Requested user category"
                         name="section"
                         icon="users-round"
                         value={data.section}
-                        onChange={(event) => setData('section', event.target.value)}
+                        onChange={changeCategory}
                         required
                         error={errors.section}
                         hint="Access is assigned separately after administrator approval."
                     >
                         <option value="">Select user category</option>
-                        <option value="CDS">CDS Staff</option>
-                        <option value="ENGP">ENGP Coordinator</option>
-                        <option value="PAMO">PAMO / Protected Area Staff</option>
+                        {(categories[data.unit_assignment] || []).map((category) => <option key={category.value} value={category.value}>{category.label}</option>)}
                     </AuthSelect>
+
+                    <AuthSelect
+                        id="office-designated"
+                        label="Office designated"
+                        name="office_designated"
+                        icon="building-2"
+                        value={data.office_designated}
+                        onChange={(event) => setData('office_designated', event.target.value)}
+                        required
+                        error={errors.office_designated}
+                        hint={selectedCategory ? `Select the canonical ${selectedCategory.label} office scope.` : 'Select a unit and user category first.'}
+                    >
+                        <option value="">Select office</option>
+                        {officeOptions.map((office) => <option key={office} value={office}>{office}</option>)}
+                    </AuthSelect>
+
+                    {data.unit_assignment === 'conservation' && data.section === 'PAMO' && <AuthSelect
+                        id="protected-area-id"
+                        label="Protected Area / PAMO assignment"
+                        name="protected_area_id"
+                        icon="map"
+                        value={data.protected_area_id}
+                        onChange={(event) => setData('protected_area_id', event.target.value)}
+                        required
+                        error={errors.protected_area_id}
+                        hint="The administrator will confirm the managing office under the existing PA routing policy."
+                    >
+                        <option value="">Select protected area</option>
+                        {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+                    </AuthSelect>}
 
                     <AuthField
                         id="password"

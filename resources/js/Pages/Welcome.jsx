@@ -1,11 +1,5 @@
 import { Head, Link } from '@inertiajs/react';
 
-const trustItems = [
-    { label: 'Secure', icon: 'shield' },
-    { label: 'Confidential', icon: 'lock' },
-    { label: 'Reliable', icon: 'check' },
-];
-
 const features = [
     { title: 'Integrated Monitoring', description: 'Consolidated monitoring across Conservation and Development activities.', icon: 'layers' },
     { title: 'Submission & Timeliness Tracking', description: 'Track report deadlines, routing, receipt, delays, and timeliness.', icon: 'calendar' },
@@ -66,9 +60,6 @@ export default function Welcome({ overview = {} }) {
                                 <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-800 dark:text-emerald-400">PENRO Mati – Conservation and Development Section</p>
                             </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-bold text-slate-600 dark:text-slate-300" aria-label="System trust information">
-                            {trustItems.map((item) => <span key={item.label} className="inline-flex items-center gap-1.5"><Icon name={item.icon} className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />{item.label}</span>)}
-                        </div>
                     </div>
                 </header>
 
@@ -83,8 +74,8 @@ export default function Welcome({ overview = {} }) {
                             <span className="inline-flex rounded-full border border-emerald-100/30 bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-50">CDS Integrated Monitoring and Management System</span>
                             <h1 className="mt-6 text-4xl font-extrabold leading-[1.04] tracking-tight text-white sm:text-5xl lg:text-6xl">Enhanced Digital<br />Alert and Tracking System<br /><span className="text-emerald-200">(eDATS)</span></h1>
                             <p className="mt-5 text-lg font-semibold text-emerald-100 sm:text-xl">One System. All CDS Monitoring. Better Decisions.</p>
-                            <p className="mt-5 max-w-2xl text-sm leading-7 text-emerald-50/90 sm:text-base">eDATS consolidates monitoring, report submissions, deadlines, supporting documents, alerts, performance, Conservation activities, and Development/ENGP monitoring in one secure workspace.</p>
-                            <Link href="/login" className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-emerald-900 shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white" aria-label="Access secure eDATS login">Access Secure Login <Icon name="arrow" className="h-4 w-4" /></Link>
+                             <p className="mt-5 max-w-2xl text-sm leading-7 text-emerald-50/90 sm:text-base">eDATS consolidates monitoring, report submissions, deadlines, supporting documents, alerts, performance, Conservation activities, and Development/ENGP monitoring in one workspace.</p>
+                             <Link href="/login" className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-emerald-900 shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white" aria-label="Access eDATS login">Access Login <Icon name="arrow" className="h-4 w-4" /></Link>
                         </div>
 
                         <section className="rounded-2xl border border-white/20 bg-white/95 p-5 shadow-2xl shadow-emerald-950/25 backdrop-blur dark:bg-slate-900/95 sm:p-6" aria-labelledby="overview-title">
@@ -102,7 +93,7 @@ export default function Welcome({ overview = {} }) {
                 <section className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:px-8" aria-labelledby="capabilities-title">
                     <div className="max-w-2xl"><p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-400">System capabilities</p><h2 id="capabilities-title" className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">A connected monitoring environment</h2></div>
                     <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        {features.map((feature) => <Link key={feature.title} href="/login" className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-emerald-700" aria-label={`${feature.title}: access through secure login`}><span className="inline-flex rounded-xl bg-emerald-100 p-2.5 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><Icon name={feature.icon} /></span><h3 className="mt-4 text-base font-extrabold text-slate-900 dark:text-white">{feature.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{feature.description}</p><span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 dark:text-emerald-400">Authorized access <Icon name="arrow" className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" /></span></Link>)}
+                        {features.map((feature) => <Link key={feature.title} href="/login" className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-emerald-700" aria-label={`${feature.title}: access through login`}><span className="inline-flex rounded-xl bg-emerald-100 p-2.5 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><Icon name={feature.icon} /></span><h3 className="mt-4 text-base font-extrabold text-slate-900 dark:text-white">{feature.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{feature.description}</p><span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 dark:text-emerald-400">Authorized access <Icon name="arrow" className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" /></span></Link>)}
                     </div>
                 </section>
 

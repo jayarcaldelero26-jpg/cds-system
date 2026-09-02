@@ -12,6 +12,7 @@ class EcotourismMonitoringController extends Controller
 {
     public function index(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $query = EcotourismMonitoring::with('protectedArea');
 
         // Search Filters
@@ -64,6 +65,7 @@ class EcotourismMonitoringController extends Controller
 
     public function create()
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('EcotourismMonitorings/Create', [
             'protectedAreas' => ProtectedArea::select('id', 'name')->get(),
             'impactRatings' => ['Low', 'Moderate', 'High'],
@@ -73,6 +75,7 @@ class EcotourismMonitoringController extends Controller
 
     public function store(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'site_name' => 'required|string|max:255',
@@ -98,6 +101,7 @@ class EcotourismMonitoringController extends Controller
 
     public function edit(EcotourismMonitoring $ecotourismMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         // Gi-format ang data daan aron dili mag-error ang HTML5 Date input sa React
         return Inertia::render('EcotourismMonitorings/Edit', [
             'monitoring' => [
@@ -120,6 +124,7 @@ class EcotourismMonitoringController extends Controller
 
     public function update(Request $request, EcotourismMonitoring $ecotourismMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'site_name' => 'required|string|max:255',
@@ -149,6 +154,7 @@ class EcotourismMonitoringController extends Controller
 
     public function destroy(EcotourismMonitoring $ecotourismMonitoring)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         if ($ecotourismMonitoring->attachment) {
             Storage::disk('public')->delete($ecotourismMonitoring->attachment);
         }

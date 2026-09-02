@@ -17,8 +17,8 @@ use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
-use App\Services\Notifications\EdatsInAppNotificationService;
 use App\Services\Modules\ModuleMetadataResolver;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -32,7 +32,7 @@ final class SubmissionTrackingService
     public const PENRO_RECEIPT = 'penro_receipt';
     public const REGIONAL_ENDORSEMENT = 'regional_endorsement';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly EdatsInAppNotificationService $notifications, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization) {}
 
     /** @return Collection<int, array<string, mixed>> */
     public function records(array $filters = []): Collection
@@ -41,6 +41,7 @@ final class SubmissionTrackingService
             ->flatMap(function (array $source, string $key) {
                 $query = $source['model']::query();
                 if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
+                if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy']);
                 if ($key === 'engp') $query->with('releaseEvents');
                 if ($key === 'conservation') {
                     $query->where(fn ($candidate) => $candidate
@@ -51,7 +52,10 @@ final class SubmissionTrackingService
                             ->whereNotNull('date_accomplished')
                             ->where(fn ($workflow) => $workflow
                                 ->whereNotIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
-                                ->orWhereNull('workflow_key'))));
+                            ->orWhereNull('workflow_key'))));
+                    if ($user = auth()->user()) {
+                        $query = $this->pambAccess->scopeQuery($query, $user);
+                    }
                 } elseif ($source['requires_date_accomplished'] ?? true) {
                     $query->whereNotNull('date_accomplished');
                 }
@@ -63,6 +67,21 @@ final class SubmissionTrackingService
 
         return $loaded
             ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts))
+            ->filter(function (array $record): bool {
+                $user = auth()->user();
+                if ($user && filled($user->unit_assignment) && ! $this->organization->isGlobal($user)) {
+                    $unit = $this->organization->unitFor($user);
+                    if ($unit === OrganizationalAccessService::DEVELOPMENT) return $record['source'] === 'engp';
+                    if ($unit === OrganizationalAccessService::CONSERVATION) return $record['source'] !== 'engp';
+                }
+                if ($record['source'] !== 'conservation' || ! $user) return true;
+                $model = ConservationReportSubmission::query()->with('protectedArea')->find($record['source_id']);
+                return $model ? $this->pambAccess->canView($user, $model) : false;
+            })
+            ->filter(function (array $record): bool {
+                $user = auth()->user();
+                return ! $user || (! $this->pambAccess->isCenro($user) && ! $this->pambAccess->isPamo($user)) || $record['source'] === 'conservation';
+            })
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
             ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
             ->values();
@@ -85,6 +104,24 @@ final class SubmissionTrackingService
     {
         $records = $snapshotRecords ?? $this->records($filters);
 
+        $user = auth()->user();
+        if ($user && $this->pambAccess->isPamo($user)) {
+            return [
+                'for_submission' => $records->filter(fn (array $record): bool => in_array(data_get($record, 'mov_processing.queue'), ['for_submission', 'for_review', 'for_release'], true))->values(),
+                'needs_correction' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
+                'release_history' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'release_history')->values(),
+            ];
+        }
+        if ($user && $this->pambAccess->isCenro($user)) {
+            return [
+                'for_submission' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_submission')->values(),
+                'for_review' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_review')->values(),
+                'needs_correction' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
+                'for_release' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release')->values(),
+                'release_history' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'release_history')->values(),
+            ];
+        }
+
         return [
             self::CENRO_RELEASE => $records->where('stage', self::CENRO_RELEASE)->values(),
             self::PENRO_RECEIPT => $records->where('stage', self::PENRO_RECEIPT)->values(),
@@ -105,7 +142,21 @@ final class SubmissionTrackingService
     {
         $source = $this->source($sourceKey);
         abort_unless($source, 404);
-        $record = $source['model']::query()->findOrFail($id);
+        $recordQuery = $source['model']::query();
+        if ($sourceKey === 'conservation') $recordQuery->with('protectedArea');
+        $record = $recordQuery->findOrFail($id);
+        if ($record instanceof ConservationReportSubmission && ($user = auth()->user())) {
+            abort_unless($this->pambAccess->canView($user, $record), 403);
+            if (($this->pambAccess->isCenro($user) || $this->pambAccess->isPamo($user))
+                && ! $this->pambAccess->canUseDownstreamOperations($user)
+                && $stage !== self::CENRO_RELEASE) {
+                abort(403);
+            }
+            if ($stage === self::CENRO_RELEASE && $this->pambAccess->isCenro($user) && ! $this->routingPolicy->isDirectPenro($record) && ! $this->pambAccess->isGlobal($user)) {
+                abort_unless($this->pambAccess->canPerform($user, 'release'), 403);
+                abort_unless(app(PambMovProcessingService::class)->status($record) === PambMovProcessingService::READY_FOR_RELEASE, 422);
+            }
+        }
         $expectedStage = $this->stage($record);
         if ($expectedStage !== $stage) {
             throw ValidationException::withMessages(['date' => 'This report is no longer awaiting that workflow action.']);
@@ -120,14 +171,12 @@ final class SubmissionTrackingService
                 $component = collect($components)->first(fn (array $item): bool => ! in_array($item['key'], $existing, true));
                 if (! $component) throw ValidationException::withMessages(['date' => 'All CENRO release components are already recorded.']);
                 $record->releaseEvents()->create(['period_component' => $component['key'], 'component_label' => $component['label'], 'date_report_released_cenro' => $value]);
-                $this->notifyTransition($sourceKey, $record, $source, $stage, $value);
                 $this->auditTransition($sourceKey, $record, $source, $stage, $value);
                 return;
             }
             $release = $record->releaseEvents()->orderByDesc('date_report_released_cenro')->value('date_report_released_cenro');
             if ($release && $value < Carbon::parse($release)->toDateString()) throw ValidationException::withMessages(['date' => 'PENRO receipt cannot be earlier than CENRO release.']);
             $record->update(['date_received_penro' => $value, ...($userId ? ['updated_by' => $userId] : [])]);
-            $this->notifyTransition($sourceKey, $record, $source, $stage, $value);
             $this->auditTransition($sourceKey, $record, $source, $stage, $value);
             return;
         }
@@ -144,8 +193,17 @@ final class SubmissionTrackingService
             $changes['updated_by'] = $userId;
         }
         DB::transaction(fn () => $record->update($changes));
-        $this->notifyTransition($sourceKey, $record, $source, $stage, $value);
         $this->auditTransition($sourceKey, $record, $source, $stage, $value);
+    }
+
+    public function recordInternalRouting(string $sourceKey, int $id, string $stageKey, string $occurredAt, ?int $userId = null, ?string $remarks = null): void
+    {
+        if ($sourceKey !== 'conservation') {
+            throw ValidationException::withMessages(['stage' => 'Detailed internal routing is limited to PAMB workflows.']);
+        }
+
+        $record = ConservationReportSubmission::query()->findOrFail($id);
+        $this->pambRouting->record($record, $stageKey, $occurredAt, $userId, $remarks);
     }
 
     /** @return array<string, mixed>|null */
@@ -154,30 +212,13 @@ final class SubmissionTrackingService
         return $this->sources()[$key] ?? null;
     }
 
-    /** @param array<string, mixed> $source */
-    private function notifyTransition(string $sourceKey, Model $record, array $source, string $stage, string $date): void
-    {
-        if ($sourceKey !== 'engp') {
-            $record->loadMissing('protectedArea:id,name');
-        }
-
-        $this->notifications->submissionTransition([
-            'source' => $sourceKey,
-            'source_id' => $record->getKey(),
-            'module' => $this->moduleMetadata($record, $source)['module_name'],
-            'target_office' => $record->getAttribute($source['target_office'] ?? 'target_office'),
-            'protected_area' => $sourceKey === 'engp' ? null : $record->protectedArea?->name,
-            'supports_regional_endorsement' => $source['supports_regional_endorsement'] ?? $sourceKey !== 'engp',
-        ], $stage, $date);
-    }
-
     private function auditTransition(string $sourceKey, Model $record, array $source, string $stage, string $date): void
     {
         $metadata = $this->moduleMetadata($record, $source);
         $this->auditLogs->record('submission_tracking', match ($stage) {
-            self::CENRO_RELEASE => 'CENRO Release Recorded',
-            self::PENRO_RECEIPT => 'PENRO Receipt Recorded',
-            default => 'Regional Endorsement Recorded',
+            self::CENRO_RELEASE => 'CENRO Release Monitoring Event Recorded',
+            self::PENRO_RECEIPT => 'PENRO Receipt Monitoring Event Recorded',
+            default => 'Regional Endorsement Monitoring Event Recorded',
         }, $sourceKey, $record->getKey(), $metadata['module_name'], 'Recorded '.$stage.' for '.$sourceKey.' record #'.$record->getKey().'.', ['date' => $date, 'stage' => $stage, 'program_area' => $metadata['program_area']]);
     }
 
@@ -240,6 +281,9 @@ final class SubmissionTrackingService
             'penro_delay_days' => $record->getAttribute('penro_delay') ?? $record->getAttribute('total_days_delayed_penro'),
             'mov_status' => ($record->getAttribute('mov_file_path') || $record->getAttribute('report_file_path') || $record->getAttribute('mov_external_url') || ! empty($record->getAttribute('attachments'))) ? 'Complete' : ($record->getAttribute('date_received_penro') ? 'MOV Not Yet Submitted' : 'Not Yet Available'),
             'mov_url' => isset($source['mov_url']) ? ($source['mov_url'])($record) : null,
+            'mov_attachment' => $sourceKey === 'conservation'
+                ? $this->attachments->descriptor('conservation-report', $record, 'mov')
+                : null,
             'mov_external' => isset($source['mov_external']) ? (bool) ($source['mov_external'])($record) : false,
             'source_url' => ($source['url'])($record),
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
@@ -257,6 +301,13 @@ final class SubmissionTrackingService
         $data['routing_complete'] = $this->isRoutingComplete($record);
         $data['completed_at'] = $data['routing_complete'] ? $this->routingCompletedAt($record) : null;
         $data['can_transition'] = auth()->user()?->can($source['ability']) ?? false;
+        $pambRouting = $sourceKey === 'conservation' ? $this->pambRouting->present($record) : ['applicable' => false, 'timeline' => [], 'current_document_location' => null, 'routing_summary' => [], 'summary_metrics' => []];
+        $data['pamb_routing_applicable'] = $pambRouting['applicable'];
+        $data['routing_timeline'] = $pambRouting['timeline'];
+        $data['current_document_location'] = $pambRouting['current_document_location'];
+        $data['routing_summary'] = $pambRouting['routing_summary'];
+        $data['routing_summary_metrics'] = $pambRouting['summary_metrics'];
+        $data['mov_processing'] = $sourceKey === 'conservation' ? $this->pambMov->present($record) : ['applicable' => false];
         return $data;
     }
 

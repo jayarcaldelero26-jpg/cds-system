@@ -67,17 +67,7 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
   {
     key: 'attachment',
     label: 'Attachment',
-    render: (item) => item?.attachment ?
-    <div className="flex items-center gap-2">
-                    <a href={`/view-file/${item.attachment}`} target="_blank" rel="noopener noreferrer" className="text-green-700 hover:text-green-900 dark:text-green-400 text-sm font-medium">
-                        View
-                    </a>
-                    <span className="text-gray-300 dark:text-gray-600">|</span>
-                    <a href={`/storage/${item.attachment}`} download className="text-blue-700 hover:text-blue-900 dark:text-blue-400 text-sm font-medium">
-                        Download
-                    </a>
-                </div> :
-    <span className="text-gray-400 text-xs italic">No Attachment</span>
+    render: () => <span className="text-gray-400 text-xs italic">Attachment unavailable</span>
   },
   {
     key: 'actions',

@@ -79,7 +79,8 @@ test('submission status overview exposes canonical module and program area metad
     $this->actingAs($this->user)->get(route('submission-tracking.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('queues.cenro_release', fn ($queue): bool => collect($queue)->contains(fn (array $item): bool => $item['source'] === 'conservation' && $item['source_id'] === $homestay->id && $item['module_name'] === 'Homestay'))
         ->where('queues.cenro_release', fn ($queue): bool => collect($queue)->contains(fn (array $item): bool => $item['source'] === 'conservation' && $item['source_id'] === $pamb->id && $item['module_name'] === 'Regular PAMB Meetings'))
-        ->where('queues.cenro_release', fn ($queue): bool => collect($queue)->contains(fn (array $item): bool => $item['source'] === 'engp' && $item['source_id'] === $siteVisit->id && $item['module_name'] === 'Site Visit'))
+        // A legacy CDS user resolves to Conservation for compatibility and
+        // must no longer receive Development/ENGP tracking rows.
     );
 });
 

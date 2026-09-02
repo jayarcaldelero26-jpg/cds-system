@@ -12,6 +12,7 @@ class ProgramProjectActivityController extends Controller
 {
     public function index(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $query = ProgramProjectActivity::with('protectedArea');
 
         if ($request->filled('search')) {
@@ -69,6 +70,7 @@ class ProgramProjectActivityController extends Controller
 
     public function create()
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('ProgramProjectActivities/Create', [
             'protectedAreas' => ProtectedArea::select('id', 'name')->get(),
             'categories' => ['Program', 'Project', 'Activity'],
@@ -78,6 +80,7 @@ class ProgramProjectActivityController extends Controller
 
     public function store(Request $request)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'title' => 'required|string|max:255',
@@ -105,6 +108,7 @@ class ProgramProjectActivityController extends Controller
 
     public function edit(ProgramProjectActivity $programProjectActivity)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         return Inertia::render('ProgramProjectActivities/Edit', [
             'ppa' => [
                 'id' => $programProjectActivity->id,
@@ -128,6 +132,7 @@ class ProgramProjectActivityController extends Controller
 
     public function update(Request $request, ProgramProjectActivity $programProjectActivity)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'title' => 'required|string|max:255',
@@ -158,6 +163,7 @@ class ProgramProjectActivityController extends Controller
 
     public function destroy(ProgramProjectActivity $programProjectActivity)
     {
+        abort(404, 'This monitoring module has been retired and is no longer available.');
         if ($programProjectActivity->attachment) {
             Storage::disk('public')->delete($programProjectActivity->attachment);
         }

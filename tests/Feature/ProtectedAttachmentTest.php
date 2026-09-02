@@ -137,6 +137,22 @@ test('protected attachment responses reject missing files and path traversal att
         ->assertNotFound();
 });
 
+test('legacy public attachment routes and preview URLs are blocked', function () {
+    Storage::fake('public');
+    Storage::disk('public')->put('bms-attachments/protected.pdf', 'secret');
+
+    $this->get('/storage/bms-attachments/protected.pdf')->assertStatus(403);
+    $this->actingAs(protectedAttachmentUser())
+        ->get('/view-file/bms-attachments/protected.pdf')
+        ->assertNotFound();
+
+    $this->get('/issue-monitorings')->assertNotFound();
+    $this->get('/lawin-monitorings')->assertNotFound();
+    $this->get('/cds-lawin')->assertNotFound();
+    $this->get('/ecotourism-monitorings')->assertNotFound();
+    $this->get('/program-project-activities')->assertNotFound();
+});
+
 test('protected preview responses use inline headers for pdf and images and attachment fallback for docx', function () {
     Storage::fake('local');
     Storage::fake('public');

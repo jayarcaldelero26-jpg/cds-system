@@ -21,8 +21,6 @@ class DatabaseSeeder extends Seeder
 
         // 2. Siguraduhon nga naa ang basic roles
         $adminRole = Role::firstOrCreate(['name' => 'CDS Admin', 'guard_name' => 'web']);
-        $staffRole = Role::firstOrCreate(['name' => 'Technical Staff', 'guard_name' => 'web']);
-        Role::firstOrCreate(['name' => 'Viewer', 'guard_name' => 'web']);
         Role::firstOrCreate(['name' => 'no_role', 'guard_name' => 'web']);
 
         // 3. Sigurohon nga naa ang Admin user ug i-assign ang 'CDS Admin' role
@@ -44,16 +42,9 @@ class DatabaseSeeder extends Seeder
 
         // 💡 4. ILAGAY DINHI ANG EMAIL SA IMONG MGA STAFF
         // I-uncomment ug ilisi ang 'staff@gmail.com' sa tinuod nilang gi-register nga email
-        $staffEmails = [
-            // 'ang_staff_email_nimo@gmail.com',
-        ];
-
-        foreach ($staffEmails as $email) {
-            $staffUser = User::where('email', $email)->first();
-            if ($staffUser && !$staffUser->hasRole('Technical Staff')) {
-                $staffUser->assignRole($staffRole);
-            }
-        }
+        // Legacy Technical Staff accounts, if any, are not recreated or
+        // reassigned by the default seed. Normalize them through User
+        // Management instead of guessing their new category.
 
         // 5. Maghimo og sample Protected Areas
         $mpl = ProtectedArea::firstOrCreate(

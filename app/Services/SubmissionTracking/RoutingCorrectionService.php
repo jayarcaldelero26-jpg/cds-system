@@ -15,13 +15,15 @@ final class RoutingCorrectionService
     public function __construct(
         private readonly SubmissionTrackingService $tracking,
         private readonly ProtectedAreaRoutingPolicy $routingPolicy,
+        private readonly PambRoutingTimelineService $pambRouting,
     ) {}
 
     /**
      * @param array<string, mixed> $dates
      * @param array<string, mixed> $releaseEvents
+     * @param array<string, mixed> $internalEvents
      */
-    public function correct(string $sourceKey, int $id, array $dates, array $releaseEvents, string $reason, int $userId): void
+    public function correct(string $sourceKey, int $id, array $dates, array $releaseEvents, string $reason, int $userId, array $internalEvents = []): void
     {
         $source = $this->tracking->source($sourceKey);
         abort_unless($source, 404);
@@ -74,6 +76,28 @@ final class RoutingCorrectionService
                 }
             }
             $this->validateChronology($record, $current);
+            if ($internalEvents !== []) {
+                if ($sourceKey !== 'conservation' || ! $this->pambRouting->applies($record)) {
+                    throw ValidationException::withMessages(['internal_events' => 'Internal routing corrections are available only for PAMB meeting workflows.']);
+                }
+                $events = $record->routingEvents()->get()->mapWithKeys(fn ($event): array => [$this->pambRouting->canonicalStageKey((string) $event->stage_key) => $event]);
+                $internalDates = $events->mapWithKeys(fn ($event, string $stageKey): array => [$stageKey => $event->occurred_at?->toDateTimeString()])->all();
+                foreach ($internalEvents as $stageKey => $value) {
+                    $stageKey = $this->pambRouting->canonicalStageKey((string) $stageKey);
+                    if (! in_array($stageKey, $this->pambRouting->internalStageKeys(), true) || ! $events->has($stageKey)) {
+                        throw ValidationException::withMessages(['internal_events' => 'An internal routing event does not belong to this report.']);
+                    }
+                    $event = $events->get($stageKey);
+                    $new = $this->nullableDateTime($value);
+                    $old = $event->occurred_at?->toDateTimeString();
+                    $internalDates[$stageKey] = $new;
+                    if ($old !== $new) {
+                        $changes[] = [$event, 'occurred_at', $new];
+                        $audits[] = ['field' => 'internal_events.'.$stageKey.'.occurred_at', 'original_value' => $old, 'corrected_value' => $new];
+                    }
+                }
+                $this->validateInternalChronology($record, $current, $internalDates);
+            }
         }
 
         if ($audits === []) throw ValidationException::withMessages(['dates' => 'At least one routing date must be changed.']);
@@ -121,5 +145,31 @@ final class RoutingCorrectionService
     private function nullableDate(mixed $value): ?string
     {
         return $value === null || $value === '' ? null : Carbon::parse($value)->toDateString();
+    }
+
+    private function nullableDateTime(mixed $value): ?string
+    {
+        return $value === null || $value === '' ? null : Carbon::parse($value)->toDateTimeString();
+    }
+
+    /** @param array<string, ?string> $canonical @param array<string, ?string> $internal */
+    private function validateInternalChronology(Model $record, array $canonical, array $internal): void
+    {
+        $dates = ['receipt' => $canonical['date_received_penro'] ?? null];
+        foreach ($this->pambRouting->internalStageKeys() as $stageKey) {
+            $dates[$stageKey] = $internal[$stageKey] ?? null;
+        }
+        $dates['regional'] = $canonical['date_endorsed_regional'] ?? null;
+        $previous = null;
+        foreach ($dates as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+            $date = Carbon::parse($value);
+            if ($previous && $date->lessThan($previous)) {
+                throw ValidationException::withMessages(['internal_events' => 'Internal routing events must remain in chronological order.']);
+            }
+            $previous = $date;
+        }
     }
 }

@@ -2,12 +2,13 @@
 
 use App\Models\User;
 use App\Policies\UserPolicy;
+use App\Models\ProtectedArea;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
-    foreach (['CDS Admin', 'Technical Staff', 'Viewer'] as $role) {
+    foreach (['CDS Admin', 'Technical Staff', 'Viewer', 'no_role', 'CENRO CDS Focal Person', 'PAMO', 'CENRO CDS Chief'] as $role) {
         Role::findOrCreate($role, 'web');
     }
 });
@@ -21,18 +22,18 @@ test('technical staff cannot access user management', function () {
         ->assertForbidden();
 });
 
-test('a CDS admin can create an inactive user and assign a role', function () {
+test('a CDS admin can create an inactive user from the operational category', function () {
     $admin = User::factory()->create();
     $admin->assignRole('CDS Admin');
 
     $response = $this->actingAs($admin)->post(route('admin.users.store'), [
-        'name' => 'CDS Viewer',
+        'name' => 'CENRO Focal',
         'email' => 'viewer@example.com',
-        'office_designated' => 'PENRO Davao Oriental',
-        'section' => 'CDS',
+        'office_designated' => 'CENRO Baganga',
+        'section' => 'CENRO_CDS_FOCAL',
+        'unit_assignment' => 'conservation',
         'password' => 'Password123!',
         'password_confirmation' => 'Password123!',
-        'role' => 'Viewer',
         'is_active' => false,
     ]);
 
@@ -41,7 +42,97 @@ test('a CDS admin can create an inactive user and assign a role', function () {
     $user = User::query()->where('email', 'viewer@example.com')->firstOrFail();
 
     expect($user->is_active)->toBeFalse()
-        ->and($user->hasRole('Viewer'))->toBeTrue();
+        ->and($user->hasRole('CENRO CDS Focal Person'))->toBeTrue();
+});
+
+test('a CDS admin can activate a fully configured user without resubmitting a role', function () {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+    $managedUser = User::factory()->create([
+        'is_active' => false,
+        'unit_assignment' => 'conservation',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $managedUser->assignRole('CENRO CDS Focal Person');
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.activate', $managedUser), [])
+        ->assertRedirect(route('admin.users.index'))
+        ->assertSessionHas('success', 'User account activated successfully.');
+
+    $activatedUser = $managedUser->fresh();
+    expect($activatedUser->is_active)->toBeTrue()
+        ->and($activatedUser->hasRole('CENRO CDS Focal Person'))->toBeTrue()
+        ->and($activatedUser->unit_assignment)->toBe('conservation')
+        ->and($activatedUser->office_designated)->toBe('CENRO Baganga');
+
+    $this->post('/logout');
+    $this->post('/login', ['email' => $managedUser->email, 'password' => 'password'])
+        ->assertRedirect(route('dashboard', absolute: false));
+    $this->assertAuthenticatedAs($managedUser->fresh());
+});
+
+test('changing a PAMO user to a CENRO role normalizes category and clears PA scope atomically', function () {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+    $area = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $admin->id, 'updated_by' => $admin->id]);
+    $managedUser = User::factory()->create(['unit_assignment' => 'conservation', 'section' => 'PAMO', 'office_designated' => 'PENRO Davao Oriental', 'protected_area_id' => $area->id, 'is_active' => false]);
+    $managedUser->assignRole('PAMO');
+
+    $this->actingAs($admin)->patch(route('admin.users.update', $managedUser), [
+        'name' => $managedUser->name,
+        'email' => $managedUser->email,
+        'unit_assignment' => 'conservation',
+        'section' => 'CENRO_CDS_CHIEF',
+        'office_designated' => 'CENRO Baganga',
+        'protected_area_id' => '',
+        'is_active' => false,
+    ])->assertRedirect(route('admin.users.index'));
+
+    $updated = $managedUser->fresh();
+    expect($updated->section)->toBe('CENRO_CDS_CHIEF')
+        ->and($updated->protected_area_id)->toBeNull()
+        ->and($updated->office_designated)->toBe('CENRO Baganga')
+        ->and($updated->hasRole('CENRO CDS Chief'))->toBeTrue();
+});
+
+test('an account without a configured operational role cannot be activated', function () {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+    $managedUser = User::factory()->create([
+        'is_active' => false,
+        'unit_assignment' => 'conservation',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $managedUser->assignRole('no_role');
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.activate', $managedUser), [])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Please complete the user\'s access role and organizational assignment before activating this account.');
+
+    expect($managedUser->fresh()->is_active)->toBeFalse();
+});
+
+test('an account with an invalid organizational scope cannot be activated', function () {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+    $managedUser = User::factory()->create([
+        'is_active' => false,
+        'unit_assignment' => 'conservation',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'PENRO Davao Oriental',
+    ]);
+    $managedUser->assignRole('CENRO CDS Focal Person');
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.activate', $managedUser), [])
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Please complete the user\'s access role and organizational assignment before activating this account.');
+
+    expect($managedUser->fresh()->is_active)->toBeFalse();
 });
 
 test('CDS admin user management pages render with the admin navigation link', function () {

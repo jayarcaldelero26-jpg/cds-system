@@ -21,8 +21,11 @@ test('welcome page source uses eDATS branding and the existing login route', fun
     expect($welcome)
         ->toContain('Enhanced Digital Alert and Tracking System')
         ->toContain('PENRO Mati – Conservation and Development Section')
-        ->toContain('Access Secure Login')
+        ->toContain('Access Login')
         ->toContain('href="/login"')
+        ->not->toContain('Secure')
+        ->not->toContain('Confidential')
+        ->not->toContain('Reliable')
         ->not->toMatch('/CDSIMS|CDS-IMS|CDS IMS|CDS System|CDIMS|Conservation and Development Information Management System/i');
 
     expect(route('login', absolute: false))->toBe('/login');
@@ -51,6 +54,7 @@ test('login presentation keeps accessible icon input and theme controls', functi
     $layout = File::get(resource_path('js/Layouts/AuthLayout.jsx'));
     $login = File::get(resource_path('js/Pages/Auth/Login.jsx'));
     $authField = File::get(resource_path('js/Components/AuthField.jsx'));
+    $flashDialog = File::get(resource_path('js/Components/FlashSuccessDialog.jsx'));
 
     expect($layout)
         ->toContain('ThemeIcon')
@@ -67,12 +71,18 @@ test('login presentation keeps accessible icon input and theme controls', functi
         ->toContain("showPassword ? 'Hide password' : 'Show password'")
         ->toContain('Forgot password?')
         ->toContain('Need an account?')
+        ->toContain('Account Pending Approval')
+        ->toContain('pendingApproval')
         ->not->toContain("{showPassword ? 'Hide' : 'Show'}")
         ->not->toContain('flex items-center rounded-xl border bg-white');
 
     expect($authField)
         ->toContain('leadingIcon')
-        ->toContain('absolute inset-y-0 right-2');
+        ->toContain('absolute right-2 top-6 z-20 flex h-11 items-center');
+
+    expect($flashDialog)
+        ->toContain('Registration Request Submitted')
+        ->toContain('registration_success');
 });
 
 test('ENGP remains a program within the authenticated eDATS navigation', function () {

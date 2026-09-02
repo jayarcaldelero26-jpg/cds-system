@@ -18,12 +18,14 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
             \App\Http\Middleware\HandleInertiaRequests::class,
+            \App\Http\Middleware\EnsureOrganizationalUnit::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
             PreventBackHistory::class, // 🚀 Gidugang kini dinhi aron ma-prevent ang back button cache
         ]);
 
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsCdsAdmin::class,
+            'unit' => \App\Http\Middleware\EnsureOrganizationalUnit::class,
         ]);
 
         // 🚀 Gidugang kini aron ma-except ang logout sa CSRF check ug malikayan ang 419 error

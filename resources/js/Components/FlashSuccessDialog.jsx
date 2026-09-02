@@ -4,9 +4,23 @@ import SuccessDialog from '@/Components/SuccessDialog';
 
 export default function FlashSuccessDialog() {
     const { flash = {} } = usePage().props;
-    const initialMessage = flash.success && !flash.status ? flash.success : null;
-    const [message, setMessage] = useState(initialMessage);
-    const eventSequence = useRef(initialMessage ? 1 : 0);
+    const flashEvent = (nextFlash = {}) => {
+        if (nextFlash.registration_success) {
+            return {
+                title: 'Registration Request Submitted',
+                message: typeof nextFlash.registration_success === 'string'
+                    ? nextFlash.registration_success
+                    : 'Your account has been created successfully and is awaiting administrator approval. You may sign in once your account has been activated.',
+            };
+        }
+
+        return nextFlash.success && !nextFlash.status
+            ? { title: 'Success', message: nextFlash.success }
+            : null;
+    };
+    const initialEvent = flashEvent(flash);
+    const [event, setEvent] = useState(initialEvent);
+    const eventSequence = useRef(initialEvent ? 1 : 0);
     const [eventKey, setEventKey] = useState(eventSequence.current);
 
     useEffect(() => {
@@ -14,17 +28,17 @@ export default function FlashSuccessDialog() {
         // legitimately be identical for several consecutive mutations.
         return router.on('success', event => {
             const nextFlash = event.detail.page.props.flash || {};
-            const nextMessage = nextFlash.success && !nextFlash.status ? nextFlash.success : null;
+            const nextEvent = flashEvent(nextFlash);
 
-            if (!nextMessage) return;
+            if (!nextEvent) return;
 
             eventSequence.current += 1;
             setEventKey(eventSequence.current);
-            setMessage(nextMessage);
+            setEvent(nextEvent);
         });
     }, []);
 
-    const close = useCallback(() => setMessage(null), []);
+    const close = useCallback(() => setEvent(null), []);
 
-    return <SuccessDialog key={eventKey} open={Boolean(message)} message={message} onClose={close} />;
+    return <SuccessDialog key={eventKey} open={Boolean(event)} title={event?.title || 'Success'} message={event?.message || ''} onClose={close} />;
 }

@@ -6,6 +6,7 @@ use Illuminate\Database\Seeder;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\PermissionRegistrar;
+use App\Services\Authorization\OrganizationalAccessService;
 
 class PermissionSeeder extends Seeder
 {
@@ -141,68 +142,19 @@ class PermissionSeeder extends Seeder
         $cdsAdmin = Role::firstOrCreate(['name' => 'CDS Admin', 'guard_name' => 'web']);
         $cdsAdmin->syncPermissions($permissions);
 
-        $technicalStaff = Role::firstOrCreate(['name' => 'Technical Staff', 'guard_name' => 'web']);
-        $technicalStaff->syncPermissions([
-            'documents.view',
-            'documents.upload',
-            'documents.update',
-            'projects.view',
-            'projects.create',
-            'projects.update',
-            'activities.view',
-            'activities.create',
-            'activities.update',
-            'reports.view',
-            'reports.generate',
-            'reports.export',
-            'compliance-alerts.manage',
-            'technical-reports.view',
-            'technical-reports.create',
-            'technical-reports.update',
-            'gis.view',
-            'gis.manage',
-            'protected-areas.view',
-            'protected-areas.create',
-            'protected-areas.update',
-            'management-plans.view',
-            'management-plans.create',
-            'management-plans.update',
-            'cds-lawin.view',
-            'cds-lawin.create',
-            'cds-lawin.update',
-            'bms.view',
-            'bms.create',
-            'bms.update',
-            'bams.view',
-            'bams.create',
-            'bams.update',
-            'bams.calculate',
-            'imea.view',
-            'imea.create',
-            'imea.update',
-            'imea.import',
-            'imea.export',
-            'aws.view',
-            'aws.create',
-            'aws.update',
-        ]);
+        // Technical Staff and Viewer were legacy user-facing categories. Their
+        // existing DB rows are intentionally preserved, but new installations
+        // no longer recreate them as active assignment profiles.
 
-        $viewer = Role::firstOrCreate(['name' => 'Viewer', 'guard_name' => 'web']);
-        $viewer->syncPermissions([
-            'documents.view',
-            'projects.view',
-            'activities.view',
-            'reports.view',
-            'technical-reports.view',
-            'gis.view',
-            'protected-areas.view',
-            'management-plans.view',
-            'cds-lawin.view',
-            'bms.view',
-            'bams.view',
-            'imea.view',
-            'aws.view',
-        ]);
+        $superAdmin = Role::firstOrCreate(['name' => 'Super Admin', 'guard_name' => 'web']);
+        $superAdmin->syncPermissions($permissions);
+
+        $organization = app(OrganizationalAccessService::class);
+        foreach ($organization->operationalCategories() as $category) {
+            $internalRole = $organization->roleForCategory($category);
+            Role::firstOrCreate(['name' => $internalRole, 'guard_name' => 'web'])
+                ->syncPermissions($organization->permissionProfileForCategory($category));
+        }
 
         // Gidugang usab nato ang 'no_role' aron dili ma-error ang pag-register sa mga users
         Role::firstOrCreate(['name' => 'no_role', 'guard_name' => 'web']);

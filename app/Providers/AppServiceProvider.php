@@ -44,7 +44,7 @@ class AppServiceProvider extends ServiceProvider
                 return null;
             }
 
-            return $user->hasRole('CDS Admin') ? true : null;
+            return $user->hasAnyRole(['CDS Admin', 'Super Admin']) ? true : null;
         });
    }
 

@@ -9,22 +9,36 @@ use App\Services\Modules\ModuleDeadlineService;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ConservationReportSubmission extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['workflow_key', 'protected_area_id', 'target_office', 'activity_name', 'document_type', 'reporting_period', 'date_conducted', 'date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional', 'mov_file_name', 'mov_file_path', 'remarks', 'created_by', 'updated_by'];
+    protected $fillable = ['workflow_key', 'protected_area_id', 'target_office', 'activity_name', 'document_type', 'reporting_period', 'date_conducted', 'date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional', 'mov_file_name', 'mov_file_path', 'mov_processing_status', 'mov_submitted_at', 'mov_submitted_by', 'mov_reviewed_at', 'mov_reviewed_by', 'mov_review_remarks', 'remarks', 'created_by', 'updated_by'];
     protected $appends = ['deadline_submission', 'days_complied', 'timeliness', 'submission_status', 'penro_delay'];
 
     protected function casts(): array
     {
-        return ['date_accomplished' => 'date:Y-m-d', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d'];
+        return ['date_accomplished' => 'date:Y-m-d', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d', 'mov_submitted_at' => 'datetime', 'mov_reviewed_at' => 'datetime'];
     }
 
     public function protectedArea(): BelongsTo { return $this->belongsTo(ProtectedArea::class); }
     public function createdBy(): BelongsTo { return $this->belongsTo(User::class, 'created_by'); }
     public function updatedBy(): BelongsTo { return $this->belongsTo(User::class, 'updated_by'); }
+
+    public function movSubmittedBy(): BelongsTo { return $this->belongsTo(User::class, 'mov_submitted_by'); }
+    public function movReviewedBy(): BelongsTo { return $this->belongsTo(User::class, 'mov_reviewed_by'); }
+
+    public function movReviewEvents(): HasMany
+    {
+        return $this->hasMany(PambMovReviewEvent::class, 'conservation_report_submission_id')->latest();
+    }
+
+    public function routingEvents(): HasMany
+    {
+        return $this->hasMany(PambRoutingEvent::class, 'conservation_report_submission_id')->orderBy('occurred_at')->orderBy('id');
+    }
 
     public function getDeadlineSubmissionAttribute(): ?string
     {

@@ -50,16 +50,6 @@ class LoginRequest extends FormRequest
             ]);
         }
 
-        // KINI NGA DUGANG: Gi-usab gikan sa is_approved ngadto sa is_active
-        $user = Auth::user();
-        if (!$user->is_active) {
-            Auth::logout();
-            throw ValidationException::withMessages([
-                // 🚀 GI-UPDATE NGA GRAMMAR DINHI
-                'email' => 'Your account has been deactivated or is currently pending administrator approval.',
-            ]);
-        }
-
         RateLimiter::clear($this->throttleKey());
     }
 

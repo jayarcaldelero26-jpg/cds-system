@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Notifications\EdatsInAppNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,8 +25,9 @@ final class NotificationController extends Controller
 
     public function recent(Request $request): JsonResponse
     {
-        $items = $request->user()->notifications()->latest()->take(8)->get()->map(fn (DatabaseNotification $notification) => $this->present($notification));
-        return response()->json(['unread_count' => $request->user()->unreadNotifications()->count(), 'notifications' => $items]);
+        $items = $this->bellNotifications($request)->take(8)->map(fn (DatabaseNotification $notification) => $this->present($notification));
+
+        return response()->json(['unread_count' => $items->count(), 'notifications' => $items->values()]);
     }
 
     public function markRead(Request $request, DatabaseNotification $notification): JsonResponse|RedirectResponse
@@ -48,6 +50,15 @@ final class NotificationController extends Controller
         return $request->expectsJson() ? response()->json(['ok' => true]) : back();
     }
 
+    public function clear(Request $request): JsonResponse|RedirectResponse
+    {
+        $this->bellNotifications($request)->each->markAsRead();
+
+        return $request->expectsJson()
+            ? response()->json(['ok' => true, 'unread_count' => 0, 'notifications' => []])
+            : back();
+    }
+
     /** @return \Illuminate\Support\Collection<int, array<string, mixed>> */
     private function items(Request $request, string $filter)
     {
@@ -63,6 +74,14 @@ final class NotificationController extends Controller
                 };
             })
             ->map(fn (DatabaseNotification $notification) => $this->present($notification));
+    }
+
+    /** @return \Illuminate\Support\Collection<int, DatabaseNotification> */
+    private function bellNotifications(Request $request)
+    {
+        return $request->user()->unreadNotifications()->latest()->get()
+            ->filter(fn (DatabaseNotification $notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))
+            ->values();
     }
 
     /** @return array<string, mixed> */

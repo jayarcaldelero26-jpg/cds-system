@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\EngpReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Authorization\OrganizationalAccessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,7 @@ use Throwable;
 
 class EngpReportController extends Controller
 {
-    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
 
     public function index(Request $request, ?string $workflow = null): Response
     {
@@ -29,7 +30,7 @@ class EngpReportController extends Controller
         $config = $workflow ? $this->workflows->find($workflow) : null;
         abort_if($workflow && ! $config, 404);
         $year = $request->integer('year') ?: 2026;
-        $query = EngpReportSubmission::query()->when($workflow, fn ($q) => $q->where('workflow_key', $workflow));
+        $query = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->when($workflow, fn ($q) => $q->where('workflow_key', $workflow));
         $query->when($request->filled('office'), fn ($q) => $q->where('office', $request->input('office')))
             ->when($request->filled('period_key'), fn ($q) => $q->where('period_key', $request->input('period_key')))
             ->when($request->filled('status'), function ($q) use ($request): void {
@@ -53,7 +54,7 @@ class EngpReportController extends Controller
             'offices' => $config['offices'] ?? $this->allOffices(),
             'filters' => $request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']),
             'summary' => $workflow ? null : $this->summary($year),
-            'summaryRows' => $workflow ? [] : EngpReportSubmission::query()->with('releaseEvents')->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
+            'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with('releaseEvents')->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
         ]);
     }
 
@@ -63,12 +64,14 @@ class EngpReportController extends Controller
         abort_unless($config, 404);
         $this->rejectRoutingFields($request);
         $validated = $this->validateData($request, $workflow, $config, false);
+        abort_unless($this->organization->canUseDevelopmentOffice($request->user(), $validated['office']), 403);
         $record = $this->findSubmissionForPeriod($workflow, $validated) ?? new EngpReportSubmission;
         return $this->persist($request, $record, $validated, $workflow, $config, 'ENGP report saved.');
     }
 
     public function update(Request $request, string $workflow, EngpReportSubmission $engpReportSubmission): RedirectResponse
     {
+        abort_unless($this->organization->canViewDevelopmentRecord($request->user(), $engpReportSubmission), 403);
         $config = $this->workflows->find($workflow);
         abort_unless($config && $engpReportSubmission->workflow_key === $workflow, 404);
         $this->rejectRoutingFields($request);
@@ -78,6 +81,7 @@ class EngpReportController extends Controller
 
     public function destroy(string $workflow, EngpReportSubmission $engpReportSubmission): RedirectResponse
     {
+        abort_unless($this->organization->canViewDevelopmentRecord(request()->user(), $engpReportSubmission), 403);
         abort_unless($this->workflows->find($workflow) && $engpReportSubmission->workflow_key === $workflow, 404);
         $path = $engpReportSubmission->mov_file_path;
         $engpReportSubmission->delete();
@@ -87,6 +91,7 @@ class EngpReportController extends Controller
 
     public function mov(string $workflow, EngpReportSubmission $engpReportSubmission)
     {
+        abort_unless($this->organization->canViewDevelopmentRecord(request()->user(), $engpReportSubmission), 403);
         abort_unless($this->workflows->find($workflow) && $engpReportSubmission->workflow_key === $workflow, 404);
         return $this->attachments->response('engp-report', $engpReportSubmission, 'mov');
     }

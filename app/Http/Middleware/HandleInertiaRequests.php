@@ -4,6 +4,9 @@ namespace App\Http\Middleware;
 
 use App\Models\ManagementPlanType;
 use App\Models\ModuleDefinition;
+use App\Services\Notifications\EdatsInAppNotificationService;
+use App\Services\SubmissionTracking\PambSubmissionAccessService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -22,9 +25,7 @@ class HandleInertiaRequests extends Middleware
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
-            return redirect()->route('login')->withErrors([
-                'email' => 'Your account has been deactivated or is currently pending administrator approval.',
-            ]);
+            return redirect()->route('login')->with('pending_approval', true);
         }
 
         return parent::handle($request, $next);
@@ -36,7 +37,11 @@ class HandleInertiaRequests extends Middleware
 
         // CDS Admin is the only role with a global bypass. All other UI
         // visibility must follow the same named abilities enforced by routes.
-        $isAdmin = $user?->hasRole('CDS Admin') ?? false;
+        $isAdmin = $user?->hasAnyRole(['CDS Admin', 'Super Admin']) ?? false;
+        $organization = app(OrganizationalAccessService::class);
+        $userUnit = $organization->unitFor($user);
+        $allowsConservation = $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION);
+        $allowsDevelopment = $organization->canAccessUnit($user, OrganizationalAccessService::DEVELOPMENT);
 
         // Susiha ang section sa user ('CDS' o 'MES')
         $userSection = $user?->section ?? '';
@@ -59,37 +64,51 @@ class HandleInertiaRequests extends Middleware
                     'email' => $user->email,
                     'office_designated' => $user->office_designated,
                     'section' => $user->section,
+                    'unit_assignment' => $user->unit_assignment,
+                    'organizational_unit' => $userUnit,
+                    'protected_area_id' => $user->protected_area_id,
+                    'roles' => $user->roles->pluck('name')->values(),
                     'is_active' => $user->is_active,
                 ] : null,
                 'canManageUsers' => $isAdmin,
+                'organizationalUnit' => $userUnit,
+                'unitVisibility' => [
+                    'conservation' => $allowsConservation,
+                    'development' => $allowsDevelopment,
+                    'isGlobal' => $isAdmin,
+                ],
                 'canManageAdministration' => $isAdmin || (!$isMes && $can('compliance-alerts.manage')),
                 'canCorrectSubmissionRouting' => $isAdmin && ($user?->can('submission-tracking.correct-routing') ?? false),
+                'pambScope' => $user ? [
+                    'isCenro' => app(PambSubmissionAccessService::class)->isCenro($user),
+                    'isGlobal' => app(PambSubmissionAccessService::class)->isGlobal($user),
+                ] : ['isCenro' => false, 'isGlobal' => false],
 
                 // 🚀 SECTION-BASED PERMISSIONS FILTERING
 
                 // Protected Areas (CDS ra)
-                'canViewProtectedAreas' => !$isMes && $can('protected-areas.view'),
-                'canCreateProtectedAreas' => !$isMes && $can('protected-areas.create'),
-                'canUpdateProtectedAreas' => !$isMes && $can('protected-areas.update'),
-                'canDeleteProtectedAreas' => $can('protected-areas.delete'),
+                'canViewProtectedAreas' => $allowsConservation && !$isMes && $can('protected-areas.view'),
+                'canCreateProtectedAreas' => $allowsConservation && !$isMes && $can('protected-areas.create'),
+                'canUpdateProtectedAreas' => $allowsConservation && !$isMes && $can('protected-areas.update'),
+                'canDeleteProtectedAreas' => $allowsConservation && $can('protected-areas.delete'),
 
                 // Management Plans (CDS ra)
-                'canViewManagementPlans' => $canViewManagementPlans,
-                'canCreateManagementPlans' => !$isMes && $can('management-plans.create'),
-                'canUpdateManagementPlans' => !$isMes && $can('management-plans.update'),
-                'canDeleteManagementPlans' => $can('management-plans.delete'),
+                'canViewManagementPlans' => $allowsConservation && $canViewManagementPlans,
+                'canCreateManagementPlans' => $allowsConservation && !$isMes && $can('management-plans.create'),
+                'canUpdateManagementPlans' => $allowsConservation && !$isMes && $can('management-plans.update'),
+                'canDeleteManagementPlans' => $allowsConservation && $can('management-plans.delete'),
 
                 // Technical Reports (CDS ra)
-                'canViewTechnicalReports' => !$isMes && $can('technical-reports.view'),
-                'canCreateTechnicalReports' => !$isMes && $can('technical-reports.create'),
-                'canUpdateTechnicalReports' => !$isMes && $can('technical-reports.update'),
+                'canViewTechnicalReports' => $can('technical-reports.view'),
+                'canCreateTechnicalReports' => $can('technical-reports.create'),
+                'canUpdateTechnicalReports' => $can('technical-reports.update'),
                 'canDeleteTechnicalReports' => $can('technical-reports.delete'),
 
                 // Ecotourism Impact Monitoring (CDS ra)
-                'canViewEcotourismMonitoring' => !$isMes && $can('ecotourism-monitoring.view'),
-                'canCreateEcotourismMonitoring' => !$isMes && $can('ecotourism-monitoring.create'),
-                'canUpdateEcotourismMonitoring' => !$isMes && $can('ecotourism-monitoring.update'),
-                'canDeleteEcotourismMonitoring' => $can('ecotourism-monitoring.delete'),
+                'canViewEcotourismMonitoring' => $allowsConservation && !$isMes && $can('ecotourism-monitoring.view'),
+                'canCreateEcotourismMonitoring' => $allowsConservation && !$isMes && $can('ecotourism-monitoring.create'),
+                'canUpdateEcotourismMonitoring' => $allowsConservation && !$isMes && $can('ecotourism-monitoring.update'),
+                'canDeleteEcotourismMonitoring' => $allowsConservation && $can('ecotourism-monitoring.delete'),
 
                 // Issues Monitoring (Pwede sa MES ug CDS)
                 'canViewIssueMonitoring' => $can('issue-monitoring.view'),
@@ -104,44 +123,44 @@ class HandleInertiaRequests extends Middleware
                 'canDeleteLawinMonitoring' => $can('lawin-monitoring.delete'),
 
                 // Automated Weather Station (AWS)
-                'canViewAws' => $can('aws.view'),
-                'canCreateAws' => $can('aws.create'),
-                'canUpdateAws' => $can('aws.update'),
-                'canDeleteAws' => $can('aws.delete'),
+                'canViewAws' => $allowsConservation && $can('aws.view'),
+                'canCreateAws' => $allowsConservation && $can('aws.create'),
+                'canUpdateAws' => $allowsConservation && $can('aws.update'),
+                'canDeleteAws' => $allowsConservation && $can('aws.delete'),
 
                 // Biodiversity Monitoring System (BMS)
-                'canViewBms' => $user?->can('bms.view') ?? false,
-                'canCreateBms' => $user?->can('bms.create') ?? false,
-                'canUpdateBms' => $user?->can('bms.update') ?? false,
-                'canDeleteBms' => $user?->can('bms.delete') ?? false,
-                'canExportBms' => ($user?->can('bms.view') ?? false) && ($user?->can('reports.export') ?? false),
-                'canManageBmsSpatial' => ($user?->can('bms.view') ?? false) && ($user?->can('gis.manage') ?? false),
+                'canViewBms' => $allowsConservation && ($user?->can('bms.view') ?? false),
+                'canCreateBms' => $allowsConservation && ($user?->can('bms.create') ?? false),
+                'canUpdateBms' => $allowsConservation && ($user?->can('bms.update') ?? false),
+                'canDeleteBms' => $allowsConservation && ($user?->can('bms.delete') ?? false),
+                'canExportBms' => $allowsConservation && ($user?->can('bms.view') ?? false) && ($user?->can('reports.export') ?? false),
+                'canManageBmsSpatial' => $allowsConservation && ($user?->can('bms.view') ?? false) && ($user?->can('gis.manage') ?? false),
 
                 // Biodiversity Assessment and Monitoring System (BAMS)
-                'canViewBams' => $user?->can('bams.view') ?? false,
-                'canCreateBams' => $user?->can('bams.create') ?? false,
-                'canUpdateBams' => $user?->can('bams.update') ?? false,
-                'canDeleteBams' => $user?->can('bams.delete') ?? false,
-                'canManageBamsSpatial' => $user?->can('bams.manage-spatial') ?? false,
-                'canCalculateBams' => $user?->can('bams.calculate') ?? false,
+                'canViewBams' => $allowsConservation && ($user?->can('bams.view') ?? false),
+                'canCreateBams' => $allowsConservation && ($user?->can('bams.create') ?? false),
+                'canUpdateBams' => $allowsConservation && ($user?->can('bams.update') ?? false),
+                'canDeleteBams' => $allowsConservation && ($user?->can('bams.delete') ?? false),
+                'canManageBamsSpatial' => $allowsConservation && ($user?->can('bams.manage-spatial') ?? false),
+                'canCalculateBams' => $allowsConservation && ($user?->can('bams.calculate') ?? false),
 
                 // Integrated Management Effectiveness Assessment (IMEA)
-                'canViewImea' => $user?->can('imea.view') ?? false,
-                'canCreateImea' => $user?->can('imea.create') ?? false,
-                'canUpdateImea' => $user?->can('imea.update') ?? false,
-                'canDeleteImea' => $user?->can('imea.delete') ?? false,
-                'canImportImea' => $user?->can('imea.import') ?? false,
-                'canExportImea' => $can('imea.export'),
+                'canViewImea' => $allowsConservation && ($user?->can('imea.view') ?? false),
+                'canCreateImea' => $allowsConservation && ($user?->can('imea.create') ?? false),
+                'canUpdateImea' => $allowsConservation && ($user?->can('imea.update') ?? false),
+                'canDeleteImea' => $allowsConservation && ($user?->can('imea.delete') ?? false),
+                'canImportImea' => $allowsConservation && ($user?->can('imea.import') ?? false),
+                'canExportImea' => $allowsConservation && $can('imea.export'),
 
                 // PPA (CDS ra)
-                'canViewPPA' => !$isMes && $can('programs-projects-activities.view'),
-                'canCreatePPA' => !$isMes && $can('programs-projects-activities.create'),
-                'canUpdatePPA' => !$isMes && $can('programs-projects-activities.update'),
-                'canDeletePPA' => $can('programs-projects-activities.delete'),
+                'canViewPPA' => $allowsConservation && !$isMes && $can('programs-projects-activities.view'),
+                'canCreatePPA' => $allowsConservation && !$isMes && $can('programs-projects-activities.create'),
+                'canUpdatePPA' => $allowsConservation && !$isMes && $can('programs-projects-activities.update'),
+                'canDeletePPA' => $allowsConservation && $can('programs-projects-activities.delete'),
 
                 // Reports (CDS ra)
                 'canViewReports' => !$isMes && $can('reports.view'),
-                'canViewComplianceAlerts' => !$isMes && $can('reports.view'),
+                'canViewComplianceAlerts' => !$isMes && $can('compliance-alerts.manage'),
                 'canManageComplianceAlerts' => !$isMes && $can('compliance-alerts.manage'),
             ],
             'managementPlanTypes' => fn () => $canViewManagementPlans
@@ -152,7 +171,7 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
                 : [],
-            'genericModuleNavigation' => fn () => ! $isMes && $can('technical-reports.view')
+            'genericModuleNavigation' => fn () => $allowsConservation && ! $isMes && $can('technical-reports.view')
                 ? ModuleDefinition::query()->active()->generic()->notRetired()->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
                     ->get(['name', 'code', 'program_area'])
                     ->map(fn (ModuleDefinition $module): array => ['label' => $module->name, 'href' => route('conservation-reports.index', $module->code), 'program_area' => $module->program_area->value])
@@ -160,14 +179,16 @@ class HandleInertiaRequests extends Middleware
                 : [],
             'engpIacGeneratorUrl' => $engpIacGeneratorUrl,
             'notificationBell' => fn () => $user && Schema::hasTable('notifications') ? [
-                'unread_count' => $user->unreadNotifications()->count(),
-                'notifications' => $user->notifications()->latest()->take(8)->get()->map(fn ($notification): array => [
+                'unread_count' => $user->unreadNotifications()->latest()->get()->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))->take(8)->count(),
+                'notifications' => $user->unreadNotifications()->latest()->get()->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))->take(8)->map(fn ($notification): array => [
                     'id' => $notification->id,
                     'title' => $notification->data['title'] ?? 'System notification',
                     'message' => $notification->data['message'] ?? '',
                     'severity' => $notification->data['severity'] ?? 'info',
                     'category' => $notification->data['category'] ?? 'submission_updates',
                     'source_label' => $notification->data['source_label'] ?? 'Report',
+                    'office' => $notification->data['office'] ?? null,
+                    'protected_area' => $notification->data['protected_area'] ?? null,
                     'url' => $notification->data['url'] ?? null,
                     'read_at' => $notification->read_at?->toIso8601String(),
                     'created_at' => $notification->created_at?->toIso8601String(),
@@ -177,6 +198,8 @@ class HandleInertiaRequests extends Middleware
                 'status' => fn () => $request->session()->get('status'),
                 'success' => fn () => $request->session()->get('success'),
                 'error' => fn () => $request->session()->get('error'),
+                'registration_success' => fn () => $request->session()->get('registration_success'),
+                'pending_approval' => fn () => $request->session()->get('pending_approval'),
             ],
             'status' => fn (): ?string => $request->session()->get('status'),
         ];

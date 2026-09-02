@@ -7,6 +7,46 @@
     to { opacity: 1; }
 }
 
+@keyframes edats-current-stage-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgb(22 163 74 / 0.35); }
+    50% { box-shadow: 0 0 0 5px rgb(22 163 74 / 0); }
+}
+
+@keyframes edats-current-stage-ripple {
+    0% { transform: translate(-50%, -50%) scale(0.70); opacity: 0.30; }
+    35% { transform: translate(-50%, -50%) scale(0.92); opacity: 0.20; }
+    75% { transform: translate(-50%, -50%) scale(1.25); opacity: 0.08; }
+    100% { transform: translate(-50%, -50%) scale(1.55); opacity: 0; }
+}
+
+.edats-current-stage-pulse { animation: edats-current-stage-pulse 2s ease-in-out infinite; }
+
+.edats-current-stage-marker { overflow: visible; }
+
+.edats-current-stage-marker__halo {
+    background: rgb(22 163 74 / 0.1);
+    box-shadow: 0 0 0 1px rgb(22 163 74 / 0.08);
+}
+
+.edats-current-stage-marker__ripple {
+    pointer-events: none;
+    border-color: rgb(22 163 74 / 0.32);
+    background: rgb(22 163 74 / 0.025);
+    transform-origin: center;
+    animation: edats-current-stage-ripple 2.2s ease-out infinite;
+}
+
+.edats-current-stage-marker__ripple--second { animation-delay: 1.1s; }
+
+/* Keep the existing progress component's reduced-motion-safe marker, but make
+   its current position a visible, gentle ring pulse. */
+.motion-safe\:animate-pulse { animation: edats-current-stage-pulse 2s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+    .edats-current-stage-pulse { animation: none; }
+    .edats-current-stage-marker__ripple { animation: none; opacity: 0.16; transform: translate(-50%, -50%) scale(1); }
+}
+
 input:-webkit-autofill,
 select:-webkit-autofill,
 textarea:-webkit-autofill {
