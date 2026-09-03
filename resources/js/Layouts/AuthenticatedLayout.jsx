@@ -507,11 +507,9 @@ export function AuthenticatedShell({ children }) {
                                 {profileOpen && (
                                     <div className="absolute right-0 z-50 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="menu">
                                         <Link href="/profile" className="block rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">Profile settings</Link>
-                                        <form action="/logout" method="POST" className="w-full">
-                                            <button type="submit" className="block w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">
+                                        <button type="button" onClick={() => router.post('/logout')} className="block w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">
                                                 Log out
-                                            </button>
-                                        </form>
+                                        </button>
                                     </div>
                                 )}
                             </div>
