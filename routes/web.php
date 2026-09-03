@@ -116,7 +116,6 @@ Route::middleware('auth')->group(function () {
     Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:reports.view')->name('business-calendar.index');
     Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.preview');
     Route::post('compliance-alerts/send', [ComplianceAlertController::class, 'send'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send');
-    Route::post('compliance-alerts/test', [ComplianceAlertController::class, 'test'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.test');
     Route::post('compliance-alerts/recipients', [ComplianceAlertController::class, 'storeRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.store');
     Route::put('compliance-alerts/recipients/{recipient}', [ComplianceAlertController::class, 'updateRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.update');
     Route::patch('compliance-alerts/recipients/{recipient}/status', [ComplianceAlertController::class, 'toggleRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.status');

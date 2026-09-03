@@ -198,7 +198,7 @@ test('CENRO review summary exposes the current verdict and preserves prior corre
         ->and($final['reviewed_user_category'])->toBe('CENRO CDS Chief')
         ->and($final['previous_correction_cycles'])->toBe(1)
         ->and($final['previous_correction']['reason'])->toBe('Attach the signed resolution.')
-        ->and($report->fresh()->movReviewEvents()->oldest('id')->pluck('event_key')->all())->toBe([
+        ->and($report->fresh()->movReviewEvents()->reorder('id', 'asc')->pluck('event_key')->all())->toBe([
             PambMovProcessingService::MOV_UPLOADED,
             PambMovProcessingService::SUBMITTED_FOR_REVIEW,
             PambMovProcessingService::NEEDS_CORRECTION,

@@ -274,22 +274,6 @@ class ComplianceAlertController extends Controller
         return back()->with('success', 'Compliance notification delivery completed.');
     }
 
-    public function test(Request $request, ComplianceAlertDeliveryService $delivery): RedirectResponse
-    {
-        $data = $request->validate([
-            'destination_key' => ['required', 'string', 'max:191'],
-            'alert_type' => ['required', Rule::in([ComplianceNotificationRun::ALERT_DUE_SOON, ComplianceNotificationRun::ALERT_OVERDUE])],
-        ]);
-        $run = $delivery->sendTest($data['destination_key'], $data['alert_type'], $request->user());
-        app(AuditLogService::class)->record('compliance_alerts', 'Compliance Alert Test Delivery', null, null, 'Compliance Alerts', 'Processed a mapped-destination compliance alert test delivery request.', ['alert_type' => $data['alert_type'], 'status' => $run->status], $request->user()->id);
-
-        if ($run->status === ComplianceNotificationRun::STATUS_FAILED) {
-            return back()->withErrors(['test' => $run->error_message ?: 'Test email delivery failed.']);
-        }
-
-        return back()->with('success', 'Compliance alert test delivery completed for the selected mapped destination.');
-    }
-
     public function storeRecipient(Request $request): RedirectResponse
     {
         $data = $this->recipientData($request);

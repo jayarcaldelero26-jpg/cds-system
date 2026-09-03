@@ -69,8 +69,8 @@ class ComplianceAlertDeliveryService
     }
 
     /**
-     * Build the exact memorandum payload consumed by preview, test, manual,
-     * and automatic delivery for one logical destination.
+     * Build the exact memorandum payload consumed by preview, manual, and
+     * automatic delivery for one logical destination.
      *
      * @return array{groups:array<int,array<string,mixed>>,settings:array<string,mixed>,recipient:array<string,mixed>,alert_type:string,presentation:array<string,mixed>,subject:string,html:string}|null
      */
@@ -87,82 +87,6 @@ class ComplianceAlertDeliveryService
         return $selected
             ? $this->buildMemorandum($selected['reports'], $selected['recipient'], $alertType)
             : null;
-    }
-
-    /**
-     * Send a controlled test to the selected mapped destination. Tests use
-     * the same resolved payload and Mailable as production, but never acquire
-     * or complete a production delivery claim.
-     */
-    public function sendTest(string $destinationKey, string $alertType, User $user): ComplianceNotificationRun
-    {
-        if ($this->reportsForDestination($destinationKey, $alertType)->isEmpty()) {
-            throw ValidationException::withMessages(['test' => 'No qualifying reports for this alert type.']);
-        }
-
-        $memorandum = $this->memorandumForDestination($destinationKey, $alertType);
-        if (! $memorandum) {
-            throw ValidationException::withMessages(['test' => 'The selected destination mapping is inactive, unmapped, or has no valid recipient email.']);
-        }
-
-        $state = $this->automaticDeliveryState();
-        if (! $state['environment_gate'] || ! $state['mail_configured']) {
-            throw ValidationException::withMessages(['test' => 'Test delivery is unavailable because the server delivery gate or mail configuration is not ready.']);
-        }
-
-        $recipient = new ResolvedComplianceRecipient(
-            key: 'test:'.$destinationKey,
-            email: $memorandum['recipient']['email'],
-            ccEmails: $memorandum['recipient']['cc_emails'],
-            name: $memorandum['recipient']['name'],
-            source: $memorandum['recipient']['source'],
-            attentionLine: $memorandum['recipient']['attention_line'],
-            mappingId: $memorandum['recipient']['mapping_id'],
-            destination: $memorandum['recipient']['destination'],
-        );
-        $today = CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE)->toDateString();
-        $run = $this->createRun(
-            $today,
-            $recipient,
-            $memorandum['reports'],
-            $memorandum['groups'],
-            $memorandum['settings'],
-            ComplianceNotificationRun::TYPE_TEST,
-            $user,
-            alertType: $alertType,
-            memorandum: $memorandum,
-        );
-
-        try {
-            $pending = Mail::to($recipient->email);
-            if ($recipient->ccEmails !== []) {
-                $pending->cc($recipient->ccEmails);
-            }
-            $pending->send(new OverdueComplianceMemorandum(
-                $memorandum['groups'],
-                $memorandum['settings'],
-                $recipient->toArray(),
-                '',
-                $alertType,
-                $memorandum['presentation'],
-            ));
-        } catch (\Throwable $exception) {
-            Log::error('Compliance test email delivery failed.', [
-                'exception' => $exception::class,
-                'message' => $this->redactTransportMessage($exception->getMessage()),
-            ]);
-            $run->update(['status' => ComplianceNotificationRun::STATUS_FAILED, 'error_message' => 'Test email delivery failed. See application logs for technical details.']);
-
-            return $run->fresh();
-        }
-
-        $run->update([
-            'status' => ComplianceNotificationRun::STATUS_SENT,
-            'sent_at' => CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE),
-            'error_message' => null,
-        ]);
-
-        return $run->fresh();
     }
 
     /** @return Collection<int, ComplianceNotificationRun> */

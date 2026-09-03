@@ -1145,14 +1145,14 @@ test('known settings placeholders are corrected without changing official values
         ->and($settings->fresh()->signatory_name)->toBe('PABLITO M. OFRECIA');
 });
 
-test('test and dry-run history do not count as production sends or failures', function () {
+test('legacy nonproduction history does not count as production sends or failures', function () {
     $manager = complianceManager(complianceUser());
     ComplianceNotificationRun::create([
-        'run_date' => now('Asia/Manila')->toDateString(), 'recipient_key' => 'test', 'run_type' => ComplianceNotificationRun::TYPE_TEST,
+        'run_date' => now('Asia/Manila')->toDateString(), 'recipient_key' => 'test', 'run_type' => 'test',
         'subject' => 'Test', 'status' => ComplianceNotificationRun::STATUS_SENT, 'report_count' => 1, 'recipients' => ['test@example.test'],
     ]);
     ComplianceNotificationRun::create([
-        'run_date' => now('Asia/Manila')->toDateString(), 'recipient_key' => 'dry-run', 'run_type' => ComplianceNotificationRun::TYPE_DRY_RUN,
+        'run_date' => now('Asia/Manila')->toDateString(), 'recipient_key' => 'dry-run', 'run_type' => 'dry_run',
         'subject' => 'Dry run', 'status' => ComplianceNotificationRun::STATUS_FAILED, 'report_count' => 1, 'recipients' => ['dry-run@example.test'],
     ]);
 
@@ -2030,7 +2030,9 @@ test('template editor UI retains four independent PA and ENGP template contexts'
         ->toContain('engp_due_soon')
         ->toContain('engp_overdue')
         ->toContain('Preview 3-Day')
-        ->toContain('Test Overdue');
+        ->not->toContain('Test Overdue')
+        ->not->toContain('Run Dry Run')
+        ->not->toContain('Evaluate As Of');
 });
 test('PA and ENGP compliance mailables use the configured Laravel From identity while recipient mappings stay independent', function () {
     Mail::fake();
@@ -2096,42 +2098,22 @@ test('all PA and ENGP destination previews use current mapped data and never sen
     Mail::assertNothingSent();
 });
 
-test('destination-aware test delivery uses the mapped recipient and the same memorandum payload without production history', function () {
+test('compliance settings expose preview only and no runtime test delivery', function (): void {
+    $page = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
+    $routes = file_get_contents(base_path('routes/web.php'));
+
+    expect($page)
+        ->toContain('Preview 3-Day')
+        ->not->toContain('Test 3-Day')
+        ->not->toContain('Test Overdue')
+        ->not->toContain('Run Dry Run')
+        ->not->toContain('Evaluate As Of')
+        ->and($routes)->not->toContain("compliance-alerts/dry-run")
+        ->not->toContain("compliance-alerts.test");
+
     Mail::fake();
-    config()->set('compliance_alerts.enabled', true);
-    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 10:00:00', 'Asia/Manila'));
-    $manager = complianceManager(complianceUser());
-    $area = complianceArea($manager);
-    bmsForDeadline($area, $manager, '2026-08-31');
-    ComplianceAlertRecipient::create([
-        'protected_area_id' => $area->id,
-        'recipient_name' => 'Deputy PASu of Pujada Bay',
-        'attention_line' => 'Chief, Conservation and Development Section',
-        'recipient_email' => 'mapped-test@example.test',
-        'cc_emails' => ['mapped-test-cc@example.test'],
-        'is_active' => true,
-    ]);
-    enabledComplianceSettings();
-
-    $run = app(ComplianceAlertDeliveryService::class)->sendTest('pa:'.$area->id, ComplianceNotificationRun::ALERT_DUE_SOON, $manager);
-
-    expect($run->run_type)->toBe(ComplianceNotificationRun::TYPE_TEST)
-        ->and($run->status)->toBe(ComplianceNotificationRun::STATUS_SENT)
-        ->and($run->recipients)->toBe(['mapped-test@example.test'])
-        ->and($run->cc_recipients)->toBe(['mapped-test-cc@example.test'])
-        ->and(ComplianceDeliveryClaim::query()->count())->toBe(0)
-        ->and(app(ComplianceAlertDeliveryService::class)->lastSentByLogicalKey(ComplianceNotificationRun::query()->get()))->toBe([]);
-
-    Mail::assertSent(OverdueComplianceMemorandum::class, function (OverdueComplianceMemorandum $mail) use ($area): bool {
-        return $mail->hasTo('mapped-test@example.test')
-            && $mail->hasCc('mapped-test-cc@example.test')
-            && str_contains($mail->render(), 'Deputy PASu of Pujada Bay')
-            && str_contains($mail->render(), $area->name)
-            && str_contains($mail->render(), 'Chief, Conservation and Development Section')
-            && $mail->presentation['template'] === 'protected_area_due_soon';
-    });
+    Mail::assertNothingSent();
 });
-
 test('destination cards expose each active mapped destination without selecting the first mapping implicitly', function () {
     $manager = complianceManager(complianceUser());
     $aliwagwag = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape (APL)', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $manager->id, 'updated_by' => $manager->id]);
@@ -2279,12 +2261,8 @@ test('saved rich text survives settings save and reload and flows through PA and
     }
 
     $delivery = app(ComplianceAlertDeliveryService::class);
-    $testRun = $delivery->sendTest('pa:'.$area->id, ComplianceNotificationRun::ALERT_DUE_SOON, $manager);
-    expect($testRun->status)->toBe(ComplianceNotificationRun::STATUS_SENT);
-    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->presentation['template'] === 'protected_area_due_soon' && str_contains($mail->render(), '<strong>rating of 1 (Poor)</strong>'));
-
     $delivery->sendAutomatic();
-    Mail::assertSent(OverdueComplianceMemorandum::class, 3);
+    Mail::assertSent(OverdueComplianceMemorandum::class, 2);
     Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => str_contains($mail->render(), '<strong>rating of 1 (Poor)</strong>') && str_contains($mail->render(), 'color:#b42318'));
 });
 
@@ -2324,4 +2302,46 @@ test('rich text editor exposes the shared controlled toolbar for every template 
         ->toContain("document.execCommand?.('removeFormat'")
         ->toContain("'#14532d'")
         ->toContain("'#b42318'");
+});
+
+test('production compliance evaluation uses the application clock without runtime simulation', function (): void {
+    Mail::fake();
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    $dueSoon = bmsForDeadline($area, $manager, '2026-09-03');
+    $dueToday = bmsForDeadline($area, $manager, '2026-09-02');
+    $overdue = bmsForDeadline($area, $manager, '2026-09-01');
+    $before = collect([$dueSoon, $dueToday, $overdue])->mapWithKeys(fn (BmsReportSubmission $report): array => [$report->id => $report->getAttributes()])->all();
+    $runsBefore = ComplianceNotificationRun::query()->count();
+    $claimsBefore = ComplianceDeliveryClaim::query()->count();
+
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-02 08:00:00', 'Asia/Manila'));
+    $buckets = app(ComplianceAlertDeliveryService::class)->currentAlertBuckets();
+
+    expect($buckets[ComplianceNotificationRun::ALERT_DUE_SOON])->toHaveCount(1)
+        ->and($buckets[ComplianceNotificationRun::ALERT_DUE_TODAY])->toHaveCount(1)
+        ->and($buckets[ComplianceNotificationRun::ALERT_OVERDUE])->toHaveCount(1)
+        ->and(ComplianceNotificationRun::query()->count())->toBe($runsBefore)
+        ->and(ComplianceDeliveryClaim::query()->count())->toBe($claimsBefore)
+        ->and(Mail::assertNothingSent());
+
+    foreach ($before as $id => $attributes) {
+        expect(BmsReportSubmission::query()->findOrFail($id)->getAttributes())->toBe($attributes);
+    }
+});
+
+test('Compliance Alerts exposes production delivery routes only and retains the authoritative schedule', function (): void {
+    $web = file_get_contents(base_path('routes/web.php'));
+    $console = file_get_contents(base_path('routes/console.php'));
+
+    expect($web)
+        ->not->toContain("compliance-alerts/dry-run")
+        ->not->toContain("compliance-alerts.test")
+        ->toContain("compliance-alerts/send")
+        ->and($console)
+        ->toContain("Schedule::command('compliance:send-overdue-alerts')")
+        ->toContain('->weekdays()')
+        ->toContain('->dailyAt($complianceAlertTime)')
+        ->toContain("->timezone('Asia/Manila')")
+        ->toContain('->withoutOverlapping()');
 });

@@ -28,7 +28,7 @@ class OverdueReportService
 {
     private const TIMEZONE = 'Asia/Manila';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly ModuleMetadataResolver $moduleResolver) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly ModuleMetadataResolver $moduleResolver, private readonly ComplianceEvaluationClock $evaluationClock) {}
 
     /** @return array<class-string<Model>, array<string, mixed>> */
     public function sourceDefinitions(): array
@@ -105,7 +105,7 @@ class OverdueReportService
     /** @return Collection<int, OverdueReport> */
     public function overdueReports(?CarbonImmutable $today = null): Collection
     {
-        $today = ($today ?? CarbonImmutable::now(self::TIMEZONE))->setTimezone(self::TIMEZONE)->startOfDay();
+        $today = $today ? $today->setTimezone(self::TIMEZONE)->startOfDay() : $this->evaluationClock->date();
         $records = collect();
 
         foreach ($this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
@@ -125,7 +125,7 @@ class OverdueReportService
     /** @return Collection<int, OverdueReport> */
     public function dueSoonReports(int $days = 3, ?CarbonImmutable $today = null): Collection
     {
-        $today = ($today ?? CarbonImmutable::now(self::TIMEZONE))->setTimezone(self::TIMEZONE)->startOfDay();
+        $today = $today ? $today->setTimezone(self::TIMEZONE)->startOfDay() : $this->evaluationClock->date();
         $through = $today->addDays(max(0, $days));
         $records = collect();
 
@@ -187,7 +187,7 @@ class OverdueReportService
     /** @return Collection<int, OverdueReport> */
     public function pendingMovReports(?CarbonImmutable $today = null): Collection
     {
-        $today = ($today ?? CarbonImmutable::now(self::TIMEZONE))->setTimezone(self::TIMEZONE)->startOfDay();
+        $today = $today ? $today->setTimezone(self::TIMEZONE)->startOfDay() : $this->evaluationClock->date();
         $records = collect();
 
         foreach ($this->loadSourceModels(function ($query, array $definition, string $modelClass): void {

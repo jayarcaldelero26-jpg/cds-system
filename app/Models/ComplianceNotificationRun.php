@@ -14,8 +14,6 @@ class ComplianceNotificationRun extends Model
     public const STATUS_SKIPPED = 'skipped';
     public const TYPE_AUTOMATIC = 'automatic';
     public const TYPE_MANUAL = 'manual';
-    public const TYPE_TEST = 'test';
-    public const TYPE_DRY_RUN = 'dry_run';
     public const ALERT_DUE_SOON = 'DUE_SOON';
     public const ALERT_DUE_TODAY = 'DUE_TODAY';
     public const ALERT_OVERDUE = 'OVERDUE';
