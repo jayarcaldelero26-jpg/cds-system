@@ -35,10 +35,6 @@ return Application::configure(basePath: dirname(__DIR__))
             'unit' => \App\Http\Middleware\EnsureOrganizationalUnit::class,
         ]);
 
-        // 🚀 Gidugang kini aron ma-except ang logout sa CSRF check ug malikayan ang 419 error
-        $middleware->validateCsrfTokens(except: [
-            'logout',
-        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

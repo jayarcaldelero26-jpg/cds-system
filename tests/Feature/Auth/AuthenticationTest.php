@@ -61,8 +61,39 @@ test('inactive users with an incorrect password retain normal credential failure
 test('users can logout', function () {
     $user = User::factory()->create();
 
-    $response = $this->actingAs($user)->post('/logout');
+    $response = $this->actingAs($user)->post('/logout', [
+        '_token' => csrf_token(),
+    ]);
 
     $this->assertGuest();
     $response->assertRedirect('/login');
+});
+
+test('logout invalidates the session and rejects missing csrf tokens', function () {
+    $user = User::factory()->create();
+
+    $this->app->instance(
+        \Illuminate\Foundation\Http\Middleware\PreventRequestForgery::class,
+        new class($this->app, $this->app['encrypter'])
+            extends \Illuminate\Foundation\Http\Middleware\PreventRequestForgery
+        {
+            protected function runningUnitTests()
+            {
+                return false;
+            }
+        },
+    );
+
+    $this->withMiddleware()->actingAs($user)->withSession(['logout-test' => 'present'])
+        ->post('/logout')
+        ->assertStatus(419);
+
+    $this->assertAuthenticatedAs($user);
+    expect(session('logout-test'))->toBe('present');
+});
+
+test('guests cannot use the logout endpoint', function () {
+    $this->post('/logout', [
+        '_token' => csrf_token(),
+    ])->assertRedirect(route('login'));
 });
