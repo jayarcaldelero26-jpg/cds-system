@@ -21,10 +21,22 @@ return new class extends Migration
 
         Schema::create('protected_area_office_assignments', function (Blueprint $table): void {
             $table->id();
-            $table->foreignId('protected_area_id')->constrained('protected_areas')->cascadeOnDelete();
-            $table->foreignId('organizational_office_id')->constrained('organizational_offices')->restrictOnDelete();
+            $table->foreignId('protected_area_id');
+            $table->foreign('protected_area_id', 'pa_office_pa_fk')
+                ->references('id')
+                ->on('protected_areas')
+                ->cascadeOnDelete();
+            $table->foreignId('organizational_office_id');
+            $table->foreign('organizational_office_id', 'pa_office_org_fk')
+                ->references('id')
+                ->on('organizational_offices')
+                ->restrictOnDelete();
             $table->string('assignment_type', 30)->default('supervising');
-            $table->foreignId('assigned_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('assigned_by')->nullable();
+            $table->foreign('assigned_by', 'pa_office_assigned_by_fk')
+                ->references('id')
+                ->on('users')
+                ->nullOnDelete();
             $table->timestamps();
             $table->unique(['protected_area_id', 'assignment_type'], 'pa_office_assignment_type_unique');
             $table->index(['organizational_office_id', 'assignment_type'], 'pa_office_assignment_scope_idx');
