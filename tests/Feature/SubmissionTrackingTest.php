@@ -120,10 +120,48 @@ test('routing correction rejects wrong password, non-admins, missing reason, and
     $this->actingAs($admin)->patch($route, ['dates' => $dates, 'reason' => '', 'password' => 'secret-password'])->assertSessionHasErrors('reason');
     $this->actingAs($admin)->patch($route, ['dates' => ['date_report_released_cenro' => '2026-08-09', 'date_received_penro' => '2026-08-07'], 'reason' => 'Chronology check.', 'password' => 'secret-password'])->assertSessionHasErrors('dates');
 
-    $staff = User::factory()->create(['section' => 'CDS']);
+    $staff = User::factory()->create(['password' => 'secret-password', 'section' => 'CDS']);
     $staff->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
     $this->actingAs($staff)->patch($route, ['dates' => $dates, 'reason' => 'Unauthorized check.', 'password' => 'secret-password'])->assertForbidden();
     expect(\App\Models\SubmissionRoutingCorrection::query()->count())->toBe(0);
+});
+
+test('routing correction follows the authenticated user password after it changes', function () {
+    $admin = User::factory()->create(['password' => 'secret-password', 'section' => 'CDS']);
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $otherAdmin = User::factory()->create(['password' => 'other-password', 'section' => 'CDS']);
+    $otherAdmin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $otherAdmin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Current password correction test', 'date_accomplished' => '2026-08-03',
+        'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $route = route('submission-tracking.correct-routing', ['conservation', $report->id]);
+    $dates = ['date_report_released_cenro' => '2026-08-06', 'date_received_penro' => '2026-08-07'];
+    $payload = fn (string $password, ?array $newDates = null): array => [
+        'dates' => $newDates ?? $dates,
+        'reason' => 'Verify current password after password change.',
+        'password' => $password,
+    ];
+
+    $this->actingAs($admin)->put('/password', [
+        'current_password' => 'secret-password',
+        'password' => 'new-secret-password',
+        'password_confirmation' => 'new-secret-password',
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs($admin)->patch($route, $payload('secret-password'))->assertSessionHasErrors('password');
+    $this->actingAs($admin)->patch($route, $payload('new-secret-password'))->assertSessionHasNoErrors();
+
+    $this->actingAs($otherAdmin)->patch($route, $payload('new-secret-password', [
+        'date_report_released_cenro' => '2026-08-07', 'date_received_penro' => '2026-08-08',
+    ]))->assertSessionHasErrors('password');
+
+    expect(\App\Models\SubmissionRoutingCorrection::query()->where('source_id', $report->id)->count())->toBe(2)
+        ->and(\App\Models\SubmissionRoutingCorrection::query()->get()->toJson())->not->toContain('secret-password')
+        ->and(\App\Models\AuditLog::query()->get()->toJson())->not->toContain('secret-password');
 });
 
 test('an accomplished conservation report enters the CENRO release queue and transitions through routing without duplication', function () {
