@@ -26,6 +26,8 @@ final class ProtectedAttachmentController extends Controller
         }
         if ($recordModel instanceof EngpReportSubmission) {
             abort_unless($this->organization->canViewDevelopmentRecord(request()->user(), $recordModel), 403);
+        } else {
+            abort_unless($this->organization->canAccessProtectedAreaRecord(request()->user(), $recordModel), 403);
         }
 
         return $this->attachments->response($source, $recordModel, $attachment);

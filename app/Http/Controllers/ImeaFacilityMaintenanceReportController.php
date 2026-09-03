@@ -6,6 +6,7 @@ use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -17,11 +18,17 @@ use Throwable;
 
 class ImeaFacilityMaintenanceReportController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(
+        private readonly ProtectedAttachmentService $attachments,
+        private readonly OrganizationalAccessService $organization,
+    ) {}
 
     public function index(Request $request): Response
     {
-        $reports = ImeaFacilityMaintenanceReport::query()->with('protectedArea:id,name')
+        if ($request->filled('protected_area_id')) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
+        }
+        $reports = $this->organization->scopeProtectedAreaQuery(ImeaFacilityMaintenanceReport::query()->with('protectedArea:id,name'), $request->user())
             ->when($request->filled('search'), function ($query) use ($request): void {
                 $search = trim((string) $request->input('search'));
                 $query->where(fn ($query) => $query->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%")));
@@ -30,21 +37,25 @@ class ImeaFacilityMaintenanceReportController extends Controller
             ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', $request->input('quarter')))
             ->latest('id')->paginate(10)->withQueryString()->through(fn ($report) => $this->data($report));
 
-        return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name']), 'filters' => $request->only(['search', 'protected_area_id', 'quarter'])]);
+        return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']), 'filters' => $request->only(['search', 'protected_area_id', 'quarter'])]);
     }
 
     public function store(Request $request): RedirectResponse { return $this->persist($request, new ImeaFacilityMaintenanceReport); }
-    public function update(Request $request, ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { return $this->persist($request, $maintenanceReport); }
-    public function destroy(ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $path = $maintenanceReport->mov_file_path; DB::transaction(fn () => $maintenanceReport->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', 'Maintenance report deleted successfully.'); }
-    public function showMov(ImeaFacilityMaintenanceReport $maintenanceReport): BinaryFileResponse { return $this->attachments->response('imea-maintenance', $maintenanceReport, 'mov'); }
+    public function update(Request $request, ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea($request->user(), $maintenanceReport->protected_area_id); return $this->persist($request, $maintenanceReport); }
+    public function destroy(ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); $path = $maintenanceReport->mov_file_path; DB::transaction(fn () => $maintenanceReport->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', 'Maintenance report deleted successfully.'); }
+    public function showMov(ImeaFacilityMaintenanceReport $maintenanceReport): BinaryFileResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); return $this->attachments->response('imea-maintenance', $maintenanceReport, 'mov'); }
 
     private function persist(Request $request, ImeaFacilityMaintenanceReport $report): RedirectResponse
     {
         $wasExisting = $report->exists;
+        if ($wasExisting) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $report->protected_area_id);
+        }
         $validated = $request->validate($this->rules(requireMov: ! $wasExisting), [
             'mov.required' => 'A report attachment / MOV is required.',
             'mov.max' => 'The MOV attachment must not exceed 20 MB.',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
         if ($wasExisting && ! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($report, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }

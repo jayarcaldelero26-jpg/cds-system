@@ -1,0 +1,16 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+#[Fillable(['code', 'name', 'office_type', 'is_active'])]
+class OrganizationalOffice extends Model
+{
+    public function protectedAreaAssignments(): HasMany
+    {
+        return $this->hasMany(ProtectedAreaOfficeAssignment::class);
+    }
+}

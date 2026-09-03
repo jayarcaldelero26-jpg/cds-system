@@ -28,7 +28,7 @@ class StoreUserRequest extends FormRequest
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique('users', 'email')],
             'office_designated' => ['required', 'string', 'max:255'], // 🚀 Gidugang validation
-            'section' => ['required', 'string', 'in:CENRO_RECORDS,CENRO_CDS_CHIEF,CENRO_CDS_FOCAL,PENRO_CDS_CHIEF,PENRO_CDS_FOCAL,PAMO'],
+            'section' => ['required', 'string', 'in:CENRO_RECORDS,CENRO_CDS_CHIEF,CENRO_CDS_FOCAL,PENRO_RECORDS,PENRO_CDS_CHIEF,PENRO_CDS_FOCAL,PAMO'],
             'unit_assignment' => ['required', 'string', 'in:conservation,development'],
             'protected_area_id' => ['nullable', 'integer', 'exists:protected_areas,id', 'required_if:section,PAMO'],
             'password' => ['required', 'string', 'confirmed', Password::defaults()],

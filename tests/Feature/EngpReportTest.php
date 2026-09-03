@@ -171,6 +171,33 @@ test('unauthorized users cannot perform an ENGP tracking transition', function (
     expect($report->releaseEvents()->count())->toBe(0);
 });
 
+test('ENGP tracking transitions enforce originating office scope', function () {
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'site_visit',
+        'activity_name' => 'ENGP Site Visit Report',
+        'document_type' => 'Quarterly Report',
+        'period_key' => 'Q1',
+        'period_label' => 'Quarter 1',
+        'deadline_submission' => '2026-03-10',
+        'office' => 'CENRO Cateel',
+    ]));
+    $wrongOffice = User::factory()->create([
+        'unit_assignment' => 'development',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $wrongOffice->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+
+    $this->actingAs($wrongOffice)
+        ->post(route('submission-tracking.transition', ['engp', $report->id, SubmissionTrackingService::CENRO_RELEASE]), [
+            'stage' => SubmissionTrackingService::CENRO_RELEASE,
+            'date' => '2026-03-10',
+        ])
+        ->assertForbidden();
+
+    expect($report->releaseEvents()->count())->toBe(0);
+});
+
 test('ENGP ordinary updates reject routing fields and preserve existing routing dates', function () {
     $report = EngpReportSubmission::create(engpPayload([
         'workflow_key' => 'site_visit',

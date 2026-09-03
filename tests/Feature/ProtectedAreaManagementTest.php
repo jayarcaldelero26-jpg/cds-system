@@ -2,6 +2,7 @@
 
 use App\Models\ProtectedArea;
 use App\Models\User;
+use App\Models\OrganizationalOffice;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -28,6 +29,7 @@ function protectedAreaPayload(array $overrides = []): array
         'area_hectares' => 1200.50, 'pamo' => 'Mati PAMO', 'pasu' => 'Juan Dela Cruz',
         'year_established' => 2002, 'legal_basis' => 'Proclamation No. 123',
         'description' => 'A protected landscape.', 'status' => 'Active', 'remarks' => 'Verified record.',
+        'supervising_office_id' => OrganizationalOffice::where('code', 'cenro_mati')->value('id'),
     ], ...$overrides];
 }
 

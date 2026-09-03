@@ -6,6 +6,7 @@ use App\Models\ProtectedArea;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\RoutingCorrectionService;
 use App\Services\BusinessCalendarService;
 use Illuminate\Http\RedirectResponse;
@@ -21,7 +22,8 @@ class SubmissionTrackingController extends Controller
     public function index(Request $request): Response
     {
         $filters = $request->only(['search', 'module', 'protected_area_id', 'target_office', 'reporting_period', 'status']);
-        $snapshot = $this->tracking->snapshot($filters);
+        $page = max(1, $request->integer('page', 1));
+        $snapshot = $this->tracking->snapshot($filters, $page, 25);
         $records = $snapshot['records'];
         $queues = $snapshot['queues'];
         return Inertia::render('SubmissionTracking/Index', [
@@ -29,9 +31,7 @@ class SubmissionTrackingController extends Controller
             'filters' => $filters,
             'filterOptions' => [
                 'modules' => $snapshot['modules'],
-                'protectedAreas' => $this->pambAccess->isPamo($request->user())
-                    ? ProtectedArea::query()->whereKey($request->user()->protected_area_id)->orderBy('name')->get(['id', 'name'])
-                    : ProtectedArea::query()->orderBy('name')->get(['id', 'name']),
+                'protectedAreas' => app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
                 'targetOffices' => $records->pluck('target_office')->filter()->unique()->sort()->values(),
                 'periods' => $records->pluck('reporting_period')->filter()->unique()->sort()->values(),
                 'statuses' => $records->pluck('submission_status')->filter()->unique()->sort()->values(),
@@ -45,6 +45,7 @@ class SubmissionTrackingController extends Controller
                 'can_review_mov' => $this->pambAccess->canPerform($request->user(), 'review'),
                 'can_release_mov' => $this->pambAccess->canPerform($request->user(), 'release'),
             ],
+            'pagination' => $snapshot['pagination'] ?? ['current_page' => 1, 'per_page' => 25, 'has_more' => false],
         ]);
     }
 
@@ -53,6 +54,16 @@ class SubmissionTrackingController extends Controller
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         abort_unless($request->user()?->can($sourceConfig['ability']), 403);
+        if ($this->tracking->usesGenericRouting($source, $record)) {
+            $data = $request->validate([
+                'stage' => ['required', 'string', Rule::in($this->tracking->genericTransitionKeys($source, $record))],
+                'remarks' => ['nullable', 'string', 'max:2000'],
+            ]);
+            abort_unless($data['stage'] === $stage, 422);
+            $this->tracking->transition($source, $record, $stage, null, $request->user()?->id, $data['remarks'] ?? null);
+
+            return back()->with('success', 'Routing action recorded.');
+        }
         $data = $request->validate([
             'date' => ['required', 'date'],
             'stage' => ['nullable', Rule::in([SubmissionTrackingService::CENRO_RELEASE, SubmissionTrackingService::PENRO_RECEIPT, SubmissionTrackingService::REGIONAL_ENDORSEMENT])],

@@ -62,10 +62,10 @@ test('CEPA custom activities use the progress-report document fallback', functio
         'activity_name' => 'Locally named CEPA coordination activity',
         'document_type' => 'Progress Report',
         'date_accomplished' => '2026-01-05',
-        'date_received_penro' => $calendar->addWorkingDays('2026-01-05', 8)->toDateString(),
+        'date_received_penro' => $calendar->addWorkingDays('2026-01-05', 8, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
     ]);
 
-    expect($report->deadline_submission)->toBe('2026-01-15')
+    expect($report->deadline_submission)->toBe('2026-01-14')
         ->and($report->timeliness)->toBe('Unsatisfactory');
 });
 
@@ -76,10 +76,10 @@ test('CEPA custom activities use the final-report document fallback', function (
         'activity_name' => 'Locally named CEPA coordination activity',
         'document_type' => 'Final Report',
         'date_accomplished' => '2026-01-05',
-        'date_received_penro' => $calendar->addWorkingDays('2026-01-05', 8)->toDateString(),
+        'date_received_penro' => $calendar->addWorkingDays('2026-01-05', 8, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
     ]);
 
-    expect($report->deadline_submission)->toBe('2026-01-29')
+    expect($report->deadline_submission)->toBe('2026-01-26')
         ->and($report->timeliness)->toBe('Outstanding');
 });
 

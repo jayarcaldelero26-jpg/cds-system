@@ -5,12 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\BmsThreat;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\Authorization\OrganizationalAccessService;
 
 class BmsThreatController extends Controller
 {
+    public function __construct(private readonly OrganizationalAccessService $organization) {}
+
     public function store(Request $request)
     {
         $validated = $request->validate($this->validationRules());
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
 
         BmsThreat::create($validated);
 
@@ -19,7 +23,9 @@ class BmsThreatController extends Controller
 
     public function update(Request $request, BmsThreat $bmsThreat)
     {
+        $this->organization->assertCanAccessProtectedArea($request->user(), $bmsThreat->protected_area_id);
         $validated = $request->validate($this->validationRules());
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
 
         $bmsThreat->update($validated);
 
@@ -28,6 +34,7 @@ class BmsThreatController extends Controller
 
     public function destroy(BmsThreat $bmsThreat)
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsThreat->protected_area_id);
         $bmsThreat->delete();
 
         return redirect()->back()->with('success', 'Threat record successfully deleted.');
@@ -39,6 +46,9 @@ class BmsThreatController extends Controller
             'ids' => ['required', 'array', 'min:1'],
             'ids.*' => ['integer', 'distinct', 'exists:bms_threats,id'],
         ]);
+        $threats = $this->organization->scopeProtectedAreaQuery(BmsThreat::query(), $request->user())
+            ->whereIn('id', $validated['ids'])->get();
+        abort_unless($threats->count() === count($validated['ids']), 403);
 
         DB::transaction(function () use ($validated) {
             BmsThreat::whereIn('id', $validated['ids'])->delete();

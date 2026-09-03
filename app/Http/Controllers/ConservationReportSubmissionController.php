@@ -52,7 +52,7 @@ class ConservationReportSubmissionController extends Controller
             'submissions' => $submissions,
             'protectedAreas' => $this->pambAccess->isPamo($request->user())
                 ? ProtectedArea::query()->whereKey($request->user()->protected_area_id)->orderBy('name')->get(['id', 'name', 'short_name'])
-                : ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name']),
+                : app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name', 'short_name']),
             'targetOffices' => $availableTargetOffices,
             'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type']),
         ]);

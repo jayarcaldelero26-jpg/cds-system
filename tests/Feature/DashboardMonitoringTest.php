@@ -73,9 +73,11 @@ test('dashboard page exposes the unified monitoring props', function () {
     $this->actingAs($this->user)->get(route('dashboard'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('Dashboard')
-            ->where('summary.tracked_reports', 2)
-            ->has('rows', 2)
-            ->where('pagination.total', 2)
+            // A legacy CDS user resolves to the Conservation unit; ENGP
+            // records are intentionally excluded from this operational view.
+            ->where('summary.tracked_reports', 1)
+            ->has('rows', 1)
+            ->where('pagination.total', 1)
             ->has('filterOptions.programs', 3)
             ->where('filters.program', 'all'));
 });

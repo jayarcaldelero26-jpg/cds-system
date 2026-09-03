@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,12 +27,18 @@ abstract class StandardAReportSubmissionController extends Controller
     protected string $routePrefix;
     protected string $storageFolder;
     protected string $label;
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(
+        private readonly ProtectedAttachmentService $attachments,
+        private readonly OrganizationalAccessService $organization,
+    ) {}
 
     public function index(Request $request): Response
     {
         $model = $this->modelClass;
-        $submissions = $model::query()
+        if ($request->filled('protected_area_id')) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
+        }
+        $submissions = $this->organization->scopeProtectedAreaQuery($model::query(), $request->user())
             ->with('protectedArea:id,name,short_name')
             ->when($request->filled('protected_area_id'), fn ($query) => $query->where('protected_area_id', $request->integer('protected_area_id')))
             ->when($request->filled('semester'), fn ($query) => $query->where('semester', $request->input('semester')))
@@ -49,7 +56,7 @@ abstract class StandardAReportSubmissionController extends Controller
 
         return Inertia::render($this->page, [
             'submissions' => $submissions,
-            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name']),
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
             'filters' => $request->only(['protected_area_id', 'semester', 'search']),
             'moduleLabel' => $this->label,
             'routePrefix' => $this->routePrefix,
@@ -62,6 +69,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'mov.required' => 'A primary report attachment is required.',
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $newPath = null;
         try {
             if ($request->hasFile('mov')) {
@@ -88,10 +96,12 @@ abstract class StandardAReportSubmissionController extends Controller
 
     public function update(Request $request, int $reportSubmission): RedirectResponse
     {
-        $submission = $this->findSubmission($reportSubmission);
+        $submission = $this->findSubmission($reportSubmission, $request->user());
+        $this->organization->assertCanAccessProtectedArea($request->user(), $submission->protected_area_id);
         $validated = $request->validate($this->rules($submission->document_type), [
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $oldPath = $submission->mov_file_path;
         $newPath = null;
         $removeOld = $request->hasFile('mov');
@@ -117,7 +127,8 @@ abstract class StandardAReportSubmissionController extends Controller
 
     public function destroy(int $reportSubmission): RedirectResponse
     {
-        $submission = $this->findSubmission($reportSubmission);
+        $submission = $this->findSubmission($reportSubmission, request()->user());
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $submission->protected_area_id);
         $path = $submission->mov_file_path;
         DB::transaction(fn () => $submission->delete());
         if ($path) $this->attachments->delete($path);
@@ -127,7 +138,8 @@ abstract class StandardAReportSubmissionController extends Controller
 
     public function showMov(int $reportSubmission): BinaryFileResponse
     {
-        $submission = $this->findSubmission($reportSubmission);
+        $submission = $this->findSubmission($reportSubmission, request()->user());
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $submission->protected_area_id);
         return $this->attachments->response($this->attachmentSource(), $submission, 'mov');
     }
 
@@ -136,7 +148,7 @@ abstract class StandardAReportSubmissionController extends Controller
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
         return [
-            'protected_area_id' => ['nullable', 'exists:protected_areas,id'],
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'target_office' => ['nullable', 'string', 'max:255'],
             'activity_name' => ['nullable', 'string', 'max:255'],
             'document_type' => ['nullable', 'string', Rule::in($documentTypes)],
@@ -148,10 +160,13 @@ abstract class StandardAReportSubmissionController extends Controller
         ];
     }
 
-    private function findSubmission(int $id): Model
+    private function findSubmission(int $id, \App\Models\User $user): Model
     {
         $model = $this->modelClass;
-        return $model::query()->findOrFail($id);
+        $submission = $model::query()->findOrFail($id);
+        $this->organization->assertCanAccessProtectedArea($user, $submission->getAttribute('protected_area_id'));
+
+        return $submission;
     }
 
 

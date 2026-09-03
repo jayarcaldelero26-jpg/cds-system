@@ -59,7 +59,7 @@ function bmsForDeadline(ProtectedArea $area, User $user, string $deadline, array
 {
     $calendar = app(BusinessCalendarService::class);
     $referenceDate = CarbonImmutable::parse($deadline, 'Asia/Manila')->subDay();
-    for ($attempt = 0; $attempt < 60 && $calendar->addWorkingDays($referenceDate, 15)->toDateString() !== $deadline; $attempt++) {
+    for ($attempt = 0; $attempt < 60 && $calendar->addWorkingDays($referenceDate, 15, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString() !== $deadline; $attempt++) {
         $referenceDate = $referenceDate->subDay();
     }
 
@@ -144,14 +144,15 @@ test('CDS Admin can change automatic delivery only with the current password and
 /** @return array<class-string, \Illuminate\Database\Eloquent\Model> */
 function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string $deadline): array
 {
-    $standardAStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -15)->toDateString();
-    $standardBStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7)->toDateString();
+    $standardAStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -15, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
+    $standardBStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
+    $pambStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7, null, BusinessCalendarService::PAMB_WORKING_WEEKDAYS)->toDateString();
     $periodKey = substr($deadline, 0, 7);
     $periodLabel = CarbonImmutable::parse($deadline)->format('F Y');
     $common = ['protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'Compliance activity', 'document_type' => 'Final Report', 'created_by' => $user->id, 'updated_by' => $user->id];
 
     $records = [
-        ConservationReportSubmission::class => ConservationReportSubmission::create([...$common, 'workflow_key' => 'regular_pamb', 'reporting_period' => 'Quarter 1', 'date_conducted' => $standardBStart, 'date_accomplished' => $standardBStart]),
+        ConservationReportSubmission::class => ConservationReportSubmission::create([...$common, 'workflow_key' => 'regular_pamb', 'reporting_period' => 'Quarter 1', 'date_conducted' => $pambStart, 'date_accomplished' => $pambStart]),
         EngpReportSubmission::class => EngpReportSubmission::create(['workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'section_name' => 'NGP', 'activity_name' => 'Community-Based Employment Program (CBEP)', 'document_type' => 'Monthly Report', 'reporting_year' => 2026, 'period_key' => $periodKey, 'period_label' => $periodLabel, 'deadline_submission' => $deadline, 'created_by' => $user->id, 'updated_by' => $user->id]),
         BmsReportSubmission::class => BmsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
         \App\Models\BamsReportSubmission::class => \App\Models\BamsReportSubmission::create([...$common, 'semester' => '1st Semester', 'date_accomplished' => $standardAStart]),
@@ -208,7 +209,7 @@ test('multiple tracker models normalize into the same overdue DTO', function () 
     $bms = bmsForDeadline($area, $user, '2026-08-24');
     $technical = TechnicalReport::create([
         'protected_area_id' => $area->id, 'report_type' => 'Technical Assessment', 'activity_name' => 'Technical Assessment Activity',
-        'target_office' => 'PAMO Pujada Bay', 'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays('2026-08-24', -7)->toDateString(),
+        'target_office' => 'PAMO Pujada Bay', 'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays('2026-08-24', -7, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
         'status' => 'Pending', 'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
 
@@ -615,7 +616,7 @@ test('existing Standard A and Standard B deadline calculations remain authoritat
     ]);
 
     expect($standardA->deadline_submission)->toBe('2026-08-24')
-        ->and($standardB->deadline_submission)->toBe('2026-08-26');
+        ->and($standardB->deadline_submission)->toBe('2026-08-25');
 });
 
 test('an exact Protected Area recipient mapping wins over office and fallback mappings', function () {

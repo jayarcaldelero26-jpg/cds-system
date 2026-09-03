@@ -3,10 +3,14 @@
 namespace App\Services\Authorization;
 
 use App\Models\ProtectedArea;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\EngpReportSubmission;
 use App\Models\User;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Database\Eloquent\Model;
 
 /** Central policy for organizational unit and assignment dimensions. */
 final class OrganizationalAccessService
@@ -18,9 +22,10 @@ final class OrganizationalAccessService
     public const CENRO_FOCAL = 'CENRO_CDS_FOCAL';
     public const PENRO_CHIEF = 'PENRO_CDS_CHIEF';
     public const PENRO_FOCAL = 'PENRO_CDS_FOCAL';
+    public const PENRO_RECORDS = 'PENRO_RECORDS';
     public const PAMO = 'PAMO';
 
-    private const OPERATIONAL_CATEGORIES = [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_CHIEF, self::PENRO_FOCAL, self::PAMO];
+    private const OPERATIONAL_CATEGORIES = [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_RECORDS, self::PENRO_CHIEF, self::PENRO_FOCAL, self::PAMO];
 
     /** @var array<string, string> */
     private const CATEGORY_LABELS = [
@@ -29,6 +34,7 @@ final class OrganizationalAccessService
         self::CENRO_FOCAL => 'CENRO CDS Focal Person',
         self::PENRO_CHIEF => 'PENRO CDS Chief',
         self::PENRO_FOCAL => 'PENRO CDS Focal Person',
+        self::PENRO_RECORDS => 'PENRO Records Unit',
         self::PAMO => 'PAMO',
     ];
 
@@ -39,6 +45,7 @@ final class OrganizationalAccessService
         'CENRO CDS Focal Person' => self::CENRO_FOCAL,
         'PENRO CDS Chief' => self::PENRO_CHIEF,
         'PENRO CDS Focal Person' => self::PENRO_FOCAL,
+        'PENRO Records Unit' => self::PENRO_RECORDS,
         'PAMO' => self::PAMO,
     ];
 
@@ -58,7 +65,7 @@ final class OrganizationalAccessService
             // value remains a compatibility fallback only; new accounts must
             // persist unit_assignment explicitly.
             'CDS' => self::CONSERVATION,
-            'PAMO', self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_CHIEF, self::PENRO_FOCAL => self::CONSERVATION,
+            'PAMO', self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_RECORDS, self::PENRO_CHIEF, self::PENRO_FOCAL => self::CONSERVATION,
             default => null,
         };
     }
@@ -73,6 +80,176 @@ final class OrganizationalAccessService
         // restricted by it; ambiguous legacy rows remain an admin-cleanup
         // concern rather than changing existing operational behavior here.
         return $assigned === null || $assigned === $unit;
+    }
+
+    public function canAccessProtectedArea(?User $user, mixed $protectedAreaId): bool
+    {
+        if (! $user || ! is_numeric($protectedAreaId)) return false;
+        if ($this->isGlobal($user)) return true;
+        if (! $this->canAccessUnit($user, self::CONSERVATION)) return false;
+
+        if ($this->effectiveCategory($user) === self::PAMO) {
+            return $user->protected_area_id !== null
+                && (int) $user->protected_area_id === (int) $protectedAreaId;
+        }
+
+        if ($this->isCenroCategory($this->effectiveCategory($user))) {
+            $officeCode = $this->officeCode($user->office_designated);
+            if ($officeCode === null) return false;
+
+            return ProtectedAreaOfficeAssignment::query()
+                ->where('protected_area_id', (int) $protectedAreaId)
+                ->where('assignment_type', 'supervising')
+                ->whereHas('office', fn ($query) => $query->where('code', $officeCode)->where('office_type', 'cenro')->where('is_active', true))
+                ->exists();
+        }
+
+        // PENRO categories are province-level oversight roles. Their module
+        // permissions still control what they may do; this method controls
+        // the PA visibility dimension.
+        return true;
+    }
+
+    public function assertCanAccessProtectedArea(?User $user, mixed $protectedAreaId): void
+    {
+        abort_unless($this->canAccessProtectedArea($user, $protectedAreaId), 403);
+    }
+
+    public function assertCanUseOptionalProtectedArea(User $user, mixed $protectedAreaId): void
+    {
+        if ($protectedAreaId === null || $protectedAreaId === '') {
+            abort_unless($this->effectiveCategory($user) !== self::PAMO, 403);
+            return;
+        }
+
+        $this->assertCanAccessProtectedArea($user, $protectedAreaId);
+    }
+
+    public function scopeProtectedAreaQuery(Builder $query, User $user, string $column = 'protected_area_id'): Builder
+    {
+        if (! $this->canAccessUnit($user, self::CONSERVATION)) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        if ($this->isGlobal($user)) {
+            return $query;
+        }
+
+        $category = $this->effectiveCategory($user);
+        if ($category !== self::PAMO && ! $this->isCenroCategory($category)) return $query;
+
+        if ($category === self::PAMO) {
+            return $query->where($column, $user->protected_area_id ?: 0);
+        }
+
+        $officeCode = $this->officeCode($user->office_designated);
+        if ($officeCode === null) return $query->whereRaw('1 = 0');
+
+        $table = $query->getModel()->getTable();
+        return $query->whereExists(function ($subquery) use ($table, $column, $officeCode): void {
+            $subquery->selectRaw('1')
+                ->from('protected_area_office_assignments as paoa')
+                ->join('organizational_offices as oo', 'oo.id', '=', 'paoa.organizational_office_id')
+                ->whereColumn('paoa.protected_area_id', $table.'.'.$column)
+                ->where('paoa.assignment_type', 'supervising')
+                ->where('oo.code', $officeCode)
+                ->where('oo.office_type', 'cenro')
+                ->where('oo.is_active', true);
+        });
+    }
+
+    public function canAccessProtectedAreaRecord(?User $user, Model $record): bool
+    {
+        if ($record instanceof ProtectedArea) return $this->canAccessProtectedArea($user, $record->getKey());
+
+        $protectedAreaId = $record->getAttribute('protected_area_id');
+        if ($protectedAreaId !== null) return $this->canAccessProtectedArea($user, $protectedAreaId);
+
+        // A null PA is a supported legacy/office-scoped shape for records
+        // whose authoritative owner is the target office.  It must never
+        // broaden PAMO access; CENRO users still need an exact office match.
+        if (! $user || ! $this->canAccessUnit($user, self::CONSERVATION)) return false;
+        if ($this->isGlobal($user)) return true;
+        if ($this->effectiveCategory($user) === self::PAMO) return false;
+        if ($this->isCenroCategory($this->effectiveCategory($user))) {
+            return $this->same($user->office_designated, $record->getAttribute('target_office'));
+        }
+
+        // PENRO oversight and legacy CDS records remain province/office
+        // scoped by their existing module policy when no PA is recorded.
+        return true;
+    }
+
+    public function canActOnProtectedAreaRecord(?User $user, Model $record): bool
+    {
+        return $this->canAccessProtectedAreaRecord($user, $record);
+    }
+
+    public function canAccessOfficeRecord(?User $user, Model|string|null $recordOrOffice): bool
+    {
+        if (! $user) return false;
+        if ($this->isGlobal($user)) return true;
+        if (! $this->canAccessUnit($user, self::DEVELOPMENT)) return false;
+
+        $office = is_string($recordOrOffice)
+            ? $recordOrOffice
+            : $recordOrOffice?->getAttribute('office');
+
+        return $this->unitFor($user) === null || $this->same($user->office_designated, $office);
+    }
+
+    /** @return list<array{id:int,code:string,name:string,office_type:string}> */
+    public function officeOptions(): array
+    {
+        return OrganizationalOffice::query()
+            ->where('is_active', true)
+            ->orderBy('office_type')
+            ->orderBy('name')
+            ->get(['id', 'code', 'name', 'office_type'])
+            ->map(fn (OrganizationalOffice $office): array => [
+                'id' => $office->id,
+                'code' => $office->code,
+                'name' => $office->name,
+                'office_type' => $office->office_type,
+            ])->all();
+    }
+
+    public function assignSupervisingOffice(ProtectedArea $protectedArea, int $officeId, User $actor): void
+    {
+        abort_unless($this->isGlobal($actor) || $actor->can('protected-areas.create') || $actor->can('protected-areas.update'), 403);
+        $office = OrganizationalOffice::query()->where('is_active', true)->findOrFail($officeId);
+
+        ProtectedAreaOfficeAssignment::updateOrCreate(
+            ['protected_area_id' => $protectedArea->getKey(), 'assignment_type' => 'supervising'],
+            ['organizational_office_id' => $office->getKey(), 'assigned_by' => $actor->getKey()],
+        );
+    }
+
+    public function supervisingOfficeId(ProtectedArea $protectedArea): ?int
+    {
+        return $protectedArea->supervisingOfficeAssignment?->organizational_office_id;
+    }
+
+    private function isCenroCategory(?string $category): bool
+    {
+        return in_array($category, [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL], true);
+    }
+
+    private function officeCode(?string $office): ?string
+    {
+        $normalized = $this->normalizeOffice($office);
+        if (! $normalized) return null;
+
+        $code = strtolower((string) preg_replace('/[^a-z0-9]+/i', '_', $normalized));
+        return trim($code, '_') ?: null;
+
+    }
+
+    public function assertAllProtectedAreasAccessible(User $user, iterable $protectedAreaIds): void
+    {
+        foreach ($protectedAreaIds as $protectedAreaId) {
+            $this->assertCanAccessProtectedArea($user, $protectedAreaId);
+        }
     }
 
     public function categoriesForUnit(string $unit): array
@@ -97,11 +274,13 @@ final class OrganizationalAccessService
     }
 
     /** @return list<array{value: string, label: string}> */
-    public function categoryOptions(string $unit): array
+    public function categoryOptions(string $unit, bool $includeCustodyCategories = false): array
     {
+        $categories = $this->categoriesForUnit($unit);
+        if (! $includeCustodyCategories) $categories = array_values(array_diff($categories, [self::PENRO_RECORDS]));
         return array_map(
             fn (string $category): array => ['value' => $category, 'label' => self::CATEGORY_LABELS[$category]],
-            $this->categoriesForUnit($unit),
+            $categories,
         );
     }
 
@@ -119,7 +298,7 @@ final class OrganizationalAccessService
     public function permissionProfileForCategory(string $category): array
     {
         return match ($category) {
-            self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_CHIEF, self::PENRO_FOCAL, self::PAMO => [
+            self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_RECORDS, self::PENRO_CHIEF, self::PENRO_FOCAL, self::PAMO => [
                 'reports.view',
                 'technical-reports.view',
                 'technical-reports.create',

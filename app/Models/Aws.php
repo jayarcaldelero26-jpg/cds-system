@@ -64,7 +64,7 @@ class Aws extends Model
     public function getDeadlineSubmissionAttribute(): ?string
     {
         return $this->date_accomplished
-            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 7, $this->target_office ?? null)->format('Y-m-d')
+            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 7, $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->format('Y-m-d')
             : null;
     }
 
@@ -73,7 +73,7 @@ class Aws extends Model
         if (! $this->date_accomplished) return null;
         if (! $this->date_received_penro) return 'Pending Submission by CENRO';
 
-        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null);
+        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
     }
 
     public function getTimelinessAttribute(): string

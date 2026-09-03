@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ManagementPlanProfile;
 use App\Models\ManagementPlanType;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -17,7 +18,7 @@ use Throwable;
 
 class ManagementPlanProfileController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
 
     public const APPROVAL_STATUSES = [
         'Draft', 'For Technical Review', 'For Revision', 'For PAMB Approval', 'PAMB Approved',
@@ -37,6 +38,7 @@ class ManagementPlanProfileController extends Controller
     {
         abort_unless($managementPlanType->is_active, 404);
         $data = $request->validate($this->rules());
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id']);
         $newDocuments = [];
 
         try {
@@ -68,11 +70,13 @@ class ManagementPlanProfileController extends Controller
     public function update(Request $request, ManagementPlanType $managementPlanType, ManagementPlanProfile $profile): RedirectResponse
     {
         $this->assertOwned($managementPlanType, $profile);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $profile->protected_area_id);
         $data = $request->validate([
             ...$this->rules(),
             'removed_document_paths' => ['nullable', 'array'],
             'removed_document_paths.*' => ['string', 'distinct'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id'] ?? $profile->protected_area_id);
 
         $current = array_filter($profile->documents ?? [], fn ($document) => $this->documentPath($document) !== null);
         $byKey = collect($current)->mapWithKeys(fn ($document, $index) => [(string) $index => $document]);
@@ -109,6 +113,7 @@ class ManagementPlanProfileController extends Controller
     public function viewDocument(ManagementPlanType $managementPlanType, ManagementPlanProfile $profile, string $document): BinaryFileResponse
     {
         $this->assertOwned($managementPlanType, $profile);
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $profile->protected_area_id);
         return $this->attachments->response('management-plan-profile', $profile, $document);
     }
 

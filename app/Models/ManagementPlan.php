@@ -3,6 +3,9 @@
 namespace App\Models;
 
 use App\Services\BusinessCalendarService;
+use App\Models\ModuleDefinition;
+use App\Services\Modules\PaMonitoringDeadlineService;
+use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -87,10 +90,12 @@ class ManagementPlan extends Model
 
     public function getDeadlineSubmissionAttribute(): ?string
     {
-        // Management Plans use the General/Standard-B seven-working-day standard.
-        return $this->date_accomplished
-            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 7, $this->target_office ?? null)->format('Y-m-d')
-            : null;
+        if (! $this->date_accomplished) return null;
+        return app(PaMonitoringDeadlineService::class)->deadline(
+            CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->startOfDay(),
+            $this->deadlineRule(),
+            $this->target_office ?? null,
+        );
     }
 
     public function getNumberDaysCompliedAttribute(): int|string|null
@@ -103,7 +108,11 @@ class ManagementPlan extends Model
             return 'Pending Submission by CENRO';
         }
 
-        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null);
+        if ($this->deadlineRule()['deadline_mode'] === ModuleDefinition::DEADLINE_CALENDAR_DAYS) {
+            return max(0, CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->diffInDays(CarbonImmutable::parse($this->date_received_penro, BusinessCalendarService::TIMEZONE)));
+        }
+
+        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
     }
 
     public function getTimelinessAttribute(): string
@@ -144,6 +153,12 @@ class ManagementPlan extends Model
 
     public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end, ?string $office = null): int
     {
-        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office);
+        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
+    }
+
+    /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
+    public function deadlineRule(): array
+    {
+        return app(PaMonitoringDeadlineService::class)->managementPlanRule($this);
     }
 }

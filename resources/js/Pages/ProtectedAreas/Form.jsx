@@ -8,7 +8,7 @@ import PageHeader from '../../Components/PageHeader';
 import PrimaryButton from '../../Components/PrimaryButton';
 
 
-export default function Form({ title, protectedArea, modal = false, onClose }) {
+export default function Form({ title, protectedArea, officeOptions = [], modal = false, onClose }) {
   const isEdit = Boolean(protectedArea);
   const { auth } = usePage().props;
 
@@ -37,6 +37,7 @@ export default function Form({ title, protectedArea, modal = false, onClose }) {
     buffer_zone_hectares: protectedArea?.buffer_zone_hectares || '',
     pamo: protectedArea?.pamo || '',
     pasu: protectedArea?.pasu || '',
+    supervising_office_id: protectedArea?.supervising_office_id || '',
     year_established: protectedArea?.year_established || '',
     legal_basis: protectedArea?.legal_basis || '',
     status: protectedArea?.status || 'Proposed',
@@ -477,6 +478,9 @@ export default function Form({ title, protectedArea, modal = false, onClose }) {
                             </div>
                             <FormField id="pamo" label="PAMO" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} />
                             <FormField id="pasu" label="PASu" value={form.data.pasu} onChange={(event) => form.setData('pasu', event.target.value)} error={form.errors.pasu} />
+                            {select('supervising_office_id', 'Supervising Office',
+                                <><option value="">Select the authoritative office</option>{officeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}{office.office_type === 'penro' ? ' (PENRO-managed)' : ''}</option>)}</>
+                            )}
                             <FormField id="year_established" label="Year Established" type="number" min="1800" max={new Date().getFullYear() + 10} value={form.data.year_established} onChange={(event) => form.setData('year_established', event.target.value)} error={form.errors.year_established} />
                             <FormField id="legal_basis" label="Legal Basis" value={form.data.legal_basis} onChange={(event) => form.setData('legal_basis', event.target.value)} error={form.errors.legal_basis} className="sm:col-span-2" />
 

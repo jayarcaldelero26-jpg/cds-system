@@ -61,7 +61,7 @@ class UserController extends Controller
         $this->authorize('create', User::class);
 
         return Inertia::render('Admin/Users/Create', [
-            'categories' => app(OrganizationalAccessService::class)->categoryOptions(OrganizationalAccessService::CONSERVATION),
+            'categories' => app(OrganizationalAccessService::class)->categoryOptions(OrganizationalAccessService::CONSERVATION, true),
             'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name']),
             'offices' => app(OrganizationalAccessService::class)->canonicalOffices(),
         ]);
@@ -108,7 +108,7 @@ class UserController extends Controller
                 'effective_category' => app(OrganizationalAccessService::class)->effectiveCategory($user),
                 'is_active' => (bool) $user->is_active,
             ],
-            'categories' => app(OrganizationalAccessService::class)->categoryOptions(OrganizationalAccessService::CONSERVATION),
+            'categories' => app(OrganizationalAccessService::class)->categoryOptions(OrganizationalAccessService::CONSERVATION, true),
             'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name']),
             'offices' => app(OrganizationalAccessService::class)->canonicalOffices(),
         ]);

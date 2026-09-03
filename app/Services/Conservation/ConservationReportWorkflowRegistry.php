@@ -2,6 +2,8 @@
 
 namespace App\Services\Conservation;
 
+use App\Models\ModuleDefinition;
+
 final class ConservationReportWorkflowRegistry
 {
     /** @var array<string, array<string, mixed>> */
@@ -153,5 +155,28 @@ final class ConservationReportWorkflowRegistry
                 ? ['working_days' => 7, 'timeliness_standard' => 'B']
                 : null)
             ?? ['working_days' => 7, 'timeliness_standard' => 'B'];
+    }
+
+    /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
+    public function deadlineRule(string $workflowKey, ?string $activityName, ?string $documentType): array
+    {
+        $rule = $this->submissionRule($workflowKey, $activityName, $documentType);
+        $mode = in_array($workflowKey, [...PambComplianceCalculator::MEETING_WORKFLOWS, PambComplianceCalculator::MANUAL_WORKFLOW], true)
+            ? ModuleDefinition::DEADLINE_PAMB_WORKING_DAYS
+            : (in_array($workflowKey, ['additional_bms_site', 'ecotourism_management_plan'], true)
+                ? ModuleDefinition::DEADLINE_CALENDAR_DAYS
+                : ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS);
+
+        $days = match ($workflowKey) {
+            'homestay', 'maintenance_buoy' => 15,
+            PambComplianceCalculator::MANUAL_WORKFLOW => strcasecmp(trim((string) $activityName), 'Final Updated Manual') === 0 ? 15 : 7,
+            default => $rule['working_days'],
+        };
+
+        if ($workflowKey === PambComplianceCalculator::MANUAL_WORKFLOW && strcasecmp(trim((string) $activityName), 'Final Updated Manual') === 0) {
+            $rule['timeliness_standard'] = 'A';
+        }
+
+        return ['deadline_mode' => $mode, 'deadline_days' => $days, 'timeliness_standard' => $rule['timeliness_standard']];
     }
 }

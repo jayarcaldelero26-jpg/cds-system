@@ -7,6 +7,7 @@ use App\Models\User;
 use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -258,19 +259,19 @@ test('Regular PAMB August 19 deadline skips Friday through Sunday and configured
     expect($withHoliday->deadline_submission)->toBe('2026-09-02');
 });
 
-test('conservation reports use the centralized seven-working-day deadline and exclude Friday through Sunday', function () {
+test('conservation reports use the standard seven-working-day deadline and exclude weekends', function () {
     $report = new ConservationReportSubmission(['date_accomplished' => '2026-08-24', 'target_office' => 'CENRO Mati']);
-    expect($report->deadline_submission)->toBe('2026-09-03');
+    expect($report->deadline_submission)->toBe('2026-09-02');
 
     NonWorkingDay::create(['date' => '2026-08-25', 'name' => 'Holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
-    expect($report->deadline_submission)->toBe('2026-09-07');
+    expect($report->deadline_submission)->toBe('2026-09-03');
 });
 
-test('Homestay deadline counts seven valid days after Wednesday and skips weekends', function () {
+test('Homestay deadline uses fifteen standard working days', function () {
     $report = new ConservationReportSubmission(['workflow_key' => 'homestay', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-08');
+    expect($report->deadline_submission)->toBe('2026-09-16');
 });
 
 test('Homestay deadline skips an active weekday holiday', function () {
@@ -278,7 +279,7 @@ test('Homestay deadline skips an active weekday holiday', function () {
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => 'homestay', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-09');
+    expect($report->deadline_submission)->toBe('2026-09-17');
 });
 test('Regular PAMB deadline counts seven valid days after Date Conducted', function () {
     $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_conducted' => '2026-08-26']);
@@ -306,10 +307,10 @@ test('Special PAMB deadline excludes an active configured weekday holiday', func
 
     expect($report->deadline_submission)->toBe('2026-09-09');
 });
-test('Maintenance of Monuments deadline counts seven valid days after Wednesday', function () {
+test('Maintenance of Monuments deadline uses the standard seven-working-day rule', function () {
     $report = new ConservationReportSubmission(['workflow_key' => 'maintenance_monuments', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-08');
+    expect($report->deadline_submission)->toBe('2026-09-04');
 });
 
 test('Maintenance of Monuments deadline excludes an active configured weekday holiday', function () {
@@ -317,12 +318,12 @@ test('Maintenance of Monuments deadline excludes an active configured weekday ho
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => 'maintenance_monuments', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-09');
+    expect($report->deadline_submission)->toBe('2026-09-07');
 });
-test('non-meeting conservation workflows retain their seven-valid-working-day deadline', function (string $workflow) {
+test('non-meeting conservation workflows retain their standard seven-working-day deadline', function (string $workflow) {
     $report = new ConservationReportSubmission(['workflow_key' => $workflow, 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-08');
+    expect($report->deadline_submission)->toBe($workflow === 'maintenance_buoy' ? '2026-09-16' : '2026-09-04');
 })->with(['maintenance_buoy', 'updating_pamp', 'restoration_plan_5_year']);
 
 test('non-meeting conservation workflows exclude an active configured weekday holiday', function (string $workflow) {
@@ -330,7 +331,7 @@ test('non-meeting conservation workflows exclude an active configured weekday ho
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => $workflow, 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-09');
+    expect($report->deadline_submission)->toBe($workflow === 'maintenance_buoy' ? '2026-09-17' : '2026-09-07');
 })->with(['maintenance_buoy', 'updating_pamp', 'restoration_plan_5_year']);
 
 test('TWC meetings use the same effective-date fallback and seven-working-day deadline', function () {
@@ -400,26 +401,26 @@ test('final PAMB manual timeliness uses the full Standard A Poor range', functio
 
     expect($report->timeliness)->toBe($timeliness);
 })->with([[11, 'Outstanding'], [13, 'Very Satisfactory'], [15, 'Satisfactory'], [29, 'Unsatisfactory'], [90, 'Poor'], [91, 'Poor']]);
-test('Additional BMS Site retains semester-only reporting and calculates its fifteenth valid working day', function () {
+test('Additional BMS Site retains semester-only reporting and uses fifteen calendar days', function () {
     $config = app(ConservationReportWorkflowRegistry::class)->find('additional_bms_site');
     $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);
 
     expect($config['period_label'])->toBe('Semester')
         ->and($config['periods'])->toBe(['1st Semester', '2nd Semester'])
-        ->and($report->deadline_submission)->toBe('2026-09-22');
+        ->and($report->deadline_submission)->toBe('2026-09-10');
 });
 
-test('Additional BMS Site skips configured holidays as well as Friday through Sunday', function () {
+test('Additional BMS Site counts weekends and ignores working-day holidays', function () {
     NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Final Report', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-23');
+    expect($report->deadline_submission)->toBe('2026-09-10');
 });
 
 test('Standard A days complied and timeliness thresholds are calculated by the centralized calendar', function (int $days, string $timeliness) {
     $calendar = app(BusinessCalendarService::class);
-    $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days)->toDateString()]);
+    $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => CarbonImmutable::parse('2026-01-05')->addDays($days)->toDateString()]);
     expect($report->days_complied)->toBe($days)->and($report->timeliness)->toBe($timeliness);
 })->with([[0, 'Outstanding'], [11, 'Outstanding'], [12, 'Very Satisfactory'], [13, 'Very Satisfactory'], [14, 'Satisfactory'], [15, 'Satisfactory'], [16, 'Unsatisfactory'], [29, 'Unsatisfactory'], [30, 'Poor'], [90, 'Poor'], [91, 'No Rating']]);
 
@@ -427,8 +428,8 @@ test('CEPA preparation and final submission resolve different backend rules', fu
     $preparation = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'CEPA Plan preparation (Analysis/Stocktaking)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);
     $final = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'Submission of Final CEPA Plan', 'document_type' => 'Final Report', 'date_accomplished' => '2026-08-26']);
 
-    expect($preparation->deadline_submission)->toBe('2026-09-08')
-        ->and($final->deadline_submission)->toBe('2026-09-22');
+    expect($preparation->deadline_submission)->toBe('2026-09-04')
+        ->and($final->deadline_submission)->toBe('2026-09-16');
 });
 
 test('CEPA preparation and final submission both skip configured holidays', function () {
@@ -437,13 +438,13 @@ test('CEPA preparation and final submission both skip configured holidays', func
     $preparation = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'CEPA Plan preparation (Branding)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);
     $final = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'Submission of Final CEPA Plan', 'document_type' => 'Final Report', 'date_accomplished' => '2026-08-26']);
 
-    expect($preparation->deadline_submission)->toBe('2026-09-09')
-        ->and($final->deadline_submission)->toBe('2026-09-23');
+    expect($preparation->deadline_submission)->toBe('2026-09-07')
+        ->and($final->deadline_submission)->toBe('2026-09-17');
 });
 
 test('CEPA preparation uses Standard B and its final submission uses Standard A', function (int $days, string $preparationTimeliness, string $finalTimeliness) {
     $calendar = app(BusinessCalendarService::class);
-    $received = $calendar->addWorkingDays('2026-01-05', $days)->toDateString();
+    $received = $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
     $preparation = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'CEPA Plan preparation (Action Planning)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => $received]);
     $final = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'Submission of Final CEPA Plan', 'document_type' => 'Final Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => $received]);
 
@@ -457,7 +458,7 @@ test('VTOL, BDFE, and BDFAP retain quarterly reporting and Standard B seven-day 
 
     expect($config['period_label'])->toBe('Reporting Period')
         ->and($config['periods'])->toBe(['Quarter 1', 'Quarter 2', 'Quarter 3', 'Quarter 4'])
-        ->and($report->deadline_submission)->toBe('2026-09-08');
+        ->and($report->deadline_submission)->toBe('2026-09-04');
 })->with([
     ['vtol_operations', 'Comprehensive Insurance (Medium multi rotor)', 'Final Report'],
     ['bdfe_terrestrial', 'Development of BDFE for Terrestrial PA', 'Progress Report'],

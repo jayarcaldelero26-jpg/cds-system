@@ -12,20 +12,27 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
+use App\Services\Authorization\OrganizationalAccessService;
 
 class ImeaAssessmentController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(
+        private readonly ProtectedAttachmentService $attachments,
+        private readonly OrganizationalAccessService $organization,
+    ) {}
 
     public function index(Request $request): Response
     {
-        $assessments = ImeaAssessment::with('protectedArea')
+        if ($request->filled('protected_area_id')) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
+        }
+        $assessments = $this->organization->scopeProtectedAreaQuery(ImeaAssessment::with('protectedArea'), $request->user())
             ->orderBy('assessment_year', 'desc')
             ->paginate(15)->through(fn (ImeaAssessment $assessment) => $this->assessmentData($assessment));
 
         $protectedAreaId = $request->input('protected_area_id');
 
-        $facilitiesQuery = ProtectedAreaFacility::with('protectedArea')
+        $facilitiesQuery = $this->organization->scopeProtectedAreaQuery(ProtectedAreaFacility::with('protectedArea'), $request->user())
             ->orderBy('year_established', 'desc');
 
         if ($protectedAreaId) {
@@ -37,7 +44,7 @@ class ImeaAssessmentController extends Controller
         return Inertia::render('Imea/Index', [
             'assessments' => $assessments,
             'facilities' => $facilities,
-            'protectedAreas' => ProtectedArea::all(['id', 'name']),
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get(['id', 'name']),
             'filters' => [
                 'protected_area_id' => $protectedAreaId,
             ],
@@ -47,7 +54,7 @@ class ImeaAssessmentController extends Controller
     public function create(): Response
     {
         return Inertia::render('Imea/Create', [
-            'protectedAreas' => ProtectedArea::all(['id', 'name']),
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), request()->user(), 'id')->get(['id', 'name']),
         ]);
     }
 
@@ -56,8 +63,11 @@ class ImeaAssessmentController extends Controller
         $year = $request->input('year');
         $period = $request->input('period');
         $protectedAreaId = $request->input('protected_area_id');
+        if ($protectedAreaId !== null) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        }
 
-        $query = ImeaAssessment::with('protectedArea');
+        $query = $this->organization->scopeProtectedAreaQuery(ImeaAssessment::with('protectedArea'), $request->user());
 
         if ($year) {
             $query->where('assessment_year', $year);
@@ -77,8 +87,8 @@ class ImeaAssessmentController extends Controller
             ->map(fn (ImeaAssessment $assessment) => $this->assessmentData($assessment))
             ->values();
 
-        $availableYears = ImeaAssessment::distinct()->orderBy('assessment_year', 'desc')->pluck('assessment_year');
-        $protectedAreas = ProtectedArea::all();
+        $availableYears = $this->organization->scopeProtectedAreaQuery(ImeaAssessment::query(), $request->user())->distinct()->orderBy('assessment_year', 'desc')->pluck('assessment_year');
+        $protectedAreas = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get();
 
         return Inertia::render('Imea/Report', [
             'totalVisitors' => $totalVisitors,
@@ -103,8 +113,11 @@ class ImeaAssessmentController extends Controller
         $protectedAreaId = $request->input('protected_area_id');
         $zone = $request->input('zone');
         $inventoryDate = $request->input('inventory_date');
+        if ($protectedAreaId !== null) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        }
 
-        $query = ProtectedAreaFacility::with('protectedArea');
+        $query = $this->organization->scopeProtectedAreaQuery(ProtectedAreaFacility::with('protectedArea'), $request->user());
 
         if ($protectedAreaId) {
             $query->where('protected_area_id', $protectedAreaId);
@@ -122,10 +135,10 @@ class ImeaAssessmentController extends Controller
         $newStructuresCount = (clone $query)->where('year_established', '>', 2022)->count();
 
         $facilitiesList = $query->orderBy('year_established', 'desc')->get();
-        $protectedAreas = ProtectedArea::all();
+        $protectedAreas = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user())->get();
 
         // Kuhaon ang tanang unique inventory dates para sa dropdown filter
-        $inventoryDates = ProtectedAreaFacility::whereNotNull('inventory_date')
+        $inventoryDates = $this->organization->scopeProtectedAreaQuery(ProtectedAreaFacility::query(), $request->user())->whereNotNull('inventory_date')
             ->distinct()
             ->orderBy('inventory_date', 'desc')
             ->pluck('inventory_date');
@@ -170,6 +183,7 @@ class ImeaAssessmentController extends Controller
             'status' => ['nullable', 'string'],
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         $attachmentPaths = [];
         if ($request->hasFile('attachments')) {
@@ -196,6 +210,7 @@ class ImeaAssessmentController extends Controller
 
     public function update(Request $request, ImeaAssessment $imeaAssessment)
     {
+        $this->organization->assertCanAccessProtectedArea($request->user(), $imeaAssessment->protected_area_id);
         $validated = $request->validate([
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'pamo_name' => ['required', 'string', 'max:255'],
@@ -219,6 +234,7 @@ class ImeaAssessmentController extends Controller
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'],
             'removed_attachments' => ['nullable', 'array'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         $currentAttachments = $imeaAssessment->attachments ?? [];
         if (is_string($currentAttachments)) {
@@ -280,6 +296,7 @@ class ImeaAssessmentController extends Controller
 
     public function destroy(ImeaAssessment $imeaAssessment): RedirectResponse
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $imeaAssessment->protected_area_id);
         $attachments = $imeaAssessment->attachments ?? [];
         $imeaAssessment->delete();
         foreach ($attachments as $attachment) {
@@ -313,6 +330,7 @@ class ImeaAssessmentController extends Controller
             'recommendations' => 'nullable|string',
             'remarks' => 'nullable|string',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         ProtectedAreaFacility::create($validated);
 
@@ -322,6 +340,7 @@ class ImeaAssessmentController extends Controller
     public function updateFacility(Request $request, $id): RedirectResponse
     {
         $facility = ProtectedAreaFacility::findOrFail($id);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $facility->protected_area_id);
 
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
@@ -341,6 +360,7 @@ class ImeaAssessmentController extends Controller
             'recommendations' => 'nullable|string',
             'remarks' => 'nullable|string',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         $facility->update($validated);
 
@@ -352,8 +372,11 @@ class ImeaAssessmentController extends Controller
         $protectedAreaId = $request->input('protected_area_id');
         $zone = $request->input('zone');
         $inventoryDate = $request->input('inventory_date');
+        if ($protectedAreaId !== null) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        }
 
-        $query = ProtectedAreaFacility::with('protectedArea');
+        $query = $this->organization->scopeProtectedAreaQuery(ProtectedAreaFacility::with('protectedArea'), $request->user());
 
         if ($protectedAreaId) {
             $query->where('protected_area_id', $protectedAreaId);
@@ -428,8 +451,9 @@ class ImeaAssessmentController extends Controller
             'file' => ['required', 'file', 'mimes:csv,txt', 'max:10240'],
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
 
-        $protectedArea = ProtectedArea::findOrFail($request->integer('protected_area_id'));
+        $protectedArea = ProtectedArea::query()->whereKey($request->integer('protected_area_id'))->firstOrFail();
         $file = $request->file('file');
         $handle = fopen($file->getRealPath(), 'r');
 
@@ -612,11 +636,9 @@ class ImeaAssessmentController extends Controller
             'ids.*' => ['integer', 'distinct', 'exists:protected_area_facilities,id'],
         ]);
 
-        $facilities = ProtectedAreaFacility::whereIn('id', $request->input('ids'))->get();
-
-        foreach ($facilities as $facility) {
-            abort_unless($request->user()->can('imea.delete'), 403);
-        }
+        $facilities = $this->organization->scopeProtectedAreaQuery(ProtectedAreaFacility::query(), $request->user())
+            ->whereIn('id', $request->input('ids'))->get();
+        abort_unless($facilities->count() === count($request->input('ids')), 403);
 
         DB::transaction(fn () => ProtectedAreaFacility::whereKey($facilities->modelKeys())->delete());
 
@@ -668,6 +690,7 @@ class ImeaAssessmentController extends Controller
     public function destroyFacility($id): RedirectResponse
     {
         $facility = ProtectedAreaFacility::findOrFail($id);
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $facility->protected_area_id);
         $facility->delete();
 
         return redirect()->back()->with('success', 'Facility inventory record deleted successfully.');

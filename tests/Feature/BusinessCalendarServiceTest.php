@@ -132,17 +132,17 @@ test('the same configured holiday is used by Standard A, Standard B, and days co
     ]);
 
     $standardA = new BmsReportSubmission([
-        'date_accomplished' => '2026-08-03', 'date_received_penro' => '2026-08-31', 'target_office' => 'CENRO Mati',
+        'date_accomplished' => '2026-08-03', 'date_received_penro' => '2026-08-25', 'target_office' => 'CENRO Mati',
     ]);
     $standardB = new TechnicalReport([
-        'date_accomplished' => '2026-08-03', 'submission_date' => '2026-08-17', 'target_office' => 'CENRO Mati',
+        'date_accomplished' => '2026-08-03', 'submission_date' => '2026-08-13', 'target_office' => 'CENRO Mati',
     ]);
 
-    expect($standardA->deadline_submission)->toBe('2026-08-31')
+    expect($standardA->deadline_submission)->toBe('2026-08-25')
         ->and($standardA->number_days_complied)->toBe(15)
-        ->and($standardB->deadline_submission)->toBe('2026-08-17')
+        ->and($standardB->deadline_submission)->toBe('2026-08-13')
         ->and($standardB->number_days_complied)->toBe(7)
-        ->and($calendar->workingDaysBetween('2026-08-03', '2026-08-31'))->toBe(15);
+        ->and($calendar->workingDaysBetween('2026-08-03', '2026-08-25', 'after_through', null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS))->toBe(15);
 });
 
 test('a configured holiday on a standard weekend remains one non-working date', function () {
@@ -168,19 +168,19 @@ test('working days and signed differences preserve tracker boundaries and signs'
         ->and($calendar->signedWorkingDayDifference('2026-07-20', '2026-07-21'))->toBe(-1);
 });
 
-test('all enrolled tracker models consume the centralized Monday-Thursday deadlines and distances', function () {
+test('all enrolled tracker models consume the centralized standard working-day deadlines and distances', function () {
     $standardA = [BmsReportSubmission::class, BamsReportSubmission::class, ImeaReportSubmission::class];
     foreach ($standardA as $modelClass) {
-        $model = new $modelClass(['date_accomplished' => '2026-08-24', 'date_received_penro' => '2026-09-17', 'target_office' => 'CENRO']);
-        expect($model->deadline_submission)->toBe('2026-09-17')
+        $model = new $modelClass(['date_accomplished' => '2026-08-24', 'date_received_penro' => '2026-09-14', 'target_office' => 'CENRO']);
+        expect($model->deadline_submission)->toBe('2026-09-14')
             ->and($model->number_days_complied)->toBe(15);
     }
 
     $standardB = [TechnicalReport::class, Aws::class, ManagementPlan::class, ImeaFacilityMaintenanceReport::class, IpafManagementReport::class];
     foreach ($standardB as $modelClass) {
-        $submission = $modelClass === TechnicalReport::class ? ['submission_date' => '2026-09-03'] : ['date_received_penro' => '2026-09-03'];
+        $submission = $modelClass === TechnicalReport::class ? ['submission_date' => '2026-09-02'] : ['date_received_penro' => '2026-09-02'];
         $model = new $modelClass(['date_accomplished' => '2026-08-24', 'target_office' => 'CENRO', ...$submission]);
-        expect($model->deadline_submission)->toBe('2026-09-03')
+        expect($model->deadline_submission)->toBe('2026-09-02')
             ->and($model->number_days_complied)->toBe(7);
     }
 });

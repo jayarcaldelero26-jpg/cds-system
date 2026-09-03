@@ -17,6 +17,9 @@ class ModuleDefinition extends Model
     public const TYPE_REGULAR_TARGET = 'regular_target';
     public const TYPE_PLAN = 'plan';
     public const DEADLINE_STANDARD_WORKING_DAYS = 'standard_working_days';
+    public const DEADLINE_PAMB_WORKING_DAYS = 'pamb_working_days';
+    public const DEADLINE_CALENDAR_DAYS = 'calendar_days';
+    public const DEADLINE_CUSTOM_STORED = 'custom_stored_deadline';
     public const DEADLINE_CUSTOM = 'custom';
     public const DEADLINE_NONE = 'none';
 

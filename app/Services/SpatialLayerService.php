@@ -24,6 +24,7 @@ class SpatialLayerService
 
         return DB::transaction(fn (): SpatialLayer => SpatialLayer::create([
             'protected_area_id' => $attributes['protected_area_id'],
+            'source_key' => $attributes['source_key'] ?? null,
             'name' => mb_substr($name, 0, 255),
             'layer_type' => $attributes['layer_type'] ?? $this->geometryType($geoJson),
             'source_format' => $attributes['source_format'] ?? 'geojson',

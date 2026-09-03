@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Requests\StoreProtectedAreaRequest;
 use App\Http\Requests\UpdateProtectedAreaRequest;
 use App\Models\ProtectedArea;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -12,6 +13,8 @@ use Inertia\Response;
 
 class ProtectedAreaController extends Controller
 {
+    public function __construct(private readonly OrganizationalAccessService $organization) {}
+
     public function index(Request $request): Response
     {
         $search = trim((string) $request->string('search'));
@@ -25,7 +28,7 @@ class ProtectedAreaController extends Controller
         }
 
         return Inertia::render('ProtectedAreas/Index', [
-            'protectedAreas' => ProtectedArea::query()
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
                     $query->where('name', 'like', "%{$search}%")
                         ->orWhere('municipality', 'like', "%{$search}%")
@@ -46,30 +49,41 @@ class ProtectedAreaController extends Controller
 
     public function create(): Response
     {
-        return Inertia::render('ProtectedAreas/Create');
+        return Inertia::render('ProtectedAreas/Create', ['officeOptions' => $this->organization->officeOptions()]);
     }
 
     public function store(StoreProtectedAreaRequest $request): RedirectResponse
     {
-        ProtectedArea::create([...$request->validated(), 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
+        $data = $request->validated();
+        $officeId = (int) $data['supervising_office_id'];
+        unset($data['supervising_office_id']);
+        $area = ProtectedArea::create([...$data, 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
+        $this->organization->assignSupervisingOffice($area, $officeId, $request->user());
 
         return to_route('protected-areas.index')->with('success', 'Protected area created successfully.');
     }
 
-    public function edit(ProtectedArea $protectedArea): Response
+    public function edit(Request $request, ProtectedArea $protectedArea): Response
     {
-        return Inertia::render('ProtectedAreas/Edit', ['protectedArea' => $this->protectedAreaData($protectedArea)]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $protectedArea->id);
+        return Inertia::render('ProtectedAreas/Edit', ['protectedArea' => $this->protectedAreaData($protectedArea), 'officeOptions' => $this->organization->officeOptions()]);
     }
 
     public function update(UpdateProtectedAreaRequest $request, ProtectedArea $protectedArea): RedirectResponse
     {
-        $protectedArea->update([...$request->validated(), 'updated_by' => $request->user()->id]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $protectedArea->id);
+        $data = $request->validated();
+        $officeId = (int) $data['supervising_office_id'];
+        unset($data['supervising_office_id']);
+        $protectedArea->update([...$data, 'updated_by' => $request->user()->id]);
+        $this->organization->assignSupervisingOffice($protectedArea, $officeId, $request->user());
 
         return to_route('protected-areas.index')->with('success', 'Protected area updated successfully.');
     }
 
     public function destroy(Request $request, ProtectedArea $protectedArea): RedirectResponse
     {
+        $this->organization->assertCanAccessProtectedArea($request->user(), $protectedArea->id);
         $protectedArea->update(['updated_by' => $request->user()->id]);
         $protectedArea->delete();
 
@@ -79,6 +93,7 @@ class ProtectedAreaController extends Controller
     /** @return array<string, mixed> */
     private function protectedAreaData(ProtectedArea $protectedArea): array
     {
+        $protectedArea->loadMissing('supervisingOffice');
         return [
             'id' => $protectedArea->id,
             'name' => $protectedArea->name,
@@ -97,6 +112,8 @@ class ProtectedAreaController extends Controller
             'description' => $protectedArea->description,
             'status' => $protectedArea->status,
             'remarks' => $protectedArea->remarks,
+            'supervising_office_id' => $protectedArea->supervisingOffice?->id,
+            'supervising_office_name' => $protectedArea->supervisingOffice?->name,
         ];
     }
 }

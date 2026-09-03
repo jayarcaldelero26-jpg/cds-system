@@ -5,6 +5,7 @@ use App\Models\ModuleDefinition;
 use App\Models\EngpReportSubmission;
 use App\Models\User;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
@@ -14,6 +15,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
+    BusinessCalendarService::forgetCache();
     $this->user = User::factory()->create(['section' => 'CDS']);
     foreach (['reports.view', 'technical-reports.update'] as $ability) $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
 });
@@ -271,10 +273,10 @@ test('Alerts consumes each generic conservation workflow deadline from its live 
         ->and($alert->module)->toBe(app(ConservationReportWorkflowRegistry::class)->find($workflowKey)['label']);
 })->with([
     ['regular_pamb', 'Regular PAMB', 'Minutes', '2026-09-08'],
-    ['additional_bms_site', 'Establishment of additional BMS site (Davao de Oro)', 'Progress Report', '2026-09-22'],
-    ['cepa_plan', 'CEPA Plan preparation (Analysis/Stocktaking)', 'Progress Report', '2026-09-08'],
-    ['cepa_plan', 'Submission of Final CEPA Plan', 'Final Report', '2026-09-22'],
-    ['monitoring_mangroves_corals_seagrass', 'Monitoring of Habitat condition (Mangroves - 1st Q)', 'Report', '2026-09-22'],
+    ['additional_bms_site', 'Establishment of additional BMS site (Davao de Oro)', 'Progress Report', '2026-09-10'],
+    ['cepa_plan', 'CEPA Plan preparation (Analysis/Stocktaking)', 'Progress Report', '2026-09-04'],
+    ['cepa_plan', 'Submission of Final CEPA Plan', 'Final Report', '2026-09-16'],
+    ['monitoring_mangroves_corals_seagrass', 'Monitoring of Habitat condition (Mangroves - 1st Q)', 'Report', '2026-09-16'],
 ]);
 
 test('one live Conservation Alerts source definition covers every configured generic conservation workflow', function () {

@@ -32,7 +32,7 @@ class DashboardController extends Controller
             return Inertia::render('Auth/WaitingApproval');
         }
 
-        if ($user->section !== 'MES') {
+        {
             $dashboard = $this->monitoring->overview($request->only([
                 'year', 'program', 'office', 'period', 'page',
             ]));
@@ -44,76 +44,10 @@ class DashboardController extends Controller
                 OrganizationalAccessService::DEVELOPMENT => 0,
                 default => $user->section === 'PAMO' && $user->protected_area_id
                     ? ProtectedArea::whereKey($user->protected_area_id)->count()
-                    : ProtectedArea::count(),
+                    : $organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id')->count(),
             };
 
             return Inertia::render('Dashboard', $dashboard);
-        }
-
-        // ============================================================
-        // MES DASHBOARD
-        // ============================================================
-
-        if ($user->section === 'MES') {
-
-            $issueCount = IssueMonitoring::count();
-
-            $lawinCount = LawinMonitoring::count();
-
-            $recentLawins = LawinMonitoring::latest()
-                ->take(2)
-                ->get()
-                ->map(function ($item) {
-                    return [
-                        'id' => 'lawin-' . $item->id,
-
-                        'activity' =>
-                            'Patrol conducted at ' .
-                            ($item->cenro ?? 'CENRO'),
-
-                        'module' => 'LAWIN (MES)',
-
-                        'date' => $item->created_at
-                            ? $item->created_at->diffForHumans()
-                            : now()->diffForHumans(),
-
-                        'status' => $item->status ?? 'Completed',
-                    ];
-                });
-
-            $recentIssues = IssueMonitoring::latest()
-                ->take(2)
-                ->get()
-                ->map(function ($item) {
-                    return [
-                        'id' => 'issue-' . $item->id,
-
-                        'activity' =>
-                            'Threat reported: ' .
-                            ($item->threat_type ?? 'Unknown'),
-
-                        'module' => 'Issues',
-
-                        'date' => $item->created_at
-                            ? $item->created_at->diffForHumans()
-                            : now()->diffForHumans(),
-
-                        'status' => 'Pending Review',
-                    ];
-                });
-
-            $dbActivities = collect()
-                ->merge($recentLawins)
-                ->merge($recentIssues)
-                ->take(4)
-                ->values()
-                ->toArray();
-
-            return Inertia::render('MesDashboard', [
-                'issueCount' => $issueCount,
-                'lawinCount' => $lawinCount,
-                'dbActivities' => $dbActivities,
-            ]);
         }
 
         // ============================================================

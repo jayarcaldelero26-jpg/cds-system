@@ -54,7 +54,7 @@ test('the final Conservation workflow batch accepts custom activity text', funct
     ['mpan', 'Final Report', 'Quarter 1'],
 ]);
 
-test('the final Conservation workflow batch skips Friday through Sunday and active holidays', function (string $workflow, string $document, string $ordinaryDeadline, string $holidayDeadline) {
+test('the final Conservation workflow batch uses standard working days and active holidays', function (string $workflow, string $document, string $ordinaryDeadline, string $holidayDeadline) {
     $report = new ConservationReportSubmission([
         'workflow_key' => $workflow,
         'activity_name' => 'Custom local activity',
@@ -74,10 +74,10 @@ test('the final Conservation workflow batch skips Friday through Sunday and acti
 
     expect($report->deadline_submission)->toBe($holidayDeadline);
 })->with([
-    ['maintenance_pa_information_system', 'Report', '2026-09-08', '2026-09-09'],
-    ['monitoring_mangroves_corals_seagrass', 'Final Report', '2026-09-22', '2026-09-23'],
-    ['water_quality_monitoring', 'Progress Report', '2026-09-08', '2026-09-09'],
-    ['mpan', 'Final Report', '2026-09-08', '2026-09-09'],
+    ['maintenance_pa_information_system', 'Report', '2026-09-04', '2026-09-07'],
+    ['monitoring_mangroves_corals_seagrass', 'Final Report', '2026-09-16', '2026-09-17'],
+    ['water_quality_monitoring', 'Progress Report', '2026-09-04', '2026-09-07'],
+    ['mpan', 'Final Report', '2026-09-04', '2026-09-07'],
 ]);
 
 test('Maintenance, Water Quality, and MPAN use Standard B thresholds', function (string $workflow, string $document) {
@@ -90,7 +90,7 @@ test('Maintenance, Water Quality, and MPAN use Standard B thresholds', function 
             'activity_name' => 'Custom local activity',
             'document_type' => $document,
             'date_accomplished' => '2026-01-05',
-            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days)->toDateString(),
+            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
         ]);
 
         expect($report->timeliness)->toBe($expected);
@@ -111,7 +111,7 @@ test('Monitoring Mangroves, Corals, Seagrass uses Standard A thresholds', functi
             'activity_name' => 'Custom local activity',
             'document_type' => 'Report',
             'date_accomplished' => '2026-01-05',
-            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days)->toDateString(),
+            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
         ]);
 
         expect($report->timeliness)->toBe($expected);

@@ -17,8 +17,8 @@ class ModuleDefinitionSeeder extends Seeder
             $this->specialized('bams', 'BAMS', ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT, 'bams', 'bams.index', 'semestral', 15),
             $this->specialized('imea', 'IMEA', ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT, 'imea', 'imea.index', 'semestral', 15),
             $this->specialized('imea_facility_maintenance', 'IMEA Facility Maintenance', ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT, 'imea-maintenance', 'imea.maintenance-reports.index', 'quarterly', 7),
-            $this->specialized('automated_weather_station', 'Automated Weather Station', ProgramArea::CONSERVATION, 'aws', 'aws.index', 'semestral', 15),
-            $this->specialized('ipaf_management', 'Management of IPAF', ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT, 'ipaf', 'ipaf.index', 'custom', null, ModuleDefinition::DEADLINE_CUSTOM, true),
+            $this->specialized('automated_weather_station', 'Automated Weather Station', ProgramArea::CONSERVATION, 'aws', 'aws.index', 'semestral', 7),
+            $this->specialized('ipaf_management', 'Management of IPAF', ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT, 'ipaf', 'ipaf.index', 'custom', 7),
             $this->specialized('revenue_collection', 'Revenue Collection', ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT, 'revenue', 'ipaf.index', 'monthly', null, ModuleDefinition::DEADLINE_CUSTOM, true),
             $this->specialized('management_plans', 'Management Plans', ProgramArea::DEVELOPMENT, 'management-plans', 'management-plans.index', null, null, ModuleDefinition::DEADLINE_CUSTOM, true, ModuleDefinition::TYPE_PLAN),
         ];
@@ -31,8 +31,8 @@ class ModuleDefinitionSeeder extends Seeder
                 'module_type' => str_contains($workflow['key'], 'plan') ? ModuleDefinition::TYPE_PLAN : ModuleDefinition::TYPE_REGULAR_TARGET,
                 'reporting_frequency' => $this->frequencyFromPeriods($workflow['periods'] ?? []),
                 'plan_duration_years' => str_contains($workflow['key'], '5_year') ? 5 : null,
-                'deadline_mode' => isset($workflow['submission_rules']) ? ModuleDefinition::DEADLINE_CUSTOM : ModuleDefinition::DEADLINE_NONE,
-                'default_deadline_days' => null, 'allow_deadline_override' => isset($workflow['submission_rules']),
+                'deadline_mode' => app(ConservationReportWorkflowRegistry::class)->deadlineRule($workflow['key'], $workflow['default_activity'] ?? null, ($workflow['activity_documents'][$workflow['default_activity'] ?? ''][0] ?? null))['deadline_mode'],
+                'default_deadline_days' => app(ConservationReportWorkflowRegistry::class)->deadlineRule($workflow['key'], $workflow['default_activity'] ?? null, ($workflow['activity_documents'][$workflow['default_activity'] ?? ''][0] ?? null))['deadline_days'], 'allow_deadline_override' => false,
                 'is_active' => true, 'description' => $workflow['description'] ?? null,
                 'existing_route_name' => 'conservation-reports.index', 'existing_source_key' => 'conservation-reports',
             ];

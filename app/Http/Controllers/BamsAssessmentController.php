@@ -10,17 +10,23 @@ use App\Models\BamsFlora;
 use App\Models\BamsFauna;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use App\Services\Authorization\OrganizationalAccessService;
 
 class BamsAssessmentController extends Controller
 {
+    public function __construct(private readonly OrganizationalAccessService $organization) {}
+
     public function index(Request $request)
     {
-        $protectedAreas = ProtectedArea::all();
-        $floraRecords = BamsFlora::with('protectedArea')->latest()->get();
+        $protectedAreas = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get();
+        $floraRecords = $this->organization->scopeProtectedAreaQuery(BamsFlora::with('protectedArea'), $request->user())->latest()->get();
 
         $selectedPaId = $request->input('protected_area_id');
-        $activePa = $selectedPaId ? ProtectedArea::find($selectedPaId) : $protectedAreas->first();
-        $spatialLayers = $activePa?->spatialLayers()->latest('id')->get() ?? collect();
+        if ($selectedPaId !== null) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $selectedPaId);
+        }
+        $activePa = $selectedPaId ? ProtectedArea::query()->whereKey($selectedPaId)->first() : $protectedAreas->first();
+        $spatialLayers = $activePa?->spatialLayers()->where(fn ($query) => $query->where('source_key', 'bams')->orWhereNull('source_key'))->latest('id')->get() ?? collect();
 
         return Inertia::render('Bams/Index', [
             'protectedAreas' => $protectedAreas,
@@ -54,6 +60,7 @@ class BamsAssessmentController extends Controller
             'distance' => ['nullable', 'numeric', 'min:0'],
             'remarks' => ['nullable', 'string'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         BamsFlora::create($validated);
 
@@ -77,6 +84,7 @@ class BamsAssessmentController extends Controller
             'wt' => ['nullable', 'numeric', 'min:0'],
             'remarks' => ['nullable', 'string'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         BamsFauna::create($validated);
         return redirect()->back()->with('success', 'Fauna assessment record successfully added.');
@@ -91,6 +99,7 @@ class BamsAssessmentController extends Controller
             'source_format' => ['nullable', 'in:geojson,shapefile'],
             'original_filename' => ['nullable', 'string', 'max:255'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
 
         app(SpatialLayerService::class)->create([
             'protected_area_id' => $request->integer('protected_area_id'),
@@ -98,6 +107,7 @@ class BamsAssessmentController extends Controller
             'source_format' => $request->input('source_format', 'geojson'),
             'original_filename' => $request->input('original_filename'),
             'geojson' => $request->input('spatial_geojson'),
+            'source_key' => 'bams',
         ], $request->user()->id);
 
         $redirectQuery = array_filter([

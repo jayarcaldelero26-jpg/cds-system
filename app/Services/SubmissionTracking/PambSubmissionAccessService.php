@@ -15,13 +15,14 @@ final class PambSubmissionAccessService
     public const CENRO_FOCAL = OrganizationalAccessService::CENRO_FOCAL;
     public const PENRO_CHIEF = OrganizationalAccessService::PENRO_CHIEF;
     public const PENRO_FOCAL = OrganizationalAccessService::PENRO_FOCAL;
+    public const PENRO_RECORDS = OrganizationalAccessService::PENRO_RECORDS;
     public const PAMO = OrganizationalAccessService::PAMO;
 
     /** @var list<string> */
     public const CENRO_CATEGORIES = [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL];
 
     /** @var list<string> */
-    public const PENRO_CATEGORIES = [self::PENRO_CHIEF, self::PENRO_FOCAL];
+    public const PENRO_CATEGORIES = [self::PENRO_RECORDS, self::PENRO_CHIEF, self::PENRO_FOCAL];
 
     public function isGlobal(User $user): bool
     {
@@ -45,7 +46,9 @@ final class PambSubmissionAccessService
 
     public function canView(User $user, ConservationReportSubmission $submission): bool
     {
-        if (! app(OrganizationalAccessService::class)->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) {
+        $organization = app(OrganizationalAccessService::class);
+        if (! $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)
+            || ! $organization->canAccessProtectedAreaRecord($user, $submission)) {
             return false;
         }
         if ($this->isGlobal($user) || $this->isPenro($user)) {
@@ -68,13 +71,20 @@ final class PambSubmissionAccessService
 
     public function scopeQuery(Builder $query, User $user): Builder
     {
-        if (! app(OrganizationalAccessService::class)->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) return $query->whereRaw('1 = 0');
+        $organization = app(OrganizationalAccessService::class);
+        if (! $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) return $query->whereRaw('1 = 0');
         if ($this->isGlobal($user) || $this->isPenro($user)) return $query;
         if ($this->isCenro($user)) {
-            $office = app(OrganizationalAccessService::class)->normalizeOffice($user->office_designated) ?: '__no_office_scope__';
-            return $query->whereRaw('LOWER(target_office) = ?', [mb_strtolower($office)]);
+            $office = $organization->normalizeOffice($user->office_designated) ?: '__no_office_scope__';
+            return $query->where(function (Builder $scoped) use ($organization, $user, $office): void {
+                $organization->scopeProtectedAreaQuery($scoped, $user);
+                $scoped->orWhere(function (Builder $officeScoped) use ($office): void {
+                    $officeScoped->whereNull('protected_area_id')
+                        ->whereRaw('LOWER(target_office) = ?', [mb_strtolower($office)]);
+                });
+            })->whereRaw('LOWER(target_office) = ?', [mb_strtolower($office)]);
         }
-        if ($this->isPamo($user)) return $query->where('protected_area_id', $user->protected_area_id ?: 0);
+        if ($this->isPamo($user)) return $organization->scopeProtectedAreaQuery($query, $user);
         return $query;
     }
 

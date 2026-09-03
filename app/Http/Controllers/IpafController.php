@@ -10,6 +10,7 @@ use App\Models\IpafRevenueTarget;
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\IpafBankBalanceSyncService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -26,19 +27,19 @@ use Throwable;
 
 class IpafController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
 
     public function index(Request $request): Response
     {
-        $protectedAreas = ProtectedArea::query()->orderBy('name')->get(['id', 'name']);
-        $revenueQuery = IpafRevenueCollection::query()->with('protectedArea:id,name,short_name')
+        $protectedAreas = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']);
+        $revenueQuery = $this->organization->scopeProtectedAreaQuery(IpafRevenueCollection::query(), $request->user())->with('protectedArea:id,name,short_name')
             ->when($request->filled('revenue_search'), fn ($q) => $this->search($q, (string) $request->input('revenue_search')))
             ->when($request->filled('revenue_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->integer('revenue_protected_area_id')))
             ->when($request->filled('revenue_month'), fn ($q) => $q->where('reporting_month', $request->integer('revenue_month')))
             ->when($request->filled('revenue_year'), fn ($q) => $q->where('reporting_year', $request->integer('revenue_year')));
         $totalCollected = IpafRevenueCollection::normalizeMoney((string) (clone $revenueQuery)->sum('total_collected'));
         $revenues = (clone $revenueQuery)->latest('id')->paginate(10, ['*'], 'revenue_page')->withQueryString()->through(fn ($row) => $this->data($row, 'ipaf.revenue.mov'));
-        $management = IpafManagementReport::query()->with('protectedArea:id,name,short_name')
+        $management = $this->organization->scopeProtectedAreaQuery(IpafManagementReport::query(), $request->user())->with('protectedArea:id,name,short_name')
             ->when($request->filled('management_search'), fn ($q) => $this->search($q, (string) $request->input('management_search')))
             ->when($request->filled('management_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->integer('management_protected_area_id')))
             ->latest('id')->paginate(10, ['*'], 'management_page')->withQueryString()->through(fn ($row) => $this->data($row, 'ipaf.management.mov'));
@@ -69,6 +70,7 @@ class IpafController extends Controller
             'targets.4' => ['nullable', 'decimal:0,2', 'min:0'],
         ]);
         $userId = $request->user()->id;
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id']);
         DB::transaction(function () use ($data, $userId): void {
             foreach (range(1, 4) as $quarter) {
                 $amount = data_get($data, "targets.$quarter");
@@ -94,6 +96,7 @@ class IpafController extends Controller
             'bank_balance' => ['required', 'numeric', 'decimal:0,2', 'min:0'],
             'status_note' => ['nullable', 'string', 'max:2000'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id']);
         $userId = $request->user()->id;
         $status = IpafAccountingStatus::query()->firstOrNew([
             'protected_area_id' => $data['protected_area_id'],
@@ -135,6 +138,7 @@ class IpafController extends Controller
             'accounting_year' => (int) $data['reporting_year'],
         ];
         if (! empty($data['accounting_protected_area_id'])) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $data['accounting_protected_area_id']);
             $redirectParameters['accounting_protected_area_id'] = (int) $data['accounting_protected_area_id'];
         }
 
@@ -170,7 +174,12 @@ class IpafController extends Controller
 
     private function persist(Request $request, Model $record, array $rules, string $activity, string $folder, string $message): RedirectResponse
     {
-        $data = $request->validate($rules, ['mov.required' => 'A report attachment / MOV is required.']); $exists = $record->exists; $old = $record->mov_file_path; $new = null; $replace = $request->hasFile('mov');
+        $data = $request->validate($rules, ['mov.required' => 'A report attachment / MOV is required.']);
+        $protectedAreaId = $record->exists ? $record->protected_area_id : ($data['protected_area_id'] ?? null);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id'] ?? $protectedAreaId);
+        if ($record->exists) $record = $this->organization->scopeProtectedAreaQuery($record::query(), $request->user())->findOrFail($record->id);
+        $exists = $record->exists; $old = $record->mov_file_path; $new = null; $replace = $request->hasFile('mov');
         try {
             if ($request->hasFile('mov')) { $file = $request->file('mov'); $new = $this->attachments->store($file, $this->attachmentSource($record)); if (! is_string($new)) throw new RuntimeException('The MOV could not be stored.'); $data = [...$data, 'mov_file_name' => $file->getClientOriginalName(), 'mov_file_path' => $new, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()]; }
             unset($data['mov']); $data['activity_name'] = $activity; $data['updated_by'] = $request->user()->id; if (! $exists) $data['created_by'] = $request->user()->id;
@@ -179,8 +188,8 @@ class IpafController extends Controller
         if ($replace && $old) $this->attachments->delete($old);
         return back()->with('success', $message);
     }
-    private function destroyRecord(Model $record, string $message): RedirectResponse { $path = $record->mov_file_path; DB::transaction(fn () => $record->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', $message); }
-    private function mov(Model $record): BinaryFileResponse { return $this->attachments->response($this->attachmentSource($record), $record, 'mov'); }
+    private function destroyRecord(Model $record, string $message): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); $path = $record->mov_file_path; DB::transaction(fn () => $record->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', $message); }
+    private function mov(Model $record): BinaryFileResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); return $this->attachments->response($this->attachmentSource($record), $record, 'mov'); }
     private function search($query, string $search): void { $search = trim($search); $query->where(fn ($q) => $q->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($q) => $q->where('name', 'like', "%{$search}%"))); }
     private function commonRules(bool $requireMov): array { return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'document_type' => ['required', Rule::in(['Final Report', 'Progress Report'])], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'remarks' => ['nullable', 'string']]; }
     private function revenueRules(bool $requireMov): array { return [...$this->commonRules($requireMov), 'reporting_month' => ['required', 'integer', 'between:1,12'], 'reporting_year' => ['required', 'integer', 'between:2000,2100'], 'total_collected' => ['required', 'decimal:0,2', 'min:0'], 'deadline_submission' => ['required', 'date']]; }
@@ -208,14 +217,14 @@ class IpafController extends Controller
         $firstMonth = (($quarter - 1) * 3) + 1;
         $lastMonth = $firstMonth + 2;
 
-        $collected = IpafRevenueCollection::query()
+        $collected = $this->organization->scopeProtectedAreaQuery(IpafRevenueCollection::query(), $request->user())
             ->select('protected_area_id', DB::raw('SUM(total_collected) as quarter_collected'))
             ->where('reporting_year', $year)
             ->whereBetween('reporting_month', [$firstMonth, $lastMonth])
             ->when($protectedAreaId, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
             ->groupBy('protected_area_id')
             ->pluck('quarter_collected', 'protected_area_id');
-        $allTargets = IpafRevenueTarget::query()->where('reporting_year', $year)->get();
+        $allTargets = $this->organization->scopeProtectedAreaQuery(IpafRevenueTarget::query(), $request->user())->where('reporting_year', $year)->get();
         $targets = $protectedAreaId ? $allTargets->where('protected_area_id', $protectedAreaId) : $allTargets;
         $quarterTargets = $targets->where('quarter', $quarter)->keyBy('protected_area_id');
         $summaryAreas = $protectedAreas->when($protectedAreaId, fn ($areas) => $areas->where('id', $protectedAreaId))->values();
@@ -232,7 +241,7 @@ class IpafController extends Controller
         });
         $totalTarget = IpafRevenueCollection::sumMoney($rows->pluck('target_amount')->filter(fn ($value) => $value !== null));
         $totalCollected = IpafRevenueCollection::sumMoney($rows->pluck('total_collected'));
-        $annualCollected = IpafRevenueCollection::query()
+        $annualCollected = $this->organization->scopeProtectedAreaQuery(IpafRevenueCollection::query(), $request->user())
             ->select('protected_area_id', DB::raw('SUM(total_collected) as annual_collected'))
             ->where('reporting_year', $year)
             ->when($protectedAreaId, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
@@ -257,7 +266,7 @@ class IpafController extends Controller
         $annualTotalTarget = $annualTargetValues->isEmpty() ? null : IpafRevenueCollection::sumMoney($annualTargetValues);
         $annualTotalCollected = IpafRevenueCollection::sumMoney($annualRows->pluck('annual_total_collected'));
 
-        $provincialAccountingRows = IpafAccountingStatus::query()
+        $provincialAccountingRows = $this->organization->scopeProtectedAreaQuery(IpafAccountingStatus::query(), $request->user())
             ->with('protectedArea:id,name')
             ->where('reporting_year', $accountingYear)
             ->orderBy('protected_area_id')
@@ -288,13 +297,13 @@ class IpafController extends Controller
         $bankBalanceValues = $accountingRows->pluck('bank_balance')->filter(fn ($value) => $value !== null);
         $provincialAccountingCollectionValues = $provincialAccountingRows->pluck('total_ipaf_collection')->filter(fn ($value) => $value !== null);
         $provincialBankBalanceValues = $provincialAccountingRows->pluck('bank_balance')->filter(fn ($value) => $value !== null);
-        $monthlyCollections = IpafRevenueCollection::query()
+        $monthlyCollections = $this->organization->scopeProtectedAreaQuery(IpafRevenueCollection::query(), $request->user())
             ->select('reporting_month', DB::raw('SUM(total_collected) as total_collected'))
             ->where('reporting_year', $analysisYear)
             ->when($analysisProtectedAreaId, fn ($query) => $query->where('protected_area_id', $analysisProtectedAreaId))
             ->groupBy('reporting_month')
             ->pluck('total_collected', 'reporting_month');
-        $analysisTargets = IpafRevenueTarget::query()
+        $analysisTargets = $this->organization->scopeProtectedAreaQuery(IpafRevenueTarget::query(), $request->user())
             ->where('reporting_year', $analysisYear)
             ->when($analysisProtectedAreaId, fn ($query) => $query->where('protected_area_id', $analysisProtectedAreaId))
             ->get();
@@ -314,7 +323,7 @@ class IpafController extends Controller
                 'total_collected' => IpafRevenueCollection::sumMoney($quarterCollectedValues),
             ];
         });
-        $bankBalances = IpafAccountingStatus::query()
+        $bankBalances = $this->organization->scopeProtectedAreaQuery(IpafAccountingStatus::query(), $request->user())
             ->with('protectedArea:id,name')
             ->where('reporting_year', $analysisYear)
             ->when($analysisProtectedAreaId, fn ($query) => $query->where('protected_area_id', $analysisProtectedAreaId))

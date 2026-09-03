@@ -15,6 +15,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
+    BusinessCalendarService::forgetCache();
     $this->user = User::factory()->create(['section' => 'CDS']);
     foreach (['reports.view', 'technical-reports.update'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
@@ -22,7 +23,10 @@ beforeEach(function (): void {
     $this->user->assignRole(Role::findOrCreate('PENRO CDS Focal Person', 'web'));
 });
 
-afterEach(function (): void { CarbonImmutable::setTestNow(); });
+afterEach(function (): void {
+    CarbonImmutable::setTestNow();
+    BusinessCalendarService::forgetCache();
+});
 
 function timelinePambReport(object $test, array $overrides = []): ConservationReportSubmission
 {

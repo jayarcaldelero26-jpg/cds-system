@@ -76,8 +76,8 @@ class ModuleDefinitionController extends Controller
             'module_type' => ['required', Rule::in([ModuleDefinition::TYPE_REGULAR_TARGET, ModuleDefinition::TYPE_PLAN])],
             'reporting_frequency' => ['nullable', Rule::in(ModuleDefinition::FREQUENCIES), Rule::requiredIf($request->input('module_type') === ModuleDefinition::TYPE_REGULAR_TARGET)],
             'plan_duration_years' => ['nullable', 'integer', 'min:1', 'max:100', Rule::requiredIf($request->input('module_type') === ModuleDefinition::TYPE_PLAN)],
-            'deadline_mode' => ['required', Rule::in([ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CUSTOM, ModuleDefinition::DEADLINE_NONE])],
-            'default_deadline_days' => ['nullable', 'integer', 'min:1', 'max:366', Rule::requiredIf($request->input('deadline_mode') === ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS)],
+            'deadline_mode' => ['required', Rule::in([ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS, ModuleDefinition::DEADLINE_CUSTOM, ModuleDefinition::DEADLINE_NONE])],
+            'default_deadline_days' => ['nullable', 'integer', 'min:1', 'max:366', Rule::requiredIf(in_array($request->input('deadline_mode'), [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true))],
             'allow_deadline_override' => ['nullable', 'boolean'],
             'description' => ['nullable', 'string', 'max:5000'],
             'is_active' => ['required', 'boolean'],
@@ -85,7 +85,7 @@ class ModuleDefinitionController extends Controller
 
         $data['reporting_frequency'] = $data['module_type'] === ModuleDefinition::TYPE_PLAN ? null : $data['reporting_frequency'];
         $data['plan_duration_years'] = $data['module_type'] === ModuleDefinition::TYPE_REGULAR_TARGET ? null : $data['plan_duration_years'];
-        $data['default_deadline_days'] = $data['deadline_mode'] === ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS ? $data['default_deadline_days'] : null;
+        $data['default_deadline_days'] = in_array($data['deadline_mode'], [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true) ? $data['default_deadline_days'] : null;
         $data['allow_deadline_override'] = $data['deadline_mode'] === ModuleDefinition::DEADLINE_CUSTOM && (bool) ($data['allow_deadline_override'] ?? false);
         return $data;
     }

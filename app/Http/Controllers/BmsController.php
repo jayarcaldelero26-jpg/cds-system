@@ -10,6 +10,7 @@ use App\Models\ProtectedArea;
 use App\Services\SpatialLayerService;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Storage;
@@ -22,6 +23,8 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class BmsController extends Controller
 {
+    public function __construct(private readonly OrganizationalAccessService $organization) {}
+
     public function formatStationRangeForAnnex($station)
     {
         if (empty($station)) return null;
@@ -39,7 +42,7 @@ class BmsController extends Controller
 
     public function index(Request $request)
     {
-        $query = BmsRecord::with('protectedArea')
+        $query = $this->organization->scopeProtectedAreaQuery(BmsRecord::with('protectedArea'), $request->user())
             ->orderBy('monitoring_date', 'desc')
             ->orderBy('station', 'asc');
 
@@ -66,11 +69,14 @@ class BmsController extends Controller
         // --- KUHA SA SPATIAL DATA NGA GIPAMATUD-AN NGA DILI MA-NULL ---
         $protectedAreaId = $request->input('protected_area_id');
 
+        if ($protectedAreaId !== null) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        }
         $selectedPa = $protectedAreaId
-            ? ProtectedArea::find($protectedAreaId)
-            : ProtectedArea::first();
+            ? ProtectedArea::query()->whereKey($protectedAreaId)->first()
+            : $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->first();
 
-        $spatialLayers = $selectedPa?->spatialLayers()->latest('id')->get() ?? collect();
+        $spatialLayers = $selectedPa?->spatialLayers()->where(fn ($query) => $query->where('source_key', 'bms')->orWhereNull('source_key'))->latest('id')->get() ?? collect();
 
         $attachmentService = app(ProtectedAttachmentService::class);
         $bmsRecords = $query->get()->map(function (BmsRecord $record) use ($attachmentService): array {
@@ -84,12 +90,15 @@ class BmsController extends Controller
 
         return Inertia::render('Bms/Index', [
             'bmsRecords' => $bmsRecords,
-            'protectedAreas' => ProtectedArea::all(),
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get(),
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date', 'year']),
             'spatialLayers' => $spatialLayers,
             'annexHeaderMetadata' => $this->annexHeaderFor($request),
-            'reportSubmissions' => BmsReportSubmission::with('protectedArea:id,name,short_name')
-                ->when($request->filled('report_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->report_protected_area_id))
+            'reportSubmissions' => $this->organization->scopeProtectedAreaQuery(BmsReportSubmission::with('protectedArea:id,name,short_name'), $request->user())
+                ->when($request->filled('report_protected_area_id'), function ($q) use ($request): void {
+                    $this->organization->assertCanAccessProtectedArea($request->user(), $request->report_protected_area_id);
+                    $q->where('protected_area_id', $request->report_protected_area_id);
+                })
                 ->when($request->filled('report_semester'), fn ($q) => $q->where('semester', $request->report_semester))
                 ->latest('id')
                 ->paginate(10, ['*'], 'report_page')
@@ -105,13 +114,16 @@ class BmsController extends Controller
                     return $data;
                 }),
             'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
-            'bmsThreats' => BmsThreat::with('protectedArea:id,name,short_name')->latest('date')->latest('id')->get(),
+            'bmsThreats' => $this->organization->scopeProtectedAreaQuery(BmsThreat::with('protectedArea:id,name,short_name'), $request->user())->latest('date')->latest('id')->get(),
             'initialTab' => $request->input('tab') === 'semestral' ? 'semestral' : null,
         ]);
     }
 
     public function semestralReport(Request $request)
     {
+        if ($request->filled('protected_area_id')) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
+        }
         $selectedYear = $request->integer('year', now()->year);
 
         return redirect()->route('bms.index', array_filter([
@@ -145,6 +157,7 @@ class BmsController extends Controller
             'ecosystem_type' => 'nullable|string',
             'mode_of_observation' => 'nullable|string',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         $newAttachment = null;
 
@@ -174,6 +187,7 @@ class BmsController extends Controller
         ], [
             'file.max' => 'The uploaded CSV file must not exceed 50 MB.',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
 
         $file = $request->file('file');
         $path = $file->getRealPath();
@@ -393,6 +407,7 @@ class BmsController extends Controller
             'source_format' => 'nullable|in:geojson,shapefile',
             'original_filename' => 'nullable|string|max:255',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
 
         app(SpatialLayerService::class)->create([
             'protected_area_id' => $request->integer('protected_area_id'),
@@ -400,6 +415,7 @@ class BmsController extends Controller
             'source_format' => $request->input('source_format', 'geojson'),
             'original_filename' => $request->input('original_filename'),
             'geojson' => $request->input('spatial_geojson'),
+            'source_key' => 'bms',
         ], $request->user()->id);
 
         $redirectQuery = array_filter([
@@ -443,6 +459,7 @@ class BmsController extends Controller
 
     public function update(Request $request, BmsRecord $bmsRecord)
     {
+        $this->organization->assertCanAccessProtectedArea($request->user(), $bmsRecord->protected_area_id);
         $validated = $request->validate([
             'protected_area_id' => 'required|exists:protected_areas,id',
             'monitoring_date' => 'required|date',
@@ -465,6 +482,7 @@ class BmsController extends Controller
             'ecosystem_type' => 'nullable|string',
             'mode_of_observation' => 'nullable|string',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         $oldAttachment = $bmsRecord->attachment;
         $newAttachment = null;
@@ -512,6 +530,7 @@ class BmsController extends Controller
             'species_observed' => 'nullable|string',
             'observer' => 'nullable|string',
         ]);
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $request->input('protected_area_id'));
 
         BmsAnnexHeader::updateOrCreate(
             $request->only(['protected_area_id', 'category', 'start_date', 'end_date']),
@@ -523,7 +542,10 @@ class BmsController extends Controller
 
     public function exportPdf(Request $request)
     {
-        $query = BmsRecord::with('protectedArea')
+        if ($request->filled('protected_area_id')) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
+        }
+        $query = $this->organization->scopeProtectedAreaQuery(BmsRecord::with('protectedArea'), $request->user())
             ->orderBy('monitoring_date', 'desc')
             ->orderBy('station', 'asc');
 
@@ -570,6 +592,7 @@ class BmsController extends Controller
 
     public function destroy(BmsRecord $bmsRecord)
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsRecord->protected_area_id);
         $attachment = $bmsRecord->attachment;
 
         DB::transaction(fn () => $bmsRecord->delete());
@@ -583,6 +606,7 @@ class BmsController extends Controller
 
     public function showAttachment(BmsRecord $bmsRecord)
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsRecord->protected_area_id);
         return app(ProtectedAttachmentService::class)->response('bms-data', $bmsRecord, 'attachment');
     }
 
@@ -593,7 +617,9 @@ class BmsController extends Controller
             'ids.*' => 'integer|exists:bms_records,id',
         ]);
 
-        $records = BmsRecord::whereIn('id', $request->ids)->get(['id', 'attachment']);
+        $records = $this->organization->scopeProtectedAreaQuery(BmsRecord::query(), $request->user())
+            ->whereIn('id', $request->ids)->get(['id', 'attachment', 'protected_area_id']);
+        abort_unless($records->count() === count($request->ids), 403);
 
         DB::transaction(fn () => BmsRecord::whereKey($records->modelKeys())->delete());
 

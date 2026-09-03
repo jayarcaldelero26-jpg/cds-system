@@ -51,12 +51,19 @@ test('PAMB primary attachments over 100 MB are rejected with a document-specific
 });
 
 test('BAMS, BMS, and IMEA report submissions accept primary attachments through 100 MB', function (): void {
+    $area = ProtectedArea::create([
+        'name' => 'Primary Upload Protected Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati',
+        'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+
     foreach ([
         ['bams.report-submissions.store', 'bams.pdf'],
         ['bms.report-submissions.store', 'bms.pdf'],
         ['imea.report-submissions.store', 'imea.pdf'],
     ] as [$routeName, $filename]) {
         $this->actingAs($this->user)->post(route($routeName), attachmentPrimaryPayload([
+            'protected_area_id' => $area->id,
             'document_type' => 'Final Report',
             'mov' => UploadedFile::fake()->create($filename, 102400, 'application/pdf'),
         ]))->assertSessionHasNoErrors();

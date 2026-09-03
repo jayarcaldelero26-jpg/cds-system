@@ -11,6 +11,7 @@ export default function Form({ title, user, categories = [], protectedAreas = []
     { value: 'CENRO_RECORDS', label: 'CENRO Records Unit' },
     { value: 'CENRO_CDS_CHIEF', label: 'CENRO CDS Chief' },
     { value: 'CENRO_CDS_FOCAL', label: 'CENRO CDS Focal Person' },
+    { value: 'PENRO_RECORDS', label: 'PENRO Records Unit' },
     { value: 'PENRO_CDS_CHIEF', label: 'PENRO CDS Chief' },
     { value: 'PENRO_CDS_FOCAL', label: 'PENRO CDS Focal Person' },
     { value: 'PAMO', label: 'PAMO' },

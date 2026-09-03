@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 #[Fillable([
-    'protected_area_id', 'name', 'layer_type', 'source_format', 'geojson',
+    'protected_area_id', 'source_key', 'name', 'layer_type', 'source_format', 'geojson',
     'original_filename', 'geometry_type', 'created_by',
 ])]
 class SpatialLayer extends Model

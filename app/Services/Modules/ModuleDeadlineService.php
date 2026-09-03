@@ -21,17 +21,25 @@ final class ModuleDeadlineService
         $submitted = $this->date($submittedDate);
         $deadline = match ($module->deadline_mode) {
             ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => $reference && $module->default_deadline_days
-                ? $this->calendar->addWorkingDays($reference, $module->default_deadline_days, $office)->toDateString()
+                ? $this->calendar->addWorkingDays($reference, $module->default_deadline_days, $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString()
+                : null,
+            ModuleDefinition::DEADLINE_CALENDAR_DAYS => $reference && $module->default_deadline_days
+                ? $reference->addDays($module->default_deadline_days)->toDateString()
                 : null,
             ModuleDefinition::DEADLINE_CUSTOM => $this->date($customDeadline)?->toDateString(),
+            ModuleDefinition::DEADLINE_CUSTOM_STORED => $this->date($customDeadline)?->toDateString(),
             default => null,
         };
 
+        $processingDays = $reference && $submitted
+            ? ($module->deadline_mode === ModuleDefinition::DEADLINE_CALENDAR_DAYS
+                ? max(0, $reference->diffInDays($submitted))
+                : $this->calendar->workingDaysBetween($reference, $submitted, 'after_through', $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS))
+            : null;
+
         return [
             'deadline_date' => $deadline,
-            'processing_days' => $reference && $submitted
-                ? $this->calendar->workingDaysBetween($reference, $submitted, 'after_through', $office)
-                : null,
+            'processing_days' => $processingDays,
             'deadline_mode' => $module->deadline_mode,
             'allow_deadline_override' => $module->allow_deadline_override,
         ];

@@ -7,6 +7,7 @@ use App\Models\ManagementPlanType;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\ComplianceMovService;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -23,9 +24,9 @@ use Throwable;
 
 class ManagementPlanController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
 
-    public function index(): Response
+    public function index(Request $request): Response
     {
         return Inertia::render('ManagementPlans/Index', [
             'planTypes' => ManagementPlanType::query()
@@ -36,6 +37,10 @@ class ManagementPlanController extends Controller
                 ->orderBy('sort_order')
                 ->orderBy('name')
                 ->get(['id', 'name', 'slug', 'description'])
+                ->map(function (ManagementPlanType $type) use ($request): ManagementPlanType {
+                    if ($type->profile && ! $this->organization->canAccessProtectedAreaRecord($request->user(), $type->profile)) $type->unsetRelation('profile');
+                    return $type;
+                })
                 ->map(fn (ManagementPlanType $type) => $this->typeData($type)),
             'selectedPlanType' => null,
         ]);
@@ -79,10 +84,10 @@ class ManagementPlanController extends Controller
 
         return Inertia::render('ManagementPlans/Index', [
             'selectedPlanType' => $this->typeData($managementPlanType),
-            'planProfile' => $managementPlanType->profile
+            'planProfile' => $managementPlanType->profile && $this->organization->canAccessProtectedAreaRecord($request->user(), $managementPlanType->profile)
                 ? ManagementPlanProfileController::profileData($managementPlanType->profile, $managementPlanType)
                 : null,
-            'managementPlans' => $managementPlanType->managementPlans()
+            'managementPlans' => $this->organization->scopeProtectedAreaQuery(ManagementPlan::query()->where('management_plan_type_id', $managementPlanType->id), $request->user())
                 ->with('protectedArea:id,name')
                 ->when($search !== '', fn ($query) => $query->where(function ($query) use ($search): void {
                     $query->where('target_office', 'like', "%{$search}%")
@@ -98,7 +103,7 @@ class ManagementPlanController extends Controller
                 ->withQueryString()
                 ->through(fn (ManagementPlan $plan) => $this->planData($plan, $managementPlanType)),
             'filters' => $filters,
-            'protectedAreas' => $this->protectedAreaOptions(),
+            'protectedAreas' => $this->protectedAreaOptions($request->user()),
             'planTypes' => [],
             'approvalStatuses' => ManagementPlanProfileController::APPROVAL_STATUSES,
             'documentCategories' => ManagementPlanProfileController::DOCUMENT_CATEGORIES,
@@ -111,7 +116,7 @@ class ManagementPlanController extends Controller
 
         return Inertia::render('ManagementPlans/Create', [
             'managementPlanType' => $this->typeData($managementPlanType),
-            'protectedAreas' => $this->protectedAreaOptions(),
+            'protectedAreas' => $this->protectedAreaOptions(request()->user()),
         ]);
     }
 
@@ -120,6 +125,7 @@ class ManagementPlanController extends Controller
         abort_unless($managementPlanType->is_active, 404);
         $this->rejectRoutingFields($request);
         $data = $request->validate($this->reportRules(requireAttachments: true));
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id']);
         $newAttachments = [];
 
         try {
@@ -146,23 +152,26 @@ class ManagementPlanController extends Controller
     public function editReport(ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): Response
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $managementPlan->protected_area_id);
 
         return Inertia::render('ManagementPlans/Edit', [
             'managementPlanType' => $this->typeData($managementPlanType),
             'managementPlan' => $this->planData($managementPlan->load('protectedArea:id,name'), $managementPlanType),
-            'protectedAreas' => $this->protectedAreaOptions(),
+            'protectedAreas' => $this->protectedAreaOptions(request()->user()),
         ]);
     }
 
     public function updateReport(Request $request, ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): RedirectResponse
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
+        $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
         $this->rejectRoutingFields($request);
         $data = $request->validate([
             ...$this->reportRules(),
             'removed_attachments' => ['nullable', 'array'],
             'removed_attachments.*' => ['string', 'distinct'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id'] ?? $managementPlan->protected_area_id);
 
         $currentAttachments = array_filter($managementPlan->attachments ?? [], fn ($attachment) => $this->attachmentPath($attachment) !== null);
         $attachmentsByKey = collect($currentAttachments)->mapWithKeys(fn ($attachment, $index) => [(string) $index => $attachment]);
@@ -209,6 +218,7 @@ class ManagementPlanController extends Controller
     public function destroyReport(Request $request, ManagementPlanType $managementPlanType, ManagementPlan $managementPlan): RedirectResponse
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
+        $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
         $managementPlan->update(['updated_by' => $request->user()->id]);
         $managementPlan->delete();
 
@@ -218,12 +228,14 @@ class ManagementPlanController extends Controller
     public function viewScopedAttachment(ManagementPlanType $managementPlanType, ManagementPlan $managementPlan, string $attachment): BinaryFileResponse
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $managementPlan->protected_area_id);
 
         return $this->attachmentResponse($managementPlan, $attachment);
     }
 
     public function viewAttachment(ManagementPlan $managementPlan, string $attachment): BinaryFileResponse
     {
+        $managementPlan = $this->authorizedPlan(request(), $managementPlan->id);
         return $this->attachmentResponse($managementPlan, $attachment);
     }
 
@@ -335,9 +347,14 @@ class ManagementPlanController extends Controller
         ];
     }
 
-    private function protectedAreaOptions(): array
+    private function protectedAreaOptions(?\App\Models\User $user = null): array
     {
-        return ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map(fn (ProtectedArea $area) => ['id' => $area->id, 'name' => $area->name])->all();
+        return $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user ?: request()->user(), 'id')->orderBy('name')->get(['id', 'name'])->map(fn (ProtectedArea $area) => ['id' => $area->id, 'name' => $area->name])->all();
+    }
+
+    private function authorizedPlan(Request $request, int $id): ManagementPlan
+    {
+        return $this->organization->scopeProtectedAreaQuery(ManagementPlan::query(), $request->user())->findOrFail($id);
     }
 
     private function storeAttachment(UploadedFile $file): array

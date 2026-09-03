@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Support\Facades\Gate;
 
 /** Read-only, permission-aware search across eDATS resources. */
@@ -12,7 +13,7 @@ final class GlobalSearchService
 {
     private const PER_GROUP_LIMIT = 5;
 
-    public function __construct(private readonly SubmissionTrackingService $tracking) {}
+    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly OrganizationalAccessService $organization) {}
 
     /** @return array{groups: list<array{key: string, label: string, results: list<array<string, string>>}>, total: int} */
     public function search(User $user, string $query): array
@@ -87,7 +88,7 @@ final class GlobalSearchService
     private function protectedAreas(User $user, string $query): array
     {
         if (!$user->can('protected-areas.view')) return [];
-        return ProtectedArea::query()->where(function ($builder) use ($query): void {
+        return $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id')->where(function ($builder) use ($query): void {
             $like = '%'.$query.'%';
             $builder->where('name', 'like', $like)->orWhere('category', 'like', $like)->orWhere('municipality', 'like', $like)->orWhere('pamo', 'like', $like)->orWhere('pasu', 'like', $like);
         })->orderBy('name')->limit(self::PER_GROUP_LIMIT)->get(['name', 'category', 'municipality'])

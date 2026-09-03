@@ -6,6 +6,7 @@ use App\Models\ProtectedArea;
 use App\Models\TechnicalReport;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -18,12 +19,13 @@ use Throwable;
 
 class TechnicalReportController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
 
     public function index(Request $request): Response
     {
         $filters = $request->only(['search', 'protected_area_id', 'target_office', 'semester', 'year']);
-        $reports = TechnicalReport::query()
+        if ($request->filled('protected_area_id')) $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
+        $reports = $this->organization->scopeProtectedAreaQuery(TechnicalReport::query(), $request->user())
             ->with('protectedArea:id,name')
             ->when($request->filled('search'), function ($query) use ($request): void {
                 $search = trim((string) $request->input('search'));
@@ -47,20 +49,21 @@ class TechnicalReportController extends Controller
         return Inertia::render('TechnicalReports/Index', [
             'technicalReports' => $reports,
             'filters' => $filters,
-            ...$this->formOptions(),
+            ...$this->formOptions($request->user()),
             'targetOffices' => TechnicalReport::query()->whereNotNull('target_office')->distinct()->orderBy('target_office')->pluck('target_office'),
         ]);
     }
 
     public function create(): Response
     {
-        return Inertia::render('TechnicalReports/Create', $this->formOptions());
+        return Inertia::render('TechnicalReports/Create', $this->formOptions(request()->user()));
     }
 
     public function store(Request $request): RedirectResponse
     {
         $this->rejectRoutingFields($request);
         $validated = $request->validate($this->rules(requireMov: true));
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
         $storedPath = null;
 
         try {
@@ -93,18 +96,21 @@ class TechnicalReportController extends Controller
 
     public function edit(TechnicalReport $technicalReport): Response
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $technicalReport->protected_area_id);
         return Inertia::render('TechnicalReports/Edit', [
             'technicalReport' => $this->reportData($technicalReport->load('protectedArea:id,name')),
-            ...$this->formOptions(),
+            ...$this->formOptions(request()->user()),
         ]);
     }
 
     public function update(Request $request, TechnicalReport $technicalReport): RedirectResponse
     {
+        $technicalReport = $this->authorizedRecord($request, $technicalReport->id);
         $this->rejectRoutingFields($request);
         $validated = $request->validate([
             ...$this->rules($technicalReport->report_type),
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id'] ?? $technicalReport->protected_area_id);
         if (! $request->hasFile('attachment') && ! app(ComplianceMovService::class)->hasValidSingleFile($technicalReport, 'attachment')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => ComplianceMovService::MESSAGE]);
         }
@@ -145,11 +151,13 @@ class TechnicalReportController extends Controller
 
     public function viewAttachment(TechnicalReport $technicalReport): BinaryFileResponse
     {
+        $technicalReport = $this->authorizedRecord(request(), $technicalReport->id);
         return $this->attachments->response('technical-report', $technicalReport, 'attachment');
     }
 
     public function destroy(TechnicalReport $technicalReport): RedirectResponse
     {
+        $technicalReport = $this->authorizedRecord(request(), $technicalReport->id);
         $path = $technicalReport->attachment;
         DB::transaction(fn () => $technicalReport->delete());
 
@@ -246,11 +254,16 @@ class TechnicalReportController extends Controller
         ];
     }
 
-    private function formOptions(): array
+    private function formOptions(?\App\Models\User $user = null): array
     {
         return [
-            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name']),
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user ?: request()->user(), 'id')->orderBy('name')->get(['id', 'name']),
             'reportTypes' => ['Final Report', 'Progress Report'],
         ];
+    }
+
+    private function authorizedRecord(Request $request, int $id): TechnicalReport
+    {
+        return $this->organization->scopeProtectedAreaQuery(TechnicalReport::query(), $request->user())->findOrFail($id);
     }
 }

@@ -6,6 +6,7 @@ use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Modules\ModuleDeadlineService;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -51,9 +52,10 @@ class ConservationReportSubmission extends Model
             return app(ModuleDeadlineService::class)->resolve($module, $this->date_accomplished, null, $this->date_received_penro, $this->target_office)['deadline_date'];
         }
 
-        return $this->date_accomplished
-            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, $this->submissionRule()['working_days'], $this->target_office)->toDateString()
-            : null;
+        if (! $this->date_accomplished) return null;
+        $rule = $this->deadlineRule();
+        return app(\App\Services\Modules\PaMonitoringDeadlineService::class)
+            ->deadline(CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->startOfDay(), $rule, $this->target_office);
     }
 
     public function getDaysCompliedAttribute(): int|string|null
@@ -68,7 +70,17 @@ class ConservationReportSubmission extends Model
         if ($module = $this->moduleDefinition()) {
             return app(ModuleDeadlineService::class)->resolve($module, $this->date_accomplished, null, $this->date_received_penro, $this->target_office)['processing_days'];
         }
-        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office);
+        $rule = $this->deadlineRule();
+        if ($rule['deadline_mode'] === ModuleDefinition::DEADLINE_CALENDAR_DAYS) {
+            return max(0, CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->diffInDays(CarbonImmutable::parse($this->date_received_penro, BusinessCalendarService::TIMEZONE)));
+        }
+        return app(BusinessCalendarService::class)->workingDaysBetween(
+            $this->date_accomplished,
+            $this->date_received_penro,
+            'after_through',
+            $this->target_office,
+            BusinessCalendarService::STANDARD_WORKING_WEEKDAYS,
+        );
     }
 
     public function getTimelinessAttribute(): string
@@ -83,12 +95,10 @@ class ConservationReportSubmission extends Model
         if (! is_int($days)) return $days;
 
         $module = $this->moduleDefinition();
-        if ($module && $module->deadline_mode !== ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS) {
+        if ($module && ! in_array($module->deadline_mode, [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true)) {
             return 'No Data';
         }
-        $standard = $module
-            ? (($module->default_deadline_days ?? 0) <= 7 ? 'B' : 'A')
-            : $this->submissionRule()['timeliness_standard'];
+        $standard = $module ? (($module->default_deadline_days ?? 0) <= 7 ? 'B' : 'A') : $this->deadlineRule()['timeliness_standard'];
 
         return $standard === 'A'
             ? match (true) { $days <= 11 => 'Outstanding', $days <= 13 => 'Very Satisfactory', $days <= 15 => 'Satisfactory', $days <= 29 => 'Unsatisfactory', $days <= 90 => 'Poor', default => 'No Rating' }
@@ -110,6 +120,24 @@ class ConservationReportSubmission extends Model
     private function submissionRule(): array
     {
         return app(ConservationReportWorkflowRegistry::class)->submissionRule(
+            $this->workflow_key ?? '',
+            $this->activity_name,
+            $this->document_type,
+        );
+    }
+
+    /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
+    public function deadlineRule(): array
+    {
+        if ($module = $this->moduleDefinition()) {
+            return [
+                'deadline_mode' => $module->deadline_mode,
+                'deadline_days' => (int) ($module->default_deadline_days ?? 0),
+                'timeliness_standard' => ($module->default_deadline_days ?? 0) <= 7 ? 'B' : 'A',
+            ];
+        }
+
+        return app(ConservationReportWorkflowRegistry::class)->deadlineRule(
             $this->workflow_key ?? '',
             $this->activity_name,
             $this->document_type,

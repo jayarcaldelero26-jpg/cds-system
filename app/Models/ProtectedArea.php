@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\HasOneThrough;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
@@ -51,5 +53,22 @@ class ProtectedArea extends Model
     public function spatialLayers(): HasMany
     {
         return $this->hasMany(SpatialLayer::class);
+    }
+
+    public function supervisingOfficeAssignment(): HasOne
+    {
+        return $this->hasOne(ProtectedAreaOfficeAssignment::class)->where('assignment_type', 'supervising');
+    }
+
+    public function supervisingOffice(): HasOneThrough
+    {
+        return $this->hasOneThrough(
+            OrganizationalOffice::class,
+            ProtectedAreaOfficeAssignment::class,
+            'protected_area_id',
+            'id',
+            'id',
+            'organizational_office_id',
+        )->where('protected_area_office_assignments.assignment_type', 'supervising');
     }
 }

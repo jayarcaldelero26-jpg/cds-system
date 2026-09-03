@@ -7,6 +7,7 @@ use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
@@ -18,11 +19,11 @@ use Throwable;
 
 class AwsController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
     public function index(Request $request)
     {
         // 1. REPORTS QUERY: Kuhaon lang kadtong mga pormal nga report (walay timestamps/raw data flag)
-        $reportsQuery = Aws::with('protectedArea')->whereNull('timestamps')->latest();
+        $reportsQuery = $this->organization->scopeProtectedAreaQuery(Aws::with('protectedArea'), $request->user())->whereNull('timestamps')->latest();
 
         if ($request->has('protected_area_id') && $request->protected_area_id) {
             $reportsQuery->where('protected_area_id', $request->protected_area_id);
@@ -42,14 +43,14 @@ class AwsController extends Controller
             ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')));
 
         // 2. RAW DATA QUERY: Kuhaon lang kadtong mga naay timestamps (mga imported CSV data)
-        $rawQuery = Aws::with('protectedArea')->whereNotNull('timestamps')->latest();
+        $rawQuery = $this->organization->scopeProtectedAreaQuery(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->latest();
 
         if ($request->has('protected_area_id') && $request->protected_area_id) {
             $rawQuery->where('protected_area_id', $request->protected_area_id);
         }
 
         // 3. CHART DATA QUERY (Para sa Line Graph nga naay Date Range Filter)
-        $chartQuery = Aws::whereNotNull('timestamps');
+        $chartQuery = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())->whereNotNull('timestamps');
 
         if ($request->has('protected_area_id') && $request->protected_area_id) {
             $chartQuery->where('protected_area_id', $request->protected_area_id);
@@ -68,7 +69,7 @@ class AwsController extends Controller
             ]);
         } elseif ($request->filled('protected_area_id')) {
             // One specific PA: calculate the quick-range window from that PA's own latest date.
-            $latestDate = Aws::whereNotNull('timestamps')
+            $latestDate = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())->whereNotNull('timestamps')
                 ->where('protected_area_id', $request->protected_area_id)
                 ->max('start_date');
 
@@ -84,7 +85,8 @@ class AwsController extends Controller
             // All Protected Areas / Compare PAs:
             // Use one common calendar window for every PA so the series share
             // the same X-axis dates. End at the earliest latest-date among PAs.
-            $latestDates = Aws::whereNotNull('timestamps')
+            $latestDates = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())
+                ->whereNotNull('timestamps')
                 ->whereNotNull('protected_area_id')
                 ->selectRaw('protected_area_id, MAX(start_date) as latest_date')
                 ->groupBy('protected_area_id')
@@ -111,7 +113,7 @@ class AwsController extends Controller
             'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString()->through(fn (Aws $report) => $this->reportData($report)),
             'rawRecords'     => $rawQuery->paginate(15, ['*'], 'raw_page')->withQueryString()->through(fn (Aws $record) => $this->rawData($record)),
             'chartRecords'   => $chartData,
-            'protectedAreas' => ProtectedArea::orderBy('name')->get(),
+            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(),
             'allProtectedAreasMode' => ! $request->filled('protected_area_id'),
             'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range'])
         ]);
@@ -122,6 +124,7 @@ class AwsController extends Controller
         $validated = $request->validate($this->validationRules(fileRequired: true), [
             'report_file.required' => 'A report attachment / MOV is required.',
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
         $storedPath = null;
 
         try {
@@ -144,8 +147,10 @@ class AwsController extends Controller
 
     public function update(Request $request, Aws $aws)
     {
+        $aws = $this->authorizedRecord($request, $aws->id);
         abort_unless($aws->timestamps === null, 404);
         $validated = $request->validate($this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type));
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
         if (! $request->hasFile('report_file') && ! app(ComplianceMovService::class)->hasValidSingleFile($aws, 'report_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['report_file' => ComplianceMovService::MESSAGE]);
         }
@@ -175,6 +180,7 @@ class AwsController extends Controller
 
     public function destroy(Aws $aws)
     {
+        $aws = $this->authorizedRecord(request(), $aws->id);
         $path = $aws->report_file_path;
         DB::transaction(fn () => $aws->delete());
         if ($path) $this->attachments->delete($path);
@@ -184,6 +190,7 @@ class AwsController extends Controller
 
     public function showReportFile(Aws $aws): BinaryFileResponse
     {
+        $aws = $this->authorizedRecord(request(), $aws->id);
         return $this->attachments->response('aws', $aws, 'report_file');
     }
 
@@ -194,10 +201,13 @@ class AwsController extends Controller
             'ids.*' => ['integer', 'distinct', 'exists:aws,id'],
         ]);
 
-        $records = Aws::whereIn('id', $validated['ids'])->get();
+        $records = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())
+            ->whereIn('id', $validated['ids'])->get();
+        abort_unless($records->count() === count($validated['ids']), 403);
 
-        DB::transaction(function () use ($validated) {
-            Aws::whereIn('id', $validated['ids'])->delete();
+        DB::transaction(function () use ($validated, $request) {
+            $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())
+                ->whereIn('id', $validated['ids'])->delete();
         });
 
         foreach ($records as $record) {
@@ -214,10 +224,11 @@ class AwsController extends Controller
         set_time_limit(300);
         ini_set('memory_limit', '512M');
 
-        $request->validate([
+        $validated = $request->validate([
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'file'              => ['required', 'file', 'mimes:csv,txt', 'max:51200'],
         ]);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
 
         try {
             $file = $request->file('file');
@@ -625,6 +636,14 @@ class AwsController extends Controller
             DB::rollBack();
             return back()->withErrors(['file' => 'Error importing file: ' . $e->getMessage()]);
         }
+    }
+
+    private function authorizedRecord(Request $request, int $id): Aws
+    {
+        $record = Aws::query()->findOrFail($id);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id);
+
+        return $record;
     }
 
     private function validationRules(bool $fileRequired, ?string $legacyDocumentType = null): array

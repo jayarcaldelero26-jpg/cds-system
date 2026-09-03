@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BmsReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -13,13 +14,17 @@ class BmsReportSubmissionController extends Controller
 {
     private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
 
-    public function __construct(private readonly ProtectedAttachmentService $attachments) {}
+    public function __construct(
+        private readonly ProtectedAttachmentService $attachments,
+        private readonly OrganizationalAccessService $organization,
+    ) {}
     public function store(Request $request)
     {
         $validated = $request->validate($this->rules(requireMov: true), [
             'mov.required' => 'A primary report attachment is required.',
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $validated = $this->storeMov($request, $validated);
         $validated['created_by'] = $request->user()?->id;
         $validated['updated_by'] = $request->user()?->id;
@@ -31,9 +36,11 @@ class BmsReportSubmissionController extends Controller
 
     public function update(Request $request, BmsReportSubmission $bmsReportSubmission)
     {
+        $this->organization->assertCanAccessProtectedArea($request->user(), $bmsReportSubmission->protected_area_id);
         $validated = $request->validate($this->rules($bmsReportSubmission->document_type), [
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
+        $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         if (! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }
@@ -59,6 +66,7 @@ class BmsReportSubmissionController extends Controller
 
     public function destroy(BmsReportSubmission $bmsReportSubmission)
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsReportSubmission->protected_area_id);
         $this->deleteMov($bmsReportSubmission);
         $bmsReportSubmission->delete();
 
@@ -67,6 +75,7 @@ class BmsReportSubmissionController extends Controller
 
     public function destroyMov(BmsReportSubmission $bmsReportSubmission)
     {
+        $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsReportSubmission->protected_area_id);
         return redirect()->back()->withErrors(['mov' => 'An existing MOV cannot be removed without a replacement.']);
     }
 
@@ -75,7 +84,7 @@ class BmsReportSubmissionController extends Controller
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
         return [
-            'protected_area_id' => ['nullable', 'exists:protected_areas,id'],
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'target_office' => ['nullable', 'string', 'max:255'],
             'activity_name' => ['nullable', 'string', 'max:255'],
             'document_type' => ['nullable', 'string', Rule::in($documentTypes)],

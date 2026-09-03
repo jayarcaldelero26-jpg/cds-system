@@ -18,7 +18,7 @@ class ManagementPlanSubmissionCalculationsTest extends TestCase
             'date_endorsed_regional' => '2026-03-30',
         ]);
 
-        $this->assertSame('2026-04-02', $plan->deadline_submission);
+        $this->assertSame('2026-04-01', $plan->deadline_submission);
         $this->assertSame(2, $plan->number_days_complied);
         $this->assertSame('Outstanding', $plan->timeliness);
         $this->assertSame('Pending Submission by CENRO', $plan->submission_status);
@@ -32,7 +32,7 @@ class ManagementPlanSubmissionCalculationsTest extends TestCase
         $calendar = new BusinessCalendarService;
         $plan = new ManagementPlan([
             'date_accomplished' => $start->toDateString(),
-            'date_received_penro' => $calendar->addWorkingDays($start, $days)->toDateString(),
+            'date_received_penro' => $calendar->addWorkingDays($start, $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
         ]);
 
         $this->assertSame($days, $plan->number_days_complied);

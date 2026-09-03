@@ -3,6 +3,8 @@
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ProtectedArea;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use Illuminate\Testing\Fluent\AssertableJson;
 use Illuminate\Support\Facades\Storage;
@@ -32,11 +34,21 @@ function organizationalUser(string $role, string $unit, string $office = 'CENRO 
 
 function organizationalArea(User $owner, string $name = 'Aliwagwag Protected Landscape'): ProtectedArea
 {
-    return ProtectedArea::create([
+    $area = ProtectedArea::create([
         'name' => $name, 'category' => 'National Park', 'municipality' => 'Baganga',
         'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $owner->id,
         'updated_by' => $owner->id,
     ]);
+
+    if ($officeId = OrganizationalOffice::query()->where('name', $owner->office_designated)->value('id')) {
+        ProtectedAreaOfficeAssignment::create([
+            'protected_area_id' => $area->id,
+            'organizational_office_id' => $officeId,
+            'assignment_type' => 'supervising',
+        ]);
+    }
+
+    return $area;
 }
 
 test('registration exposes only organizational request options and no super admin', function () {
@@ -134,6 +146,7 @@ test('PAMB tracking and ENGP records are filtered by the assigned office', funct
 });
 
 test('PAMO record and attachment access stay within the assigned protected area', function () {
+    Storage::fake('local');
     $pamo = organizationalUser('PAMO', 'conservation', 'PENRO Davao Oriental');
     $area = organizationalArea($pamo);
     $otherArea = organizationalArea($pamo, 'Other Protected Area');

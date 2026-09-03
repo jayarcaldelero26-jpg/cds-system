@@ -11,9 +11,9 @@ use Illuminate\Support\Collection;
 /**
  * The single source of truth for report-submission business dates.
  *
- * Existing workflows retain the Monday-Thursday default calendar profile.
- * PAMB calculations explicitly use the Monday-Thursday profile, with
- * configured non-working days layered on top of either profile.
+ * Existing callers retain the Monday-Thursday legacy default. Ordinary
+ * workbook WORKDAY calculations explicitly use STANDARD_WORKING_WEEKDAYS;
+ * PAMB calculations explicitly use the Monday-Thursday profile.
  */
 class BusinessCalendarService
 {
@@ -21,6 +21,7 @@ class BusinessCalendarService
 
     /** @var list<int> */
     public const PAMB_WORKING_WEEKDAYS = [1, 2, 3, 4];
+    public const STANDARD_WORKING_WEEKDAYS = [1, 2, 3, 4, 5];
 
     public const SCOPE_NATIONAL = 'NATIONAL';
     public const SCOPE_DAVAO_ORIENTAL = 'DAVAO_ORIENTAL';
@@ -33,7 +34,7 @@ class BusinessCalendarService
     {
         $day = $this->date($date);
 
-        $workingWeekdays ??= [1, 2, 3, 4];
+        $workingWeekdays ??= self::PAMB_WORKING_WEEKDAYS;
         if (! in_array($day->dayOfWeekIso, $workingWeekdays, true)) {
             return false;
         }

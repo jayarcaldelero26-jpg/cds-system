@@ -13,6 +13,8 @@ use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
 use App\Models\SubmissionRoutingCorrection;
+use App\Models\DocumentRoutingEvent;
+use App\Models\AuditLog;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
@@ -23,6 +25,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use App\Services\AuditLogService;
 
@@ -32,13 +35,13 @@ final class SubmissionTrackingService
     public const PENRO_RECEIPT = 'penro_receipt';
     public const REGIONAL_ENDORSEMENT = 'regional_endorsement';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting) {}
 
     /** @return Collection<int, array<string, mixed>> */
-    public function records(array $filters = []): Collection
+    public function records(array $filters = [], ?int $limitPerSource = null): Collection
     {
         $loaded = collect($this->sources())
-            ->flatMap(function (array $source, string $key) {
+            ->flatMap(function (array $source, string $key) use ($filters, $limitPerSource) {
                 $query = $source['model']::query();
                 if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
                 if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy']);
@@ -56,8 +59,19 @@ final class SubmissionTrackingService
                     if ($user = auth()->user()) {
                         $query = $this->pambAccess->scopeQuery($query, $user);
                     }
-                } elseif ($source['requires_date_accomplished'] ?? true) {
+                } elseif ($user = auth()->user()) {
+                    if ($key === 'engp') {
+                        $query = $this->organization->scopeDevelopmentQuery($query, $user);
+                    } elseif ($this->hasProtectedAreaColumn($source['model'])) {
+                        $query = $this->organization->scopeProtectedAreaQuery($query, $user);
+                    }
+                }
+                $this->applyDatabaseFilters($query, $key, $filters);
+                if ($key !== 'conservation' && $key !== 'engp' && ($source['requires_date_accomplished'] ?? true)) {
                     $query->whereNotNull('date_accomplished');
+                }
+                if ($limitPerSource !== null) {
+                    $query->limit(max(1, $limitPerSource));
                 }
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
             });
@@ -65,8 +79,11 @@ final class SubmissionTrackingService
         $this->moduleResolver->prime($loaded->pluck('record'));
         $correctionCounts = $this->correctionCounts($loaded);
 
+        $routingAudits = $this->routingAudits($loaded);
+        $routingEvents = $this->genericRoutingEvents($loaded);
+
         return $loaded
-            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts))
+            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect()))
             ->filter(function (array $record): bool {
                 $user = auth()->user();
                 if ($user && filled($user->unit_assignment) && ! $this->organization->isGlobal($user)) {
@@ -78,24 +95,38 @@ final class SubmissionTrackingService
                 $model = ConservationReportSubmission::query()->with('protectedArea')->find($record['source_id']);
                 return $model ? $this->pambAccess->canView($user, $model) : false;
             })
-            ->filter(function (array $record): bool {
-                $user = auth()->user();
-                return ! $user || (! $this->pambAccess->isCenro($user) && ! $this->pambAccess->isPamo($user)) || $record['source'] === 'conservation';
-            })
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
             ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
             ->values();
     }
 
     /** @return array{records: Collection<int,array<string,mixed>>, queues: array<string,Collection<int,array<string,mixed>>>, modules: list<string>} */
-    public function snapshot(array $filters = []): array
+    public function snapshot(array $filters = [], ?int $page = null, int $perPage = 25): array
     {
-        $records = $this->records($filters);
+        if ($page === null) {
+            $records = $this->records($filters);
+            $pagination = null;
+        } else {
+            $page = max(1, $page);
+            $perPage = max(1, min(100, $perPage));
+            // Fetch one page beyond the requested window from each source so
+            // the UI can determine whether another bounded page exists. The
+            // expensive normalization/history work is never performed for the
+            // complete cross-module dataset during an index request.
+            $candidates = $this->records($filters, ($page + 1) * $perPage);
+            $records = $candidates->forPage($page, $perPage)->values();
+            $pagination = [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'has_more' => $candidates->count() > ($page * $perPage),
+            ];
+        }
 
         return [
             'records' => $records,
             'queues' => $this->queues($filters, $records),
             'modules' => $this->modules($records),
+            ...($pagination === null ? [] : ['pagination' => $pagination]),
         ];
     }
 
@@ -105,16 +136,17 @@ final class SubmissionTrackingService
         $records = $snapshotRecords ?? $this->records($filters);
 
         $user = auth()->user();
+        $genericRecords = $records->filter(fn (array $record): bool => ($record['source'] ?? null) !== 'engp' && ! ($record['pamb_routing_applicable'] ?? false));
         if ($user && $this->pambAccess->isPamo($user)) {
             return [
-                'for_submission' => $records->filter(fn (array $record): bool => in_array(data_get($record, 'mov_processing.queue'), ['for_submission', 'for_review', 'for_release'], true))->values(),
+                'for_submission' => $records->filter(fn (array $record): bool => in_array(data_get($record, 'mov_processing.queue'), ['for_submission', 'for_review', 'for_release'], true))->merge($genericRecords)->unique(fn (array $record): string => $record['source'].':'.$record['source_id'])->values(),
                 'needs_correction' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
                 'release_history' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'release_history')->values(),
             ];
         }
         if ($user && $this->pambAccess->isCenro($user)) {
             return [
-                'for_submission' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_submission')->values(),
+                'for_submission' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_submission')->merge($genericRecords)->unique(fn (array $record): string => $record['source'].':'.$record['source_id'])->values(),
                 'for_review' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_review')->values(),
                 'needs_correction' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
                 'for_release' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release')->values(),
@@ -138,13 +170,40 @@ final class SubmissionTrackingService
         return ($snapshotRecords ?? $this->records())->pluck('module')->unique()->sort()->values()->all();
     }
 
-    public function transition(string $sourceKey, int $id, string $stage, string $date, ?int $userId): void
+    public function usesGenericRouting(string $sourceKey, int $id): bool
+    {
+        $source = $this->source($sourceKey);
+        if (! $source || $sourceKey === 'engp') return false;
+        $record = $source['model']::query()->findOrFail($id);
+        $this->genericRouting->assertCanView($record, $sourceKey, auth()->user());
+        return $this->usesGenericRecord($sourceKey, $record);
+    }
+
+    /** @return list<string> */
+    public function genericTransitionKeys(string $sourceKey, int $id): array
+    {
+        $source = $this->source($sourceKey);
+        abort_unless($source && $sourceKey !== 'engp', 404);
+        $record = $source['model']::query()->findOrFail($id);
+        $this->genericRouting->assertCanView($record, $sourceKey, auth()->user());
+        abort_unless($this->usesGenericRecord($sourceKey, $record), 422);
+        return $this->genericRouting->actionKeys($record, $sourceKey, auth()->user());
+    }
+
+    public function transition(string $sourceKey, int $id, string $stage, ?string $date, ?int $userId, ?string $remarks = null): void
     {
         $source = $this->source($sourceKey);
         abort_unless($source, 404);
         $recordQuery = $source['model']::query();
         if ($sourceKey === 'conservation') $recordQuery->with('protectedArea');
         $record = $recordQuery->findOrFail($id);
+        if ($sourceKey === 'engp' && $user = auth()->user()) {
+            abort_unless($this->organization->canViewDevelopmentRecord($user, $record), 403);
+        }
+        if ($this->usesGenericRecord($sourceKey, $record)) {
+            $this->genericRouting->transition($record, $sourceKey, $stage, $userId, $remarks);
+            return;
+        }
         if ($record instanceof ConservationReportSubmission && ($user = auth()->user())) {
             abort_unless($this->pambAccess->canView($user, $record), 403);
             if (($this->pambAccess->isCenro($user) || $this->pambAccess->isPamo($user))
@@ -171,13 +230,13 @@ final class SubmissionTrackingService
                 $component = collect($components)->first(fn (array $item): bool => ! in_array($item['key'], $existing, true));
                 if (! $component) throw ValidationException::withMessages(['date' => 'All CENRO release components are already recorded.']);
                 $record->releaseEvents()->create(['period_component' => $component['key'], 'component_label' => $component['label'], 'date_report_released_cenro' => $value]);
-                $this->auditTransition($sourceKey, $record, $source, $stage, $value);
+                $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);
                 return;
             }
             $release = $record->releaseEvents()->orderByDesc('date_report_released_cenro')->value('date_report_released_cenro');
             if ($release && $value < Carbon::parse($release)->toDateString()) throw ValidationException::withMessages(['date' => 'PENRO receipt cannot be earlier than CENRO release.']);
             $record->update(['date_received_penro' => $value, ...($userId ? ['updated_by' => $userId] : [])]);
-            $this->auditTransition($sourceKey, $record, $source, $stage, $value);
+            $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);
             return;
         }
         $this->validateChronology($record, $stage, $value);
@@ -193,7 +252,7 @@ final class SubmissionTrackingService
             $changes['updated_by'] = $userId;
         }
         DB::transaction(fn () => $record->update($changes));
-        $this->auditTransition($sourceKey, $record, $source, $stage, $value);
+        $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);
     }
 
     public function recordInternalRouting(string $sourceKey, int $id, string $stageKey, string $occurredAt, ?int $userId = null, ?string $remarks = null): void
@@ -212,14 +271,14 @@ final class SubmissionTrackingService
         return $this->sources()[$key] ?? null;
     }
 
-    private function auditTransition(string $sourceKey, Model $record, array $source, string $stage, string $date): void
+    private function auditTransition(string $sourceKey, Model $record, array $source, string $stage, string $date, ?int $userId = null): void
     {
         $metadata = $this->moduleMetadata($record, $source);
         $this->auditLogs->record('submission_tracking', match ($stage) {
             self::CENRO_RELEASE => 'CENRO Release Monitoring Event Recorded',
             self::PENRO_RECEIPT => 'PENRO Receipt Monitoring Event Recorded',
             default => 'Regional Endorsement Monitoring Event Recorded',
-        }, $sourceKey, $record->getKey(), $metadata['module_name'], 'Recorded '.$stage.' for '.$sourceKey.' record #'.$record->getKey().'.', ['date' => $date, 'stage' => $stage, 'program_area' => $metadata['program_area']]);
+        }, $sourceKey, $record->getKey(), $metadata['module_name'], 'Recorded '.$stage.' for '.$sourceKey.' record #'.$record->getKey().'.', ['date' => $date, 'stage' => $stage, 'program_area' => $metadata['program_area']], $userId);
     }
 
     /** @return array<string, array<string, mixed>> */
@@ -241,7 +300,7 @@ final class SubmissionTrackingService
 
     /** @param array<string, mixed> $source
      *  @return array<string, mixed> */
-    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = []): array
+    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection): array
     {
         $isEngp = $sourceKey === 'engp';
         $period = $isEngp
@@ -308,7 +367,67 @@ final class SubmissionTrackingService
         $data['routing_summary'] = $pambRouting['routing_summary'];
         $data['routing_summary_metrics'] = $pambRouting['summary_metrics'];
         $data['mov_processing'] = $sourceKey === 'conservation' ? $this->pambMov->present($record) : ['applicable' => false];
+        $data['routing'] = $sourceKey === 'conservation' && $pambRouting['applicable']
+            ? app(DocumentRoutingPresenter::class)->presentPamb($record, $pambRouting)
+            : app(DocumentRoutingPresenter::class)->present($record, $sourceKey, $routingAudits, $routingEvents);
+        if ($this->usesGenericRecord($sourceKey, $record)) {
+            $data['current_document_location'] = $data['routing']['current_location'];
+        }
         return $data;
+    }
+
+    /** @return array<string, Collection<int,AuditLog>> */
+    private function routingAudits(Collection $loaded): array
+    {
+        $items = $loaded;
+        if ($items->isEmpty()) return [];
+
+        $logs = AuditLog::query()
+            ->where('event_type', 'submission_tracking')
+            ->where(function ($query) use ($items): void {
+                foreach ($items->groupBy('key') as $source => $sourceItems) {
+                    $query->orWhere(fn ($inner) => $inner
+                        ->where('entity_type', $source)
+                        ->whereIn('entity_id', $sourceItems->pluck('record')->map(fn (Model $record): string => (string) $record->getKey())->all()));
+                }
+            })
+            ->with('user:id,name,section')
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->get();
+
+        return $logs->groupBy(fn (AuditLog $log): string => $log->entity_type.':'.$log->entity_id)->all();
+    }
+
+    /** @return array<string, Collection<int,DocumentRoutingEvent>> */
+    private function genericRoutingEvents(Collection $loaded): array
+    {
+        $items = $loaded->filter(fn (array $item): bool => $this->usesGenericRecord($item['key'], $item['record']));
+        if ($items->isEmpty()) return [];
+
+        $events = DocumentRoutingEvent::query()
+            ->where(function ($query) use ($items): void {
+                foreach ($items->groupBy('key') as $source => $sourceItems) {
+                    $query->orWhere(fn ($inner) => $inner
+                        ->where('source_type', $source)
+                        ->whereIn('source_id', $sourceItems->pluck('record')->map(fn (Model $record): string => (string) $record->getKey())->all()));
+                }
+            })
+            ->with('recordedBy:id,name,section')
+            ->orderBy('occurred_at')
+            ->orderBy('id')
+            ->get();
+
+        return $events->groupBy(fn (DocumentRoutingEvent $event): string => $event->source_type.':'.$event->source_id)->all();
+    }
+
+    private function usesGenericRecord(string $sourceKey, Model $record): bool
+    {
+        if ($sourceKey === 'engp') return false;
+        if ($sourceKey === 'conservation') {
+            return ! app(PambComplianceCalculator::class)->applies((string) $record->getAttribute('workflow_key'));
+        }
+        return true;
     }
 
 
@@ -401,6 +520,58 @@ final class SubmissionTrackingService
         }
 
         return strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' ? $url : null;
+    }
+
+    private function hasProtectedAreaColumn(string $modelClass): bool
+    {
+        return in_array($modelClass, [
+            \App\Models\BmsRecord::class,
+            \App\Models\BmsReportSubmission::class,
+            \App\Models\BamsReportSubmission::class,
+            \App\Models\ImeaAssessment::class,
+            \App\Models\ImeaReportSubmission::class,
+            \App\Models\ImeaFacilityMaintenanceReport::class,
+            \App\Models\Aws::class,
+            \App\Models\IpafManagementReport::class,
+            \App\Models\IpafRevenueCollection::class,
+            \App\Models\ManagementPlan::class,
+            \App\Models\TechnicalReport::class,
+        ], true);
+    }
+
+    /** Apply request filters before records are hydrated and normalized. */
+    private function applyDatabaseFilters($query, string $sourceKey, array $filters): void
+    {
+        $model = $query->getModel();
+        $schema = Schema::connection($model->getConnectionName());
+        $table = $model->getTable();
+
+        if (filled($filters['protected_area_id'] ?? null) && $this->hasProtectedAreaColumn($model::class)) {
+            $query->where($table.'.protected_area_id', (int) $filters['protected_area_id']);
+        }
+
+        $officeColumn = $sourceKey === 'engp' ? 'office' : 'target_office';
+        if (filled($filters['target_office'] ?? null) && $schema->hasColumn($table, $officeColumn)) {
+            $query->where($table.'.'.$officeColumn, $filters['target_office']);
+        }
+
+        $search = trim((string) ($filters['search'] ?? ''));
+        if ($search === '') return;
+
+        $searchColumns = array_values(array_filter([
+            'activity_name', 'document_type', 'target_office', 'office',
+            'station_name', 'station', 'report_type', 'period_label',
+        ], fn (string $column): bool => $schema->hasColumn($table, $column)));
+        if ($searchColumns === [] && ! $schema->hasColumn($table, 'protected_area_id')) return;
+
+        $query->where(function ($searchQuery) use ($search, $searchColumns, $schema, $table): void {
+            foreach ($searchColumns as $column) {
+                $searchQuery->orWhere($column, 'like', '%'.$search.'%');
+            }
+            if ($schema->hasColumn($table, 'protected_area_id')) {
+                $searchQuery->orWhereHas('protectedArea', fn ($areaQuery) => $areaQuery->where('name', 'like', '%'.$search.'%'));
+            }
+        });
     }
 
     /** @param array<string, mixed> $record */

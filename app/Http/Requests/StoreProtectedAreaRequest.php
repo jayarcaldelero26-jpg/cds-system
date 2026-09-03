@@ -66,6 +66,7 @@ class StoreProtectedAreaRequest extends FormRequest
             'description' => ['nullable', 'string'],
             'status' => ['required', Rule::in(['Active', 'Inactive', 'Proposed'])],
             'remarks' => ['nullable', 'string'],
+            'supervising_office_id' => ['required', 'integer', 'exists:organizational_offices,id'],
         ];
     }
 }
