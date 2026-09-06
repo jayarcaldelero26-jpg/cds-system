@@ -203,11 +203,16 @@ final class ProtectedAttachmentService
     public function descriptor(string $source, Model $record, string $key): ?array
     {
         $resolved = $this->resolveRecordAttachment($source, $record, $key);
-        if ($resolved === null || $resolved['path'] === null || $this->resolveDiskPath($resolved['path']) === null) {
+        if ($resolved === null || $resolved['path'] === null) {
             return null;
         }
 
-        $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size']);
+        $diskPath = $this->resolveDiskPath($resolved['path']);
+        if ($diskPath === null) {
+            return null;
+        }
+
+        $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size'], $diskPath);
 
         return [
             'key' => $key,
@@ -229,7 +234,7 @@ final class ProtectedAttachmentService
         $diskPath = $this->resolveDiskPath($resolved['path']);
         abort_unless($diskPath !== null, 404);
 
-        $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size']);
+        $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size'], $diskPath);
         $filename = $this->safeFilename($resolved['name'] ?: basename($resolved['path']));
         $disposition = $this->isInlineMime($info['mime_type'], $filename) ? 'inline' : 'attachment';
 
@@ -350,10 +355,10 @@ final class ProtectedAttachmentService
         return ltrim(str_replace('\\', '/', $path), '/');
     }
 
-    /** @return array{mime_type:string,size:int|null} */
-    private function fileInfo(string $path, mixed $mime, mixed $size): array
+    /** @return array{mime_type:string,size:int|null} @param array{absolute:string,disk:string}|null $diskPath */
+    private function fileInfo(string $path, mixed $mime, mixed $size, ?array $diskPath = null): array
     {
-        $diskPath = $this->resolveDiskPath($path);
+        $diskPath ??= $this->resolveDiskPath($path);
         $absolute = $diskPath['absolute'] ?? null;
         $detected = $absolute && function_exists('mime_content_type') ? mime_content_type($absolute) : false;
         $mimeType = is_string($mime) && $mime !== '' ? $mime : (is_string($detected) && $detected !== '' ? $detected : $this->mimeFromExtension($path));

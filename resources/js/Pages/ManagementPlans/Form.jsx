@@ -6,6 +6,7 @@ import PageHeader from '../../Components/PageHeader';
 import { formatReportDate } from '../../Utils/dateFormatters';
 import ManagementPlanAttachments, { useManagementPlanAttachments } from './Attachments';
 import TimelinessBadge, { isTimelinessValue } from '../../Components/TimelinessBadge';
+import SaveProgressIndicator from '@/Components/Attachments/SaveProgressIndicator';
 
 const labelClass = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
 const badgeClass = (value) => ({ 'Report Submitted': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
@@ -21,12 +22,12 @@ export default function Form({ title, managementPlan, managementPlanType, protec
   const change = (name) => (event) => form.setData(name, event.target.value);
   const calculated = managementPlan ? [['Deadline for Submission to PENRO', formatReportDate(managementPlan.deadline_submission)], ['Number of Days Complied', managementPlan.number_days_complied], ['Timeliness', managementPlan.timeliness], ['Status of Submission', managementPlan.submission_status], ['Total Number of Days Delayed at PENRO', managementPlan.total_days_delayed_penro]] : [];
   const trackerRoute = route('management-plans.types.show', managementPlanType.slug);
-  const submit = (event) => {event.preventDefault();const options = { forceFormData: true, preserveScroll: true };if (isEdit) {form.transform((data) => ({ ...data, _method: 'patch' }));form.post(route('management-plans.types.reports.update', [managementPlanType.slug, managementPlan.id]), options);} else {form.transform((data) => data);form.post(route('management-plans.types.reports.store', managementPlanType.slug), options);}};
+  const submit = (event) => {event.preventDefault();if (form.processing) return;const options = { forceFormData: true, preserveScroll: true };if (isEdit) {form.transform((data) => ({ ...data, _method: 'patch' }));form.post(route('management-plans.types.reports.update', [managementPlanType.slug, managementPlan.id]), options);} else {form.transform((data) => data);form.post(route('management-plans.types.reports.store', managementPlanType.slug), options);}};
 
   return <AuthenticatedLayout title={title || (isEdit ? 'Edit Management Plan Submission' : 'Add Management Plan Submission')}>
         <PageHeader title={isEdit ? `Edit ${managementPlanType.name} Report Submission` : `Add ${managementPlanType.name} Report Submission`} description={isEdit ? 'Update submission details and review supporting documents side-by-side.' : `Record a report submission for ${managementPlanType.name}.`} actions={<Link href={trackerRoute} className="rounded-xl bg-white/10 px-4 py-2.5 text-xs font-bold text-white transition hover:bg-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-white">← Back to {managementPlanType.name}</Link>} />
         <div className="mt-6 grid items-start gap-6 xl:grid-cols-12">
-            <Card className="xl:col-span-7"><form onSubmit={submit} className="space-y-5">
+            <Card className="xl:col-span-7"><form onSubmit={submit} className="space-y-5"><SaveProgressIndicator processing={form.processing} progress={form.progress} />
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-xs text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300"><span className="font-semibold">Plan:</span> <span className="font-bold">{managementPlanType.name}</span></div>
                 <CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className={labelClass}><FloatingInput id="form-target-office" label="Target Office" required value={form.data.target_office} onChange={change('target_office')} />{error('target_office')}</div>

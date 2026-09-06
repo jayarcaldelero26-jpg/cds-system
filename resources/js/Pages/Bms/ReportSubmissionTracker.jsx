@@ -118,6 +118,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   };
   const submit = (event) => {
     event.preventDefault();
+    if (form.processing) return;
     const options = { forceFormData: true, preserveScroll: true, onSuccess: closeAll };
     if (modal === 'edit' || modal === 'mov') {
       form.transform((data) => ({ ...data, _method: 'put' }));
@@ -202,11 +203,11 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
             </div>}
         </CrudDetailsModal>
 
-        <CrudFormModal open={modal === 'mov'} mode="edit" title={detailsMov ? 'Replace Report Attachment' : 'Attach Report'} subtitle="Attach or replace the primary report document." onClose={backFromForm} onSubmit={submit} processing={form.processing} errors={form.errors} saveLabel={detailsMov ? 'Replace Attachment' : 'Attach Report'} maxWidth="max-w-xl">
+        <CrudFormModal open={modal === 'mov'} mode="edit" title={detailsMov ? 'Replace Report Attachment' : 'Attach Report'} subtitle="Attach or replace the primary report document." onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} saveLabel={detailsMov ? 'Replace Attachment' : 'Attach Report'} maxWidth="max-w-xl">
             <CrudSection title={reportAttachmentLabel}><FileAttachmentPanel id="reportsubmissiontracker-mov" label={reportAttachmentLabel} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={detailsMov ? [detailsMov] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /></CrudSection>
         </CrudFormModal>
 
-        <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} icon={workflowConfig ? undefined : '\uD83D\uDCCB'} title={modal === 'edit' ? `Edit ${moduleLabel} Report Submission` : `Add ${moduleLabel} Report Submission`} subtitle={modal === 'edit' ? 'Update report details and review the MOV side-by-side.' : 'Report compliance details and supporting MOV.'} onClose={backFromForm} onSubmit={submit} processing={form.processing} errors={form.errors} canDelete={modal === 'edit' && canDelete} onDelete={() => requestDelete(selectedReport)} saveLabel={modal === 'edit' ? 'Save Changes' : 'Save Report'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}>
+        <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} icon={workflowConfig ? undefined : '\uD83D\uDCCB'} title={modal === 'edit' ? `Edit ${moduleLabel} Report Submission` : `Add ${moduleLabel} Report Submission`} subtitle={modal === 'edit' ? 'Update report details and review the MOV side-by-side.' : 'Report compliance details and supporting MOV.'} onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} canDelete={modal === 'edit' && canDelete} onDelete={() => requestDelete(selectedReport)} saveLabel={modal === 'edit' ? 'Save Changes' : 'Save Report'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}>
             <CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className={label}><FloatingInput id="reportsubmissiontracker-target-office" label="Target Office" value={form.data.target_office} onChange={change('target_office')} />{error('target_office')}</div>
                 <div className={label}><FloatingSelect id="reportsubmissiontracker-name-of-pa" label="Name of PA" value={form.data.protected_area_id} onChange={change('protected_area_id')}><option value="">Select Protected Area</option>{protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</FloatingSelect>{error('protected_area_id')}</div>
