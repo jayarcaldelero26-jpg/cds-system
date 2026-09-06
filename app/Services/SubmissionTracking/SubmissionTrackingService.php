@@ -21,6 +21,7 @@ use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Modules\ModuleMetadataResolver;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Support\DatePresentationNormalizer;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
@@ -234,7 +235,7 @@ final class SubmissionTrackingService
                 return;
             }
             $release = $record->releaseEvents()->orderByDesc('date_report_released_cenro')->value('date_report_released_cenro');
-            if ($release && $value < Carbon::parse($release)->toDateString()) throw ValidationException::withMessages(['date' => 'PENRO receipt cannot be earlier than CENRO release.']);
+            if (($releaseDate = DatePresentationNormalizer::toDateString($release)) && $value < $releaseDate) throw ValidationException::withMessages(['date' => 'PENRO receipt cannot be earlier than CENRO release.']);
             $record->update(['date_received_penro' => $value, ...($userId ? ['updated_by' => $userId] : [])]);
             $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);
             return;
@@ -310,7 +311,7 @@ final class SubmissionTrackingService
             $period = Carbon::create()->month((int) $record->getAttribute('reporting_month'))->format('F').' '.$record->getAttribute('reporting_year');
         }
         $directPenro = ! $isEngp && $this->routingPolicy->isDirectPenro($record);
-        $releaseDate = $isEngp ? $record->releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last() : ($record->getAttribute('date_report_released_cenro') ? Carbon::parse($record->getAttribute('date_report_released_cenro'))->toDateString() : null);
+        $releaseDate = $isEngp ? $record->releaseEvents->map(fn (Model $event): ?string => DatePresentationNormalizer::toDateString($event->getRawOriginal('date_report_released_cenro')))->filter()->sort()->last() : $this->date($record, 'date_report_released_cenro');
         $dates = $isEngp
             ? ['date_received_penro']
             : ($sourceKey === 'conservation'
@@ -330,7 +331,7 @@ final class SubmissionTrackingService
             'program' => $metadata['program_area'],
             'program_area' => $metadata['program_area'],
             'reporting_year' => $record->getAttribute('reporting_year'),
-            'date_conducted' => $record->getAttribute('date_conducted'),
+            'date_conducted' => $this->text($record, 'date_conducted'),
             'date_accomplished' => null,
             'reporting_period' => $period,
             'deadline_submission' => $record->getAttribute('deadline_submission'),
@@ -349,8 +350,7 @@ final class SubmissionTrackingService
             'cenro_release_applicable' => ! $directPenro,
         ];
         foreach ($dates as $field) {
-            $value = $record->getAttribute($field);
-            $data[$field] = $value ? Carbon::parse($value)->toDateString() : null;
+            $data[$field] = $field === 'date_conducted' ? $this->text($record, $field) : $this->date($record, $field);
         }
         $data['date_report_released_cenro'] = $releaseDate;
         $data['date_endorsed_regional'] = $isEngp ? null : ($data['date_endorsed_regional'] ?? null);
@@ -475,12 +475,12 @@ final class SubmissionTrackingService
     {
         $terminalStage = $this->terminalStage($record);
         $value = match ($terminalStage) {
-            self::PENRO_RECEIPT => $record->getAttribute('date_received_penro'),
-            self::REGIONAL_ENDORSEMENT => $record->getAttribute('date_endorsed_regional'),
+            self::PENRO_RECEIPT => $record->getRawOriginal('date_received_penro'),
+            self::REGIONAL_ENDORSEMENT => $record->getRawOriginal('date_endorsed_regional'),
             default => null,
         };
 
-        return $value ? Carbon::parse($value)->toDateString() : null;
+        return DatePresentationNormalizer::toDateString($value);
     }
 
     private function terminalStage(Model $record): string
@@ -509,10 +509,18 @@ final class SubmissionTrackingService
 
     private function date(Model $record, string $field): ?string
     {
-        $value = $record->getAttribute($field);
-        return $value ? Carbon::parse($value)->toDateString() : null;
+        return DatePresentationNormalizer::toDateString($record->getRawOriginal($field));
     }
 
+
+    private function text(Model $record, string $field): ?string
+    {
+        $value = $record->getRawOriginal($field);
+
+        return $value === null || $value === ''
+            ? null
+            : (is_scalar($value) ? (string) $value : DatePresentationNormalizer::toDateString($value));
+    }
     private function safeExternalUrl(?string $url): ?string
     {
         if (! is_string($url) || ! filter_var($url, FILTER_VALIDATE_URL)) {

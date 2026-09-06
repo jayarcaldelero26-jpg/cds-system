@@ -6,6 +6,7 @@ use App\Models\EngpReportSubmission;
 use App\Models\ConservationReportSubmission;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Support\DatePresentationNormalizer;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -57,7 +58,7 @@ final class RoutingStatusPresenter
                 return SubmissionTrackingService::CENRO_RELEASE;
             }
 
-            return $record->getAttribute('date_received_penro')
+            return $this->date($record, 'date_received_penro')
                 ? 'endorsed'
                 : SubmissionTrackingService::PENRO_RECEIPT;
         }
@@ -68,7 +69,7 @@ final class RoutingStatusPresenter
         $readyWithoutAccomplishment = $sourceKey === 'revenue';
         $activityDate = $record instanceof ConservationReportSubmission && $this->pambCompliance->applies($record->workflow_key)
             ? $this->pambCompliance->authoritativeDate($record)
-            : $record->getAttribute('date_accomplished');
+            : $this->date($record, 'date_accomplished');
         if (! $readyWithoutAccomplishment && ! $activityDate && ! $hasRoutingDate) {
             return 'not_ready';
         }
@@ -104,6 +105,6 @@ final class RoutingStatusPresenter
 
     private function date(Model $record, string $field): mixed
     {
-        return $record->getAttribute($field);
+        return DatePresentationNormalizer::toDateString($record->getRawOriginal($field) ?? $record->getAttribute($field));
     }
 }

@@ -146,3 +146,30 @@ test('PAMO origin enters PENRO custody without a fabricated CENRO route', functi
     performRouting($service, $report, 'forward_from_pamo', $areaOwner);
     expect($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS);
 });
+
+test('legacy milestone state starts the canonical routing timeline at its current stage', function (): void {
+    routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = routingReport();
+    $deadline = $report->deadline_submission;
+    $report->update([
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+    ]);
+
+    $record = $report->fresh();
+    $state = app(DocumentRoutingTransitionService::class)->presentation($record, 'bms', collect());
+
+    expect($state)->toHaveKeys(['stage', 'bootstrapped', 'events', 'profile', 'actions', 'allowed_actions', 'capabilities'])
+        ->and($state['bootstrapped'])->toBeTrue()
+        ->and($state['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($state['events'])->toBeEmpty();
+
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)->present($record, 'bms', collect(), collect());
+    $canonicalTimeline = collect($routing['timeline'])->filter(fn (array $item): bool => ! str_starts_with($item['key'], 'legacy:'))->values();
+
+    expect($canonicalTimeline->first()['key'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($canonicalTimeline->first()['status'])->toBe('current')
+        ->and($routing['current_location'])->toBe('PENRO Records Unit')
+        ->and($record->fresh()->deadline_submission)->toBe($deadline)
+        ->and($record->fresh()->date_received_penro->toDateString())->toBe('2026-08-05');
+});

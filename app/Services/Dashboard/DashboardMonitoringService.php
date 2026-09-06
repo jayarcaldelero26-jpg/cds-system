@@ -3,6 +3,7 @@
 namespace App\Services\Dashboard;
 
 use App\Support\OfficeProtectedAreaPresenter;
+use App\Support\DatePresentationNormalizer;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -141,7 +142,7 @@ final class DashboardMonitoringService
         }
 
         try {
-            return CarbonImmutable::parse($value, self::TIMEZONE)->startOfDay();
+            return ($date = DatePresentationNormalizer::toDateString($value)) ? CarbonImmutable::createFromFormat('!Y-m-d', $date, self::TIMEZONE) : null;
         } catch (Throwable) {
             return null;
         }

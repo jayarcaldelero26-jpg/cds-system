@@ -8,6 +8,7 @@ use App\Models\EngpReportSubmission;
 use App\Services\BusinessCalendarService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Support\DatePresentationNormalizer;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -82,6 +83,7 @@ final class DocumentRoutingPresenter
         $state = app(DocumentRoutingTransitionService::class)->presentation($record, $sourceKey, $routingEvents, auth()->user());
         $profile = $state['profile'];
         $actions = collect($state['actions']);
+        $currentStage = (string) $state['stage'];
         $start = $state['stage'] === DocumentRoutingProfileRegistry::PAMO_ORIGIN
             ? DocumentRoutingProfileRegistry::PAMO_ORIGIN
             : ($profile['key'] === 'canonical_direct_penro' ? DocumentRoutingProfileRegistry::PENRO_ORIGIN : DocumentRoutingProfileRegistry::PREPARATION);
@@ -283,7 +285,7 @@ final class DocumentRoutingPresenter
 
     private function date(mixed $value): ?CarbonImmutable
     {
-        return blank($value) ? null : CarbonImmutable::parse($value, BusinessCalendarService::TIMEZONE)->startOfDay();
+        return ($date = DatePresentationNormalizer::toDateString($value)) ? CarbonImmutable::createFromFormat('!Y-m-d', $date, BusinessCalendarService::TIMEZONE) : null;
     }
 
     private function pambEventType(array $event): string
