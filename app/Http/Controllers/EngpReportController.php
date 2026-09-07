@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\EngpReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Engp\EngpMonitoringStatusResolver;
 use App\Services\Authorization\OrganizationalAccessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -20,7 +21,7 @@ use Throwable;
 
 class EngpReportController extends Controller
 {
-    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
+    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses) {}
 
     public function index(Request $request, ?string $workflow = null): Response
     {
@@ -44,6 +45,10 @@ class EngpReportController extends Controller
                 $q->where(fn ($inner) => $inner->where('office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('section_name', 'like', "%{$search}%"));
             });
         $rows = $query->with('releaseEvents')->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString()->through(fn (EngpReportSubmission $row) => $this->data($row));
+        $offices = collect($config['offices'] ?? $this->allOffices())
+            ->filter(fn (string $office): bool => $this->organization->canUseDevelopmentOffice($request->user(), $office))
+            ->values()
+            ->all();
 
         return Inertia::render('Engp/Index', [
             'workflow' => $workflow,
@@ -51,9 +56,9 @@ class EngpReportController extends Controller
             'workflows' => $this->workflows->all(),
             'submissions' => $rows,
             'periods' => $config ? $this->workflows->periods($workflow, $year) : [],
-            'offices' => $config['offices'] ?? $this->allOffices(),
+            'offices' => $offices,
             'filters' => $request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']),
-            'summary' => $workflow ? null : $this->summary($year),
+            'summary' => $workflow ? null : $this->summary($year, $request->user()),
             'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with('releaseEvents')->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
         ]);
     }
@@ -190,10 +195,22 @@ class EngpReportController extends Controller
     {
         $data = collect($record->toArray())->except(['mov_file_path'])->all();
         $externalUrl = $this->safeExternalUrl($record->mov_external_url);
+        $monitoringStatus = $this->monitoringStatuses->resolve($record->deadline_submission?->toDateString(), $record->date_received_penro?->toDateString());
+        $releaseEvents = $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values();
         $mov = $record->mov_file_path
             ? $this->attachments->descriptor('engp-report', $record, 'mov')
             : ($externalUrl ? ['name' => 'External MOV reference', 'mime_type' => null, 'type' => null, 'size' => null, 'url' => $externalUrl, 'external' => true] : null);
-        return [...$data, 'workflow_label' => $record->workflow()['label'] ?? 'ENGP Report', 'release_events' => $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values(), 'mov' => $mov];
+        return [...$data,
+            'workflow_label' => $record->workflow()['label'] ?? 'ENGP Report',
+            'monitoring_status_key' => $monitoringStatus['key'],
+            'monitoring_status' => $monitoringStatus['label'],
+            'record_source' => 'Actual encoded submission',
+            'submission_matched' => true,
+            'date_released_cenro' => $releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last(),
+            'release_events' => $releaseEvents,
+            'mov_status' => $mov ? 'Recorded' : 'Not yet recorded',
+            'mov' => $mov,
+        ];
     }
 
     private function safeExternalUrl(?string $url): ?string
@@ -205,9 +222,19 @@ class EngpReportController extends Controller
         return strtolower((string) parse_url($url, PHP_URL_SCHEME)) === 'https' ? $url : null;
     }
 
-    private function summary(int $year): array
+    private function summary(int $year, \App\Models\User $user): array
     {
-        return collect($this->workflows->keys())->reject(fn (string $key): bool => $key === 'weekly_accomplishment')->map(fn (string $key): array => ['workflow_key' => $key, 'label' => $this->workflows->find($key)['label'], 'records' => EngpReportSubmission::query()->where('workflow_key', $key)->where('reporting_year', $year)->count()])->values()->all();
+        return collect($this->workflows->keys())
+            ->reject(fn (string $key): bool => $key === 'weekly_accomplishment')
+            ->map(function (string $key) use ($year, $user): array {
+                $query = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $user);
+
+                return [
+                    'workflow_key' => $key,
+                    'label' => $this->workflows->find($key)['label'],
+                    'records' => $query->where('workflow_key', $key)->where('reporting_year', $year)->count(),
+                ];
+            })->values()->all();
     }
 
     private function allOffices(): array

@@ -16,13 +16,14 @@ use App\Models\LawinMonitoring;
 use App\Models\CdsLawinMonitoring;
 use App\Models\Aws;
 use App\Services\Dashboard\DashboardMonitoringService;
+use App\Services\Dashboard\EngpDashboardMonitoringService;
 use Carbon\Carbon;
 use Inertia\Inertia;
 use App\Services\Authorization\OrganizationalAccessService;
 
 class DashboardController extends Controller
 {
-    public function __construct(private readonly DashboardMonitoringService $monitoring) {}
+    public function __construct(private readonly DashboardMonitoringService $monitoring, private readonly EngpDashboardMonitoringService $engpMonitoring) {}
 
     public function index(Request $request)
     {
@@ -32,22 +33,39 @@ class DashboardController extends Controller
             return Inertia::render('Auth/WaitingApproval');
         }
 
-        {
-            $dashboard = $this->monitoring->overview($request->only([
-                'year', 'program', 'office', 'period', 'page',
-            ]));
+        if ($request->string('view')->toString() === 'combined') {
+            return redirect()->route('dashboard', ['view' => 'pa']);
+        }
 
-            // Retained for existing authorized-navigation consumers; the new
-            // monitoring dashboard itself uses the normalized live report rows.
-            $organization = app(OrganizationalAccessService::class);
-            $dashboard['protectedAreasCount'] = match ($organization->unitFor($user)) {
-                OrganizationalAccessService::DEVELOPMENT => 0,
-                default => $user->section === 'PAMO' && $user->protected_area_id
-                    ? ProtectedArea::whereKey($user->protected_area_id)->count()
-                    : $organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id')->count(),
-            };
+        $view = in_array($request->string('view')->toString(), ['pa', 'engp'], true)
+            ? $request->string('view')->toString()
+            : 'pa';
+        $organization = app(OrganizationalAccessService::class);
+        $protectedAreasCount = match ($organization->unitFor($user)) {
+            OrganizationalAccessService::DEVELOPMENT => 0,
+            default => $user->section === 'PAMO' && $user->protected_area_id
+                ? ProtectedArea::whereKey($user->protected_area_id)->count()
+                : $organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id')->count(),
+        };
+        $filters = $request->only(['year', 'program', 'office', 'protected_area_id', 'report_type', 'period', 'frequency', 'search', 'page']);
 
-            return Inertia::render('Dashboard', $dashboard);
+        if ($view === 'pa') {
+            return Inertia::render('Dashboard', [
+                // Force the operational dashboard to the PA tracking domain
+                // before the dashboard service aggregates or paginates rows.
+                ...$this->monitoring->overview([...$filters, 'program' => 'conservation']),
+                'view' => $view,
+                'protectedAreasCount' => $protectedAreasCount,
+            ]);
+        }
+
+        $engp = $this->engpMonitoring->overview($filters);
+        if ($view === 'engp') {
+            return Inertia::render('Dashboard', [
+                'view' => $view,
+                'engp' => $engp,
+                'protectedAreasCount' => $protectedAreasCount,
+            ]);
         }
 
         // ============================================================
@@ -904,4 +922,5 @@ class DashboardController extends Controller
                 $semester2Count,
         ]);
     }
+
 }

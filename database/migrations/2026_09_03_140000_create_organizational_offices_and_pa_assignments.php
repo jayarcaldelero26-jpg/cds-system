@@ -45,7 +45,7 @@ return new class extends Migration
         $now = now();
         DB::table('organizational_offices')->insert([
             ['code' => 'cenro_baganga', 'name' => 'CENRO Baganga', 'office_type' => 'cenro', 'is_active' => true, 'created_at' => $now, 'updated_at' => $now],
-            ['code' => 'cenro_cateel', 'name' => 'CENRO Cateel', 'office_type' => 'cenro', 'is_active' => true, 'created_at' => $now, 'updated_at' => $now],
+            ['code' => 'cenro_manay', 'name' => 'CENRO Manay', 'office_type' => 'cenro', 'is_active' => true, 'created_at' => $now, 'updated_at' => $now],
             ['code' => 'cenro_lupon', 'name' => 'CENRO Lupon', 'office_type' => 'cenro', 'is_active' => true, 'created_at' => $now, 'updated_at' => $now],
             ['code' => 'cenro_mati', 'name' => 'CENRO Mati', 'office_type' => 'cenro', 'is_active' => true, 'created_at' => $now, 'updated_at' => $now],
             ['code' => 'penro_davao_oriental', 'name' => 'PENRO Davao Oriental', 'office_type' => 'penro', 'is_active' => true, 'created_at' => $now, 'updated_at' => $now],

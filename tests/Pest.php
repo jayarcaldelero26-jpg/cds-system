@@ -2,6 +2,8 @@
 
 use App\Services\BusinessCalendarService;
 
+use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -21,6 +23,8 @@ pest()->extend(TestCase::class)
     ->in('Feature');
 
 afterEach(function (): void {
+    Carbon::setTestNow();
+    CarbonImmutable::setTestNow();
     BusinessCalendarService::forgetCache();
 });
 

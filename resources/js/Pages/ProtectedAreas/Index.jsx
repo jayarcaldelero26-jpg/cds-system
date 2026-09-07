@@ -37,7 +37,7 @@ function DetailItem({ label, value, className = '' }) {
 
 }
 
-export default function Index({ protectedAreas, filters }) {
+export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   const { auth } = usePage().props;
 
   const [search, setSearch] = useState(filters.search || '');
@@ -656,7 +656,7 @@ export default function Index({ protectedAreas, filters }) {
         onConfirm={deleteProtectedArea}
         processing={deleting} />
 
-            {createOpen && <ProtectedAreaForm modal onClose={() => setCreateOpen(false)} title="Add Protected Area" />}
+            {createOpen && <ProtectedAreaForm modal onClose={() => setCreateOpen(false)} title="Add Protected Area" officeOptions={officeOptions} />}
 
         </AuthenticatedLayout>);
 

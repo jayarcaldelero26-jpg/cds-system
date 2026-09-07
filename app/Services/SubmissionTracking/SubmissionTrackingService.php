@@ -41,7 +41,14 @@ final class SubmissionTrackingService
     /** @return Collection<int, array<string, mixed>> */
     public function records(array $filters = [], ?int $limitPerSource = null): Collection
     {
-        $loaded = collect($this->sources())
+        $sources = $this->sources();
+        if (($filters['program'] ?? null) === 'conservation') {
+            unset($sources['engp']);
+        } elseif (($filters['program'] ?? null) === 'engp') {
+            $sources = array_intersect_key($sources, ['engp' => true]);
+        }
+
+        $loaded = collect($sources)
             ->flatMap(function (array $source, string $key) use ($filters, $limitPerSource) {
                 $query = $source['model']::query();
                 if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');

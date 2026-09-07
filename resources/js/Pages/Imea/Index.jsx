@@ -5,6 +5,7 @@ import Card from '@/Components/Card';
 import StatusBadge from '@/Components/StatusBadge';
 import PageHeader from '@/Components/PageHeader';
 import Tooltip from '@/Components/Tooltip';
+import WorkflowTabs from './WorkflowTabs';
 
 export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
   const { props } = usePage();
@@ -89,6 +90,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
   const openViewAssessmentModal = (row) => {
     setSelectedAssessment(row);
     setAttachedFiles([]);
+    setAttachmentError('');
 
     let rawFiles = [];
     const possibleValues = [row.attachments, row.file_path, row.attachment, row.file, row.documents, row.document, row.media];
@@ -286,22 +288,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
             <PageHeader
         title="Integrated Protected Area Ecotourism Monitoring (IMEA)"
-        description="Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs."
-        actions={
-        activeTab === 'assessments' ?
-        <>
-                            <Link href="/imea/report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📊 View Summary Report</Link>
-                            {canCreate && <Link href="/imea/create" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">+ Add IMEA Assessment</Link>}
-                        </> :
+        description="Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs." />
 
-        <div className="flex items-center gap-2">
-                            <Link href="/imea/facilities-report" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📊 View Facilities Summary Report</Link>
-                            {canImport && <button onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center justify-center rounded-xl bg-blue-600/80 hover:bg-blue-600 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">📥 Import CSV</button>}
-                            {canCreate && <button onClick={() => openFacilityModal()} className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap">+ Add Facility / Infrastructure</button>}
-                        </div>
-
-        } />
-
+            <WorkflowTabs active="facilities" />
 
             {/* TAB 1: IMEA ASSESSMENTS */}
             {activeTab === 'assessments' &&
@@ -347,6 +336,11 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
             {/* TAB 2: FACILITIES & INFRASTRUCTURES INVENTORY */}
             {activeTab === 'facilities' &&
       <>
+                    <div className="mt-3 mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                        <Link href="/imea/facilities-report" className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 shadow-sm transition hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">📊 View Facilities Summary Report</Link>
+                        {canImport && <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm transition hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">📥 Import CSV</button>}
+                        {canCreate && <button type="button" onClick={() => openFacilityModal()} className="inline-flex items-center justify-center rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-green-800">+ Add Facility / Infrastructure</button>}
+                    </div>
                     <div className="mb-4">
                         <Card className="border border-gray-100 dark:border-gray-800 shadow-md rounded-2xl bg-white dark:bg-gray-900 p-4">
                             <div className="flex flex-col sm:flex-row sm:items-end gap-3">

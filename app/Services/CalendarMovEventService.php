@@ -15,6 +15,7 @@ use App\Models\ManagementPlan;
 use App\Models\ModuleDefinition;
 use App\Models\User;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use Carbon\CarbonImmutable;
@@ -29,6 +30,7 @@ final class CalendarMovEventService
         private readonly ProtectedAttachmentService $attachments,
         private readonly ConservationReportWorkflowRegistry $conservationWorkflows,
         private readonly EngpReportWorkflowRegistry $engpWorkflows,
+        private readonly OrganizationalAccessService $organization,
     ) {}
 
     /** @return list<array{key:string,label:string}> */
@@ -55,13 +57,16 @@ final class CalendarMovEventService
 
         collect($this->sources())
             ->filter(fn (array $source, string $key): bool => ($module === null || $module === $key) && $user->can($source['ability']))
-            ->each(function (array $source, string $key) use (&$months, &$activeModules, $year, $protectedAreaId): void {
+            ->each(function (array $source, string $key) use (&$months, &$activeModules, $year, $protectedAreaId, $user): void {
                 if ($protectedAreaId !== null && $source['protected_area'] === null) {
                     return;
                 }
 
                 $query = $source['model']::query()
                     ->whereBetween($source['date'], [$year->startOfYear()->toDateString(), $year->endOfYear()->toDateString()]);
+                if ($key === 'engp') {
+                    $this->organization->scopeDevelopmentQuery($query, $user);
+                }
                 if ($source['protected_area'] !== null && $protectedAreaId !== null) {
                     $query->where($source['protected_area'], $protectedAreaId);
                 }
@@ -110,13 +115,16 @@ final class CalendarMovEventService
 
         return collect($this->sources())
             ->filter(fn (array $source, string $key): bool => ($module === null || $module === $key) && $user->can($source['ability']))
-            ->flatMap(function (array $source, string $key) use ($start, $end, $protectedAreaId): Collection {
+            ->flatMap(function (array $source, string $key) use ($start, $end, $protectedAreaId, $user): Collection {
                 if ($protectedAreaId !== null && $source['protected_area'] === null) {
                     return collect();
                 }
 
                 $query = $source['model']::query()
                     ->whereBetween($source['date'], [$start, $end]);
+                if ($key === 'engp') {
+                    $this->organization->scopeDevelopmentQuery($query, $user);
+                }
 
                 if ($source['protected_area'] !== null) {
                     $query->when($protectedAreaId !== null, fn ($query) => $query->where($source['protected_area'], $protectedAreaId))

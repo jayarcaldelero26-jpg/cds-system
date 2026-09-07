@@ -3,6 +3,7 @@ import { useForm, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import Tooltip from '@/Components/Tooltip';
+import PageHeader from '@/Components/PageHeader';
 
 export default function ImeaCreate({ protectedAreas }) {
   const [attachedFiles, setAttachedFiles] = useState([]);
@@ -66,23 +67,20 @@ export default function ImeaCreate({ protectedAreas }) {
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
             `}</style>
 
-            {/* Management Plan Style Gradient Header Banner */}
-            <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md mb-6">
-                <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
-
-                <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    <div>
-                        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-white">Add IMEA Assessment</h1>
-                        <p className="text-xs sm:text-sm text-green-100 mt-1">Record a new integrated protected area ecotourism impact assessment.</p>
-                    </div>
+            <PageHeader
+                title="Add IMEA Assessment"
+                description="Record a new integrated protected area ecotourism impact assessment."
+                icon="solar:leaf-linear"
+                className="mb-6"
+                actions={
                     <Link
             href="/imea"
             className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition whitespace-nowrap backdrop-blur-xs">
 
                         ← Back to List
                     </Link>
-                </div>
-            </div>
+                }
+            />
 
             {/* SPLIT LAYOUT: FORM SA LEFT (SPAN 7), LIVE PREVIEW SA RIGHT (SPAN 5) */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">

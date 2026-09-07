@@ -3,6 +3,7 @@
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -88,4 +89,75 @@ test('dashboard reports the protected area total and authorized navigation route
 
     $this->get(route('protected-areas.index'))->assertOk();
     $this->get(route('protected-areas.create'))->assertOk();
+});
+
+test('protected area forms expose active organizational offices without retired Cateel options', function (): void {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+
+    $this->actingAs($admin)->get(route('protected-areas.index'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('officeOptions', fn ($options): bool => $options->pluck('name')->all() === [
+                'CENRO Baganga',
+                'CENRO Lupon',
+                'CENRO Manay',
+                'CENRO Mati',
+                'PENRO Davao Oriental',
+                'PENRO Mati',
+            ])
+            ->where('officeOptions', fn ($options): bool => $options->pluck('name')->doesntContain('CENRO Cateel')));
+
+    $this->actingAs($admin)->get(route('protected-areas.create'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('officeOptions.0.name', 'CENRO Baganga'));
+});
+
+test('protected area edit form binds existing, preserves unassigned, and updates one supervising assignment', function (): void {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+    $baganga = OrganizationalOffice::where('code', 'cenro_baganga')->firstOrFail();
+    $mati = OrganizationalOffice::where('code', 'cenro_mati')->firstOrFail();
+    $penro = OrganizationalOffice::where('code', 'penro_davao_oriental')->firstOrFail();
+    $aliwagwag = ProtectedArea::create([...protectedAreaPayload(['name' => 'Aliwagwag Protected Landscape']), 'created_by' => $admin->id, 'updated_by' => $admin->id]);
+    $mhrws = ProtectedArea::create([...protectedAreaPayload(['name' => 'Mt. Hamiguitan Range Wildlife Sanctuary']), 'created_by' => $admin->id, 'updated_by' => $admin->id]);
+    $unassigned = ProtectedArea::create([...protectedAreaPayload(['name' => 'Unassigned Protected Area']), 'created_by' => $admin->id, 'updated_by' => $admin->id]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $aliwagwag->id,
+        'organizational_office_id' => $baganga->id,
+        'assignment_type' => 'supervising',
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $mhrws->id,
+        'organizational_office_id' => $penro->id,
+        'assignment_type' => 'supervising',
+    ]);
+
+    $this->actingAs($admin)->get(route('protected-areas.edit', $aliwagwag))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('protectedArea.supervising_office_id', $baganga->id)
+            ->where('protectedArea.supervising_office_name', 'CENRO Baganga'));
+
+    $this->actingAs($admin)->get(route('protected-areas.edit', $mhrws))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('protectedArea.supervising_office_id', $penro->id)
+            ->where('protectedArea.supervising_office_name', 'PENRO Davao Oriental'));
+
+    $this->actingAs($admin)->get(route('protected-areas.edit', $unassigned))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('protectedArea.supervising_office_id', null)
+            ->where('officeOptions.0.name', 'CENRO Baganga'));
+
+    $this->actingAs($admin)->patch(route('protected-areas.update', $aliwagwag), protectedAreaPayload([
+        'name' => 'Aliwagwag Protected Landscape',
+        'supervising_office_id' => $mati->id,
+    ]))->assertRedirect(route('protected-areas.index'));
+
+    expect(ProtectedAreaOfficeAssignment::query()
+        ->where('protected_area_id', $aliwagwag->id)
+        ->where('assignment_type', 'supervising')
+        ->count())->toBe(1)
+        ->and(ProtectedAreaOfficeAssignment::query()
+            ->where('protected_area_id', $aliwagwag->id)
+            ->where('assignment_type', 'supervising')
+            ->value('organizational_office_id'))->toBe($mati->id);
 });

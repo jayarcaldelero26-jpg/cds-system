@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import Tooltip from '@/Components/Tooltip';
+import PageHeader from '@/Components/PageHeader';
 
 export default function FacilitiesReport({
   totalFacilities,
@@ -133,14 +134,12 @@ export default function FacilitiesReport({
                     </p>
                 </div>
 
-                {/* Header Banner (Normal view) */}
-                <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md mb-6 no-print">
-                    <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <h1 className="text-2xl font-bold tracking-tight text-white">Facilities & Infrastructures Inventory Report</h1>
-                            <p className="mt-1 text-sm text-green-100">Consolidated zoning and infrastructure records ({currentInventoryDateDisplay}).</p>
-                        </div>
-                        <div className="flex items-center gap-3">
+                <PageHeader
+                    title="Facilities & Infrastructures Inventory Report"
+                    description={`Consolidated zoning and infrastructure records (${currentInventoryDateDisplay}).`}
+                    icon="solar:buildings-2-linear"
+                    className="mb-6 no-print"
+                    actions={<div className="flex flex-wrap items-center gap-3">
                             {canExportImea &&
               <a
                 href={`/imea/facilities-export?protected_area_id=${selectedPA}&zone=${selectedZone}&inventory_date=${selectedInventoryDate}`}
@@ -155,9 +154,8 @@ export default function FacilitiesReport({
                             <Link href="/imea" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition backdrop-blur-xs">
                                 ← Back to List
                             </Link>
-                        </div>
-                    </div>
-                </div>
+                        </div>}
+                />
 
                 {/* 4-COLUMN FILTER SECTION (GI-APIL ANG DATE CONDUCTED DROPDOWN) */}
                 <div className="no-print mb-6">

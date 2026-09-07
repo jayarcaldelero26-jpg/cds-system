@@ -2,6 +2,7 @@ import { FloatingSelect } from "@/Components/Form";import { Link, router } from 
 import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
+import PageHeader from '@/Components/PageHeader';
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 
 export default function ImeaReport({
@@ -188,18 +189,12 @@ export default function ImeaReport({
                     </h2>
                 </div>
 
-                {/* Header Banner (Normal view) */}
-                <div className="sticky top-20 z-10 relative overflow-hidden rounded-xl bg-gradient-to-r from-green-600 via-green-700 to-green-800 p-6 text-white shadow-md mb-6 no-print">
-                    <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/15 blur-2xl pointer-events-none"></div>
-
-                    <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <h1 className="text-2xl font-bold tracking-tight text-white">Integrated Protected Area Ecotourism Monitoring (IMEA)</h1>
-                            <p className="mt-1 text-sm text-green-100">
-                                Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs.
-                            </p>
-                        </div>
-                        <div className="flex items-center gap-3">
+                <PageHeader
+                    title="Integrated Protected Area Ecotourism Monitoring (IMEA)"
+                    description="Consolidation of ecotourism impact assessments and infrastructure inventories of PAMOs."
+                    icon="solar:leaf-linear"
+                    className="mb-6 no-print"
+                    actions={<div className="flex flex-wrap items-center gap-3">
                             <button
                 type="button"
                 onClick={handlePrint}
@@ -213,9 +208,8 @@ export default function ImeaReport({
 
                                 ← Back to List
                             </Link>
-                        </div>
-                    </div>
-                </div>
+                        </div>}
+                />
 
                 {/* Filter Section */}
                 <div className="no-print">

@@ -65,12 +65,13 @@ test('normal Inertia navigation uses only the built-in top progress indicator', 
         ->and(File::exists(resource_path('js/Components/GlobalLoadingOverlay.jsx')))->toBeFalse();
 });
 
-test('IMEA Report and IMEA Data do not render the redundant local tab shell', function (): void {
+test('IMEA Report omits the local tab shell while IMEA Data retains shared workflow navigation', function (): void {
     $report = File::get(resource_path('js/Pages/Imea/ReportSubmissions.jsx'));
     $data = File::get(resource_path('js/Pages/Imea/Index.jsx'));
 
     expect($report)->not->toContain('WorkflowTabs')
-        ->and($data)->not->toContain('WorkflowTabs')
+        ->and($data)->toContain("import WorkflowTabs from './WorkflowTabs';")
+        ->and($data)->toContain('<WorkflowTabs active="facilities" />')
         ->and($report)->toContain('PageHeader')
         ->and($data)->toContain('Facilities & Infrastructures inventory');
 });

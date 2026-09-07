@@ -3,6 +3,7 @@
 use App\Models\NonWorkingDay;
 use App\Models\BmsReportSubmission;
 use App\Models\BamsReportSubmission;
+use App\Models\EngpReportSubmission;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
@@ -126,4 +127,40 @@ test('calendar year view groups permitted submissions by month and respects prot
     $this->actingAs($viewer)->get(route('business-calendar.index', ['view' => 'month', 'month' => '2026-08', 'protected_area_id' => $area->id, 'module' => 'bms']))
         ->assertOk()
         ->assertInertia(fn ($page) => $page->where('view', 'month')->where('month', '2026-08')->where('filters.module', 'bms')->where('filters.protected_area_id', $area->id)->has('movEvents', 1));
+});
+
+test('calendar ENGP events and year summaries respect the development office scope', function (): void {
+    $viewer = User::factory()->create([
+        'unit_assignment' => 'development',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $viewer->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'),
+        Permission::findOrCreate('technical-reports.view', 'web'),
+    ]);
+
+    $base = [
+        'workflow_key' => 'cbep',
+        'section_name' => 'NGP',
+        'activity_name' => 'Community-Based Employment Program (CBEP)',
+        'document_type' => 'Monthly Report',
+        'reporting_year' => 2026,
+        'period_key' => '2026-08',
+        'period_label' => 'August 2026',
+        'deadline_submission' => '2026-08-20',
+        'date_received_penro' => '2026-08-18',
+    ];
+    EngpReportSubmission::create([...$base, 'office' => 'CENRO Baganga']);
+    EngpReportSubmission::create([...$base, 'office' => 'CENRO Mati']);
+
+    $this->actingAs($viewer)->get(route('business-calendar.index', ['month' => '2026-08', 'module' => 'engp']))->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movEvents', 1)
+            ->where('movEvents.0.office', 'CENRO Baganga'));
+
+    $this->actingAs($viewer)->get(route('business-calendar.index', ['view' => 'year', 'year' => 2026, 'module' => 'engp']))->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('yearSummary.months.08.submitted_movs', 1)
+            ->where('yearSummary.overview.submitted_movs', 1));
 });

@@ -179,7 +179,7 @@ test('ENGP tracking transitions enforce originating office scope', function () {
         'period_key' => 'Q1',
         'period_label' => 'Quarter 1',
         'deadline_submission' => '2026-03-10',
-        'office' => 'CENRO Cateel',
+        'office' => 'CENRO Lupon',
     ]));
     $wrongOffice = User::factory()->create([
         'unit_assignment' => 'development',
@@ -239,4 +239,35 @@ test('ENGP ordinary updates reject routing fields and preserve existing routing 
 
 test('ENGP summary excludes the weekly accomplishment workflow', function () {
     $this->actingAs($this->user)->get(route('engp-reports.summary'))->assertOk()->assertInertia(fn ($page) => $page->component('Engp/Index')->where('workflow', null)->has('summary', 11));
+});
+
+test('ENGP summary counts remain within the authenticated development office scope', function (): void {
+    $scopedUser = User::factory()->create([
+        'unit_assignment' => 'development',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $scopedUser->givePermissionTo(Permission::findOrCreate('technical-reports.view', 'web'));
+    EngpReportSubmission::create(engpPayload(['office' => 'CENRO Baganga', 'date_received_penro' => '2026-01-18']));
+    EngpReportSubmission::create(engpPayload(['office' => 'CENRO Mati']));
+
+    $this->actingAs($scopedUser)->get(route('engp-reports.summary'))
+        ->assertInertia(fn ($page) => $page
+            ->where('summary.0.workflow_key', 'cbep')
+            ->where('summary.0.records', 1)
+            ->has('summaryRows', 1)
+            ->where('summaryRows.0.office', 'CENRO Baganga')
+            ->where('summaryRows.0.monitoring_status', 'Report Submitted'));
+});
+
+test('scoped ENGP users receive only their authorized office choices', function (): void {
+    $scopedUser = User::factory()->create([
+        'unit_assignment' => 'development',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $scopedUser->givePermissionTo(Permission::findOrCreate('technical-reports.view', 'web'));
+
+    $this->actingAs($scopedUser)->get(route('engp-reports.index', 'cbep'))
+        ->assertInertia(fn ($page) => $page->where('offices', ['CENRO Baganga']));
 });

@@ -1,69 +1,204 @@
 import CrudTable from '@/Components/Crud/CrudTable';
 import { FloatingSelect } from '@/Components/Form';
-import PageHeader from '@/Components/PageHeader';
+import StatusBadge from '@/Components/StatusBadge';
+import TimelinessBadge from '@/Components/TimelinessBadge';
+import MonitoringPageHeader from '@/Components/Dashboard/MonitoringPageHeader';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { Icon } from '@iconify/react';
 import { router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
-import TimelinessBadge from '@/Components/TimelinessBadge';
+import { Icon } from '@iconify/react';
 import { parseDateOnly } from '@/Utils/dateFormatters';
 
 const DASH = '—';
 const DATE_FORMATTER = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
 
-const formatDashboardDate = value => {
-    if (value === null || value === undefined || String(value).trim() === '') return DASH;
-    const raw = String(value).trim();
-    if (['n/a', 'na'].includes(raw.toLowerCase()) || raw === DASH) return 'N/A';
-    const date = parseDateOnly(raw);
-    if (!date) return DASH;
-    return DATE_FORMATTER.format(date);
+const formatDate = value => {
+    if (!value) return DASH;
+    const date = parseDateOnly(String(value));
+    return date ? DATE_FORMATTER.format(date) : DASH;
 };
 
-const badge = (value, tone = 'neutral') => {
-    const tones = { green: 'bg-green-100 text-green-800 dark:bg-green-950/60 dark:text-green-300', blue: 'bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300', red: 'bg-red-100 text-red-800 dark:bg-red-950/60 dark:text-red-300', amber: 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300', neutral: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300' };
-    return <span className={`inline-flex max-w-44 items-center justify-center rounded-full px-2 py-1 text-center text-[11px] font-semibold leading-tight ${tones[tone] || tones.neutral}`}>{value || DASH}</span>;
-};
-const statusTone = value => { const status = String(value || '').toLowerCase(); if (status.includes('submitted') || status.includes('completed')) return 'green'; if (status.includes('endorsement')) return 'amber'; if (status.includes('not yet') || status.includes('overdue')) return 'red'; if (status.includes('ongoing') || status.includes('allowable')) return 'blue'; return 'neutral'; };
+const percent = value => String(Number(value || 0).toFixed(Number(value || 0) % 1 === 0 ? 0 : 1)) + '%';
 
-function MovCell({ row }) {
-    if (!row.mov_url) return <span className="text-gray-400 dark:text-gray-500">{DASH}</span>;
-    return <a href={row.mov_url} target={row.mov_external ? '_blank' : undefined} rel={row.mov_external ? 'noopener noreferrer' : undefined} onClick={event => event.stopPropagation()} title={row.mov_external ? 'Open external MOV' : 'View MOV'} className="inline-flex items-center gap-1 font-semibold text-green-700 hover:text-green-900 dark:text-green-400"><Icon icon={row.mov_external ? 'solar:round-arrow-up-outline' : 'solar:document-text-bold'} width="16" height="16" />{row.mov_external ? 'Open' : 'View'}</a>;
+const statusVariant = value => {
+    const normalized = String(value || '').toLowerCase();
+    if (normalized.includes('not yet')) return 'inactive';
+    if (normalized.includes('submitted') || normalized.includes('completed')) return 'active';
+    if (normalized.includes('overdue')) return 'inactive';
+    if (normalized.includes('ongoing') || normalized.includes('preparation')) return 'pending';
+    return 'info';
+};
+
+function MetricCard({ label, value, helper, tone = 'green', icon = 'solar:document-text-linear' }) {
+    const tones = {
+        green: { card: 'border-green-100 bg-green-50 text-green-950 dark:border-green-900/60 dark:bg-green-950/30 dark:text-green-100', icon: 'bg-green-600 text-white', accent: 'border-l-green-600' },
+        amber: { card: 'border-amber-100 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100', icon: 'bg-amber-500 text-white', accent: 'border-l-amber-500' },
+        red: { card: 'border-red-100 bg-red-50 text-red-950 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-100', icon: 'bg-red-600 text-white', accent: 'border-l-red-600' },
+        blue: { card: 'border-blue-100 bg-blue-50 text-blue-950 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-100', icon: 'bg-blue-600 text-white', accent: 'border-l-blue-600' },
+    };
+    const selected = tones[tone] || tones.green;
+    return <article className={'flex min-h-[112px] items-start gap-3 rounded-2xl border border-l-4 p-3.5 transition duration-200 hover:-translate-y-0.5 ' + selected.accent + ' ' + selected.card}>
+        <span className={'flex h-10 w-10 shrink-0 items-center justify-center rounded-full ' + selected.icon}><Icon icon={icon} width="20" height="20" /></span>
+        <div className="min-w-0 pt-0.5">
+            <p className="text-[11px] font-bold uppercase tracking-[0.1em] opacity-70">{label}</p>
+            <p className="mt-1 text-[26px] font-black leading-none tracking-tight">{value}</p>
+            {helper && <p className="mt-1.5 truncate text-[11px] font-medium opacity-70">{helper}</p>}
+        </div>
+    </article>;
 }
 
-export default function Dashboard({ rows, pagination, filterOptions, filters }) {
-    const [values, setValues] = useState(filters);
-    useEffect(() => {
-        const next = {
-            year: filters.year ?? filterOptions.years?.[0] ?? '',
-            program: filters.program ?? 'all',
-            office: filters.office ?? '',
-            period: filters.period ?? '',
-        };
-        setValues(current => Object.keys(next).every(key => String(current?.[key] ?? '') === String(next[key] ?? '')) ? current : next);
-    }, [filters.year, filters.program, filters.office, filters.period, filterOptions.years?.[0]]);
-    const defaultValues = { year: filterOptions.years?.[0] ?? values.year, program: 'all', office: '', period: '' };
-    const filtersChanged = ['year', 'program', 'office', 'period'].some(key => String(values[key] ?? '') !== String(defaultValues[key] ?? ''));
-    const navigate = next => router.get(route('dashboard'), next, { preserveState: true, preserveScroll: true, replace: true });
-    const setFilter = (key, value) => { const next = { ...values, [key]: value, page: 1 }; setValues(next); navigate(next); };
-    const resetFilters = () => { const next = { ...defaultValues, page: 1 }; setValues(next); navigate(next); };
-    const page = number => navigate({ ...values, page: number });
-    const total = pagination?.total ?? rows.length;
+function SectionCard({ title, subtitle, icon, children, className = '' }) {
+    return <section className={'overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 ' + className}>
+        <div className="flex items-center gap-2 border-b border-gray-100 px-4 py-2.5 dark:border-gray-800">
+            {icon && <Icon icon={icon} width="17" height="17" className="shrink-0 text-green-700 dark:text-green-400" />}
+            <div className="min-w-0">
+                <h2 className="text-xs font-bold uppercase tracking-[0.08em] text-gray-900 dark:text-white">{title}</h2>
+                {subtitle && <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">{subtitle}</p>}
+            </div>
+        </div>
+        {children}
+    </section>;
+}
+
+function Progress({ value }) {
+    return <div className="flex items-center gap-2"><div className="h-2 min-w-20 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800"><div className="h-full rounded-full bg-green-600" style={{ width: Math.min(100, Math.max(0, Number(value || 0))) + '%' }} /></div><span className="w-12 text-right text-xs font-bold text-gray-700 dark:text-gray-200">{percent(value)}</span></div>;
+}
+
+function ViewTabs({ view }) {
+    const tabs = [['pa', 'PA Monitoring'], ['engp', 'ENGP Monitoring']];
+    return <nav aria-label="Dashboard monitoring views" className="grid h-10 grid-cols-2 overflow-hidden rounded-lg border border-green-800 bg-white shadow-sm dark:border-green-700 dark:bg-gray-900">{tabs.map(([key, label]) => <button key={key} type="button" onClick={() => router.get(route('dashboard'), { view: key }, { preserveState: true, preserveScroll: true, replace: true })} className={'px-3 py-2 text-xs font-bold transition ' + (view === key ? 'bg-green-800 text-white' : 'text-green-800 hover:bg-green-50 dark:text-green-300 dark:hover:bg-green-950/40')} aria-current={view === key ? 'page' : undefined}>{label}</button>)}</nav>;
+}
+
+function PaHeaderPeriod({ filters = {} }) {
+    const ranges = { 'Quarter 1': ['January 1', 'March 31'], 'Quarter 2': ['April 1', 'June 30'], 'Quarter 3': ['July 1', 'September 30'], 'Quarter 4': ['October 1', 'December 31'] };
+    const year = filters.year || 'Current';
+    const range = ranges[filters.period];
+    return { title: filters.period ? filters.period + ', ' + year : year + ' Monitoring', subtitle: range ? range[0] + ' – ' + range[1] + ', ' + year : filters.period ? 'Selected reporting period' : 'All reporting periods' };
+}
+
+function EngpHeaderPeriod({ data = {} }) {
+    const filters = data.filters || {};
+    const period = (data.filterOptions?.periods || []).find(item => item.value === filters.period);
+    const frequency = filters.frequency && filters.frequency !== 'all' ? filters.frequency[0].toUpperCase() + filters.frequency.slice(1) : 'All frequencies';
+    return { title: (filters.year || 2026) + ' Monitoring', subtitle: period?.label || frequency };
+}
+
+function EngpFilters({ data }) {
+    const { filterOptions = {}, filters = {} } = data;
+    const [values, setValues] = useState({ year: filters.year || 2026, period: filters.period || '', office: filters.office || '', frequency: filters.frequency || 'all' });
+    useEffect(() => setValues({ year: filters.year || 2026, period: filters.period || '', office: filters.office || '', frequency: filters.frequency || 'all' }), [filters.year, filters.period, filters.office, filters.frequency]);
+    const navigate = next => router.get(route('dashboard'), { view: 'engp', ...next, page: 1 }, { preserveState: true, preserveScroll: true, replace: true });
+    const setFilter = (key, value) => setValues(current => ({ ...current, [key]: value }));
+    const reset = () => navigate({ year: filterOptions.years?.[0] || 2026, period: '', office: '', frequency: 'all' });
+    return <section className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"><div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gray-500 dark:text-gray-400">Monitoring filters</p><span className="text-[11px] text-gray-400">ENGP report tracking only</span></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-6"><FloatingSelect label="Year" size="sm" focusTone="green" value={values.year} onChange={event => setFilter('year', event.target.value)}>{(filterOptions.years || [2026]).map(year => <option key={year} value={year}>{year}</option>)}</FloatingSelect><FloatingSelect label="Period" size="sm" focusTone="green" value={values.period} onChange={event => setFilter('period', event.target.value)}><option value="">All / Annual</option>{(filterOptions.periods || []).map(period => <option key={period.value} value={period.value}>{period.label}{period.frequency ? ' · ' + period.frequency : ''}</option>)}</FloatingSelect><FloatingSelect label="Office" size="sm" focusTone="green" value={values.office} onChange={event => setFilter('office', event.target.value)}><option value="">All Offices</option>{(filterOptions.offices || []).map(office => <option key={office} value={office}>{office}</option>)}</FloatingSelect><FloatingSelect label="Frequency" size="sm" focusTone="green" value={values.frequency} onChange={event => setFilter('frequency', event.target.value)}>{(filterOptions.frequencies || []).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</FloatingSelect><button type="button" onClick={() => navigate(values)} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-green-800 px-3 text-xs font-bold text-white shadow-sm hover:bg-green-900"><Icon icon="solar:filter-linear" width="15" />Apply Filters</button><button type="button" onClick={reset} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 hover:border-green-300 hover:text-green-800 dark:border-gray-700 dark:text-gray-300">Reset</button></div></section>;
+}
+
+function EngpKpis({ summary }) {
+    return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6"><MetricCard label="Scheduled Requirements" value={summary?.scheduled_requirements ?? summary?.expected ?? 0} helper="Generated active registry obligations" icon="solar:document-list-linear" tone="blue" /><MetricCard label="Reports Submitted" value={summary?.reports_submitted ?? summary?.submitted ?? 0} helper="Matched record with PENRO receipt" icon="solar:check-circle-linear" tone="green" /><MetricCard label="Within Preparation Period" value={summary?.within_preparation_period ?? 0} helper="Not due within the reminder window" icon="solar:calendar-linear" tone="blue" /><MetricCard label="Ongoing Preparation" value={summary?.ongoing_preparation ?? 0} helper="Due today or within the reminder window" icon="solar:clock-circle-linear" tone="amber" /><MetricCard label="Not Yet Submitted / Overdue" value={summary?.not_yet_submitted ?? summary?.overdue ?? 0} helper="Deadline passed without PENRO receipt" icon="solar:danger-triangle-linear" tone="red" /><MetricCard label="Compliance Rate" value={percent(summary?.compliance_rate)} helper="Reports submitted / scheduled requirements" icon="solar:chart-2-linear" tone="green" /></div>;
+}
+
+function EngpPerformance({ officePerformance = [], reportTypeCompliance = [] }) {
+    return <div className="grid gap-3 xl:grid-cols-2"><SectionCard title="Office Performance" subtitle="Authorized ENGP offices; scheduled requirements matched to actual submissions" icon="solar:buildings-2-linear" className="h-[300px]"><div className="max-h-[244px] overflow-auto"><table className="min-w-full text-left text-xs"><thead className="sticky top-0 z-10 bg-gray-50 text-[10px] uppercase text-gray-500 dark:bg-gray-800/95 dark:text-gray-400"><tr><th className="px-3 py-2">Office</th><th className="px-2 py-2 text-right">Scheduled</th><th className="px-2 py-2 text-right">Submitted</th><th className="px-2 py-2 text-right">Within</th><th className="px-2 py-2 text-right">Ongoing</th><th className="px-2 py-2 text-right">Not Yet Submitted</th><th className="min-w-28 px-3 py-2">Compliance</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{officePerformance.map(row => <tr key={row.office}><td className="px-3 py-2 font-semibold text-gray-900 dark:text-white">{row.office}</td><td className="px-2 py-2 text-right">{row.scheduled_requirements ?? row.expected}</td><td className="px-2 py-2 text-right">{row.reports_submitted ?? row.submitted}</td><td className="px-2 py-2 text-right">{row.within_preparation_period ?? 0}</td><td className="px-2 py-2 text-right">{row.ongoing_preparation ?? 0}</td><td className="px-2 py-2 text-right">{row.not_yet_submitted ?? row.overdue}</td><td className="px-3 py-2"><Progress value={row.compliance_rate} /></td></tr>)}</tbody></table>{!officePerformance.length && <p className="px-3 py-8 text-center text-xs text-gray-500">No authorized ENGP requirements match the selected filters.</p>}</div></SectionCard><SectionCard title="Report Type Compliance" subtitle="Active definitions from the ENGP workflow registry" icon="solar:chart-square-linear" className="h-[300px]"><div className="max-h-[244px] overflow-auto"><table className="min-w-full text-left text-xs"><thead className="sticky top-0 z-10 bg-gray-50 text-[10px] uppercase text-gray-500 dark:bg-gray-800/95 dark:text-gray-400"><tr><th className="px-3 py-2">Report / Activity</th><th className="px-2 py-2">Frequency</th><th className="px-2 py-2 text-right">Scheduled</th><th className="px-2 py-2 text-right">Submitted</th><th className="px-2 py-2 text-right">Within</th><th className="px-2 py-2 text-right">Ongoing</th><th className="px-2 py-2 text-right">Not Yet Submitted</th><th className="min-w-28 px-3 py-2">Compliance</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{reportTypeCompliance.map(row => <tr key={row.workflow_key}><td className="px-3 py-2"><p className="font-semibold text-gray-900 dark:text-white">{row.label}</p><p className="mt-0.5 text-[11px] text-gray-500">{row.activity}</p></td><td className="px-2 py-2">{row.frequency}</td><td className="px-2 py-2 text-right">{row.scheduled_requirements ?? row.expected}</td><td className="px-2 py-2 text-right">{row.reports_submitted ?? row.submitted}</td><td className="px-2 py-2 text-right">{row.within_preparation_period ?? 0}</td><td className="px-2 py-2 text-right">{row.ongoing_preparation ?? 0}</td><td className="px-2 py-2 text-right">{row.not_yet_submitted ?? row.overdue}</td><td className="px-3 py-2"><Progress value={row.compliance_rate} /></td></tr>)}</tbody></table>{!reportTypeCompliance.length && <p className="px-3 py-8 text-center text-xs text-gray-500">No report definitions match the selected filters.</p>}</div></SectionCard></div>;
+}
+
+function AlertMetric({ label, value, tone, icon }) {
+    const tones = { amber: 'border-amber-100 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100', red: 'border-red-100 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-100', gray: 'border-gray-100 bg-gray-50 text-gray-900 dark:border-gray-800 dark:bg-gray-800/70 dark:text-white' };
+    return <div className={'flex items-center gap-2 rounded-xl border p-2 ' + (tones[tone] || tones.gray)}><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white/70"><Icon icon={icon} width="16" height="16" /></span><div><p className="text-[10px] font-bold uppercase opacity-70">{label}</p><p className="mt-0.5 text-xl font-extrabold">{value ?? 0}</p></div></div>;
+}
+
+function AlertsCard({ alerts = {}, canViewComplianceAlerts }) {
+    return <SectionCard title="Compliance Alerts & History" subtitle="Existing alert data; dashboard load never sends alerts" icon="solar:bell-bing-linear" className="h-[330px]"><div className="grid gap-2 p-3 sm:grid-cols-2"><AlertMetric label="Due within 3 days" value={alerts.due_within_3_days} tone="amber" icon="solar:clock-circle-linear" /><AlertMetric label="Due today" value={alerts.due_today} tone="gray" icon="solar:calendar-mark-linear" /><AlertMetric label="Overdue" value={alerts.overdue} tone="red" icon="solar:danger-triangle-linear" /><AlertMetric label="Alerts sent today" value={alerts.alerts_sent_today} tone="gray" icon="solar:letter-linear" /></div><div className="space-y-1.5 px-3 pb-3 text-[11px] text-gray-600 dark:text-gray-300"><p><span className="font-bold">Last memorandum sent:</span> {alerts.last_memorandum_sent ? formatDate(alerts.last_memorandum_sent) : 'None recorded today'}</p><p><span className="font-bold">Recent recipient offices:</span> {alerts.recent_recipient_offices?.join(', ') || 'None recorded'}</p>{canViewComplianceAlerts && alerts.view_url && <a href={alerts.view_url} className="inline-flex items-center gap-1 pt-1 font-bold text-green-700 hover:text-green-900 dark:text-green-400">View Compliance Alerts <Icon icon="solar:arrow-right-up-linear" width="14" /></a>}</div></SectionCard>;
+}
+
+function EngpTable({ data }) {
+    const { rows = [], pagination = {}, filters = {} } = data;
+    const navigate = page => router.get(route('dashboard'), { view: 'engp', ...filters, page }, { preserveState: true, preserveScroll: true, replace: true });
+    const columns = [
+        { key: 'office', label: 'Office', headerClassName: 'min-w-36', render: row => <span className="font-semibold text-gray-900 dark:text-white">{row.office}</span> },
+        { key: 'report', label: 'Report / Activity', headerClassName: 'min-w-64', render: row => <div><p className="font-semibold text-gray-900 dark:text-white">{row.report}</p><p className="mt-0.5 text-xs text-gray-500">{row.activity}</p></div> },
+        { key: 'record_source', label: 'Record Source', headerClassName: 'min-w-44', render: row => <span className={row.submission_matched ? 'font-semibold text-green-700 dark:text-green-300' : 'text-gray-600 dark:text-gray-300'}>{row.record_source}</span> },
+        { key: 'frequency', label: 'Frequency', cellClassName: 'whitespace-nowrap' },
+        { key: 'reporting_period', label: 'Reporting Period', cellClassName: 'whitespace-nowrap' },
+        { key: 'deadline', label: 'Deadline', cellClassName: 'whitespace-nowrap', render: row => formatDate(row.deadline) },
+        { key: 'date_released_cenro', label: 'Date Released by CENRO', cellClassName: 'whitespace-nowrap', render: row => formatDate(row.date_released_cenro) },
+        { key: 'date_received', label: 'Date Received by PENRO', cellClassName: 'whitespace-nowrap', render: row => formatDate(row.date_received) },
+        { key: 'days_complied', label: 'Days Complied', cellClassName: 'text-center', render: row => row.days_complied ?? DASH },
+        { key: 'timeliness', label: 'Timeliness', cellClassName: 'whitespace-nowrap', render: row => row.timeliness ? <TimelinessBadge value={row.timeliness} /> : DASH },
+        { key: 'status', label: 'Submission Status', headerClassName: 'min-w-56', render: row => <div><StatusBadge variant={statusVariant(row.status)}>{row.status}</StatusBadge><p className="mt-1 text-[11px] text-gray-500">{row.submission_matched ? 'Matched actual submission' : 'Scheduled only'}</p></div> },
+        { key: 'action', label: 'MOV / Action', cellClassName: 'whitespace-nowrap', render: row => <div className="flex flex-col gap-1"><span className="text-xs text-gray-500">{row.mov_status || DASH}</span><a href={row.source_url} onClick={event => event.stopPropagation()} className="font-bold text-green-700 hover:text-green-900 dark:text-green-400">View Details</a></div> },
+    ];
+    const total = pagination.total || 0;
     const first = total ? ((pagination.current_page - 1) * pagination.per_page) + 1 : 0;
     const last = total ? Math.min(pagination.current_page * pagination.per_page, total) : 0;
+    return <CrudTable title="Submission Monitoring" subtitle="Scheduled registry requirements matched to actual encoded submissions; missing dates remain unrecorded" rows={rows} columns={columns} rowKey="id" className="h-[330px]" tableClassName="min-w-[1900px]" tableContainerClassName="h-[270px]" compact emptyTitle="No ENGP requirements match the selected filters." emptyDescription="Try another office, period, or frequency." pagination={<div className="flex flex-col gap-1 text-[11px] text-gray-500 sm:flex-row sm:items-center sm:justify-between"><span>Showing {first}–{last} of {total} scheduled requirements</span>{pagination.last_page > 1 && <div className="flex items-center gap-1.5"><button type="button" disabled={pagination.current_page === 1} onClick={() => navigate(pagination.current_page - 1)} className="rounded-lg border border-gray-200 px-2.5 py-1 font-semibold disabled:opacity-40 dark:border-gray-700">Previous</button><span>Page {pagination.current_page} of {pagination.last_page}</span><button type="button" disabled={pagination.current_page === pagination.last_page} onClick={() => navigate(pagination.current_page + 1)} className="rounded-lg border border-gray-200 px-2.5 py-1 font-semibold disabled:opacity-40 dark:border-gray-700">Next</button></div>}</div>} />;
+}
+
+function EngpSummary({ data }) {
+    const period = EngpHeaderPeriod({ data });
+    return <><MonitoringPageHeader title="ENGP Monitoring Overview" description="National Greening Program monitoring, tracking, and compliance" periodTitle={period.title} periodSubtitle={period.subtitle} icon="solar:leaf-linear" /><EngpFilters data={data} /><EngpKpis summary={data.summary} /></>;
+}
+
+function EngpContent({ data }) {
+    return <><EngpPerformance officePerformance={data.officePerformance} reportTypeCompliance={data.reportTypeCompliance} /><div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_22rem]"><EngpTable data={data} /><AlertsCard alerts={data.alerts} canViewComplianceAlerts={data.canViewComplianceAlerts} /></div></>;
+}
+
+function PaFilters({ filterOptions = {}, filters = {} }) {
+    const [values, setValues] = useState({ year: filters.year || '', period: filters.period || '', report_type: filters.report_type || '', office: filters.office || '', protected_area_id: filters.protected_area_id || '' });
+    useEffect(() => setValues({ year: filters.year || '', period: filters.period || '', report_type: filters.report_type || '', office: filters.office || '', protected_area_id: filters.protected_area_id || '' }), [filters.year, filters.period, filters.report_type, filters.office, filters.protected_area_id]);
+    const navigate = next => router.get(route('dashboard'), { view: 'pa', program: 'conservation', ...next, page: 1 }, { preserveState: true, preserveScroll: true, replace: true });
+    const apply = () => navigate(values);
+    const reset = () => navigate({ year: filterOptions.years?.[0] || '', period: '', report_type: '', office: '', protected_area_id: '' });
+    return <section className="rounded-2xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"><div className="mb-2 flex items-center justify-between"><p className="text-[11px] font-bold uppercase tracking-[0.1em] text-gray-500 dark:text-gray-400">PA monitoring filters</p><span className="text-[11px] text-gray-400">Report tracking only</span></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-7"><FloatingSelect label="Year" size="sm" focusTone="green" value={values.year} onChange={event => setValues(current => ({ ...current, year: event.target.value }))}>{(filterOptions.years || []).map(year => <option key={year} value={year}>{year}</option>)}</FloatingSelect><FloatingSelect label="Quarter / Period" size="sm" focusTone="green" value={values.period} onChange={event => setValues(current => ({ ...current, period: event.target.value }))}><option value="">All periods</option>{(filterOptions.periods || []).map(period => <option key={period} value={period}>{period}</option>)}</FloatingSelect><FloatingSelect label="Program / Report Type" size="sm" focusTone="green" value={values.report_type} onChange={event => setValues(current => ({ ...current, report_type: event.target.value }))}><option value="">All PA report types</option>{(filterOptions.reportTypes || []).map(type => <option key={type} value={type}>{type}</option>)}</FloatingSelect><FloatingSelect label="Office" size="sm" focusTone="green" value={values.office} onChange={event => setValues(current => ({ ...current, office: event.target.value }))}><option value="">All offices</option>{(filterOptions.offices || []).map(office => <option key={office} value={office}>{office}</option>)}</FloatingSelect><FloatingSelect label="Protected Area" size="sm" focusTone="green" value={values.protected_area_id} onChange={event => setValues(current => ({ ...current, protected_area_id: event.target.value }))}><option value="">All protected areas</option>{(filterOptions.protectedAreas || []).map(area => <option key={area.id} value={area.id}>{area.label}</option>)}</FloatingSelect><button type="button" onClick={apply} className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-green-800 px-3 text-xs font-bold text-white shadow-sm hover:bg-green-900"><Icon icon="solar:filter-linear" width="15" />Apply Filters</button><button type="button" onClick={reset} className="h-10 rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 hover:border-green-300 hover:text-green-800 dark:border-gray-700 dark:text-gray-300">Reset</button></div></section>;
+}
+
+function PaMatrix({ rows = [] }) {
+    return <SectionCard title="PA Report Monitoring Matrix" subtitle="Authorized PA report-tracking workflows only" icon="solar:chart-square-linear" className="h-[300px]"><div className="max-h-[244px] overflow-auto"><table className="min-w-full text-left text-xs"><thead className="sticky top-0 z-10 bg-gray-50 text-[10px] uppercase text-gray-500 dark:bg-gray-800/95 dark:text-gray-400"><tr><th className="px-3 py-2">Module / Activity</th><th className="px-2 py-2 text-right">Tracked</th><th className="px-2 py-2 text-right">Submitted</th><th className="px-2 py-2 text-right">Pending</th><th className="px-2 py-2 text-right">Overdue</th><th className="min-w-28 px-3 py-2">Rate</th></tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.map(row => <tr key={row.module}><td className="px-3 py-2 font-semibold text-gray-900 dark:text-white">{row.module}</td><td className="px-2 py-2 text-right">{row.tracked}</td><td className="px-2 py-2 text-right">{row.submitted}</td><td className="px-2 py-2 text-right">{row.pending}</td><td className="px-2 py-2 text-right">{row.overdue}</td><td className="px-3 py-2"><Progress value={row.compliance_rate} /></td></tr>)}</tbody></table>{!rows.length && <p className="px-3 py-8 text-center text-xs text-gray-500">No tracked PA report workflows match the selected filters.</p>}</div></SectionCard>;
+}
+
+function RoutingBottlenecks({ data = {} }) {
+    const stages = data.stages || [];
+    return <SectionCard title="Current Routing Bottlenecks" subtitle="Active PA documents grouped by their server-derived current stage" icon="solar:route-linear" className="h-[300px]"><div className="p-3"><div className="mb-2 flex items-end justify-between rounded-xl bg-gray-50 px-3 py-2 dark:bg-gray-800/70"><div><p className="text-[10px] font-bold uppercase text-gray-500">Average Routing Time</p><p className="mt-0.5 text-lg font-extrabold text-gray-900 dark:text-white">{data.average_routing_time ?? DASH}<span className="ml-1 text-[11px] font-medium text-gray-500">{data.average_routing_time !== null && data.average_routing_time !== undefined ? data.routing_time_unit : ''}</span></p></div><Icon icon="solar:route-linear" width="20" className="text-green-700" /></div><div className="max-h-[184px] overflow-auto">{stages.length ? <div className="divide-y divide-gray-100 dark:divide-gray-800">{stages.map(row => <div key={row.stage} className="flex items-center justify-between gap-3 py-2 text-xs"><div className="flex min-w-0 items-center gap-2"><span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" /><div className="min-w-0"><p className="truncate font-semibold text-gray-800 dark:text-gray-200">{row.stage}</p><p className="text-[11px] text-gray-500">{row.average_pending_days !== null ? 'Avg ' + row.average_pending_days + ' working days pending' : 'Pending duration not recorded'}</p></div></div><div className="shrink-0 text-right"><p className="font-extrabold text-amber-700">{row.active_documents}</p><p className="text-[10px] uppercase text-gray-400">active</p></div></div>)}</div> : <p className="py-7 text-center text-xs text-gray-500">No active routing bottlenecks in the authorized scope.</p>}</div></div></SectionCard>;
+}
+
+function TopOverdueCard({ overdue = [] }) {
+    return <SectionCard title="Top Overdue Reports" subtitle="Maximum five PA attention items" icon="solar:danger-triangle-linear" className="h-[300px]"><div className="max-h-[212px] overflow-auto divide-y divide-gray-100 dark:divide-gray-800">{overdue.length ? overdue.map(row => <a key={row.id} href={row.source_url || route('submission-tracking.index')} className="block px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-800/50"><div className="flex items-start justify-between gap-2"><p className="truncate text-xs font-semibold text-gray-900 dark:text-white">{row.report}</p><span className="shrink-0 text-[11px] font-bold text-red-700">{row.days_overdue ?? DASH}d overdue</span></div><p className="mt-0.5 truncate text-[11px] text-gray-500">{row.office_or_pa} · Due {formatDate(row.deadline)}</p><p className="mt-0.5 truncate text-[11px] text-gray-500">Stage: {row.current_stage}</p></a>) : <p className="px-3 py-8 text-center text-xs text-gray-500">No overdue PA reports in the authorized scope.</p>}</div><div className="border-t border-gray-100 px-3 py-2 dark:border-gray-800"><a href={route('submission-tracking.index')} className="text-[11px] font-bold text-green-700 hover:text-green-900 dark:text-green-400">View All Overdue Reports <Icon icon="solar:arrow-right-up-linear" width="13" className="inline" /></a></div></SectionCard>;
+}
+
+function PaSubmissionTracking({ rows = [], pagination = {}, filters = {} }) {
+    const navigate = page => router.get(route('dashboard'), { view: 'pa', program: 'conservation', ...filters, page }, { preserveState: true, preserveScroll: true, replace: true });
     const columns = [
-        { key: 'module', label: 'Program / Module', headerClassName: 'min-w-48 text-left md:sticky md:left-0 md:z-30 md:bg-green-900', cellClassName: 'min-w-48 md:sticky md:left-0 md:z-10 md:bg-white dark:md:bg-gray-900', tooltip: row => `${row.module}${row.program ? ` — ${row.program}` : ''}`, render: row => <div className="min-w-0"><p className="font-semibold text-gray-900 dark:text-white">{row.module}</p><p className="mt-0.5 text-xs text-green-700 dark:text-green-400">{row.program}</p></div> },
-        { key: 'office_or_pa', label: 'Office / Protected Area', headerClassName: 'min-w-52 text-left md:sticky md:left-48 md:z-30 md:bg-green-900', cellClassName: 'min-w-52 md:sticky md:left-48 md:z-10 md:bg-white dark:md:bg-gray-900', tooltip: row => row.office_or_pa },
-        { key: 'reporting_period', label: 'Reporting Period', headerClassName: 'min-w-36 text-left', tooltip: row => row.reporting_period },
-        { key: 'deadline_submission', label: 'Deadline for Submission to PENRO', headerClassName: 'min-w-40 text-center', cellClassName: 'text-center', render: row => formatDashboardDate(row.deadline_submission) },
-        { key: 'date_received_penro', label: 'Date Received by PENRO Records', headerClassName: 'min-w-40 text-center', cellClassName: 'text-center', render: row => formatDashboardDate(row.date_received_penro) },
-        { key: 'days_complied', label: 'Number of Days Complied', headerClassName: 'min-w-32 text-center', cellClassName: 'text-center font-semibold', render: row => row.days_complied ?? DASH },
-        { key: 'timeliness', label: 'Timeliness', headerClassName: 'min-w-36 text-center', cellClassName: 'text-center', render: row => <TimelinessBadge value={row.timeliness} /> },
-        { key: 'submission_status', label: 'Status of Submission', headerClassName: 'min-w-40 text-center', cellClassName: 'text-center', render: row => badge(row.submission_status, statusTone(row.submission_status)) },
-        { key: 'mov', label: 'MOV', headerClassName: 'min-w-20 text-center', cellClassName: 'text-center', render: row => <MovCell row={row} /> },
+        { key: 'module', label: 'Program / Module', headerClassName: 'sticky left-0 z-30 w-[180px] min-w-[180px] max-w-[180px] bg-green-900', cellClassName: 'relative sticky left-0 z-10 w-[180px] min-w-[180px] max-w-[180px] whitespace-normal break-words bg-white dark:bg-gray-900', render: row => <span className="break-words font-semibold text-gray-900 dark:text-white">{row.module}</span> },
+        { key: 'office_or_pa', label: 'Office / Protected Area', headerClassName: 'sticky left-[180px] z-30 w-[230px] min-w-[230px] max-w-[230px] bg-green-900', cellClassName: 'sticky left-[180px] z-10 w-[230px] min-w-[230px] max-w-[230px] whitespace-normal break-words bg-white dark:bg-gray-900' },
+        { key: 'activity_name', label: 'Activity / Report Type', headerClassName: 'sticky left-[410px] z-30 w-[224px] min-w-[224px] max-w-[224px] border-r border-green-700/70 bg-green-900 pr-5', cellClassName: 'relative sticky left-[410px] z-10 w-[224px] min-w-[224px] max-w-[224px] whitespace-normal break-words border-r border-gray-200 bg-white pr-5 dark:border-gray-700 dark:bg-gray-900', render: row => <span className="break-words">{row.activity_name || row.document_type || DASH}</span> },
+        { key: 'reporting_period', label: 'Reporting Period', cellClassName: 'whitespace-nowrap' },
+        { key: 'deadline_submission', label: 'Deadline', cellClassName: 'whitespace-nowrap', render: row => formatDate(row.deadline_submission) },
+        { key: 'date_received_penro', label: 'Date Received', cellClassName: 'whitespace-nowrap', render: row => formatDate(row.date_received_penro) },
+        { key: 'days_complied', label: 'Days Complied', cellClassName: 'text-center', render: row => row.days_complied ?? DASH },
+        { key: 'timeliness', label: 'Timeliness', cellClassName: 'whitespace-nowrap', render: row => <TimelinessBadge value={row.timeliness} /> },
+        { key: 'current_stage', label: 'Current Stage', headerClassName: 'min-w-40', render: row => row.routing?.current_status || row.submission_status || DASH },
+        { key: 'current_location', label: 'Current Location', headerClassName: 'min-w-40', render: row => row.current_document_location || DASH },
+        { key: 'status', label: 'Status', cellClassName: 'whitespace-nowrap', render: row => <StatusBadge variant={statusVariant(row.submission_status)}>{row.submission_status || DASH}</StatusBadge> },
+        { key: 'action', label: 'MOV / Action', headerClassName: 'min-w-28 whitespace-nowrap', cellClassName: 'whitespace-nowrap', render: row => <div className="flex flex-col gap-1"><a href={row.source_url} onClick={event => event.stopPropagation()} className="font-bold text-green-700 hover:text-green-900 dark:text-green-400">View Details</a>{row.mov_url && <a href={row.mov_url} target={row.mov_external ? '_blank' : undefined} rel={row.mov_external ? 'noopener noreferrer' : undefined} onClick={event => event.stopPropagation()} className="text-[11px] font-semibold text-gray-500">View MOV</a>}</div> },
     ];
-    return <AuthenticatedLayout title="eDATS Monitoring Dashboard"><div className="space-y-5"><PageHeader title="eDATS Monitoring Dashboard" description="Live report submission and compliance monitoring" />
-        <section className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900"><div className="mb-3 flex items-center justify-between gap-3"><p className="text-xs font-semibold uppercase tracking-[0.1em] text-gray-500 dark:text-gray-400">Monitoring filters</p>{filtersChanged && <button type="button" onClick={resetFilters} className="text-xs font-semibold text-green-700 transition hover:text-green-900 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-green-400 dark:hover:text-green-300">Reset Filters</button>}</div><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><FloatingSelect label="Reporting Year" size="sm" focusTone="green" value={values.year} onChange={event => setFilter('year', event.target.value)}>{filterOptions.years.map(year => <option key={year} value={year}>{year}</option>)}</FloatingSelect><FloatingSelect label="Program / Source" size="sm" focusTone="green" value={values.program} onChange={event => setFilter('program', event.target.value)}>{filterOptions.programs.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</FloatingSelect><FloatingSelect label="Office / Protected Area" size="sm" focusTone="green" value={values.office} onChange={event => setFilter('office', event.target.value)}><option value="">All offices / protected areas</option>{filterOptions.offices.map(item => <option key={item} value={item}>{item}</option>)}</FloatingSelect><FloatingSelect label="Reporting Period" size="sm" focusTone="green" value={values.period} onChange={event => setFilter('period', event.target.value)}><option value="">All reporting periods</option>{filterOptions.periods.map(item => <option key={item} value={item}>{item}</option>)}</FloatingSelect></div></section>
-        <CrudTable title="Submission Status Overview" subtitle="Live report submission and compliance records" headerActions={<span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-semibold text-green-800 dark:bg-green-950/50 dark:text-green-300">{total} {total === 1 ? 'record' : 'records'}</span>} columns={columns} rows={rows} rowKey={row => `${row.source}-${row.source_id}`} onRowClick={row => row.source_url && router.visit(row.source_url)} tableClassName="min-w-[1100px]" tableContainerClassName="max-h-[70vh] overscroll-x-contain" tableHeaderClassName="sticky top-0 z-20" compact emptyTitle="No monitoring records match the selected filters." emptyDescription="Try changing a filter or reset the selected filters." pagination={<div className="flex flex-col gap-2 text-xs text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between"><span>Showing {first}–{last} of {total} records</span>{pagination.last_page > 1 && <div className="flex items-center gap-2"><button type="button" disabled={pagination.current_page === 1} onClick={() => page(pagination.current_page - 1)} className="rounded-lg border border-gray-200 px-3 py-1.5 font-semibold text-gray-700 transition hover:border-green-500 hover:text-green-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200">Previous</button><span>Page {pagination.current_page} of {pagination.last_page}</span><button type="button" disabled={pagination.current_page === pagination.last_page} onClick={() => page(pagination.current_page + 1)} className="rounded-lg border border-gray-200 px-3 py-1.5 font-semibold text-gray-700 transition hover:border-green-500 hover:text-green-700 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-200">Next</button></div>}</div>} />
-    </div></AuthenticatedLayout>;
+    const total = pagination.total || 0;
+    const first = total ? ((pagination.current_page - 1) * pagination.per_page) + 1 : 0;
+    const last = total ? Math.min(pagination.current_page * pagination.per_page, total) : 0;
+    return <CrudTable title="PA Submission Tracking" subtitle="All tracked PA reports and their submission status" rows={rows} columns={columns} rowKey={row => row.source + '-' + row.source_id} className="overflow-hidden" tableClassName="min-w-[1250px]" tableContainerClassName="max-h-[420px]" tableHeaderClassName="sticky top-0 z-20" compact compactEmpty emptyTitle="No tracked PA reports match the selected filters." emptyDescription="Try changing a filter or reset the selected filters." pagination={<div className="flex flex-col gap-1 text-[11px] text-gray-500 sm:flex-row sm:items-center sm:justify-between"><span>Showing {first}–{last} of {total} reports</span>{pagination.last_page > 1 && <div className="flex items-center gap-1.5"><button type="button" disabled={pagination.current_page === 1} onClick={() => navigate(pagination.current_page - 1)} className="rounded-lg border border-gray-200 px-2.5 py-1 font-semibold disabled:opacity-40 dark:border-gray-700">Previous</button><span>Page {pagination.current_page} of {pagination.last_page}</span><button type="button" disabled={pagination.current_page === pagination.last_page} onClick={() => navigate(pagination.current_page + 1)} className="rounded-lg border border-gray-200 px-2.5 py-1 font-semibold disabled:opacity-40 dark:border-gray-700">Next</button></div>}</div>} />;
+}
+
+function PaInterpretation({ items = [] }) {
+    return <SectionCard title="Executive Interpretation" subtitle="Deterministic summaries from current PA tracking metrics" icon="solar:lightbulb-linear"><div className="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-4">{items.length ? items.map(item => <div key={item.label} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 dark:border-gray-800 dark:bg-gray-800/70"><p className="text-[10px] font-bold uppercase text-green-700 dark:text-green-400">{item.label}</p><p className="mt-0.5 text-xs text-gray-700 dark:text-gray-300">{item.text}</p></div>) : <p className="px-3 py-3 text-xs text-gray-500">Insufficient tracked PA data for an interpretation.</p>}</div></SectionCard>;
+}
+
+function PaSummary({ filterOptions = {}, filters = {}, summary = {} }) {
+    const period = PaHeaderPeriod({ filters });
+    return <><MonitoringPageHeader title="PA Monitoring Overview" description="Quarterly report tracking, routing, compliance, and accomplishments" periodTitle={period.title} periodSubtitle={period.subtitle} icon="solar:shield-check-linear" /><PaFilters filterOptions={filterOptions} filters={filters} /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><MetricCard label="Tracked Reports" value={summary.tracked_reports ?? 0} helper="Actual authorized PA tracking records" icon="solar:document-list-linear" tone="blue" /><MetricCard label="Submitted" value={summary.submitted ?? 0} helper="PENRO receipt recorded" icon="solar:check-circle-linear" tone="green" /><MetricCard label="Pending" value={summary.pending ?? 0} helper="Due today or later" icon="solar:clock-circle-linear" tone="amber" /><MetricCard label="Overdue" value={summary.overdue ?? 0} helper="Past authoritative deadline" icon="solar:danger-triangle-linear" tone="red" /><MetricCard label="Compliance Rate" value={percent(summary.compliance_rate)} helper="Submitted / tracked" icon="solar:chart-2-linear" tone="green" /></div></>;
+}
+
+function PaContent({ rows = [], pagination = {}, filters = {}, paMatrix = [], routingBottlenecks = {}, topOverdueReports = [], executiveInterpretation = [] }) {
+    return <><PaSubmissionTracking rows={rows} pagination={pagination} filters={filters} /><div className="grid gap-3 xl:grid-cols-3"><PaMatrix rows={paMatrix} /><RoutingBottlenecks data={routingBottlenecks} /><TopOverdueCard overdue={topOverdueReports} /></div><PaInterpretation items={executiveInterpretation} /></>;
+}
+
+export default function Dashboard({ view = 'pa', engp, rows, pagination, filterOptions, filters, summary, paMatrix, routingBottlenecks, topOverdueReports, executiveInterpretation }) {
+    return <AuthenticatedLayout title="eDATS Monitoring Dashboard"><div className="space-y-3"><ViewTabs view={view} />{view === 'engp' ? <><EngpSummary data={engp || {}} /><EngpContent data={engp || {}} /></> : <><PaSummary filterOptions={filterOptions} filters={filters} summary={summary} /><PaContent rows={rows} pagination={pagination} filters={filters} paMatrix={paMatrix} routingBottlenecks={routingBottlenecks} topOverdueReports={topOverdueReports} executiveInterpretation={executiveInterpretation} /></>}</div></AuthenticatedLayout>;
 }

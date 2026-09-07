@@ -39,6 +39,7 @@ class ProtectedAreaController extends Controller
                 ->paginate(15)
                 ->withQueryString()
                 ->through(fn (ProtectedArea $protectedArea): array => $this->protectedAreaData($protectedArea)),
+            'officeOptions' => $this->organization->officeOptions(),
             'filters' => [
                 'search' => $search,
                 'sort' => $sort,

@@ -376,19 +376,20 @@ final class OrganizationalAccessService
     public function canViewDevelopmentRecord(User $user, EngpReportSubmission $record): bool
     {
         if (! $this->canAccessUnit($user, self::DEVELOPMENT)) return false;
-        if ($this->isGlobal($user) || $this->unitFor($user) === null) return true;
+        if ($this->isGlobal($user) || $this->unitFor($user) === null || $this->isPenroCategory($this->effectiveCategory($user))) return true;
         return $this->same($user->office_designated, $record->office);
     }
 
     public function canUseDevelopmentOffice(User $user, string $office): bool
     {
         return $this->canAccessUnit($user, self::DEVELOPMENT)
-            && ($this->isGlobal($user) || $this->unitFor($user) === null || $this->same($user->office_designated, $office));
+            && ($this->isGlobal($user) || $this->unitFor($user) === null || $this->isPenroCategory($this->effectiveCategory($user)) || $this->same($user->office_designated, $office));
     }
 
     public function scopeDevelopmentQuery($query, User $user)
     {
-        if ($this->isGlobal($user) || $this->unitFor($user) === null) return $query;
+        if (! $this->canAccessUnit($user, self::DEVELOPMENT)) return $query->whereRaw('1 = 0');
+        if ($this->isGlobal($user) || $this->unitFor($user) === null || $this->isPenroCategory($this->effectiveCategory($user))) return $query;
         $office = $this->normalizeOffice($user->office_designated) ?: '__no_office_scope__';
         return $query->whereRaw('LOWER(office) = ?', [mb_strtolower($office)]);
     }
@@ -396,5 +397,10 @@ final class OrganizationalAccessService
     private function same(?string $left, ?string $right): bool
     {
         return trim((string) $left) !== '' && mb_strtolower(trim((string) $left)) === mb_strtolower(trim((string) $right));
+    }
+
+    private function isPenroCategory(?string $category): bool
+    {
+        return in_array($category, [self::PENRO_RECORDS, self::PENRO_CHIEF, self::PENRO_FOCAL], true);
     }
 }

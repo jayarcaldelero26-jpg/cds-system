@@ -20,15 +20,18 @@ use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\RoutingStatusPresenter;
 use App\Services\Modules\ModuleMetadataResolver;
+use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Models\ModuleDefinition;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class OverdueReportService
 {
     private const TIMEZONE = 'Asia/Manila';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly ModuleMetadataResolver $moduleResolver, private readonly ComplianceEvaluationClock $evaluationClock) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly ModuleMetadataResolver $moduleResolver, private readonly ComplianceEvaluationClock $evaluationClock, private readonly OrganizationalAccessService $organization, private readonly PambSubmissionAccessService $pambAccess) {}
 
     /** @return array<class-string<Model>, array<string, mixed>> */
     public function sourceDefinitions(): array
@@ -182,6 +185,46 @@ class OverdueReportService
     public function dueTodayReports(?CarbonImmutable $today = null): Collection
     {
         return $this->dueSoonReports(0, $today);
+    }
+
+    /**
+     * Lightweight dashboard projection of the existing ENGP alert rules.
+     * It intentionally reads only the ENGP deadline/receipt columns; the full
+     * alert methods remain responsible for memorandum/report presentation.
+     *
+     * @param list<string> $offices
+     * @return array{due_within_3_days:int,due_today:int,overdue:int}
+     */
+    public function engpDashboardAlertSummary(array $offices, ?CarbonImmutable $today = null): array
+    {
+        if ($offices === []) {
+            return ['due_within_3_days' => 0, 'due_today' => 0, 'overdue' => 0];
+        }
+
+        $today = $today ? $today->setTimezone(self::TIMEZONE)->startOfDay() : $this->evaluationClock->date();
+        $through = $today->addDays(3);
+        $query = EngpReportSubmission::query()
+            ->select(['office', 'deadline_submission', 'date_received_penro'])
+            ->whereIn('office', $offices)
+            ->whereNotNull('deadline_submission')
+            ->whereNull('date_received_penro');
+        if ($user = auth()->user()) {
+            $this->organization->scopeDevelopmentQuery($query, $user);
+        }
+
+        $summary = ['due_within_3_days' => 0, 'due_today' => 0, 'overdue' => 0];
+        foreach ($query->get() as $record) {
+            $deadline = CarbonImmutable::parse($record->deadline_submission, self::TIMEZONE)->startOfDay();
+            if ($deadline->lessThan($today)) {
+                $summary['overdue']++;
+            } elseif ($deadline->isSameDay($today)) {
+                $summary['due_today']++;
+            } elseif ($deadline->lessThanOrEqualTo($through)) {
+                $summary['due_within_3_days']++;
+            }
+        }
+
+        return $summary;
     }
 
     /** @return Collection<int, OverdueReport> */
@@ -516,9 +559,19 @@ class OverdueReportService
     private function loadSourceModels(callable $configure): Collection
     {
         $sources = collect();
+        $user = auth()->user();
 
         foreach ($this->sourceDefinitions() as $modelClass => $definition) {
             $query = $this->withProtectedArea($modelClass::query(), $modelClass);
+            if ($user) {
+                if ($modelClass === EngpReportSubmission::class) {
+                    $this->organization->scopeDevelopmentQuery($query, $user);
+                } elseif ($modelClass === ConservationReportSubmission::class) {
+                    $this->pambAccess->scopeQuery($query, $user);
+                } elseif ($this->hasProtectedAreaColumn($modelClass)) {
+                    $this->organization->scopeProtectedAreaQuery($query, $user);
+                }
+            }
             $configure($query, $definition, $modelClass);
 
             foreach ($query->get() as $model) {
@@ -529,6 +582,12 @@ class OverdueReportService
         $this->moduleResolver->prime($sources->pluck('model'));
 
         return $sources;
+    }
+
+    private function hasProtectedAreaColumn(string $modelClass): bool
+    {
+        return Schema::connection((new $modelClass)->getConnectionName())
+            ->hasColumn((new $modelClass)->getTable(), 'protected_area_id');
     }
 
     private function dateString(mixed $value): ?string

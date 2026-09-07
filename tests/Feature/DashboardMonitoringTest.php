@@ -5,6 +5,7 @@ use App\Models\EngpReportSubmission;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Dashboard\DashboardMonitoringService;
+use App\Services\Engp\EngpReportWorkflowRegistry;
 use Carbon\CarbonImmutable;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -78,26 +79,95 @@ test('dashboard page exposes the unified monitoring props', function () {
             ->where('summary.tracked_reports', 1)
             ->has('rows', 1)
             ->where('pagination.total', 1)
-            ->has('filterOptions.programs', 3)
-            ->where('filters.program', 'all'));
+            ->has('filterOptions.programs', 1)
+            ->where('filters.program', 'conservation')
+            ->has('paMatrix')
+            ->has('routingBottlenecks')
+            ->has('topOverdueReports')
+            ->has('complianceSnapshot')
+            ->has('executiveInterpretation'));
 });
 
-test('dashboard table presents only common conservation and ENGP fields', function () {
+test('PA Monitoring excludes CBEP and every ENGP registry workflow before aggregation', function (): void {
+    $pa = conservationReport($this->normalPa, $this->user, ['date_accomplished' => '2026-08-26']);
+    foreach (app(EngpReportWorkflowRegistry::class)->keys() as $index => $workflowKey) {
+        EngpReportSubmission::create([
+            'workflow_key' => $workflowKey,
+            'office' => 'CENRO Baganga',
+            'activity_name' => $workflowKey === 'cbep' ? 'Community-Based Employment Program (CBEP)' : $workflowKey,
+            'document_type' => 'Report',
+            'reporting_year' => 2026,
+            'period_key' => '2026-'.str_pad((string) (($index % 9) + 1), 2, '0', STR_PAD_LEFT),
+            'period_label' => 'Period '.($index + 1),
+            'deadline_submission' => '2026-09-30',
+        ]);
+    }
+
+    $this->actingAs($this->user)->get(route('dashboard', ['view' => 'pa', 'program' => 'engp', 'report_type' => 'CBEP']))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('summary.tracked_reports', 0)
+            ->has('rows', 0)
+            ->where('filters.program', 'conservation')
+            ->has('paMatrix', 0));
+});
+
+test('ENGP monitoring excludes PA workflows and legacy combined view falls back to PA', function (): void {
+    conservationReport($this->normalPa, $this->user, ['date_accomplished' => '2026-08-26']);
+    $engp = engpReport($this->user, ['date_received_penro' => '2026-08-18']);
+    $admin = dashboardGlobalUser();
+
+    $this->actingAs($admin)->get(route('dashboard', ['view' => 'engp', 'year' => 2026, 'office' => 'CENRO Mati', 'frequency' => 'monthly', 'period' => '2026-08']))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('engp.rows.0.source', 'engp')
+            ->where('engp.summary.expected', 8));
+
+    $this->actingAs($admin)->get(route('dashboard', ['view' => 'combined', 'year' => 2026]))
+        ->assertRedirect(route('dashboard', ['view' => 'pa']));
+
+    expect($engp->exists)->toBeTrue();
+});
+
+test('PA filters and authorization are applied before PA aggregation', function (): void {
+    $cenro = User::factory()->create([
+        'unit_assignment' => 'conservation',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    conservationReport($this->normalPa, $this->user, ['protected_area_id' => null, 'target_office' => 'CENRO Baganga', 'date_accomplished' => '2026-08-26']);
+    conservationReport($this->normalPa, $this->user, ['protected_area_id' => null, 'target_office' => 'CENRO Mati', 'date_accomplished' => '2026-08-26']);
+
+    $this->actingAs($cenro)->get(route('dashboard', ['view' => 'pa', 'office' => 'CENRO Mati']))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('summary.tracked_reports', 0)
+            ->where('filterOptions.offices', ['CENRO Baganga'])
+            ->has('rows', 0));
+});
+
+test('empty PA dashboard returns compact management empty states', function (): void {
+    $admin = dashboardGlobalUser();
+
+    $this->actingAs($admin)->get(route('dashboard', ['view' => 'pa', 'year' => 2025]))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('summary.tracked_reports', 0)
+            ->where('summary.submitted', 0)
+            ->where('summary.pending', 0)
+            ->where('summary.overdue', 0)
+            ->has('paMatrix', 0)
+            ->has('topOverdueReports', 0)
+            ->where('executiveInterpretation.0.text', 'No tracked PA report records match the selected filters.'));
+});
+
+test('PA dashboard presents only PA monitoring surfaces', function () {
     $dashboardSource = file_get_contents(resource_path('js/Pages/Dashboard.jsx'));
 
-    expect($dashboardSource)->toContain("label: 'Program / Module'")
-        ->toContain("label: 'Office / Protected Area'")
-        ->toContain("label: 'Reporting Period'")
-        ->toContain("label: 'Deadline for Submission to PENRO'")
-        ->toContain("label: 'Date Received by PENRO Records'")
-        ->toContain("label: 'Number of Days Complied'")
-        ->toContain("label: 'Timeliness'")
-        ->toContain("label: 'Status of Submission'")
-        ->toContain("label: 'MOV'")
-        ->not->toContain("label: 'Date Conducted'")
-        ->not->toContain("label: 'Date Accomplished'")
-        ->not->toContain('Date of Report Released by CENRO Records')
-        ->not->toContain("label: 'Date Endorsed to Regional Office'")
+    expect($dashboardSource)->toContain('PA Report Monitoring Matrix')
+        ->toContain('Current Routing Bottlenecks')
+        ->toContain('Top Overdue Reports')
+        ->not->toContain('Compliance Snapshot')
+        ->toContain('Executive Interpretation')
+        ->toContain('report_type')
+        ->toContain('protected_area_id')
+        ->not->toContain('PA Submission Status Overview')
         ->not->toContain('Total Number of Days Delayed at the PENRO');
 });
 
@@ -179,7 +249,7 @@ function engpReport(User $user, array $overrides = []): EngpReportSubmission
         'activity_name' => 'Community-Based Employment Program (CBEP)',
         'document_type' => 'Monthly Report',
         'reporting_year' => 2026,
-        'period_key' => 'august',
+        'period_key' => '2026-08',
         'period_label' => 'August 2026',
         'deadline_submission' => '2026-09-01',
         'created_by' => $user->id,

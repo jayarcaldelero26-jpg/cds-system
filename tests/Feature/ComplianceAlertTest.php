@@ -35,6 +35,7 @@ beforeEach(function () {
     config()->set('compliance_alerts.enabled', false);
     config()->set('compliance_alerts.recipients', ['alerts@example.test']);
     config()->set('compliance_alerts.cc_recipients', []);
+    Storage::fake('local');
     Storage::fake('public');
 });
 
@@ -223,7 +224,6 @@ test('authoritative PENRO receipt closes the active alert immediately and sends 
     $user = complianceUser(); $area = complianceArea($user);
     $report = bmsForDeadline($area, $user, '2026-08-24', ['date_received_penro' => '2026-08-25']);
     $service = app(OverdueReportService::class);
-
     expect($service->overdueReports())->toBeEmpty()
         ->and($service->pendingRecordsVerification())->toHaveCount(1)
         ->and($service->pendingRecordsVerification()->first()['source_id'])->toBe($report->id)
@@ -362,11 +362,11 @@ test('Compliance Alerts No Recipient Mapping card counts current candidates and 
 test('destination coverage remains distinct and separate from current alert coverage', function () {
     $manager = complianceManager(complianceUser());
     engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-1', 'office' => 'CENRO Baganga']);
-    engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-2', 'office' => 'CENRO Cateel']);
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-2', 'office' => 'CENRO Lupon']);
     engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-1', 'office' => 'CENRO Manay']);
-    engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-2', 'office' => 'CENRO Caraga']);
+    engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-2', 'office' => 'CENRO Mati']);
     ComplianceAlertRecipient::create(['target_office' => 'CENRO Baganga', 'recipient_email' => 'baganga@example.test', 'is_active' => true]);
-    ComplianceAlertRecipient::create(['target_office' => 'CENRO Cateel', 'recipient_email' => 'cateel@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Lupon', 'recipient_email' => 'lupon@example.test', 'is_active' => true]);
 
     $delivery = app(ComplianceAlertDeliveryService::class);
     expect($delivery->currentAlertReports())->toBeEmpty()
@@ -388,7 +388,7 @@ test('destination coverage remains distinct and separate from current alert cove
     $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
         ->where('summary.unmapped_destinations', 1));
 
-    ComplianceAlertRecipient::create(['target_office' => 'CENRO Caraga', 'recipient_email' => 'caraga@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'CENRO Mati', 'recipient_email' => 'mati@example.test', 'is_active' => true]);
     $this->actingAs($manager)->get(route('compliance-alerts.index'))->assertInertia(fn (Assert $page) => $page
         ->where('summary.unmapped_destinations', 0));
 });
@@ -1491,6 +1491,38 @@ test('office recipient creation stores the canonical target office key', functio
     $mapping = ComplianceAlertRecipient::query()->where('recipient_email', 'baganga-create@example.test')->firstOrFail();
     expect($mapping->target_office)->toBe('CENRO Baganga')
         ->and($mapping->target_office_key)->toBe('cenro_baganga');
+});
+
+test('recipient mapping exposes the four active ENGP CENRO office options', function () {
+    $manager = complianceManager(complianceUser());
+
+    $this->actingAs($manager)->get(route('compliance-alert-recipients.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->where('organizationalOffices', [
+            ['code' => 'cenro_baganga', 'name' => 'CENRO Baganga'],
+            ['code' => 'cenro_lupon', 'name' => 'CENRO Lupon'],
+            ['code' => 'cenro_manay', 'name' => 'CENRO Manay'],
+            ['code' => 'cenro_mati', 'name' => 'CENRO Mati'],
+        ]));
+});
+
+test('manual ENGP office mappings store canonical keys for the remaining CENRO offices', function () {
+    $manager = complianceManager(complianceUser());
+    $offices = [
+        ['label' => 'CENRO Manay', 'email' => 'manay-config@example.test', 'key' => 'cenro_manay'],
+        ['label' => 'CENRO Mati', 'email' => 'mati-config@example.test', 'key' => 'cenro_mati'],
+        ['label' => 'CENRO Lupon', 'email' => 'lupon-config@example.test', 'key' => 'cenro_lupon'],
+    ];
+
+    foreach ($offices as $office) {
+        $this->actingAs($manager)->post(route('compliance-alerts.recipients.store'), [
+            'target_office' => $office['label'],
+            'recipient_email' => $office['email'],
+            'is_active' => true,
+        ])->assertRedirect()->assertSessionDoesntHaveErrors();
+
+        expect(ComplianceAlertRecipient::query()->where('recipient_email', $office['email'])->value('target_office_key'))->toBe($office['key']);
+    }
 });
 
 test('alternate office spelling stores the same canonical target office key', function () {

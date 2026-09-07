@@ -5,6 +5,7 @@ import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 import Tooltip from '../Components/Tooltip';
 import NotificationBell from '../Components/Notifications/NotificationBell';
+import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
 
 const allNavigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', section: 'BOTH' },
@@ -226,7 +227,10 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     const { url } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
-    const userUnit = auth?.user?.unit_assignment || auth?.organizationalUnit || (userSection === 'ENGP' ? 'development' : null);
+    const isGlobalUnitScope = auth?.unitVisibility?.isGlobal === true;
+    const userUnit = isGlobalUnitScope
+        ? null
+        : auth?.user?.unit_assignment || auth?.organizationalUnit || (userSection === 'ENGP' ? 'development' : null);
     const [openDropdowns, setOpenDropdowns] = useState({});
     const navigationRef = useRef(null);
     const navigation = useMemo(() => withGenericModuleNavigation(allNavigation, genericModuleNavigation), [genericModuleNavigation]);
@@ -369,7 +373,15 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     return (
         <>
             <button type="button" className={`fixed inset-0 z-30 bg-gray-950/40 lg:hidden ${open ? '' : 'hidden'}`} onClick={onClose} aria-label="Close navigation" />
-            <aside className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-green-950/20 bg-green-900 text-white transition-transform duration-200 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}>
+            <aside
+                className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-green-950/20 bg-green-950 text-white transition-transform duration-200 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
+                style={{
+                    backgroundImage: `linear-gradient(to bottom, rgba(3, 39, 38, 0.97) 0%, rgba(3, 44, 42, 0.95) 48%, rgba(3, 49, 45, 0.88) 100%), url(${monitoringMountainForest})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center bottom',
+                    backgroundRepeat: 'no-repeat',
+                }}
+            >
                 <div className="flex h-20 items-center gap-3 border-b border-white/10 px-6">
                     <img src={logoSrc} alt="Department of Environment and Natural Resources logo" className="h-11 w-11 shrink-0 object-contain rounded-full bg-white p-0.5 shadow-sm" />
                     <div className="min-w-0 flex-1 leading-tight">

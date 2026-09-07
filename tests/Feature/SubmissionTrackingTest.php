@@ -16,6 +16,8 @@ use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
     BusinessCalendarService::forgetCache();
+    Storage::fake('local');
+    Storage::fake('public');
     $this->user = User::factory()->create(['section' => 'CDS']);
     foreach (['reports.view', 'technical-reports.update'] as $ability) $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
 });

@@ -6,6 +6,7 @@ use App\Models\ComplianceAlertRecipient;
 use App\Models\ComplianceAlertSetting;
 use App\Models\ComplianceNotificationRun;
 use App\Models\NonWorkingDay;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceAlertSettingsService;
@@ -189,6 +190,7 @@ class ComplianceAlertController extends Controller
             'view' => 'recipients',
             'recipients' => ComplianceAlertRecipient::query()->with('protectedArea:id,name')->latest('id')->get()->map(fn (ComplianceAlertRecipient $recipient) => $this->recipientPayload($recipient)),
             'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name']),
+            'organizationalOffices' => OrganizationalOffice::query()->where('office_type', 'cenro')->where('is_active', true)->orderBy('name')->get(['code', 'name'])->map(fn (OrganizationalOffice $office): array => ['code' => $office->code, 'name' => $office->name])->values(),
             'mappingCoverage' => $destinationCoverage['coverage'],
             'mappingMetrics' => ['active_mappings' => ComplianceAlertRecipient::query()->where('is_active', true)->count(), 'mapped' => $destinationCoverage['mapped'], 'unmapped' => $destinationCoverage['unmapped'], 'total' => $destinationCoverage['total']],
         ]);
@@ -488,7 +490,6 @@ class ComplianceAlertController extends Controller
                 'target_office' => 'This office mapping has no valid target office and cannot be activated.',
             ]);
         }
-
         return [
             'protected_area_id' => null,
             'target_office' => $office['label'],
