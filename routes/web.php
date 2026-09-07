@@ -193,6 +193,9 @@ Route::middleware('auth')->group(function () {
     Route::delete('aws/{aws}', [AwsController::class, 'destroy'])->middleware('can:aws.delete')->name('aws.destroy');
     Route::post('aws/bulk-destroy', [AwsController::class, 'bulkDestroy'])->middleware('can:aws.delete')->name('aws.bulk-destroy');
     Route::post('aws/import', [AwsController::class, 'import'])->middleware('can:aws.create')->name('aws.import');
+    Route::get('aws/summary/export', [AwsController::class, 'monthlySummaryExport'])->middleware('can:aws.view')->name('aws.summary.export');
+    Route::get('aws/monthly-summary/pdf', [AwsController::class, 'monthlySummaryPdf'])->middleware('can:aws.view')->name('aws.monthly-summary.pdf');
+    Route::get('aws/monthly-summary/xlsx', [AwsController::class, 'monthlySummaryXlsx'])->middleware('can:aws.view')->name('aws.monthly-summary.xlsx');
     Route::get('aws/{aws}/report-file', [AwsController::class, 'showReportFile'])->middleware('can:aws.view')->name('aws.report-file.show');
     // Gitangtang na dinhi ang Zentra API route (/aws/zentra-sync)
 

@@ -4,6 +4,7 @@ import PageHeader from '@/Components/PageHeader';
 import MapView from './Components/MapView';
 import { Head, Link, useForm } from '@inertiajs/react';
 import { normalizeSpatialFile } from '@/Utils/spatialUpload';
+import DatePicker from '@/Components/DatePicker';
 
 export default function BamsIndex({
   auth,
@@ -423,15 +424,7 @@ export default function BamsIndex({
 
 
 
-                                            <FloatingInput id="index-date" label="Date:"
-                    type="date"
-                    value={form.data.date}
-                    onChange={(e) =>
-                    form.setData(
-                      'date',
-                      e.target.value
-                    )
-                    } />
+                                            <DatePicker id="index-date" label="Date:" value={form.data.date} onChange={(value) => form.setData('date', value)} />
 
 
                                         </div>

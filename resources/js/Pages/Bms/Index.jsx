@@ -3,6 +3,8 @@ import PageHeader from '@/Components/PageHeader';
 import { Head, router, useForm } from '@inertiajs/react';
 import { useState, useEffect } from 'react';
 import { parseDateOnly } from '@/Utils/dateFormatters';
+import DatePicker from '@/Components/DatePicker';
+import DateRangePicker from '@/Components/DateRangePicker';
 
 // Leaflet Map Marker Icons Import
 import 'leaflet/dist/leaflet.css';
@@ -826,14 +828,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                             <option value="Fauna">Fauna</option>
                                         </FloatingSelect>
                                     </div>
-                                    <div>
-                                        <label className="block text-[10px] font-bold text-gray-500 uppercase mb-1">Date Range</label>
-                                        <div className="flex items-center gap-1">
-                                            <FloatingInput id="bms-filter-start-date" label="Start Date" size="sm" type="date" value={filters?.start_date || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, start_date: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}} />
-                                            <span className="text-gray-400 text-xs font-bold">to</span>
-                                            <FloatingInput id="bms-filter-end-date" label="End Date" size="sm" type="date" value={filters?.end_date || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, end_date: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}} />
-                                        </div>
-                                    </div>
+                                        <DateRangePicker id="bms-filter-date-range" label="Date Range" value={{ from: filters?.start_date || '', to: filters?.end_date || '' }} onChange={({ from, to }) => { router.get(route('bms.index'), { ...filters, start_date: from || undefined, end_date: to || undefined }, { preserveState: true, preserveScroll: true, replace: true }); }} />
                                 </div>
                                 {viewMode === 'table' && canDeleteBms &&
               <div className="flex items-center gap-2 self-end md:self-auto">
@@ -1147,7 +1142,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                     </div>
                                     <div>
 
-                                        <FloatingInput id="index-monitoring-date" label="Monitoring Date" type="date" value={form.data.monitoring_date} onChange={(e) => form.setData('monitoring_date', e.target.value)} required />
+                                        <DatePicker id="index-monitoring-date" label="Monitoring Date" value={form.data.monitoring_date} onChange={(value) => form.setData('monitoring_date', value)} required />
                                         {fieldError(form.errors, 'monitoring_date')}
                                     </div>
                                 </div>
@@ -1318,7 +1313,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                         <form onSubmit={submitHeaderEdit} className="space-y-4 text-sm">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div><FloatingInput id="index-location" label="Location" type="text" value={annexHeaderForm.data.location} onChange={(e) => annexHeaderForm.setData('location', e.target.value)} /></div>
-                                <div><FloatingInput id="index-date-conducted" label="Date Conducted" type="date" value={annexHeaderForm.data.date_conducted} onChange={(e) => annexHeaderForm.setData('date_conducted', e.target.value)} /></div>
+                                <div><DatePicker id="index-date-conducted" label="Date Conducted" value={annexHeaderForm.data.date_conducted} onChange={(value) => annexHeaderForm.setData('date_conducted', value)} /></div>
                                 <div><FloatingInput id="index-start-end-time" label="Start / End Time" type="text" value={annexHeaderForm.data.start_end_time} onChange={(e) => annexHeaderForm.setData('start_end_time', e.target.value)} placeholder="e.g. 07:00 AM - 11:00 AM" /></div>
                                 <div><FloatingInput id="index-length-of-transect" label="Length of Transect" type="text" value={annexHeaderForm.data.length_of_transect} onChange={(e) => annexHeaderForm.setData('length_of_transect', e.target.value)} /></div>
                                 <div><FloatingInput id="index-start-gps-reading" label="Start GPS Reading" type="text" value={annexHeaderForm.data.start_gps} onChange={(e) => annexHeaderForm.setData('start_gps', e.target.value)} /></div>
@@ -1360,7 +1355,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                             {actionError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{actionError}</div>}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
                                 <div><FloatingSelect id="index-protected-area" label="Protected Area" value={editForm.data.protected_area_id} onChange={(e) => editForm.setData('protected_area_id', e.target.value)} required><option value="">Select Protected Area</option>{protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</FloatingSelect>{fieldError(editForm.errors, 'protected_area_id')}</div>
-                                <div><FloatingInput id="index-monitoring-date" label="Monitoring Date" type="date" value={editForm.data.monitoring_date} onChange={(e) => editForm.setData('monitoring_date', e.target.value)} required />{fieldError(editForm.errors, 'monitoring_date')}</div>
+                                <div><DatePicker id="index-monitoring-date" label="Monitoring Date" value={editForm.data.monitoring_date} onChange={(value) => editForm.setData('monitoring_date', value)} required />{fieldError(editForm.errors, 'monitoring_date')}</div>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                 <div><FloatingInput id="index-station" label="Station" type="text" value={editForm.data.station} onChange={(e) => editForm.setData('station', e.target.value)} /></div>

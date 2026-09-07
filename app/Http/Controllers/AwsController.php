@@ -4,8 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Aws;
 use App\Models\ProtectedArea;
+use Carbon\CarbonImmutable;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
+use App\Services\AwsMonthlySummaryService;
+use App\Services\AwsMonthlySummaryXlsxService;
+use App\Services\AwsSummaryDocxService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
@@ -15,11 +19,18 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Throwable;
 
 class AwsController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
+    public function __construct(
+        private readonly ProtectedAttachmentService $attachments,
+        private readonly OrganizationalAccessService $organization,
+        private readonly AwsMonthlySummaryService $monthlySummary,
+        private readonly AwsMonthlySummaryXlsxService $monthlySummaryXlsx,
+        private readonly AwsSummaryDocxService $monthlySummaryDocx,
+    ) {}
     public function index(Request $request)
     {
         // 1. REPORTS QUERY: Kuhaon lang kadtong mga pormal nga report (walay timestamps/raw data flag)
@@ -109,16 +120,172 @@ class AwsController extends Controller
             ->orderBy('protected_area_id', 'asc')
             ->get();
 
+        [$summaryMode, $summaryPeriod, $summaryProtectedAreaId, $summaryPeriodLabel, $summaryCaption] = $this->summarySelection($request);
+        $summaryRows = $this->monthlySummary->summarizePeriod($request->user(), $summaryMode, $summaryPeriod, $summaryProtectedAreaId);
+
+
         return Inertia::render('AWS/Aws', [
             'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString()->through(fn (Aws $report) => $this->reportData($report)),
             'rawRecords'     => $rawQuery->paginate(15, ['*'], 'raw_page')->withQueryString()->through(fn (Aws $record) => $this->rawData($record)),
             'chartRecords'   => $chartData,
             'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(),
             'allProtectedAreasMode' => ! $request->filled('protected_area_id'),
-            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range'])
+            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range']),
+            'monthlySummary' => $summaryRows->values()->all(),
+            'monthlyFilters' => [
+                'mode' => $summaryMode,
+                'year' => $summaryPeriod['year'] ?? null,
+                'month' => $summaryPeriod['to_month'] ?? null,
+                'from_month' => $summaryPeriod['from_month'] ?? null,
+                'to_month' => $summaryPeriod['to_month'] ?? null,
+                'date' => $summaryPeriod['date'] ?? null,
+                'date_from' => $summaryPeriod['date_from'] ?? null,
+                'date_to' => $summaryPeriod['date_to'] ?? null,
+                'protected_area_id' => $summaryProtectedAreaId,
+                'period_label' => $summaryPeriodLabel,
+                'caption' => $summaryCaption,
+            ],
+            'monthlyYearOptions' => range(now()->year - 5, now()->year + 1),
+            'monthlyMonthOptions' => collect(range(1, 12))->map(fn (int $month): array => ['value' => $month, 'label' => date('F', mktime(0, 0, 0, $month, 1))])->all(),
         ]);
     }
 
+
+    public function monthlySummaryExport(Request $request)
+    {
+        $format = $request->validate([
+            'format' => ['required', Rule::in(['pdf', 'xlsx', 'docx'])],
+        ])['format'];
+
+        [$mode, $period, $protectedAreaId, $periodLabel, $caption] = $this->summarySelection($request);
+        $rows = $this->monthlySummary->summarizePeriod($request->user(), $mode, $period, $protectedAreaId);
+        $protectedAreaName = $protectedAreaId !== null
+            ? $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->findOrFail($protectedAreaId)->name
+            : null;
+        $filename = $this->summaryFilename($mode, $period, $format);
+
+        return match ($format) {
+            'pdf' => Pdf::loadView('aws.monthly-summary-pdf', [
+                'rows' => $rows, 'mode' => $mode, 'periodLabel' => $periodLabel,
+                'caption' => $caption, 'protectedAreaName' => $protectedAreaName,
+            ])->setPaper('a4', 'landscape')->download($filename),
+            'xlsx' => $this->monthlySummaryXlsx->download($rows, $periodLabel, $filename),
+            'docx' => $this->monthlySummaryDocx->download($rows, $mode, $periodLabel, $filename),
+        };
+    }
+
+    public function monthlySummaryPdf(Request $request)
+    {
+        $request->merge(['format' => 'pdf']);
+        return $this->monthlySummaryExport($request);
+    }
+
+    public function monthlySummaryXlsx(Request $request)
+    {
+        $request->merge(['format' => 'xlsx']);
+        return $this->monthlySummaryExport($request);
+    }
+
+    public function monthlySummaryDocx(Request $request)
+    {
+        $request->merge(['format' => 'docx']);
+        return $this->monthlySummaryExport($request);
+    }
+
+    /** @return array{0:string,1:array<string,mixed>,2:int|null,3:string,4:string} */
+    private function summarySelection(Request $request): array
+    {
+        $hasLegacyMonthlyInputs = $request->hasAny(['monthly_year', 'monthly_month', 'monthly_from_month', 'monthly_to_month']);
+        $mode = strtolower((string) ($request->input('mode') ?: ($hasLegacyMonthlyInputs ? 'month' : 'one_month')));
+
+        if (! in_array($mode, ['one_month', 'custom_range', 'month', 'day', 'range'], true)) {
+            abort(422, 'Select a valid AWS summary period.');
+        }
+
+        if ($mode === 'one_month') {
+            $year = (int) ($request->input('year') ?: now()->year);
+            $month = (int) ($request->input('month') ?: now()->month);
+            abort_unless($year >= 2000 && $year <= 2100 && $month >= 1 && $month <= 12, 422, 'Select a valid reporting month.');
+
+            $period = ['year' => $year, 'month' => $month];
+            $label = CarbonImmutable::createSafe($year, $month, 1)->format('F Y');
+            $caption = 'Reporting Period';
+        } elseif ($mode === 'custom_range') {
+            $dateFrom = (string) ($request->input('date_from') ?: '');
+            $dateTo = (string) ($request->input('date_to') ?: '');
+            validator(['date_from' => $dateFrom, 'date_to' => $dateTo], [
+                'date_from' => ['required', 'date_format:Y-m-d'],
+                'date_to' => ['required', 'date_format:Y-m-d', 'after_or_equal:date_from'],
+            ])->validate();
+
+            $period = ['date_from' => $dateFrom, 'date_to' => $dateTo];
+            $from = CarbonImmutable::createFromFormat('!Y-m-d', $dateFrom);
+            $to = CarbonImmutable::createFromFormat('!Y-m-d', $dateTo);
+            abort_unless($from !== false && $to !== false, 422, 'Select a valid reporting period.');
+            $dash = "\u{2013}";
+            $label = $from->year === $to->year && $from->month === $to->month
+                ? $from->format('F j').$dash.$to->format('j, Y')
+                : $from->format('F j, Y').$dash.$to->format('F j, Y');
+            $caption = 'Reporting Period';
+        } elseif ($mode === 'month') {
+            $year = (int) ($request->input('year') ?: $request->input('monthly_year') ?: now()->year);
+            $fromMonth = (int) ($request->input('from_month') ?: $request->input('monthly_from_month') ?: $request->input('month') ?: $request->input('monthly_month') ?: now()->month);
+            $toMonth = (int) ($request->input('to_month') ?: $request->input('monthly_to_month') ?: $request->input('month') ?: $request->input('monthly_month') ?: $fromMonth);
+            abort_unless($year >= 2000 && $year <= 2100 && $fromMonth >= 1 && $fromMonth <= 12 && $toMonth >= 1 && $toMonth <= 12 && $toMonth >= $fromMonth, 422, 'Select a valid reporting month range.');
+
+            $period = ['year' => $year, 'from_month' => $fromMonth, 'to_month' => $toMonth];
+            $from = CarbonImmutable::createSafe($year, $fromMonth, 1);
+            $to = CarbonImmutable::createSafe($year, $toMonth, 1);
+            $dash = "\u{2013}";
+            $label = $fromMonth === $toMonth ? $from->format('F Y') : $from->format('F').$dash.$to->format('F Y');
+            $caption = 'Monthly Monitoring Summary';
+        } elseif ($mode === 'day') {
+            $date = (string) ($request->input('date') ?: $request->input('monthly_date') ?: now()->toDateString());
+            validator(['date' => $date], ['date' => ['required', 'date']])->validate();
+            $period = ['date' => $date];
+            $label = CarbonImmutable::parse($date)->format('F j, Y');
+            $caption = 'Reporting Date';
+        } else {
+            $dateFrom = (string) ($request->input('date_from') ?: $request->input('monthly_date_from') ?: '');
+            $dateTo = (string) ($request->input('date_to') ?: $request->input('monthly_date_to') ?: '');
+            validator(['date_from' => $dateFrom, 'date_to' => $dateTo], ['date_from' => ['required', 'date'], 'date_to' => ['required', 'date', 'after_or_equal:date_from']])->validate();
+            $period = ['date_from' => $dateFrom, 'date_to' => $dateTo];
+            $from = CarbonImmutable::parse($dateFrom);
+            $to = CarbonImmutable::parse($dateTo);
+            $dash = "\u{2013}";
+            $label = $from->year === $to->year && $from->month === $to->month ? $from->format('F j').$dash.$to->format('j, Y') : $from->format('F j, Y').$dash.$to->format('F j, Y');
+            $caption = 'Reporting Period';
+        }
+
+        $protectedAreaId = $request->filled('monthly_protected_area_id')
+            ? (int) $request->input('monthly_protected_area_id')
+            : ($request->filled('summary_protected_area_id') ? (int) $request->input('summary_protected_area_id') : null);
+        if ($protectedAreaId === null && ($request->has('mode') || $request->has('date') || $request->has('date_from') || $request->has('year') || $request->has('month') || $request->has('from_month'))) {
+            $protectedAreaId = $request->filled('protected_area_id') ? (int) $request->input('protected_area_id') : null;
+        }
+        if ($protectedAreaId !== null) $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+
+        return [$mode, $period, $protectedAreaId, $label, $caption];
+    }
+
+    /** @param array<string,mixed> $period */
+    private function summaryFilename(string $mode, array $period, string $extension): string
+    {
+        if ($mode === 'one_month') {
+            $stem = sprintf('aws-summary-%04d-%02d', $period['year'], $period['month']);
+        } elseif ($mode === 'custom_range') {
+            $stem = 'aws-summary-'.(string) $period['date_from'].'-to-'.(string) $period['date_to'];
+        } elseif ($mode === 'month') {
+            $stem = sprintf('aws-monthly-summary-%04d-%02d-to-%04d-%02d', $period['year'], $period['from_month'], $period['year'], $period['to_month']);
+            if ($period['from_month'] === $period['to_month']) $stem = sprintf('aws-monthly-summary-%04d-%02d', $period['year'], $period['from_month']);
+        } elseif ($mode === 'day') {
+            $stem = 'aws-summary-'.(string) $period['date'];
+        } else {
+            $stem = 'aws-summary-'.(string) $period['date_from'].'-to-'.(string) $period['date_to'];
+        }
+
+        return $stem.'.'.$extension;
+    }
     public function store(Request $request)
     {
         $validated = $request->validate($this->validationRules(fileRequired: true), [

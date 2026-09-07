@@ -1,4 +1,5 @@
-import { FloatingSelect, FloatingInput } from "@/Components/Form";import { useEffect, useState } from 'react';
+import { FloatingSelect } from "@/Components/Form";
+import DateRangePicker from "@/Components/DateRangePicker";import { useEffect, useState } from 'react';
 import { router } from '@inertiajs/react';
 import Card from '../../Components/Card';
 import { dateOnlyTimestamp, parseDateOnly } from '@/Utils/dateFormatters';
@@ -1165,43 +1166,10 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                             </div>
                         </div>
 
-                        {rangePreset === 'custom' &&
-            <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-                                <div>
-
-
-
-                                    <FloatingInput id="awsgraph-start-date" label="Start Date"
-                type="date"
-                value={graphStartDate}
-                onChange={handleStartDateChange} />
-
-
-                                </div>
-
-                                <div>
-
-
-
-                                    <FloatingInput id="awsgraph-end-date" label="End Date"
-                type="date"
-                value={graphEndDate}
-                onChange={handleEndDateChange} />
-
-
-                                </div>
-
-                                <button
-                type="button"
-                onClick={clearGraphRange}
-                className="rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-5 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:border-emerald-400 hover:text-emerald-700 transition whitespace-nowrap">
-
-                                    Clear Date Filter
-                                </button>
-                            </div>
-            }
-
-                        {rangePreset !== 'custom' && (graphStartDate || graphEndDate) &&
+{rangePreset === 'custom' && <div className="mt-3 grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                            <DateRangePicker id="awsgraph-custom-range" label="Date Range" value={{ from: graphStartDate, to: graphEndDate }} onChange={({ from, to }) => { setRangePreset('custom'); setGraphStartDate(from); setGraphEndDate(to); triggerUpdate(undefined, from, to, 'custom'); }} />
+                            <button type="button" onClick={clearGraphRange} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-xs font-semibold text-gray-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">Clear Date Filter</button>
+                        </div>}                        {rangePreset !== 'custom' && (graphStartDate || graphEndDate) &&
             <div className="mt-3 flex justify-end">
                                 <button
                 type="button"

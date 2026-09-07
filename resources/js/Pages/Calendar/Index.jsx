@@ -7,6 +7,7 @@ import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import ConfirmDialog from '@/Components/ConfirmDialog';
 import { formatReportDate } from '@/Utils/dateFormatters';
+import DatePicker from '@/Components/DatePicker';
 
 const initialForm = { date: '', name: '', type: 'NATIONAL_HOLIDAY', scope: 'NATIONAL', location: '', reference: '', remarks: '', is_active: true };
 const typeLabels = {
@@ -44,7 +45,7 @@ function CalendarEventFormModal({ open, editing, form, onClose, onSubmit }) {
 
             <div className="custom-table-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
                 <div className="grid grid-cols-1 gap-x-5 gap-y-4 sm:grid-cols-2">
-                    <CalendarField label="Date" required error={form.errors.date}><CalendarInput type="date" required value={form.data.date || ''} onChange={event => form.setData('date', event.target.value)} /></CalendarField>
+                    <CalendarField label="Date" required error={form.errors.date}><DatePicker id="calendar-event-date" value={form.data.date || ''} onChange={(value) => form.setData('date', value)} required /></CalendarField>
                     <CalendarField label="Name / Description" required error={form.errors.name}><CalendarInput required value={form.data.name || ''} placeholder="Enter name or description" onChange={event => form.setData('name', event.target.value)} /></CalendarField>
                     <CalendarField label="Type" required error={form.errors.type}><CalendarSelect required value={form.data.type || ''} onChange={event => form.setData('type', event.target.value)}><option value="NATIONAL_HOLIDAY">National Holiday</option><option value="LOCAL_HOLIDAY">Local Holiday</option><option value="SPECIAL_NON_WORKING_DAY">Special Non-Working Day</option><option value="OFFICE_DECLARED_NON_WORKING_DAY">Office-Declared Non-Working Day</option><option value="OTHER">Other</option></CalendarSelect></CalendarField>
                     <CalendarField label="Scope" required error={form.errors.scope}><CalendarSelect required value={form.data.scope || ''} onChange={event => form.setData('scope', event.target.value)}><option value="NATIONAL">National</option><option value="DAVAO_ORIENTAL">Davao Oriental</option><option value="OFFICE">Office</option></CalendarSelect></CalendarField>

@@ -1,3 +1,4 @@
+import DatePicker from '@/Components/DatePicker';
 import { FloatingSelect, FloatingTextarea } from "@/Components/Form";import { router, useForm, usePage } from '@inertiajs/react';
 import { useMemo, useState } from 'react';
 import CrudTable from '@/Components/Crud/CrudTable';
@@ -53,7 +54,7 @@ export default function Threats({ threats = [], protectedAreas = [] }) {
 
   const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
   const error = (name) => form.errors[name] && <span className="mt-1 block text-xs text-red-500">{form.errors[name]}</span>;
-  const field = (name, text, options = {}) => <FloatingInput id={`threat-${name}`} label={text} type={options.type || 'text'} value={form.data[name]} onChange={(event) => form.setData(name, event.target.value)} required={options.required} error={form.errors[name]} />;
+  const field = (name, text, options = {}) => options.type === 'date' ? <DatePicker id={'threat-' + name} label={text} value={form.data[name] || ''} onChange={(value) => form.setData(name, value)} required={options.required} error={form.errors[name]} /> : <FloatingInput id={'threat-' + name} label={text} type={options.type || 'text'} value={form.data[name]} onChange={(event) => form.setData(name, event.target.value)} required={options.required} error={form.errors[name]} />;
 
   const columns = [
   { key: 'date_location', label: 'Date / Location', render: (threat) => <><div className="font-semibold text-gray-900 dark:text-white">{display(threat.date)}</div><div className="text-xs text-gray-500">{display(threat.location)}</div></> },

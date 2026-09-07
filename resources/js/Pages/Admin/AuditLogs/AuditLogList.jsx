@@ -5,6 +5,7 @@ import CrudTable from '@/Components/Crud/CrudTable';
 import PageHeader from '@/Components/PageHeader';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { formatReportDateTime } from '@/Utils/dateFormatters';
+import DateRangePicker from '@/Components/DateRangePicker';
 
 const auditDash = '\u2014';
 const metadataLabels = {
@@ -240,8 +241,7 @@ export default function AuditLogList({ logs = { data: [] }, filters = {}, eventT
         { className: 'grid gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-4 dark:border-gray-800 dark:bg-gray-900' },
         createElement('input', { value: search, onChange: event => setSearch(event.target.value), onKeyDown: event => event.key === 'Enter' && apply({}), placeholder: 'Search', className: inputClass }),
         createElement('select', { defaultValue: filters.event_type || '', onChange: event => apply({ event_type: event.target.value || undefined }), className: inputClass }, createElement('option', { value: '' }, 'All event types'), ...eventTypes.map(type => createElement('option', { key: type }, type))),
-        createElement('input', { type: 'date', defaultValue: filters.date_from || '', onChange: event => apply({ date_from: event.target.value || undefined }), className: inputClass }),
-        createElement('input', { type: 'date', defaultValue: filters.date_to || '', onChange: event => apply({ date_to: event.target.value || undefined }), className: inputClass }),
+        createElement(DateRangePicker, { id: 'audit-log-date-range', label: 'Date Range', value: { from: filters.date_from || '', to: filters.date_to || '' }, onChange: ({ from, to }) => apply({ date_from: from || undefined, date_to: to || undefined }) }),
     );
     const pagination = logs.links?.length > 3 ? createElement(
         'div',

@@ -1,4 +1,5 @@
-import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { router, useForm, usePage } from '@inertiajs/react';
+import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";
+import DatePicker from "@/Components/DatePicker";import { router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import CrudTable from '@/Components/Crud/CrudTable';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
@@ -216,7 +217,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
                 <div className={label}><FloatingSelect id="reportsubmissiontracker-semester" label={periodLabel} required value={form.data[periodField] || ''} onChange={change(periodField)}><option value="">Select {periodLabel}</option>{periods.map((period) => <option key={period}>{period}</option>)}</FloatingSelect>{error(periodField)}</div>
                 <div className={label}><FloatingInput id="reportsubmissiontracker-date-conducted" label="Date Conducted" type={isMeetingPamb ? 'date' : 'text'} required={isMeetingPamb} value={form.data.date_conducted} onChange={change('date_conducted')} placeholder={isMeetingPamb ? undefined : 'Enter date or coverage period'} />{error('date_conducted')}</div>
             </div></CrudSection>
-            <CrudSection title="Compliance Basis"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div className={label}><FloatingInput id="bms-report-date-accomplished" label="Date Accomplished" type="date" value={form.data.date_accomplished} onChange={change('date_accomplished')} />{error('date_accomplished')}</div></div></CrudSection>
+            <CrudSection title="Compliance Basis"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div className={label}><DatePicker id="bms-report-date-accomplished" label="Date Accomplished" value={form.data.date_accomplished} onChange={(value) => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />{error('date_accomplished')}</div></div></CrudSection>
         <CrudSection title="Report Attachment & Remarks"><div className="space-y-5"><FileAttachmentPanel id="reportsubmissiontracker-form-mov" label={reportAttachmentLabel} required={modal === 'create'} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={currentMov(selectedReport) ? [currentMov(selectedReport)] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /><div className={label}><FloatingTextarea id="reportsubmissiontracker-remarks" label="Remarks" rows="4" value={form.data.remarks} onChange={change('remarks')} />{error('remarks')}</div></div></CrudSection>
         </CrudFormModal>
 

@@ -14,6 +14,7 @@ import PageHeader from '@/Components/PageHeader';
 import { formatReportDate } from '@/Utils/dateFormatters';
 import { formatMoney } from '@/Utils/moneyFormatters';
 import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
+import DatePicker from '@/Components/DatePicker';
 import AccountingSection from './AccountingSection';
 import IpafAnalysis from './IpafAnalysis';
 import RevenueQuarterlySummary from './RevenueQuarterlySummary';
@@ -83,7 +84,7 @@ function FormFields({ revenue, form, protectedAreas, selected, preview, setPrevi
       {!revenue && <div className={label}><FloatingInput id="index-date-conducted" label="Date Conducted" value={form.data.date_conducted} onChange={change('date_conducted')} />{error('date_conducted')}</div>}
     </div></CrudSection>
     {revenue && <CrudSection title="Revenue Collection"><div className={label}><FloatingInput id="index-total-collected" label="Total Collected" required type="number" min="0" step="0.01" value={form.data.total_collected} onChange={change('total_collected')} />{error('total_collected')}</div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Read label="IPAF RIA (75%)" value={money(split.ria)} /><Read label="SAGF (25%)" value={money(split.sagf)} /></div></CrudSection>}
-    <CrudSection title="Compliance Basis"><div className="grid gap-4 sm:grid-cols-2">{revenue ? <div className={label}><FloatingInput id="ipaf-deadline-submission" label="Deadline for Submission to PENRO" required type="date" value={form.data.deadline_submission || ''} onChange={change('deadline_submission')} />{error('deadline_submission')}</div> : <div className={label}><FloatingInput id="index-date-accomplished" label="Date Accomplished" type="date" value={form.data.date_accomplished || ''} onChange={change('date_accomplished')} />{error('date_accomplished')}</div>}</div></CrudSection>
+    <CrudSection title="Compliance Basis"><div className="grid gap-4 sm:grid-cols-2">{revenue ? <div className={label}><DatePicker id="ipaf-deadline-submission" label="Deadline for Submission to PENRO" required value={form.data.deadline_submission || ''} onChange={(value) => form.setData('deadline_submission', value)} error={form.errors.deadline_submission} />{error('deadline_submission')}</div> : <div className={label}><DatePicker id="index-date-accomplished" label="Date Accomplished" value={form.data.date_accomplished || ''} onChange={(value) => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />{error('date_accomplished')}</div>}</div></CrudSection>
     <CrudSection title="Attachment / MOV & Remarks"><div className="space-y-5"><FileAttachmentPanel id={`ipaf-${revenue ? 'revenue' : 'management'}-mov`} label="Report Attachment / MOV" required={!selected?.id} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" existingFiles={selected?.mov ? [selected.mov] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /><div className={label}><FloatingTextarea id="index-remarks" label="Remarks" rows="4" value={form.data.remarks} onChange={change('remarks')} />{error('remarks')}</div></div></CrudSection>
   </>;
 }

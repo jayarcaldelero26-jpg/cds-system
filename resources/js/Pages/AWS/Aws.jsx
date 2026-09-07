@@ -1,4 +1,5 @@
-import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { useState, useEffect } from 'react';
+import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";
+import DatePicker from "@/Components/DatePicker";import { useState, useEffect } from 'react';
 import { useForm, router, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
@@ -7,14 +8,15 @@ import ConfirmDialog from '../../Components/ConfirmDialog';
 import AwsTable from './AwsTable';
 import AwsGraph from './AwsGraph';
 import AwsReportSubmissionTracker from './AwsReportSubmissionTracker';
+import AwsMonthlySummary from './AwsMonthlySummary';
 
-export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], filters = {} }) {
+export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
   const { auth = {} } = usePage().props;
 
   // Kuhaon ang tab gikan sa URL kung naay ?tab=raw-data o ?tab=analytics
   const urlParams = new URLSearchParams(window.location.search);
   const urlTab = urlParams.get('tab');
-  const initialTab = urlTab === 'raw-data' ? 'raw-data' : urlTab === 'analytics' ? 'analytics' : 'reports';
+  const initialTab = urlTab === 'raw-data' ? 'raw-data' : urlTab === 'analytics' ? 'analytics' : 'monthly-summary';
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const isReportContext = activeTab === 'reports' || activeTab === 'form';
@@ -231,27 +233,17 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
 {!isReportContext && (
                 <div className="mt-2 mb-3 flex items-center gap-2 overflow-x-auto">
-                    <button
-            onClick={() => handleTabChange('raw-data')}
-            className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
-            activeTab === 'raw-data' ?
-            'bg-green-700 text-white shadow-md' :
-            'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-            }>
-
-                        <span className="text-sm"></span> AWS Raw Data Table
+                    <button type="button" onClick={() => handleTabChange('monthly-summary')} className={activeTab === 'monthly-summary' ? 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-green-700 text-white shadow-md' : 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}>
+                        Monitoring Summary
                     </button>
-                    <button
-            onClick={() => handleTabChange('analytics')}
-            className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
-            activeTab === 'analytics' ?
-            'bg-green-700 text-white shadow-md' :
-            'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-            }>
-
-                        <span className="text-sm"></span> Weather Analytics & Graph
+                    <button type="button" onClick={() => handleTabChange('raw-data')} className={activeTab === 'raw-data' ? 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-green-700 text-white shadow-md' : 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}>
+                        Daily AWS Data
                     </button>
-                </div>                )}
+                    <button type="button" onClick={() => handleTabChange('analytics')} className={activeTab === 'analytics' ? 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-green-700 text-white shadow-md' : 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}>
+                        Weather Analytics &amp; Graph
+                    </button>
+                </div>
+                )}
 
                 {activeTab === 'raw-data' &&
         <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
@@ -398,6 +390,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
         }
 
                 {/* ANALYTICS & GRAPH TAB */}
+                {activeTab === 'monthly-summary' && <AwsMonthlySummary rows={monthlySummary} protectedAreas={protectedAreas} filters={monthlyFilters} yearOptions={monthlyYearOptions} monthOptions={monthlyMonthOptions} />}
+
                 {activeTab === 'analytics' &&
         <AwsGraph
           chartRecords={chartRecords}
@@ -504,23 +498,13 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                             </div>
                                             <div>
 
-                                                <FloatingInput id="aws-start-date" label="Start Date"
-                      type="date"
-                      value={data.start_date}
-                      onChange={(e) => setData('start_date', e.target.value)}
-
-                      required />
+                                                <DatePicker id="aws-start-date" label="Start Date" value={data.start_date} onChange={(value) => setData('start_date', value)} required />
 
                                                 {errors.start_date && <div className="text-red-500 text-xs mt-1">{errors.start_date}</div>}
                                             </div>
                                             <div>
 
-                                                <FloatingInput id="aws-end-date" label="End Date"
-                      type="date"
-                      value={data.end_date}
-                      onChange={(e) => setData('end_date', e.target.value)}
-
-                      required />
+                                                <DatePicker id="aws-end-date" label="End Date" value={data.end_date} onChange={(value) => setData('end_date', value)} required />
 
                                                 {errors.end_date && <div className="text-red-500 text-xs mt-1">{errors.end_date}</div>}
                                             </div>
@@ -811,13 +795,13 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                         </div>
                                         <div>
 
-                                            <FloatingInput id="aws-start-date" label="Start Date" type="date" value={data.start_date} onChange={(e) => setData('start_date', e.target.value)} required />
+                                            <DatePicker id="aws-start-date" label="Start Date" value={data.start_date} onChange={(value) => setData('start_date', value)} required />
                                         </div>
                                     </div>
 
                                     <div>
 
-                                        <FloatingInput id="aws-end-date" label="End Date" type="date" value={data.end_date} onChange={(e) => setData('end_date', e.target.value)} required />
+                                        <DatePicker id="aws-end-date" label="End Date" value={data.end_date} onChange={(value) => setData('end_date', value)} required />
                                     </div>
 
                                     <div>

@@ -11,6 +11,7 @@ import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import { useReportDetails } from '@/Components/Crud/ReportDetailsContext';
 import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
 import { formatReportValue } from '@/Utils/dateFormatters';
+import DatePicker from '@/Components/DatePicker';
 
 const empty = { protected_area_id: '', station_name: '', location: '', activity_name: '', document_type: '', semester: '1st Semester', report_period_type: 'Monthly', date_conducted: '', date_accomplished: '', start_date: '', end_date: '', status: 'Approve', recommendation_remarks: '', report_file: null };
 const badgeClass = (value) => ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-500 text-white';
@@ -84,5 +85,5 @@ export default function AwsReportSubmissionTracker({ records = [], pagination, p
     </div>;
 }
 
-function Field({ label, name, type = 'text', form, required = false }) {return <FloatingInput id={'aws-' + name} label={label} required={required} type={type} value={form.data[name] || ''} onChange={(event) => form.setData(name, event.target.value)} error={form.errors[name]} />;}
+function Field({ label, name, type = 'text', form, required = false }) { const value = form.data[name] || ''; return type === 'date' ? <DatePicker id={'aws-' + name} label={label} required={required} value={value} onChange={(nextValue) => form.setData(name, nextValue)} error={form.errors[name]} /> : <FloatingInput id={'aws-' + name} label={label} required={required} type={type} value={value} onChange={(event) => form.setData(name, event.target.value)} error={form.errors[name]} />; }
 function Filter({ label, value, onChange, options }) {return <FloatingSelect id={`aws-filter-${label.toLowerCase().replace(/\s+/g, '-')}`} label={label} size="sm" value={value} onChange={(event) => onChange(event.target.value)}><option value="">All</option>{options.map(([key, text]) => <option key={key} value={key}>{text}</option>)}</FloatingSelect>;}
