@@ -13,19 +13,21 @@ import AwsMonthlySummary from './AwsMonthlySummary';
 export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
   const { auth = {} } = usePage().props;
 
-  // Kuhaon ang tab gikan sa URL kung naay ?tab=raw-data o ?tab=analytics
+  // Keep report/form links working. The old raw-data link now opens the
+  // Monitoring Summary with its supporting observation section expanded.
   const urlParams = new URLSearchParams(window.location.search);
   const urlTab = urlParams.get('tab');
-  const initialTab = urlTab === 'raw-data' ? 'raw-data' : urlTab === 'analytics' ? 'analytics' : 'monthly-summary';
+  const initialTab = urlTab === 'reports' || urlTab === 'form' ? urlTab : urlTab === 'analytics' ? 'analytics' : 'monitoring-summary';
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const isReportContext = activeTab === 'reports' || activeTab === 'form';
+  const [showObservationRecords, setShowObservationRecords] = useState(urlTab === 'raw-data');
 
   // Reports records ug pagination
   const records = Array.isArray(awsRecords) ? awsRecords : awsRecords.data || [];
   const pagination = Array.isArray(awsRecords) ? null : awsRecords;
 
-  // Raw Data records ug pagination para sa pikas tab
+  // Raw observation records are supporting data for the unified workspace.
   const rawDataList = Array.isArray(rawRecords) ? rawRecords : rawRecords.data || [];
   const rawPagination = Array.isArray(rawRecords) ? null : rawRecords;
 
@@ -72,7 +74,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   };
 
   const handleSelectAll = (e) => {
-    const currentList = activeTab === 'raw-data' ? rawDataList : records;
+    const currentList = rawDataList;
     if (e.target.checked) {
       setSelectedIds(currentList.map((r) => r.id));
     } else {
@@ -105,7 +107,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
   const handleFilterChange = (e) => {
     const paId = e.target.value;
-    router.get(route('aws.index'), { ...filters, protected_area_id: paId || undefined, tab: activeTab }, { preserveState: true, preserveScroll: true, replace: true });
+    router.get(route('aws.index'), { ...filters, protected_area_id: paId || undefined, tab: activeTab === 'analytics' ? 'analytics' : 'monitoring-summary' }, { preserveState: true, preserveScroll: true, replace: true });
   };
 
 
@@ -171,7 +173,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       onSuccess: () => {
         importForm.reset();
         setIsImportModalOpen(false);
-        setActiveTab('raw-data');
+        setShowObservationRecords(true);
       }
     });
   };
@@ -207,7 +209,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   };
 
   return (
-    <AuthenticatedLayout title={isReportContext ? 'AWS Report' : 'Automated Weather Stations (AWS)'}>
+    <AuthenticatedLayout title={isReportContext ? 'AWS Report' : 'AWS Monitoring Summary'}>
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
@@ -217,60 +219,33 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
             <div className="space-y-6">
                 <PageHeader
-          title={isReportContext ? 'AWS Report' : 'Automated Weather Stations (AWS)'}
-          description={isReportContext ? 'AWS report submission and compliance tracking.' : 'Consolidation of meteorological monitoring reports and document attachments.'}
+          title={isReportContext ? 'AWS Report' : 'AUTOMATED WEATHER STATION (AWS) MONITORING SUMMARY'}
+          description={isReportContext ? 'AWS report submission and compliance tracking.' : 'One monitoring workspace for reporting, weather analytics, and daily observation records.'}
           actions={
-          !isReportContext ?
-          <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl text-xs font-bold text-white transition shadow-sm">
-                                Import CSV
-          </button> : activeTab === 'reports' ?
+          isReportContext && activeTab === 'reports' ?
           null : activeTab === 'form' ?
           <button type="button" onClick={() => { handleTabChange('reports'); reset(); setPreviewUrl(null); setSelectedRecord(null); }} className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-white transition">
                                 Back to AWS Report
           </button> : null
           } />
 
-
-{!isReportContext && (
-                <div className="mt-2 mb-3 flex items-center gap-2 overflow-x-auto">
-                    <button type="button" onClick={() => handleTabChange('monthly-summary')} className={activeTab === 'monthly-summary' ? 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-green-700 text-white shadow-md' : 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}>
+                {!isReportContext && <nav aria-label="AWS views" className="flex flex-wrap gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                    <button
+                      type="button"
+                      onClick={() => handleTabChange('monitoring-summary')}
+                      aria-current={activeTab === 'monitoring-summary' ? 'page' : undefined}
+                      className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${activeTab === 'monitoring-summary' ? 'bg-green-700 text-white shadow-sm' : 'text-gray-700 hover:bg-green-50 dark:text-gray-200 dark:hover:bg-green-950/40'}`}>
                         Monitoring Summary
                     </button>
-                    <button type="button" onClick={() => handleTabChange('raw-data')} className={activeTab === 'raw-data' ? 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-green-700 text-white shadow-md' : 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}>
-                        Daily AWS Data
-                    </button>
-                    <button type="button" onClick={() => handleTabChange('analytics')} className={activeTab === 'analytics' ? 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-green-700 text-white shadow-md' : 'shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}>
+                    <button
+                      type="button"
+                      onClick={() => handleTabChange('analytics')}
+                      aria-current={activeTab === 'analytics' ? 'page' : undefined}
+                      className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${activeTab === 'analytics' ? 'bg-green-700 text-white shadow-sm' : 'text-gray-700 hover:bg-green-50 dark:text-gray-200 dark:hover:bg-green-950/40'}`}>
                         Weather Analytics &amp; Graph
                     </button>
-                </div>
-                )}
+                </nav>}
 
-                {activeTab === 'raw-data' &&
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white dark:bg-gray-900 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-800">
-                        <div className="w-full sm:w-72">
-
-                            <FloatingSelect id="aws-filter-by-protected-area" label="Filter by Protected Area"
-            value={filters.protected_area_id || ''}
-            onChange={handleFilterChange} size="sm">
-
-
-                                <option value="">All Protected Areas</option>
-                                {protectedAreas.map((pa) =>
-              <option key={pa.id} value={pa.id}>{pa.name}</option>
-              )}
-                            </FloatingSelect>
-                        </div>
-
-                        {auth.canDeleteAws && (activeTab === 'reports' && records.length > 0 && selectedIds.length > 0 || activeTab === 'raw-data' && rawDataList.length > 0 && selectedIds.length > 0) &&
-          <button
-            onClick={() => setShowBulkDeleteConfirm(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm transition">
-
-                                Delete Selected ({selectedIds.length})
-                            </button>
-          }
-                    </div>
-        }
 
                 {/* REPORTS TABLE TAB */}
                 {activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} filters={filters} />}
@@ -377,28 +352,53 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     </div>
         }
 
-                {/* RAW DATA TABLE TAB */}
-                {activeTab === 'raw-data' &&
-        <AwsTable
-          records={rawDataList}
-          selectedIds={selectedIds}
-          handleSelectAll={handleSelectAll}
-          handleSelectOne={handleSelectOne}
-          pagination={rawPagination}
-          selectable={Boolean(auth.canDeleteAws)} />
+                {activeTab === 'monitoring-summary' && <>
+                    <AwsMonthlySummary
+                      rows={monthlySummary}
+                      protectedAreas={protectedAreas}
+                      filters={monthlyFilters}
+                      yearOptions={monthlyYearOptions}
+                      monthOptions={monthlyMonthOptions}
+                      canImport={Boolean(auth.canCreateAws)}
+                      onImport={() => setIsImportModalOpen(true)} />
 
-        }
+                    <section aria-labelledby="aws-daily-observations-heading" className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h2 id="aws-daily-observations-heading" className="text-lg font-bold text-green-900 dark:text-green-300">AWS Observation Records</h2>
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Daily/source observation records used by the monitoring summary.</p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {auth.canCreateAws && <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700">Import AWS Data</button>}
+                                <button type="button" onClick={() => setShowObservationRecords((visible) => !visible)} aria-expanded={showObservationRecords} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-bold text-gray-700 transition hover:border-green-500 hover:text-green-700 dark:border-gray-700 dark:text-gray-200">{showObservationRecords ? 'Hide Records' : 'Show Records'}</button>
+                            </div>
+                        </div>
+                        {showObservationRecords && <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-800">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Technical source records matching the active summary period and Protected Area filter.</p>
+                                {auth.canDeleteAws && rawDataList.length > 0 && selectedIds.length > 0 && <button type="button" onClick={() => setShowBulkDeleteConfirm(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-red-700">Delete Selected ({selectedIds.length})</button>}
+                            </div>
+                            <AwsTable
+                              records={rawDataList}
+                              selectedIds={selectedIds}
+                              handleSelectAll={handleSelectAll}
+                              handleSelectOne={handleSelectOne}
+                              pagination={rawPagination}
+                              selectable={Boolean(auth.canDeleteAws)} />
+                        </div>}
+                    </section>
+                </>}
 
-                {/* ANALYTICS & GRAPH TAB */}
-                {activeTab === 'monthly-summary' && <AwsMonthlySummary rows={monthlySummary} protectedAreas={protectedAreas} filters={monthlyFilters} yearOptions={monthlyYearOptions} monthOptions={monthlyMonthOptions} />}
-
-                {activeTab === 'analytics' &&
-        <AwsGraph
-          chartRecords={chartRecords}
-          protectedAreas={protectedAreas}
-          filters={filters} />
-
-        }
+                {activeTab === 'analytics' && <section aria-labelledby="aws-weather-analytics-heading" className="space-y-3">
+                    <div>
+                        <h2 id="aws-weather-analytics-heading" className="text-lg font-bold text-green-900 dark:text-green-300">Weather Analytics &amp; Graph</h2>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Visual analysis of authorized AWS observations with protected-area, date-range, and metric controls.</p>
+                    </div>
+                    <AwsGraph
+                      chartRecords={chartRecords}
+                      protectedAreas={protectedAreas}
+                      filters={filters} />
+                </section>}
 
                 {/* FORM TAB */}
                 {activeTab === 'form' &&
@@ -605,13 +605,13 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 animate-pop-in space-y-6">
                         <div className="flex items-center justify-between border-b pb-4 dark:border-gray-800">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
-                                <span></span> Import Meteorological Data from CSV
+                                <span></span> Import AWS Data
                             </h3>
                             <button type="button" onClick={() => setIsImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg"></button>
                         </div>
 
                         <form onSubmit={handleImportSubmit} className="space-y-4">
-                            <p className="text-xs text-gray-500">Upload a formatted CSV file and select the target Protected Area.</p>
+                            <p className="text-xs text-gray-500">Upload AWS monitoring data using the supported spreadsheet format.</p>
 
                             <div>
 
@@ -631,12 +631,13 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                             <div>
 
-                                <FileInput id="aws-select-csv-file-csv"
+                                <FileInput id="aws-select-aws-file"
               type="file"
-              accept=".csv, .txt"
+              accept=".xlsx,.csv"
               onChange={(e) => importForm.setData('file', e.target.files[0])}
 
               required />
+                                {importForm.data.file && <p className="mt-2 text-xs font-semibold text-gray-600 dark:text-gray-300">Selected file: {importForm.data.file.name}</p>}
 
                                 {importForm.errors.file &&
               <div className="max-h-28 overflow-y-auto text-red-600 dark:text-red-400 text-xs mt-2 font-semibold p-2.5 bg-red-50 dark:bg-red-950/50 rounded-xl border border-red-200 dark:border-red-900">
@@ -658,7 +659,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                 disabled={importForm.processing}
                 className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5">
 
-                                Import CSV
+                                Import AWS Data
                                 </button>
                             </div>
                         </form>
@@ -857,7 +858,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       }
 
             {/* BULK DELETE CONFIRMATION */}
-            {showBulkDeleteConfirm && activeTab === 'raw-data' &&
+            {showBulkDeleteConfirm && !isReportContext &&
       <ConfirmDialog
         open
         title="Delete Selected Raw Data?"
@@ -870,7 +871,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
       }
 
-            {showBulkDeleteConfirm && activeTab !== 'raw-data' &&
+            {showBulkDeleteConfirm && isReportContext &&
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
                         <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl"></div>

@@ -3,6 +3,7 @@
 namespace App\Services\SubmissionTracking;
 
 use App\Models\ProtectedArea;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /** Centralized routing-origin rules for protected-area submissions. */
@@ -15,6 +16,8 @@ final class ProtectedAreaRoutingPolicy
     private const DIRECT_PENRO_CANONICAL_NAMES = [
         self::DIRECT_PENRO_NAME,
         'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)',
+        'Mt. Hamiguitan RWS',
+        'Hamiguitan',
     ];
 
     private const DIRECT_PENRO_ALIASES = [
@@ -61,6 +64,24 @@ final class ProtectedAreaRoutingPolicy
     public function terminalStage(Model $record): string
     {
         return self::TERMINAL_STAGE;
+    }
+
+    /** Apply the same direct-PENRO identity used by runtime routing decisions. */
+    public function scopeDirectPenroQuery(Builder $query): Builder
+    {
+        return $query->whereHas('protectedArea', function (Builder $area): void {
+            $area->whereIn('name', self::DIRECT_PENRO_CANONICAL_NAMES)
+                ->orWhereIn('short_name', ['MHRWS']);
+        });
+    }
+
+    /** Apply the inverse direct-PENRO scope without loading records first. */
+    public function scopeNotDirectPenroQuery(Builder $query): Builder
+    {
+        return $query->whereDoesntHave('protectedArea', function (Builder $area): void {
+            $area->whereIn('name', self::DIRECT_PENRO_CANONICAL_NAMES)
+                ->orWhereIn('short_name', ['MHRWS']);
+        });
     }
 
     private function resolveCanonicalId(): void

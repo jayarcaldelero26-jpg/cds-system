@@ -17,7 +17,7 @@ final class DashboardMonitoringService
     public function __construct(private readonly SubmissionTrackingService $tracking) {}
 
     /** @return array<string, mixed> */
-    public function overview(array $filters = []): array
+    public function overview(array $filters = [], bool $assignTrackingNumbers = true): array
     {
         $today = CarbonImmutable::now(self::TIMEZONE)->startOfDay();
         $year = (int) ($filters['year'] ?? $today->year);
@@ -28,8 +28,14 @@ final class DashboardMonitoringService
         $period = trim((string) ($filters['period'] ?? ''));
         $trackingFilters = array_filter([
             'program' => $program,
+            'reporting_year' => $year,
+            'target_office' => $office,
+            'protected_area_id' => $protectedAreaId,
+            'module' => $reportType,
+            'reporting_period' => $period,
         ], fn (mixed $value): bool => filled($value));
-        $all = $this->tracking->records($trackingFilters)->map(fn (array $row): array => $this->present($row, $today));
+        $all = $this->tracking->records($trackingFilters, null, $assignTrackingNumbers)->map(fn (array $row): array => $this->present($row, $today));
+        $available = $this->tracking->filterOptions(['program' => $program]);
 
         $rows = $all
             ->filter(fn (array $row): bool => $row['reporting_year'] === $year)
@@ -54,7 +60,6 @@ final class DashboardMonitoringService
         $perPage = 10;
         $complianceRate = $this->rate($submitted->count(), $rows->count());
         $paMatrix = $this->groupByModule($rows);
-        $routing = $this->routingBottlenecks($rows);
 
         return [
             'summary' => [
@@ -86,19 +91,18 @@ final class DashboardMonitoringService
                 ->values()
                 ->all(),
             'filterOptions' => [
-                'years' => $all->pluck('reporting_year')->filter()->push($today->year)->unique()->sortDesc()->values()->all(),
+                'years' => $available['years'],
                 'programs' => [
                     ['value' => 'conservation', 'label' => 'Conservation / Protected Area'],
                 ],
-                'offices' => $all->pluck('target_office')->filter()->unique()->sort()->values()->all(),
+                'offices' => $available['targetOffices'],
                 'protectedAreas' => $all->filter(fn (array $row): bool => filled($row['protected_area_id']) && filled($row['protected_area']))
                     ->map(fn (array $row): array => ['id' => (int) $row['protected_area_id'], 'label' => $row['protected_area']])
                     ->unique('id')->sortBy('label')->values()->all(),
-                'reportTypes' => $all->pluck('module')->filter()->unique()->sort()->values()->all(),
-                'periods' => $all->pluck('reporting_period')->filter()->unique()->sort()->values()->all(),
+                'reportTypes' => $available['modules'],
+                'periods' => $available['periods'],
             ],
             'paMatrix' => $paMatrix->values()->all(),
-            'routingBottlenecks' => $routing,
             'topOverdueReports' => $overdue->take(5)->map(fn (array $row): array => $this->overduePresentation($row, $today))->values()->all(),
             'complianceSnapshot' => [
                 'tracked_reports' => $rows->count(),
@@ -107,7 +111,7 @@ final class DashboardMonitoringService
                 'overdue' => $overdue->count(),
                 'compliance_rate' => $complianceRate,
             ],
-            'executiveInterpretation' => $this->interpretation($rows, $paMatrix, $routing, $complianceRate),
+            'executiveInterpretation' => $this->interpretation($rows, $paMatrix, $complianceRate),
             'formulas' => [
                 'tracked_reports' => 'Actual authorized PA report-tracking records matching the selected filters.',
                 'submitted' => 'Tracked PA records with a non-null PENRO receipt date.',
@@ -137,43 +141,6 @@ final class DashboardMonitoringService
     }
 
     /** @return array<string, mixed> */
-    private function routingBottlenecks(Collection $rows): array
-    {
-        $active = $rows->filter(fn (array $row): bool => ! ($row['routing_complete'] ?? false));
-        $stages = $active->map(function (array $row): ?array {
-            $label = data_get($row, 'routing.current_location')
-                ?: ($row['current_document_location'] ?? null)
-                ?: data_get($row, 'routing.current_status');
-            if (! $label || $label === '—') return null;
-            $pendingDays = data_get($row, 'routing.working_days_pending');
-            if (! is_numeric($pendingDays)) $pendingDays = data_get($row, 'routing_summary.working_days_pending');
-            return ['label' => $label, 'pending_days' => is_numeric($pendingDays) ? (float) $pendingDays : null];
-        })->filter()->groupBy('label')->map(function (Collection $items, string $label): array {
-            $days = $items->pluck('pending_days')->filter(fn (mixed $value): bool => is_numeric($value));
-            return [
-                'stage' => $label,
-                'active_documents' => $items->count(),
-                'average_pending_days' => $days->isNotEmpty() ? round($days->avg(), 1) : null,
-                'maximum_pending_days' => $days->isNotEmpty() ? round($days->max(), 1) : null,
-            ];
-        })->sortByDesc(fn (array $row): array => [$row['active_documents'], $row['maximum_pending_days'] ?? -1])->values();
-
-        $durations = $rows->flatMap(function (array $row): array {
-            $metrics = $row['routing_summary_metrics'] ?? [];
-            foreach (['cenro_to_regional', 'penro_to_regional', 'cenro_to_penro'] as $key) {
-                if (($metrics[$key]['status'] ?? null) === 'ready' && is_numeric($metrics[$key]['value'] ?? null)) return [(float) $metrics[$key]['value']];
-            }
-            return [];
-        });
-
-        return [
-            'stages' => $stages->take(6)->values()->all(),
-            'average_routing_time' => $durations->isNotEmpty() ? round($durations->avg(), 1) : null,
-            'routing_time_unit' => 'working days',
-        ];
-    }
-
-    /** @return array<string, mixed> */
     private function overduePresentation(array $row, CarbonImmutable $today): array
     {
         $deadline = $this->date($row['deadline_submission'] ?? null);
@@ -190,7 +157,7 @@ final class DashboardMonitoringService
     }
 
     /** @return list<array{label:string,text:string}> */
-    private function interpretation(Collection $rows, Collection $matrix, array $routing, float $complianceRate): array
+    private function interpretation(Collection $rows, Collection $matrix, float $complianceRate): array
     {
         if ($rows->isEmpty()) return [['label' => 'PA monitoring', 'text' => 'No tracked PA report records match the selected filters.']];
 
@@ -199,13 +166,10 @@ final class DashboardMonitoringService
             return ['label' => $label, 'rate' => $this->rate($submitted, $items->count())];
         })->filter(fn (array $item): bool => $item['rate'] > 0)->sortByDesc(fn (array $item): array => [$item['rate'], $item['label']])->first();
         $delayed = $matrix->sortByDesc(fn (array $item): array => [$item['overdue'], $item['pending'], $item['module']])->first();
-        $largestBottleneck = collect($routing['stages'] ?? [])->sortByDesc(fn (array $item): array => [$item['active_documents'], $item['maximum_pending_days'] ?? -1])->first();
-
         return array_values(array_filter([
             $office ? ['label' => 'Most compliant PA / office', 'text' => $office['label'].' at '.$this->formatRate($office['rate']).' submitted.'] : ['label' => 'Most compliant PA / office', 'text' => 'Insufficient submitted records to determine the most compliant PA.'],
             ['label' => 'Current PA compliance', 'text' => $this->formatRate($complianceRate).' of tracked PA reports submitted.'],
             $delayed && ($delayed['overdue'] > 0 || $delayed['pending'] > 0) ? ['label' => 'Most delayed workflow', 'text' => $delayed['module'].' has '.$delayed['overdue'].' overdue and '.$delayed['pending'].' pending.'] : null,
-            $largestBottleneck ? ['label' => 'Largest routing bottleneck', 'text' => $largestBottleneck['stage'].' currently holds '.$largestBottleneck['active_documents'].' active document(s).'] : null,
         ]));
     }
 

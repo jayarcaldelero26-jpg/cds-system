@@ -6,6 +6,7 @@ use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Modules\ModuleDeadlineService;
+use App\Services\Modules\ModuleMetadataResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -146,10 +147,12 @@ class ConservationReportSubmission extends Model
 
     private function moduleDefinition(): ?ModuleDefinition
     {
-        if (app(ConservationReportWorkflowRegistry::class)->find((string) $this->workflow_key)) {
-            return null;
-        }
+        $module = app(ModuleMetadataResolver::class)->genericDefinition((string) $this->workflow_key);
+        if (! $module) return null;
 
-        return ModuleDefinition::query()->generic()->notRetired()->where('code', $this->workflow_key)->first();
+        // Built-in conservation workflows resolve their policy through the
+        // canonical registry. Custom generic modules retain the existing
+        // ModuleDeadlineService contract for custom/no-deadline policies.
+        return app(ConservationReportWorkflowRegistry::class)->defaultFind((string) $this->workflow_key) ? null : $module;
     }
 }

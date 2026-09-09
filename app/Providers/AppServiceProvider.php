@@ -6,6 +6,7 @@ use App\Services\AuditLogService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Modules\ModuleMetadataResolver;
+use App\Services\Reports\ReportRequirementRegistry;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Gate;
@@ -18,10 +19,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->scoped(ReportRequirementRegistry::class, fn (): ReportRequirementRegistry => new ReportRequirementRegistry());
         $this->app->scoped(ModuleMetadataResolver::class, function ($app): ModuleMetadataResolver {
             return new ModuleMetadataResolver(
                 $app->make(ConservationReportWorkflowRegistry::class),
                 $app->make(EngpReportWorkflowRegistry::class),
+                $app->make(ReportRequirementRegistry::class),
             );
         });
     }

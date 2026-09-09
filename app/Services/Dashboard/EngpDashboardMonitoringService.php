@@ -301,8 +301,12 @@ final class EngpDashboardMonitoringService
             }
         }
 
+        $existingYears = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), auth()->user())
+            ->select('reporting_year')->distinct()->pluck('reporting_year')->all();
+        $years = $this->workflows->availableYears($existingYears, $year);
+
         return [
-            'years' => [2026],
+            'years' => $years,
             'periods' => $periods->unique('value')->sortBy('value')->values()->all(),
             'offices' => array_values($allowedOffices),
             'frequencies' => [
@@ -335,7 +339,7 @@ final class EngpDashboardMonitoringService
     private function year(mixed $value): int
     {
         $year = filter_var($value, FILTER_VALIDATE_INT);
-        return $year && $year >= 2000 && $year <= 2100 ? (int) $year : 2026;
+        return $year && $year >= 2000 && $year <= 2100 ? (int) $year : CarbonImmutable::now(self::TIMEZONE)->year;
     }
 
     private function frequency(mixed $value): string

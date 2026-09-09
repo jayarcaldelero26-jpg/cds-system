@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\ProtectedArea;
 use App\Models\ManagementPlan;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 use Spatie\Permission\Models\Role;
 
 class DatabaseSeeder extends Seeder
@@ -23,13 +24,22 @@ class DatabaseSeeder extends Seeder
         $adminRole = Role::firstOrCreate(['name' => 'CDS Admin', 'guard_name' => 'web']);
         Role::firstOrCreate(['name' => 'no_role', 'guard_name' => 'web']);
 
-        // 3. Sigurohon nga naa ang Admin user ug i-assign ang 'CDS Admin' role
-        $admin = User::where('email', 'tempcdsims@gmail.com')->first();
+        // The initial administrator password must be supplied explicitly for a
+        // deliberate local/bootstrap seed. Never keep a usable credential in
+        // tracked source code.
+        $adminEmail = trim((string) env('EDATS_SEED_ADMIN_EMAIL', 'tempcdsims@gmail.com'));
+        $adminPassword = (string) env('EDATS_SEED_ADMIN_PASSWORD', '');
+        $admin = User::where('email', $adminEmail)->first();
         if (!$admin) {
+            if ($adminPassword === '') {
+                $this->command?->warn('Seeded administrator and sample records were skipped. Set EDATS_SEED_ADMIN_PASSWORD for an explicit local/bootstrap seed.');
+                return;
+            }
+
             $admin = User::create([
                 'name' => 'Conservation Development Section',
-                'email' => 'tempcdsims@gmail.com',
-                'password' => bcrypt('denrcds2026'),
+                'email' => $adminEmail,
+                'password' => Hash::make($adminPassword),
                 'office_designated' => 'PENRO Davao Oriental',
                 'section' => 'CDS',
                 'is_active' => true,
@@ -47,6 +57,21 @@ class DatabaseSeeder extends Seeder
         // Management instead of guessing their new category.
 
         // 5. Maghimo og sample Protected Areas
+        $apl = ProtectedArea::firstOrCreate(
+            ['name' => 'Aliwagwag Protected Landscape (APL)'],
+            [
+                'short_name' => 'APL',
+                'category' => 'Protected Landscape',
+                'municipality' => 'Baganga',
+                'province' => 'Davao Oriental',
+                'region' => 'Region XI',
+                'status' => 'Active',
+                'description' => 'Protected landscape in Baganga, Davao Oriental.',
+                'created_by' => $admin->id,
+                'updated_by' => $admin->id,
+            ]
+        );
+
         $mpl = ProtectedArea::firstOrCreate(
             ['name' => 'Mati Protected Landscape (MPL)'],
             [

@@ -50,9 +50,9 @@ final class GlobalSearchService
             ['title' => 'BAMS', 'subtitle' => 'Biodiversity Assessment and Monitoring System', 'url' => '/bams', 'icon' => 'leaf', 'ability' => 'bams.view'],
             ['title' => 'IMEA', 'subtitle' => 'Integrated Management Effectiveness Assessment', 'url' => '/imea', 'icon' => 'chart', 'ability' => 'imea.view'],
             ['title' => 'AWS', 'subtitle' => 'Automated Weather Station monitoring', 'url' => '/aws', 'icon' => 'cloud', 'ability' => 'aws.view'],
-            ['title' => 'IPAF', 'subtitle' => 'Integrated Protected Area Fund monitoring', 'url' => '/ipaf', 'icon' => 'document', 'ability' => 'technical-reports.view'],
+            ['title' => 'IPAF', 'subtitle' => 'Integrated Protected Area Fund records and accounting', 'url' => '/ipaf', 'icon' => 'document', 'ability' => 'technical-reports.view'],
             ['title' => 'Management of IPAF', 'subtitle' => 'IPAF management reports', 'url' => '/ipaf?ipaf_tab=management', 'icon' => 'document', 'ability' => 'technical-reports.view'],
-            ['title' => 'Revenue Collection', 'subtitle' => 'IPAF revenue collection monitoring', 'url' => '/ipaf?ipaf_tab=revenue', 'icon' => 'document', 'ability' => 'technical-reports.view'],
+            ['title' => 'Revenue Collection', 'subtitle' => 'IPAF revenue collection records', 'url' => '/ipaf?ipaf_tab=revenue', 'icon' => 'document', 'ability' => 'technical-reports.view'],
             ['title' => 'ENGP Summary Monitoring', 'subtitle' => 'National Greening Program', 'url' => '/engp-reports/summary', 'icon' => 'chart', 'ability' => 'technical-reports.view'],
             ['title' => 'CBEP', 'subtitle' => 'ENGP monthly report workflow', 'url' => '/engp-reports/cbep', 'icon' => 'document', 'ability' => 'technical-reports.view'],
             ['title' => 'ELCAC', 'subtitle' => 'ENGP monthly report workflow', 'url' => '/engp-reports/elcac', 'icon' => 'document', 'ability' => 'technical-reports.view'],
@@ -70,9 +70,9 @@ final class GlobalSearchService
     /** @return list<array<string, string>> */
     private function reports(User $user, string $query): array
     {
-        return $this->tracking->records()
+        return $this->tracking->search($query)
             ->filter(fn (array $record): bool => $this->canViewReport($user, (string) ($record['source'] ?? '')))
-            ->filter(fn (array $record): bool => $this->matches($query, implode(' ', [$record['module'] ?? '', $record['target_office'] ?? '', $record['protected_area'] ?? '', $record['reporting_period'] ?? '', $record['activity_name'] ?? '', $record['document_type'] ?? ''])))
+            ->filter(fn (array $record): bool => $this->matches($query, implode(' ', [$record['tracking_number'] ?? '', $record['module'] ?? '', $record['target_office'] ?? '', $record['protected_area'] ?? '', $record['reporting_period'] ?? '', $record['activity_name'] ?? '', $record['document_type'] ?? ''])))
             ->take(self::PER_GROUP_LIMIT)->map(function (array $record): array {
                 $context = collect([$record['target_office'] ?? null, $record['protected_area'] ?? null])->filter()->implode(' · ');
                 $period = trim((string) ($record['reporting_period'] ?? ''));

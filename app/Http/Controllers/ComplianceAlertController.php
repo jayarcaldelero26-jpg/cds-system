@@ -211,9 +211,17 @@ class ComplianceAlertController extends Controller
         $modules = collect($calendarEvents->modules($request->user()));
         $module = $request->string('module')->toString();
         $module = $modules->contains('key', $module) ? $module : null;
-        $protectedAreaId = $request->filled('protected_area_id') && ProtectedArea::query()->whereKey($request->integer('protected_area_id'))->exists()
-            ? $request->integer('protected_area_id')
-            : null;
+        $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+        $protectedAreaId = null;
+        if ($request->filled('protected_area_id')) {
+            $protectedAreaId = $request->integer('protected_area_id');
+            $organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        }
+        $protectedAreas = $organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map->only(['id', 'name'])
+            ->values();
 
         $nonWorkingDays = NonWorkingDay::query()
             ->whereBetween('date', [
@@ -235,7 +243,7 @@ class ComplianceAlertController extends Controller
             'month' => $month->format('Y-m'),
             'filters' => ['module' => $module, 'protected_area_id' => $protectedAreaId],
             'modules' => $modules->values(),
-            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name'])->values(),
+            'protectedAreas' => $protectedAreas,
             'movEvents' => $view === 'month' ? $calendarEvents->events($request->user(), $month, $module, $protectedAreaId) : [],
             'yearSummary' => $yearSummary,
             'nonWorkingDays' => $nonWorkingDays,

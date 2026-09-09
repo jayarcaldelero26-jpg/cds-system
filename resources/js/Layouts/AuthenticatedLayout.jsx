@@ -66,7 +66,7 @@ const allNavigation = [
             { label: 'BMS Data', href: '/bms', permission: 'canViewBms', activeQuery: { tracker: null } },
             { label: 'BAMS Data', href: '/bams', permission: 'canViewBams' },
             { label: 'IMEA Data', href: '/imea', permission: 'canViewImea' },
-            { label: 'AWS Data', href: '/aws?tab=raw-data', permission: 'canViewAws', activeQueryAny: [{ tab: 'raw-data' }, { tab: 'analytics' }] },
+            { label: 'AWS Data', href: '/aws?tab=monitoring-summary', permission: 'canViewAws', activeQueryAny: [{ tab: 'monitoring-summary' }, { tab: 'raw-data' }, { tab: 'analytics' }] },
         ]
     },
 
@@ -118,6 +118,7 @@ const allNavigation = [
     { label: 'Integrated Watershed Management', href: '#', icon: 'watershed', comingSoon: true, section: 'CDS', unit: 'development' },
 
     { label: 'eDATS MONITORING', heading: true, section: 'BOTH' },
+    { label: 'Reports', href: '/reports', icon: 'reports', permission: 'canViewReports', section: 'BOTH' },
     { label: 'Submission Tracking', href: '/submission-tracking', icon: 'submission-tracking', permission: 'canViewReports', section: 'CDS' },
     { label: 'Alerts', href: '/compliance-alerts', icon: 'alerts', permission: 'canViewComplianceAlerts', section: 'CDS' },
     { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewReports', section: 'BOTH' },

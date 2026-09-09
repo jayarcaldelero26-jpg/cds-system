@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use App\Services\AuditLogService;
+use App\Services\Reports\ReportTrackingNumberService;
 
 final class SubmissionTrackingService
 {
@@ -36,10 +37,10 @@ final class SubmissionTrackingService
     public const PENRO_RECEIPT = 'penro_receipt';
     public const REGIONAL_ENDORSEMENT = 'regional_endorsement';
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting, private readonly ReportTrackingNumberService $trackingNumbers) {}
 
     /** @return Collection<int, array<string, mixed>> */
-    public function records(array $filters = [], ?int $limitPerSource = null): Collection
+    public function records(array $filters = [], ?int $limitPerSource = null, bool $assignTrackingNumbers = true): Collection
     {
         $sources = $this->sources();
         if (($filters['program'] ?? null) === 'conservation') {
@@ -50,48 +51,22 @@ final class SubmissionTrackingService
 
         $loaded = collect($sources)
             ->flatMap(function (array $source, string $key) use ($filters, $limitPerSource) {
-                $query = $source['model']::query();
-                if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
-                if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy']);
-                if ($key === 'engp') $query->with('releaseEvents');
-                if ($key === 'conservation') {
-                    $query->where(fn ($candidate) => $candidate
-                        ->where(fn ($meeting) => $meeting
-                            ->whereIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
-                            ->whereNotNull('date_conducted'))
-                        ->orWhere(fn ($other) => $other
-                            ->whereNotNull('date_accomplished')
-                            ->where(fn ($workflow) => $workflow
-                                ->whereNotIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)
-                            ->orWhereNull('workflow_key'))));
-                    if ($user = auth()->user()) {
-                        $query = $this->pambAccess->scopeQuery($query, $user);
-                    }
-                } elseif ($user = auth()->user()) {
-                    if ($key === 'engp') {
-                        $query = $this->organization->scopeDevelopmentQuery($query, $user);
-                    } elseif ($this->hasProtectedAreaColumn($source['model'])) {
-                        $query = $this->organization->scopeProtectedAreaQuery($query, $user);
-                    }
-                }
-                $this->applyDatabaseFilters($query, $key, $filters);
-                if ($key !== 'conservation' && $key !== 'engp' && ($source['requires_date_accomplished'] ?? true)) {
-                    $query->whereNotNull('date_accomplished');
-                }
-                if ($limitPerSource !== null) {
-                    $query->limit(max(1, $limitPerSource));
-                }
+                $query = $this->sourceQuery($key, $source, $filters, true);
+                if ($limitPerSource !== null) $query->limit(max(1, $limitPerSource));
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
             });
 
         $this->moduleResolver->prime($loaded->pluck('record'));
+        $trackingNumbers = $assignTrackingNumbers
+            ? $this->trackingNumbers->ensureFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]))
+            : $this->trackingNumbers->existingFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]));
         $correctionCounts = $this->correctionCounts($loaded);
 
         $routingAudits = $this->routingAudits($loaded);
         $routingEvents = $this->genericRoutingEvents($loaded);
 
         return $loaded
-            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect()))
+            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers))
             ->filter(function (array $record): bool {
                 $user = auth()->user();
                 if ($user && filled($user->unit_assignment) && ! $this->organization->isGlobal($user)) {
@@ -106,6 +81,12 @@ final class SubmissionTrackingService
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
             ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
             ->values();
+    }
+
+    /** Lightweight bounded search for global-search consumers. */
+    public function search(string $term, int $limit = 5): Collection
+    {
+        return $this->records(['search' => $term], max(1, $limit));
     }
 
     /** @return array{records: Collection<int,array<string,mixed>>, queues: array<string,Collection<int,array<string,mixed>>>, modules: list<string>} */
@@ -123,10 +104,15 @@ final class SubmissionTrackingService
             // complete cross-module dataset during an index request.
             $candidates = $this->records($filters, ($page + 1) * $perPage);
             $records = $candidates->forPage($page, $perPage)->values();
+            $total = $this->countForFilters($filters);
             $pagination = [
                 'current_page' => $page,
                 'per_page' => $perPage,
-                'has_more' => $candidates->count() > ($page * $perPage),
+                'total' => $total,
+                'last_page' => max(1, (int) ceil($total / $perPage)),
+                'from' => $total > 0 ? (($page - 1) * $perPage) + 1 : null,
+                'to' => $total > 0 ? min($page * $perPage, $total) : null,
+                'has_more' => $page < max(1, (int) ceil($total / $perPage)),
             ];
         }
 
@@ -135,6 +121,51 @@ final class SubmissionTrackingService
             'queues' => $this->queues($filters, $records),
             'modules' => $this->modules($records),
             ...($pagination === null ? [] : ['pagination' => $pagination]),
+        ];
+    }
+
+    /** @return array{modules:list<string>,targetOffices:list<string>,periods:list<string>,statuses:list<string>,years:list<int>} */
+    public function filterOptions(array $filters = []): array
+    {
+        $modules = collect();
+        $offices = collect();
+        $periods = collect();
+        $years = collect([now()->year]);
+
+        $sources = $this->sources();
+        if (($filters['program'] ?? null) === 'conservation') unset($sources['engp']);
+        if (($filters['program'] ?? null) === 'engp') $sources = array_intersect_key($sources, ['engp' => true]);
+
+        foreach ($sources as $key => $source) {
+            $query = $this->sourceQuery($key, $source, [], false);
+            $model = $query->getModel();
+            $schema = Schema::connection($model->getConnectionName());
+            $table = $model->getTable();
+            $officeColumn = $key === 'engp' ? 'office' : 'target_office';
+            if ($schema->hasColumn($table, $officeColumn)) {
+                $offices = $offices->merge($query->clone()->reorder()->whereNotNull($officeColumn)->distinct()->orderBy($officeColumn)->pluck($officeColumn));
+            }
+            $periodColumn = $key === 'engp' ? 'period_label' : ($schema->hasColumn($table, 'reporting_period') ? 'reporting_period' : ($schema->hasColumn($table, 'semester') ? 'semester' : null));
+            if ($periodColumn) {
+                $periods = $periods->merge($query->clone()->reorder()->whereNotNull($periodColumn)->distinct()->orderBy($periodColumn)->pluck($periodColumn));
+            }
+            if ($schema->hasColumn($table, 'reporting_year')) $years = $years->merge($query->clone()->reorder()->whereNotNull('reporting_year')->distinct()->orderByDesc('reporting_year')->pluck('reporting_year'));
+            if ($schema->hasColumn($table, 'workflow_key')) {
+                foreach ($query->clone()->reorder()->whereNotNull('workflow_key')->distinct()->orderBy('workflow_key')->pluck('workflow_key') as $workflowKey) {
+                    $record = $model->newInstance(['workflow_key' => $workflowKey]);
+                    $modules->push($source['module']($record));
+                }
+            } else {
+                $modules->push($source['module']($model->newInstance()));
+            }
+        }
+
+        return [
+            'modules' => $modules->filter()->unique()->sort()->values()->all(),
+            'targetOffices' => $offices->filter()->unique()->sort()->values()->all(),
+            'periods' => $periods->filter()->unique()->sort()->values()->all(),
+            'statuses' => [RoutingStatusPresenter::NO_ACTIVITY, RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO, RoutingStatusPresenter::PENDING_REGIONAL, RoutingStatusPresenter::COMPLETED],
+            'years' => $years->map(fn ($year): int => (int) $year)->filter(fn (int $year): bool => $year >= 2000 && $year <= 2100)->unique()->sortDesc()->values()->all(),
         ];
     }
 
@@ -279,6 +310,67 @@ final class SubmissionTrackingService
         return $this->sources()[$key] ?? null;
     }
 
+    /** Build one authorization-first query for a registered active source. */
+    private function sourceQuery(string $key, array $source, array $filters = [], bool $withRelations = true)
+    {
+        $query = $source['model']::query();
+        $model = $query->getModel();
+        $schema = Schema::connection($model->getConnectionName());
+        $table = $model->getTable();
+
+        if ($withRelations) {
+            if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
+            if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy']);
+            if ($key === 'engp') $query->with('releaseEvents');
+        }
+        if ($key === 'conservation') {
+            $query->where(fn ($candidate) => $candidate
+                ->where(fn ($meeting) => $meeting->whereIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)->whereNotNull('date_conducted'))
+                ->orWhere(fn ($other) => $other->whereNotNull('date_accomplished')->where(fn ($workflow) => $workflow->whereNotIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)->orWhereNull('workflow_key'))));
+        }
+        if ($user = auth()->user()) {
+            if ($key === 'conservation') $query = $this->pambAccess->scopeQuery($query, $user);
+            elseif ($key === 'engp') $query = $this->organization->scopeDevelopmentQuery($query, $user);
+            elseif ($this->hasProtectedAreaColumn($source['model'])) $query = $this->organization->scopeProtectedAreaQuery($query, $user);
+        }
+        $this->applyDatabaseFilters($query, $key, $filters);
+        if ($key !== 'conservation' && $key !== 'engp' && ($source['requires_date_accomplished'] ?? true)) $query->whereNotNull('date_accomplished');
+
+        $hasAccomplished = $schema->hasColumn($table, 'date_accomplished');
+        $hasConducted = $schema->hasColumn($table, 'date_conducted');
+        if ($hasAccomplished || $hasConducted) {
+            $dateExpression = $hasAccomplished && $hasConducted
+                ? 'COALESCE('.$table.'.date_accomplished, '.$table.'.date_conducted)'
+                : ($hasAccomplished ? $table.'.date_accomplished' : $table.'.date_conducted');
+            // Match the normalized collection sort: dated records first,
+            // then null-date records in deterministic source-id order.
+            $query->orderByRaw('CASE WHEN '.$dateExpression.' IS NULL THEN 1 ELSE 0 END ASC')
+                ->orderByRaw($dateExpression.' DESC');
+        }
+        $query->orderBy($table.'.id');
+        return $query;
+    }
+
+    private function countForFilters(array $filters): int
+    {
+        $sources = $this->sources();
+        if (($filters['program'] ?? null) === 'conservation') unset($sources['engp']);
+        if (($filters['program'] ?? null) === 'engp') $sources = array_intersect_key($sources, ['engp' => true]);
+        return collect($sources)->sum(function (array $source, string $key) use ($filters): int {
+            return (int) $this->sourceQuery($key, $source, $filters, false)->count();
+        });
+    }
+
+    private function sourceModuleLabel(string $sourceKey, string $modelClass, string $workflowKey): string
+    {
+        $record = new $modelClass(['workflow_key' => $workflowKey]);
+        return match ($sourceKey) {
+            'engp' => (string) ($this->engpWorkflows->find($workflowKey)['label'] ?? 'ENGP Report'),
+            'conservation' => (string) ($this->workflows->find($workflowKey)['label'] ?? 'Conservation Report'),
+            default => (string) (($this->sources()[$sourceKey]['module'])($record) ?? 'Report'),
+        };
+    }
+
     private function auditTransition(string $sourceKey, Model $record, array $source, string $stage, string $date, ?int $userId = null): void
     {
         $metadata = $this->moduleMetadata($record, $source);
@@ -308,12 +400,12 @@ final class SubmissionTrackingService
 
     /** @param array<string, mixed> $source
      *  @return array<string, mixed> */
-    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection): array
+    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection, array $trackingNumbers = []): array
     {
         $isEngp = $sourceKey === 'engp';
         $period = $isEngp
             ? $record->getAttribute('period_label')
-            : ($record->getAttribute('reporting_period') ?: $record->getAttribute('semester'));
+            : ($record->getAttribute('reporting_period') ?: ($record->getAttribute('semester') ?: $record->getAttribute('quarter')));
         if (! $period && $record->getAttribute('reporting_month')) {
             $period = Carbon::create()->month((int) $record->getAttribute('reporting_month'))->format('F').' '.$record->getAttribute('reporting_year');
         }
@@ -325,9 +417,26 @@ final class SubmissionTrackingService
                 ? ['date_conducted', 'date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional']
                 : ['date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional']);
         $metadata = $this->moduleMetadata($record, $source);
+        $reportingYear = $record->getAttribute('reporting_year');
+        if (! $reportingYear) {
+            $yearDate = $record->getAttribute('date_accomplished') ?: $record->getAttribute('date_conducted');
+            $reportingYear = $yearDate ? Carbon::parse($yearDate)->year : null;
+        }
         $data = [
             'source' => $sourceKey,
             'source_id' => $record->getKey(),
+            'tracking_number' => $trackingNumbers[$sourceKey.':'.$record->getKey()] ?? null,
+            'workflow_key' => $record->getAttribute('workflow_key') ?: match ($sourceKey) {
+                'bms' => 'bms',
+                'bams' => 'bams',
+                'imea' => 'imea',
+                'imea-maintenance' => 'imea_facility_maintenance',
+                'aws' => 'automated_weather_station',
+                'ipaf-management' => 'ipaf_management',
+                'revenue' => 'revenue_collection',
+                'management-plans' => 'management_plans',
+                default => null,
+            },
             'module' => $metadata['module_name'],
             'module_name' => $metadata['module_name'],
             'target_office' => $record->getAttribute($source['target_office'] ?? 'target_office'),
@@ -337,10 +446,11 @@ final class SubmissionTrackingService
             'document_type' => $record->getAttribute('document_type') ?: $record->getAttribute('report_period_type'),
             'program' => $metadata['program_area'],
             'program_area' => $metadata['program_area'],
-            'reporting_year' => $record->getAttribute('reporting_year'),
+            'reporting_year' => $reportingYear,
             'date_conducted' => $this->text($record, 'date_conducted'),
             'date_accomplished' => null,
             'reporting_period' => $period,
+            'period_key' => $record->getAttribute('period_key'),
             'deadline_submission' => $record->getAttribute('deadline_submission'),
             'days_complied' => $record->getAttribute('days_complied') ?? $record->getAttribute('number_days_complied'),
             'submission_status' => $this->statusPresenter->status($record, $sourceKey),
@@ -565,9 +675,40 @@ final class SubmissionTrackingService
             $query->where($table.'.protected_area_id', (int) $filters['protected_area_id']);
         }
 
+        if (filled($filters['reporting_year'] ?? null)) {
+            $year = (int) $filters['reporting_year'];
+            if ($schema->hasColumn($table, 'reporting_year')) {
+                $query->where($table.'.reporting_year', $year);
+            } elseif ($schema->hasColumn($table, 'date_accomplished') || $schema->hasColumn($table, 'date_conducted')) {
+                $query->where(function ($yearQuery) use ($table, $schema, $year): void {
+                    if ($schema->hasColumn($table, 'date_accomplished')) $yearQuery->orWhereYear($table.'.date_accomplished', $year);
+                    if ($schema->hasColumn($table, 'date_conducted')) $yearQuery->orWhereYear($table.'.date_conducted', $year);
+                });
+            }
+        }
+
+        if (filled($filters['reporting_period'] ?? null)) {
+            $period = (string) $filters['reporting_period'];
+            $periodColumn = $sourceKey === 'engp' ? 'period_label' : ($schema->hasColumn($table, 'reporting_period') ? 'reporting_period' : ($schema->hasColumn($table, 'semester') ? 'semester' : null));
+            if ($periodColumn) $query->where($table.'.'.$periodColumn, $period);
+        }
+
+        if (filled($filters['module'] ?? null) && $schema->hasColumn($table, 'workflow_key')) {
+            $workflowKeys = collect($query->clone()->reorder()->whereNotNull('workflow_key')->distinct()->orderBy('workflow_key')->pluck('workflow_key'))
+                ->filter(fn ($workflowKey): bool => $this->sourceModuleLabel($sourceKey, $sourceKey === 'engp' ? EngpReportSubmission::class : $model::class, (string) $workflowKey) === (string) $filters['module'])
+                ->values()->all();
+            $query->whereIn($table.'.workflow_key', $workflowKeys);
+        }
+
+        if (filled($filters['status'] ?? null)) $this->applyStatusFilter($query, $sourceKey, (string) $filters['status'], $table, $schema);
+
         $officeColumn = $sourceKey === 'engp' ? 'office' : 'target_office';
         if (filled($filters['target_office'] ?? null) && $schema->hasColumn($table, $officeColumn)) {
             $query->where($table.'.'.$officeColumn, $filters['target_office']);
+        }
+
+        if (($filters['focus_source'] ?? null) === $sourceKey && filled($filters['focus_id'] ?? null)) {
+            $query->where($table.'.id', (int) $filters['focus_id']);
         }
 
         $search = trim((string) ($filters['search'] ?? ''));
@@ -575,18 +716,51 @@ final class SubmissionTrackingService
 
         $searchColumns = array_values(array_filter([
             'activity_name', 'document_type', 'target_office', 'office',
-            'station_name', 'station', 'report_type', 'period_label',
+            'station_name', 'report_period_type', 'reporting_period', 'period_label', 'semester',
         ], fn (string $column): bool => $schema->hasColumn($table, $column)));
         if ($searchColumns === [] && ! $schema->hasColumn($table, 'protected_area_id')) return;
 
-        $query->where(function ($searchQuery) use ($search, $searchColumns, $schema, $table): void {
+        $modelClass = $model::class;
+        $query->where(function ($searchQuery) use ($query, $search, $searchColumns, $schema, $table, $sourceKey, $modelClass): void {
             foreach ($searchColumns as $column) {
                 $searchQuery->orWhere($column, 'like', '%'.$search.'%');
+            }
+            if ($schema->hasColumn($table, 'workflow_key')) {
+                $workflowKeys = collect($query->clone()->reorder()->whereNotNull('workflow_key')->distinct()->orderBy('workflow_key')->pluck('workflow_key'))
+                    ->filter(fn ($workflowKey): bool => str_contains(strtolower($this->sourceModuleLabel($sourceKey, $modelClass, (string) $workflowKey)), strtolower($search)))
+                    ->values()->all();
+                if ($workflowKeys !== []) $searchQuery->orWhereIn($table.'.workflow_key', $workflowKeys);
+            } else {
+                $fixedModule = match ($sourceKey) {
+                    'bms' => 'BMS Report',
+                    'bams' => 'BAMS Report',
+                    'imea' => 'IMEA Report',
+                    'aws' => 'AWS Report',
+                    'ipaf-management' => 'Management of IPAF',
+                    'imea-maintenance' => 'IMEA Facility Maintenance',
+                    'revenue' => 'Revenue Collection',
+                    'management-plans' => 'Management Plans',
+                    default => null,
+                };
+                if ($fixedModule && str_contains(strtolower($fixedModule), strtolower($search))) $searchQuery->orWhereRaw('1 = 1');
             }
             if ($schema->hasColumn($table, 'protected_area_id')) {
                 $searchQuery->orWhereHas('protectedArea', fn ($areaQuery) => $areaQuery->where('name', 'like', '%'.$search.'%'));
             }
+            if (Schema::hasTable('report_tracking_references')) {
+                $searchQuery->orWhereExists(fn ($referenceQuery) => $referenceQuery
+                    ->select(DB::raw('1'))
+                    ->from('report_tracking_references')
+                    ->whereColumn('report_tracking_references.source_id', $table.'.id')
+                    ->where('report_tracking_references.source_type', $sourceKey)
+                    ->where('report_tracking_references.tracking_number', $this->isTrackingNumber($search) ? '=' : 'like', $this->isTrackingNumber($search) ? strtoupper($search) : '%'.$search.'%'));
+            }
         });
+    }
+
+    private function isTrackingNumber(string $value): bool
+    {
+        return preg_match('/^EDATS-(?:PA|ENGP)-\d{4}-\d+$/i', trim($value)) === 1;
     }
 
     /** @param array<string, mixed> $record */
@@ -598,6 +772,38 @@ final class SubmissionTrackingService
         if (($filters['reporting_period'] ?? '') && $record['reporting_period'] !== $filters['reporting_period']) return false;
         if (($filters['status'] ?? '') && $record['submission_status'] !== $filters['status']) return false;
         $search = strtolower(trim((string) ($filters['search'] ?? '')));
-        return ! $search || str_contains(strtolower(implode(' ', [$record['module'], $record['target_office'], $record['protected_area'], $record['activity_name'], $record['document_type'], $record['reporting_period']])), $search);
+        return ! $search || str_contains(strtolower(implode(' ', [$record['tracking_number'] ?? '', $record['module'], $record['target_office'], $record['protected_area'], $record['activity_name'], $record['document_type'], $record['reporting_period']])), $search);
+    }
+
+    private function applyStatusFilter($query, string $sourceKey, string $status, string $table, $schema): void
+    {
+        if ($sourceKey === 'engp') {
+            if ($status === RoutingStatusPresenter::COMPLETED) $query->whereNotNull($table.'.date_received_penro');
+            elseif (in_array($status, [RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO], true)) {
+                $query->whereNull($table.'.date_received_penro')->where(function ($stageQuery) use ($sourceKey, $status): void {
+                    $workflows = app(EngpReportWorkflowRegistry::class)->all();
+                    foreach ($workflows as $workflow) {
+                        $key = (string) ($workflow['key'] ?? '');
+                        if ($key === '') continue;
+                        $needed = ($workflow['period'] ?? $workflow['reporting_frequency'] ?? '') === 'quarterly' ? 3 : 1;
+                        $stageQuery->orWhere(function ($workflowQuery) use ($key, $needed, $status): void {
+                            $workflowQuery->where('workflow_key', $key);
+                            if ($status === RoutingStatusPresenter::PENDING_CENRO) $workflowQuery->whereHas('releaseEvents', null, '<', $needed);
+                            else $workflowQuery->whereHas('releaseEvents', null, '>=', $needed);
+                        });
+                    }
+                });
+            }
+            return;
+        }
+
+        match ($status) {
+            RoutingStatusPresenter::COMPLETED => $query->whereNotNull($table.'.date_received_penro')->whereNotNull($table.'.date_endorsed_regional'),
+            RoutingStatusPresenter::PENDING_REGIONAL => $query->whereNotNull($table.'.date_received_penro')->whereNull($table.'.date_endorsed_regional'),
+            RoutingStatusPresenter::PENDING_PENRO => $query->whereNull($table.'.date_received_penro')->where(function ($stage) use ($table): void { $stage->whereNotNull($table.'.date_report_released_cenro')->orWhere(fn ($direct) => $this->routingPolicy->scopeDirectPenroQuery($direct)); }),
+            RoutingStatusPresenter::PENDING_CENRO => $query->whereNull($table.'.date_received_penro')->whereNull($table.'.date_report_released_cenro')->where(fn ($notDirect) => $this->routingPolicy->scopeNotDirectPenroQuery($notDirect)),
+            RoutingStatusPresenter::NO_ACTIVITY => $query->whereNull($table.'.date_received_penro')->whereNull($table.'.date_report_released_cenro')->whereNull($table.'.date_endorsed_regional'),
+            default => null,
+        };
     }
 }

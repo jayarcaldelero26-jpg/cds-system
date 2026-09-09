@@ -3,6 +3,7 @@
 namespace App\Services\Engp;
 
 use Carbon\CarbonImmutable;
+use App\Services\Reports\ReportRequirementRegistry;
 
 final class EngpReportWorkflowRegistry
 {
@@ -26,16 +27,45 @@ final class EngpReportWorkflowRegistry
 
     public function find(string $key): ?array
     {
+        return app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $key)
+            ?? $this->defaultFind($key);
+    }
+
+    /** Static defaults used only when seeding/backfilling canonical definitions. */
+    public function defaultFind(string $key): ?array
+    {
         $workflow = self::WORKFLOWS[$key] ?? null;
         if (! $workflow) {
             return null;
         }
 
-        return [...$workflow, 'key' => $key, 'offices' => $workflow['offices'] ?? self::OFFICES];
+        return [
+            ...$workflow,
+            'key' => $key,
+            'offices' => $workflow['offices'] ?? self::OFFICES,
+            ...($workflow['period'] === 'weekly' ? [
+                'weekly' => [
+                    'excluded_start_dates' => ['2026-08-31'],
+                    'initial_deadline_day' => 20,
+                ],
+            ] : []),
+        ];
     }
 
     /** @return list<string> */
     public function keys(): array
+    {
+        return $this->allKeys();
+    }
+
+    /** @param list<int|string> $existingYears */
+    public function availableYears(array $existingYears = [], ?int $currentYear = null): array
+    {
+        return app(ReportRequirementRegistry::class)->availableYears(ReportRequirementRegistry::ENGP, $existingYears, $currentYear);
+    }
+
+    /** @return list<string> */
+    public function defaultKeys(): array
     {
         return array_keys(self::WORKFLOWS);
     }
@@ -43,76 +73,100 @@ final class EngpReportWorkflowRegistry
     /** @return list<array<string, mixed>> */
     public function all(): array
     {
-        return array_map(fn (string $key): array => $this->find($key), $this->keys());
+        $definitions = app(ReportRequirementRegistry::class)
+            ->definitions(ReportRequirementRegistry::ENGP, true)
+            ->all();
+
+        return $definitions !== []
+            ? $definitions
+            : array_map(fn (string $key): array => $this->defaultFind($key), $this->defaultKeys());
+    }
+
+    /** @return list<string> */
+    private function allKeys(): array
+    {
+        try {
+            return collect($this->all())->pluck('key')->all();
+        } catch (\Throwable) {
+            return $this->defaultKeys();
+        }
     }
 
     /** @return list<array{key: string, label: string}> */
     public function periods(string $workflowKey, int $year): array
     {
-        $workflow = $this->find($workflowKey);
-        if (! $workflow || $year !== 2026) {
-            return [];
+        $periods = app(ReportRequirementRegistry::class)->periods(ReportRequirementRegistry::ENGP, $workflowKey, $year);
+        if ($periods !== [] || app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
+            return $periods;
         }
 
+        $workflow = $this->defaultFind($workflowKey);
+        if (! $workflow) return [];
         return match ($workflow['period']) {
-            'monthly' => array_map(fn (int $month): array => [
-                'key' => sprintf('%d-%02d', $year, $month),
-                'label' => CarbonImmutable::create($year, $month, 1)->format('F Y'),
-            ], range(1, 12)),
+            'monthly' => array_map(fn (int $month): array => ['key' => sprintf('%d-%02d', $year, $month), 'label' => CarbonImmutable::create($year, $month, 1)->format('F Y')], range(1, 12)),
             'quarterly' => array_map(fn (int $quarter): array => ['key' => "Q{$quarter}", 'label' => "Quarter {$quarter}"], range(1, 4)),
-            'weekly' => $this->weeklyPeriods(),
+            'weekly' => $this->weeklyPeriods($year),
             default => [],
         };
     }
 
     public function period(string $workflowKey, int $year, string $periodKey): ?array
     {
+        $period = app(ReportRequirementRegistry::class)->period(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey);
+        if ($period !== null || app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
+            return $period;
+        }
+
         return collect($this->periods($workflowKey, $year))->firstWhere('key', $periodKey);
     }
 
     public function deadline(string $workflowKey, int $year, string $periodKey): ?string
     {
-        if (! $this->period($workflowKey, $year, $periodKey)) {
-            return null;
+        $canonical = app(ReportRequirementRegistry::class);
+        if ($canonical->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
+            return $canonical->deadline(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey);
         }
 
-        $workflow = $this->find($workflowKey);
+        if (! $this->period($workflowKey, $year, $periodKey)) return null;
+        $workflow = $this->defaultFind($workflowKey);
         if ($workflow['period'] === 'monthly') {
             [$periodYear, $month] = array_map('intval', explode('-', $periodKey));
             return CarbonImmutable::create($periodYear, $month, $workflowKey === 'rims' && $month === 1 ? 29 : 20)->toDateString();
         }
-        if ($workflow['period'] === 'quarterly') {
-            return CarbonImmutable::create($year, ((int) substr($periodKey, 1)) * 3, 10)->toDateString();
-        }
-
-        $period = $this->period($workflowKey, $year, $periodKey);
-        return $period['deadline'] ?? null;
+        if ($workflow['period'] === 'quarterly') return CarbonImmutable::create($year, ((int) substr($periodKey, 1)) * 3, 10)->toDateString();
+        return data_get(collect($this->periods($workflowKey, $year))->firstWhere('key', $periodKey), 'deadline');
     }
 
     /** @return list<array{key: string, label: string}> */
     public function releaseComponents(string $workflowKey, int $year, string $periodKey): array
     {
-        $workflow = $this->find($workflowKey);
-        if (! $workflow || ! $this->period($workflowKey, $year, $periodKey)) {
-            return [];
+        $canonical = app(ReportRequirementRegistry::class);
+        if ($canonical->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
+            return $canonical->releaseComponents(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey);
         }
+
+        $workflow = $this->defaultFind($workflowKey);
+        if (! $workflow || ! $this->period($workflowKey, $year, $periodKey)) return [];
         if ($workflow['period'] !== 'quarterly') {
             $period = $this->period($workflowKey, $year, $periodKey);
             return [['key' => 'period', 'label' => $period['label']]];
         }
-
         $quarter = (int) substr($periodKey, 1);
         return array_map(fn (int $month): array => ['key' => CarbonImmutable::create($year, $month, 1)->format('Y-m'), 'label' => CarbonImmutable::create($year, $month, 1)->format('F')], range(($quarter - 1) * 3 + 1, $quarter * 3));
     }
 
     /** @return list<array{key: string, label: string, deadline: string}> */
-    private function weeklyPeriods(): array
+    private function weeklyPeriods(int $year): array
     {
         $periods = [];
-        $start = CarbonImmutable::create(2026, 1, 5);
+        $start = CarbonImmutable::create($year, 1, 1);
+        while ($start->dayOfWeekIso !== 1) {
+            $start = $start->addDay();
+        }
         $number = 0;
-        while ($start->year === 2026) {
-            if ($start->toDateString() !== '2026-08-31') {
+        $excludedStartDates = $year === 2026 ? ['2026-08-31'] : [];
+        while ($start->year === $year) {
+            if (! in_array($start->toDateString(), $excludedStartDates, true)) {
                 $number++;
                 $end = $start->addDays(3);
                 $startLabel = $start->format('M j');
@@ -122,7 +176,9 @@ final class EngpReportWorkflowRegistry
                 $periods[] = [
                     'key' => sprintf('W%02d', $number),
                     'label' => "{$labelMonth} Week {$weekInMonth} ({$startLabel}-{$endLabel})",
-                    'deadline' => in_array($number, [1, 2], true) ? '2026-01-20' : $end->toDateString(),
+                    'deadline' => in_array($number, [1, 2], true)
+                        ? $start->setDay(min(20, $start->daysInMonth))->toDateString()
+                        : $end->toDateString(),
                 ];
             }
             $start = $start->addWeek();

@@ -11,7 +11,7 @@ import PambMovProgress from '@/Components/SubmissionTracking/PambMovProgress';
 import DocumentRoutingTimeline from '@/Components/SubmissionTracking/DocumentRoutingTimeline';
 import DocumentPreviewDialog from '@/Components/SubmissionTracking/DocumentPreviewDialog';
 import PremiumTimePicker from '@/Components/PremiumTimePicker';
-import { Link, router, useForm, usePage } from '@inertiajs/react';
+import { router, useForm, usePage } from '@inertiajs/react';
 import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
 import { localDateInputValue } from '@/Utils/dateInput';
 import DatePicker from '@/Components/DatePicker';
@@ -46,7 +46,7 @@ const historyWidths = {
 const historyHeader = width => `${historyWidths[width]} px-4 py-3 align-middle text-xs font-semibold leading-4`;
 const historyCell = width => `${historyWidths[width]} px-4 py-3 align-top text-sm leading-5`;
 
-export default function Index({ queues = {}, filters = {}, filterOptions = {}, trackingContext = {}, pagination = {} }) {
+export default function Index({ queues = {}, filters = {}, filterOptions = {}, trackingContext = {}, pagination = {}, focus = {} }) {
     const { props: pageProps } = usePage();
     const canCorrectSubmissionRouting = Boolean(pageProps.auth?.canCorrectSubmissionRouting);
     const cenroTabs = [['for_submission', 'For Submission'], ['for_review', 'For Review'], ['needs_correction', 'Needs Correction'], ['for_release', 'For Release'], ['release_history', 'Release History']];
@@ -56,6 +56,10 @@ export default function Index({ queues = {}, filters = {}, filterOptions = {}, t
     const [search, setSearch] = useState(filters.search || '');
     const [module, setModule] = useState(filters.module || '');
     const [protectedAreaId, setProtectedAreaId] = useState(filters.protected_area_id || '');
+    const [targetOffice, setTargetOffice] = useState(filters.target_office || '');
+    const [reportingPeriod, setReportingPeriod] = useState(filters.reporting_period || '');
+    const [reportingYear, setReportingYear] = useState(filters.reporting_year || '');
+    const [status, setStatus] = useState(filters.status || '');
     const [selected, setSelected] = useState(null);
     const [details, setDetails] = useState(null);
     const form = useForm({ date: localDateInputValue(), stage: '', remarks: '' });
@@ -66,6 +70,7 @@ export default function Index({ queues = {}, filters = {}, filterOptions = {}, t
     const [routingStage, setRoutingStage] = useState(null);
     const [previewRow, setPreviewRow] = useState(null);
     const [reviewing, setReviewing] = useState(null);
+    const [focusOpened, setFocusOpened] = useState(false);
     const rows = queues[tab] || [];
     const displayDate = tab === 'history' ? historyDate : plainDate;
     const action = tab === 'cenro_release' ? ['Record CENRO Release', 'Record CENRO release date', 'Date CENRO released the report / MOV', 'Save Release Date'] : tab === 'penro_receipt' ? ['Record PENRO Receipt', 'Record PENRO receipt date', 'Date PENRO received the report / MOV', 'Save Receipt Date'] : ['Record Regional Endorsement', 'Record Regional endorsement date', 'Date report / MOV was endorsed to the Regional Office', 'Save Endorsement Date'];
@@ -93,7 +98,11 @@ export default function Index({ queues = {}, filters = {}, filterOptions = {}, t
     useEffect(() => setSearch(filters.search || ''), [filters.search]);
     useEffect(() => setModule(filters.module || ''), [filters.module]);
     useEffect(() => setProtectedAreaId(filters.protected_area_id || ''), [filters.protected_area_id]);
-    const navigateFilters = changes => router.get(route('submission-tracking.index'), { ...filters, search: search || undefined, module: module || undefined, protected_area_id: protectedAreaId || undefined, ...changes }, { preserveState: true, preserveScroll: true, replace: true });
+    useEffect(() => setTargetOffice(filters.target_office || ''), [filters.target_office]);
+    useEffect(() => setReportingPeriod(filters.reporting_period || ''), [filters.reporting_period]);
+    useEffect(() => setReportingYear(filters.reporting_year || ''), [filters.reporting_year]);
+    useEffect(() => setStatus(filters.status || ''), [filters.status]);
+    const navigateFilters = changes => router.get(route('submission-tracking.index'), { ...filters, search: search || undefined, module: module || undefined, protected_area_id: protectedAreaId || undefined, target_office: targetOffice || undefined, reporting_period: reportingPeriod || undefined, reporting_year: reportingYear || undefined, status: status || undefined, ...changes }, { preserveState: true, preserveScroll: true, replace: true });
     useEffect(() => {
         if (search === (filters.search || '')) return undefined;
         const timer = window.setTimeout(() => navigateFilters({ search: search || undefined }), 300);
@@ -110,6 +119,18 @@ export default function Index({ queues = {}, filters = {}, filterOptions = {}, t
             if (updated) setDetails(updated);
         }
     }, [queues]);
+    useEffect(() => {
+        if (focusOpened || !focus?.source || !focus?.id) return;
+        const target = Object.values(queues).flat().find(row => row.source === focus.source && Number(row.source_id) === Number(focus.id));
+        if (!target) {
+            setFocusOpened(true);
+            return;
+        }
+        const targetTab = visibleTabs.find(([key]) => (queues[key] || []).some(row => row.source === target.source && Number(row.source_id) === Number(target.source_id)))?.[0];
+        if (targetTab) setTab(targetTab);
+        setDetails(target);
+        setFocusOpened(true);
+    }, [queues, focus?.source, focus?.id, focusOpened]);
     const submit = event => { event.preventDefault(); form.post(route('submission-tracking.transition', [selected.source, selected.source_id, form.data.stage]), { preserveScroll: true, onSuccess: () => setSelected(null) }); };
     const submitReview = event => { event.preventDefault(); reviewForm.post(route('submission-tracking.mov.review', [reviewing.source, reviewing.source_id]), { preserveScroll: true, onSuccess: () => { setReviewing(null); reviewForm.reset(); } }); };
     const submitInternal = event => { event.preventDefault(); internalForm.post(route('submission-tracking.internal-routing', [details.source, details.source_id, routingStage.key]), { preserveScroll: true, onSuccess: () => { setRoutingStage(null); internalForm.reset(); } }); };
@@ -132,7 +153,7 @@ export default function Index({ queues = {}, filters = {}, filterOptions = {}, t
     return <AuthenticatedLayout title="Submission Tracking"><PageHeader title="Submission Tracking" description="Monitor report / MOV routing milestones recorded by staff. These actions record real-world dates; eDATS does not transmit official documents." />
         <div className="mt-6 space-y-5">
             <div className="flex flex-wrap gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900">{visibleTabs.map(([key, label]) => <button key={key} type="button" onClick={() => setTab(key)} className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${tab === key ? 'bg-green-700 text-white shadow-sm' : 'text-gray-600 hover:bg-green-50 dark:text-gray-300 dark:hover:bg-gray-800'}`}>{label}<span className="ml-2 opacity-75">{(queues[key] || []).length}</span></button>)}</div>
-            <div className="grid gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-3 dark:border-gray-800 dark:bg-gray-900"><FloatingInput id="submission-tracking-search" label="Search" value={search} onChange={event => setSearch(event.target.value)} size="sm" /><FloatingSelect id="submission-tracking-module" label="Module" value={module} onChange={event => { const value = event.target.value; setModule(value); navigateFilters({ module: value || undefined }); }} size="sm"><option value="">All modules</option>{(filterOptions.modules || []).map(value => <option key={value}>{value}</option>)}</FloatingSelect><FloatingSelect id="submission-tracking-area" label="Protected Area" value={protectedAreaId} onChange={event => { const value = event.target.value; setProtectedAreaId(value); navigateFilters({ protected_area_id: value || undefined }); }} size="sm"><option value="">All protected areas</option>{(filterOptions.protectedAreas || []).map(area => <option key={area.id} value={area.id}>{area.name}</option>)}</FloatingSelect></div>
+            <div className="grid gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4 dark:border-gray-800 dark:bg-gray-900"><FloatingInput id="submission-tracking-search" label="Search / Tracking No." value={search} onChange={event => setSearch(event.target.value)} size="sm" /><FloatingSelect id="submission-tracking-module" label="Module" value={module} onChange={event => { const value = event.target.value; setModule(value); navigateFilters({ module: value || undefined }); }} size="sm"><option value="">All modules</option>{(filterOptions.modules || []).map(value => <option key={value}>{value}</option>)}</FloatingSelect><FloatingSelect id="submission-tracking-area" label="Protected Area" value={protectedAreaId} onChange={event => { const value = event.target.value; setProtectedAreaId(value); navigateFilters({ protected_area_id: value || undefined }); }} size="sm"><option value="">All protected areas</option>{(filterOptions.protectedAreas || []).map(area => <option key={area.id} value={area.id}>{area.name}</option>)}</FloatingSelect><FloatingSelect id="submission-tracking-office" label="Office" value={targetOffice} onChange={event => { const value = event.target.value; setTargetOffice(value); navigateFilters({ target_office: value || undefined }); }} size="sm"><option value="">All offices</option>{(filterOptions.targetOffices || []).map(value => <option key={value}>{value}</option>)}</FloatingSelect><FloatingSelect id="submission-tracking-period" label="Reporting Period" value={reportingPeriod} onChange={event => { const value = event.target.value; setReportingPeriod(value); navigateFilters({ reporting_period: value || undefined }); }} size="sm"><option value="">All periods</option>{(filterOptions.periods || []).map(value => <option key={value}>{value}</option>)}</FloatingSelect><FloatingSelect id="submission-tracking-year" label="Reporting Year" value={reportingYear} onChange={event => { const value = event.target.value; setReportingYear(value); navigateFilters({ reporting_year: value || undefined }); }} size="sm"><option value="">All years</option>{(filterOptions.years || []).map(value => <option key={value}>{value}</option>)}</FloatingSelect><FloatingSelect id="submission-tracking-status" label="Status" value={status} onChange={event => { const value = event.target.value; setStatus(value); navigateFilters({ status: value || undefined }); }} size="sm"><option value="">All statuses</option>{(filterOptions.statuses || []).map(value => <option key={value}>{value}</option>)}</FloatingSelect></div>
             <CrudTable title={visibleTabs.find(([key]) => key === tab)?.[1] || 'Submission Tracking'} subtitle={tab === 'history' || tab === 'release_history' ? 'Completed routing records' : 'Monitoring queue'} helperText={tab === 'history' || tab === 'release_history' ? 'Read-only record of completed monitoring history.' : 'Click a row for Full Details. Actions are available after opening Full Details.'} columns={columns} rows={rows} rowKey={row => `${row.source}-${row.source_id}`} onRowClick={setDetails} emptyTitle="No reports in this queue" emptyDescription="No report submissions currently match this workflow stage and filters." tableClassName={tab === 'history' || tab === 'release_history' ? 'min-w-[2260px]' : 'min-w-[1500px]'} compact />
             <div className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-4 py-3 text-xs dark:border-gray-800 dark:bg-gray-900">
                 <span className="text-gray-500 dark:text-gray-400">Page {pagination.current_page || 1}</span>
@@ -144,6 +165,7 @@ export default function Index({ queues = {}, filters = {}, filterOptions = {}, t
         </div>
             <CrudDetailsModal open={Boolean(details)} title="Submission Full Details" subtitle={details ? `${details.module || 'Report'} · ${details.protected_area || 'Protected area unavailable'}` : ''} onClose={() => setDetails(null)} canEdit={canCorrectSubmissionRouting} onEdit={() => openCorrection(details)} editLabel="Correct Routing Record" summary={details && <CrudSummaryGrid items={[{ label: 'Module', value: details.module }, { label: 'Protected Area', value: details.protected_area || FALLBACK }, { label: 'Reporting Period', value: details.reporting_period || FALLBACK }, { label: details.mov_processing?.applicable ? 'Workflow Status' : 'Routing Status', render: () => <Badge value={details.mov_processing?.applicable ? details.mov_processing.workflow_status : details.submission_status} /> }, { label: 'Timeliness', render: () => <Badge value={details.timeliness} /> }, ...(details.pamb_routing_applicable ? [{ label: 'Current Document Location', value: details.current_document_location || FALLBACK }] : [])]} />}>
             {details?.mov_processing?.applicable && <PambMovProgress row={details} context={trackingContext} onSubmit={(row, options = {}) => router.post(route('submission-tracking.mov.submit-review', [row.source, row.source_id]), {}, { preserveScroll: true, ...options })} onReview={(row, decision) => { reviewForm.setData({ decision, remarks: '' }); reviewForm.clearErrors(); setReviewing(row); }} onRelease={row => { form.setData({ date: localDateInputValue(), stage: 'cenro_release' }); form.clearErrors(); setSelected(row); }} />}
+            {details && <CrudSection title="Tracking Reference"><p className="text-lg font-black tracking-wide text-green-800 dark:text-green-200">{details.tracking_number || FALLBACK}</p><p className="mt-1 text-xs text-gray-500">Stable reference for this report submission.</p></CrudSection>}
             {details?.pamb_routing_applicable && trackingContext.can_use_downstream_operations ? <PambRoutingTimeline row={details} onRecord={stage => { internalForm.setData({ remarks: '', stage: stage.key }); internalForm.clearErrors(); setRoutingStage(stage); }} onCanonicalAction={stage => { form.setData({ date: localDateInputValue(), stage: stage.key === 'penro_records_received' ? 'penro_receipt' : 'regional_endorsement', remarks: '' }); form.clearErrors(); setSelected(details); }} /> : <DocumentRoutingTimeline row={details} onAction={stage => { form.setData({ date: '', stage: stage.key, remarks: '' }); form.clearErrors(); setSelected(details); }} />}
         </CrudDetailsModal>
         <CrudFormModal open={Boolean(selected)} mode="edit" title={genericAction?.action_label || action[1]} subtitle={genericAction ? 'The event timestamp is recorded by the server.' : 'Record the real-world routing event only. eDATS does not electronically transmit the official document.'} onClose={() => setSelected(null)} onSubmit={submit} processing={form.processing} errors={form.errors} saveLabel={genericAction?.action_label || action[3]} maxWidth="max-w-xl"><CrudSection title={genericAction ? 'Document Routing Event' : 'Monitoring Event'}>{selected?.mov_url && <button type="button" onClick={() => setPreviewRow(selected)} className="mb-3 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 dark:text-green-200">Preview MOV / Report</button>}{genericAction ? <FloatingTextarea id="submission-tracking-remarks" label="Remarks / Reference (optional)" rows={3} value={form.data.remarks} onChange={event => form.setData('remarks', event.target.value)} error={form.errors.remarks} /> : <><p className="mb-3 text-xs text-gray-600 dark:text-gray-300">This date records when the office released, received, or endorsed the report / MOV. Backdating is allowed when chronology is valid.</p><DatePicker id="submission-tracking-date" label={action[2]} value={form.data.date} onChange={(value) => form.setData('date', value)} error={form.errors.date} /></>}</CrudSection></CrudFormModal>

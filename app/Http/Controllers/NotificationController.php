@@ -88,6 +88,11 @@ final class NotificationController extends Controller
     private function present(DatabaseNotification $notification): array
     {
         $data = $notification->data;
+        $url = $data['url'] ?? null;
+        if (EdatsInAppNotificationService::isBellAlert($data)) {
+            $url = EdatsInAppNotificationService::actionUrl($data, request()->user());
+        }
+
         return [
             'id' => $notification->id,
             'title' => $data['title'] ?? 'System notification',
@@ -97,7 +102,7 @@ final class NotificationController extends Controller
             'source_label' => $data['source_label'] ?? 'Report',
             'office' => $data['office'] ?? null,
             'protected_area' => $data['protected_area'] ?? null,
-            'url' => $data['url'] ?? null,
+            'url' => $url,
             'read_at' => $notification->read_at?->toIso8601String(),
             'created_at' => $notification->created_at?->toIso8601String(),
         ];

@@ -17,6 +17,7 @@ use App\Models\ModuleDefinition;
 use App\Models\TechnicalReport;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Reports\ReportRequirementRegistry;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -27,6 +28,7 @@ final class ModuleMetadataResolver
     public function __construct(
         private readonly ConservationReportWorkflowRegistry $conservationWorkflows,
         private readonly EngpReportWorkflowRegistry $engpWorkflows,
+        private readonly ReportRequirementRegistry $requirements,
     ) {}
 
     /** @param Collection<int,Model> $models */
@@ -42,9 +44,22 @@ final class ModuleMetadataResolver
 
         $this->genericDefinitions = $keys->isEmpty()
             ? collect()
-            : ModuleDefinition::query()->active()->generic()->notRetired()->whereIn('code', $keys->all())
-                ->get(['id', 'code', 'name', 'program_area'])
-                ->keyBy('code');
+            : $keys->mapWithKeys(fn (string $key): array => [$key => $this->requirements->model(ReportRequirementRegistry::PA, $key)])
+                ->filter()->values()->keyBy('code');
+    }
+
+    public function genericDefinition(string $workflowKey): ?ModuleDefinition
+    {
+        if ($this->genericDefinitions !== null) {
+            return $this->genericDefinitions->get($workflowKey);
+        }
+
+        $definition = $this->requirements->model(ReportRequirementRegistry::PA, $workflowKey);
+        return $definition && $definition->implementation_type === ModuleDefinition::IMPLEMENTATION_GENERIC && $definition->is_active
+            ? $definition
+            : null;
+
+        return $this->genericDefinitions->get($workflowKey);
     }
 
     /** @return array{module_name:string,program_area:?string,workflow_key:?string} */
@@ -53,9 +68,7 @@ final class ModuleMetadataResolver
         $workflowKey = $model->getAttribute('workflow_key');
 
         if ($model instanceof ConservationReportSubmission) {
-            $definition = $this->genericDefinitions !== null
-                ? $this->genericDefinitions->get((string) $workflowKey)
-                : ModuleDefinition::query()->active()->generic()->notRetired()->where('code', (string) $workflowKey)->first();
+            $definition = $this->genericDefinition((string) $workflowKey);
 
             if ($definition) {
                 return [

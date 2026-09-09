@@ -22,7 +22,7 @@ final class AwsMonthlySummaryXlsxService
             'Protected Area', 'Reporting Period', 'Average Atmospheric Pressure (kPa)',
             'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)',
             'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')',
-            'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Remarks', 'Data Completeness (%)',
+            'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Remarks',
         ];
         $sheetRows = [
             $this->row(1, ['Automated Weather Station (AWS) Monitoring Summary'], [1]),
@@ -55,15 +55,15 @@ final class AwsMonthlySummaryXlsxService
             $summary['protected_area_name'], $summary['period'], $summary['average_atmospheric_pressure'],
             $summary['average_air_temperature'], $summary['average_vapor_pressure_deficit'],
             $summary['average_relative_humidity'], $summary['mean_wind_direction'], $summary['total_precipitation'],
-            $summary['average_wind_speed'], $summary['remarks'], $summary['data_completeness'],
-        ], [0, 0, 2, 2, 2, 2, 2, 2, 2, 0, 3]);
+            $summary['average_wind_speed'], $summary['remarks'],
+        ], [0, 0, 2, 2, 2, 2, 2, 2, 0]);
     }
 
     private function worksheet(array $rows, int $lastRow): string
     {
         $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
         $xml .= '<sheetViews><sheetView workbookViewId="0"><pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><cols>';
-        foreach ([22, 18, 22, 20, 25, 21, 19, 20, 20, 24, 18] as $column => $width) $xml .= '<col min="'.($column + 1).'" max="'.($column + 1).'" width="'.$width.'" customWidth="1"/>';
+        foreach ([22, 18, 22, 20, 25, 21, 19, 20, 28] as $column => $width) $xml .= '<col min="'.($column + 1).'" max="'.($column + 1).'" width="'.$width.'" customWidth="1"/>';
         $xml .= '</cols><sheetData>';
         foreach ($rows as [$number, $values, $styles]) {
             $xml .= '<row r="'.$number.'">';
@@ -73,7 +73,7 @@ final class AwsMonthlySummaryXlsxService
             }
             $xml .= '</row>';
         }
-        return $xml.'</sheetData><autoFilter ref="A4:K'.$lastRow.'"/><pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>';
+        return $xml.'</sheetData><autoFilter ref="A4:I'.$lastRow.'"/><pageMargins left="0.25" right="0.25" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>';
     }
 
     private function cell(int $column, int $row, mixed $value, int $style): string

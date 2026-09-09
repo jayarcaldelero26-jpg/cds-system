@@ -73,8 +73,10 @@ test('monthly summary uses weighted arithmetic means, interval rainfall totals, 
         ->and($row['mean_wind_direction'])->toBe(0.0)
         ->and($row['observation_count'])->toBe(192)
         ->and($row['expected_observations'])->toBe(2976)
-        ->and($row['remarks'])->toBe('Insufficient Data')
-        ->and($row['average_vapor_pressure'])->toBeGreaterThan(1.0);
+        ->and($row['remarks'])->toBe('Normal Weather Conditions')
+        ->and($row['average_vapor_pressure'])->toBeGreaterThan(1.0)
+        ->and($row['average_vapor_pressure_deficit'])->toBeGreaterThan(0.0)
+        ->and($row['average_vapor_pressure_deficit'])->toBeLessThan($row['average_vapor_pressure']);
 });
 
 test('null sensor values are excluded and a month with no persisted raw rows returns no fabricated row', function () {

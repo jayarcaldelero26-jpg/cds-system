@@ -473,6 +473,7 @@ test('standardized submission statuses are derived from the report lifecycle', f
 });
 
 test('the standard report form requires an attachment and leaves routing dates for submission tracking', function () {
+    Storage::fake('local');
     Storage::fake('public');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'homestay'), [
@@ -500,6 +501,7 @@ test('the standard report form requires an attachment and leaves routing dates f
 });
 
 test('editing a conservation report preserves its attachment unless an explicit replacement is uploaded', function () {
+    Storage::fake('local');
     Storage::fake('public');
     Storage::disk('public')->put('conservation-report-movs/original.pdf', 'original');
     $report = ConservationReportSubmission::create([
@@ -519,6 +521,7 @@ test('editing a conservation report preserves its attachment unless an explicit 
 });
 
 test('a crafted hidden attachment removal flag cannot erase an existing conservation MOV', function () {
+    Storage::fake('local');
     Storage::fake('public');
     Storage::disk('public')->put('conservation-report-movs/protected.pdf', 'protected');
     $report = ConservationReportSubmission::create([

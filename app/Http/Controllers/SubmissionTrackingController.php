@@ -21,20 +21,27 @@ class SubmissionTrackingController extends Controller
 
     public function index(Request $request): Response
     {
-        $filters = $request->only(['search', 'module', 'protected_area_id', 'target_office', 'reporting_period', 'status']);
+        $filters = $request->only(['search', 'module', 'protected_area_id', 'target_office', 'reporting_period', 'reporting_year', 'status']);
+        $focusSource = $request->query('focus_source');
+        $focusSource = is_string($focusSource) && in_array($focusSource, ['conservation', 'engp', 'bms', 'bams', 'imea', 'imea-maintenance', 'aws', 'ipaf-management', 'revenue', 'management-plans'], true)
+            ? $focusSource
+            : null;
+        $focusId = filter_var($request->query('focus_id'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $focusId = $focusId === false ? null : $focusId;
+        $trackingFilters = $focusSource !== null && $focusId !== null
+            ? [...$filters, 'focus_source' => $focusSource, 'focus_id' => $focusId]
+            : $filters;
         $page = max(1, $request->integer('page', 1));
-        $snapshot = $this->tracking->snapshot($filters, $page, 25);
+        $snapshot = $this->tracking->snapshot($trackingFilters, $page, 25);
         $records = $snapshot['records'];
         $queues = $snapshot['queues'];
         return Inertia::render('SubmissionTracking/Index', [
             'queues' => $queues,
             'filters' => $filters,
+            'focus' => ['source' => $focusSource, 'id' => $focusId],
             'filterOptions' => [
-                'modules' => $snapshot['modules'],
+                ...$this->tracking->filterOptions($filters),
                 'protectedAreas' => app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
-                'targetOffices' => $records->pluck('target_office')->filter()->unique()->sort()->values(),
-                'periods' => $records->pluck('reporting_period')->filter()->unique()->sort()->values(),
-                'statuses' => $records->pluck('submission_status')->filter()->unique()->sort()->values(),
             ],
             'trackingContext' => [
                 'is_cenro_user' => $this->pambAccess->isCenro($request->user()),

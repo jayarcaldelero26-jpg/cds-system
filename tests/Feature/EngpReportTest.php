@@ -94,6 +94,35 @@ test('ENGP external MOV references accept HTTPS only', function () {
     expect(EngpReportSubmission::query()->where('workflow_key', 'site_visit')->count())->toBe(0);
 });
 
+test('ENGP accepts future reporting years and rejects years outside the supported range', function () {
+    $this->actingAs($this->user)
+        ->post(route('engp-reports.store', 'cbep'), [
+            'office' => 'CENRO Baganga',
+            'section_name' => 'NGP',
+            'reporting_year' => 2027,
+            'period_key' => '2027-01',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('engp_report_submissions', [
+        'workflow_key' => 'cbep',
+        'office' => 'CENRO Baganga',
+        'reporting_year' => 2027,
+        'period_key' => '2027-01',
+        'deadline_submission' => '2027-01-20',
+    ]);
+
+    $this->actingAs($this->user)
+        ->from(route('engp-reports.index', 'cbep'))
+        ->post(route('engp-reports.store', 'cbep'), [
+            'office' => 'CENRO Baganga',
+            'reporting_year' => 1999,
+            'period_key' => '1999-01',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasErrors('reporting_year');
+});
+
 test('ENGP store updates an existing submission instead of inserting a duplicate period', function () {
     $existing = EngpReportSubmission::create([
         'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'section_name' => 'Original Section',
@@ -270,4 +299,24 @@ test('scoped ENGP users receive only their authorized office choices', function 
 
     $this->actingAs($scopedUser)->get(route('engp-reports.index', 'cbep'))
         ->assertInertia(fn ($page) => $page->where('offices', ['CENRO Baganga']));
+});
+
+test('ENGP index accepts the reporting_year query alias and returns the selected year schedule', function (): void {
+    $this->actingAs($this->user)
+        ->get(route('engp-reports.index', ['workflow' => 'cbep', 'reporting_year' => 2027]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('year', 2027)
+            ->where('filters.year', 2027)
+            ->where('periods.0.key', '2027-01')
+            ->where('periods.11.key', '2027-12')
+            ->where('periodsByYear.2027.0.key', '2027-01')
+            ->where('years', fn ($years): bool => collect($years)->contains(2027)));
+});
+
+test('ENGP index normalizes an invalid year query to the current reporting year', function (): void {
+    $this->actingAs($this->user)
+        ->get(route('engp-reports.index', ['workflow' => 'cbep', 'year' => 9999]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('year', CarbonImmutable::now('Asia/Manila')->year));
 });

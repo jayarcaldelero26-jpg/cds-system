@@ -38,12 +38,12 @@ COPY . .
 RUN composer install --no-dev --optimize-autoloader
 
 # Frontend dependencies and build
-RUN npm install
+RUN npm ci --ignore-scripts
 RUN npm run build
 
 # Clear Laravel caches
 # Do NOT run config:cache during Docker build.
-# Render environment variables are provided at runtime.
+# Deployment environment variables are provided at runtime.
 RUN php artisan optimize:clear || true
 RUN php artisan config:clear || true
 RUN php artisan route:clear || true

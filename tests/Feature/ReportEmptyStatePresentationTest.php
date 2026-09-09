@@ -76,9 +76,36 @@ test('IMEA Report omits the local tab shell while IMEA Data retains shared workf
         ->and($data)->toContain('Facilities & Infrastructures inventory');
 });
 
-test('legitimate multi-view navigation remains in BMS, BAMS, AWS, and IPAF', function (): void {
+test('legitimate multi-view navigation remains in BMS, BAMS, and IPAF while AWS keeps summary and analytics separate', function (): void {
+    $aws = File::get(resource_path('js/Pages/AWS/Aws.jsx'));
+    $navigation = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
+    $summary = File::get(resource_path('js/Pages/AWS/AwsMonthlySummary.jsx'));
+    $pdf = File::get(resource_path('views/aws/monthly-summary-pdf.blade.php'));
+    $xlsx = File::get(app_path('Services/AwsMonthlySummaryXlsxService.php'));
+    $docx = File::get(app_path('Services/AwsSummaryDocxService.php'));
+
     expect(File::get(resource_path('js/Pages/Bms/Index.jsx')))->toContain("setActiveTab('list')")
         ->and(File::get(resource_path('js/Pages/Bams/Index.jsx')))->toContain("setActiveTab('map')")
-        ->and(File::get(resource_path('js/Pages/AWS/Aws.jsx')))->toContain("handleTabChange('analytics')")
+        ->and($aws)->not->toContain('Daily AWS Data')
+        ->and($aws)->toContain('Monitoring Summary')
+        ->and($aws)->toContain('Weather Analytics &amp; Graph')
+        ->and($aws)->toContain('AWS Observation Records')
+        ->and($aws)->toContain('Import AWS Data')
+        ->and($summary)->toContain('canImport')
+        ->and($summary)->toContain('onImport')
+        ->and($aws)->toContain('<AwsGraph')
+        ->and($aws)->toContain("urlTab === 'raw-data'")
+        ->and($aws)->toContain(": 'monitoring-summary'")
+        ->and($navigation)->toContain("href: '/aws?tab=monitoring-summary'")
+        ->and($navigation)->toContain("{ tab: 'raw-data' }")
+        ->and($navigation)->toContain("{ tab: 'analytics' }")
+        ->and($summary)->toContain('AwsWeatherRemarkBadge')
+        ->and($summary)->not->toContain('Data Completeness (%)')
+        ->and($pdf)->not->toContain('Data Completeness (%)')
+        ->and($xlsx)->not->toContain('Data Completeness (%)')
+        ->and($docx)->not->toContain('Data Completeness (%)')
+        ->and($pdf)->toContain('Remarks')
+        ->and($xlsx)->toContain('Remarks')
+        ->and($docx)->toContain('Remarks')
         ->and(File::get(resource_path('js/Pages/Ipaf/Index.jsx')))->toContain("key: 'accounting'");
 });

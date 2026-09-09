@@ -4,6 +4,8 @@ use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ProtectedArea;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use App\Notifications\EdatsInAppNotification;
 use App\Services\Notifications\EdatsInAppNotificationService;
@@ -174,6 +176,58 @@ test('ENGP overdue reports use the same live Alerts source and active IMEA Maint
         ->and($notification->data['source_type'])->toBe(EngpReportSubmission::class)
         ->and(app(OverdueReportService::class)->sourceDefinitions())->toHaveKey(ImeaFacilityMaintenanceReport::class)
         ->and($engp->date_received_penro)->toBeNull();
+});
+
+test('overdue notifications open the authorized focused Submission Tracking record for a CDS Chief', function () {
+    $chief = User::factory()->create([
+        'section' => 'CENRO_CDS_CHIEF',
+        'unit_assignment' => 'conservation',
+        'office_designated' => 'CENRO Mati',
+    ]);
+    foreach (['reports.view', 'technical-reports.view', 'technical-reports.update'] as $permission) {
+        $chief->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+    }
+
+    $area = notificationProtectedArea('Notification Scope Protected Area', $this->user);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('name', 'CENRO Mati')->value('id'),
+        'assignment_type' => 'supervising',
+    ]);
+    $report = notificationConservationReport($area, $this->user, [
+        'target_office' => 'CENRO Mati',
+        'date_accomplished' => '2026-08-03',
+    ]);
+
+    app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
+
+    $notification = $chief->notifications()->latest()->firstOrFail();
+    $url = (string) $notification->data['url'];
+    expect($url)->toContain('/submission-tracking')
+        ->toContain('focus_source=conservation')
+        ->toContain('focus_id='.$report->id);
+
+    $this->actingAs($chief)->get($url)
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('focus.source', 'conservation')
+            ->where('focus.id', $report->id));
+
+    $chief->notify(new EdatsInAppNotification([
+        'type' => EdatsInAppNotificationService::OVERDUE,
+        'category' => 'overdue',
+        'title' => 'Legacy overdue notification',
+        'message' => 'Legacy action URL must be repaired at presentation time.',
+        'source_type' => ConservationReportSubmission::class,
+        'source_id' => $report->id,
+        'url' => route('reports.index'),
+    ]));
+    $this->actingAs($chief)->getJson(route('notifications.recent'))
+        ->assertOk()
+        ->assertJsonPath('notifications.0.url', $url);
+
+    $unauthorized = User::factory()->create(['section' => 'CDS']);
+    $this->actingAs($unauthorized)->get(route('reports.index'))->assertForbidden();
 });
 
 function notificationPayload(string $key): array

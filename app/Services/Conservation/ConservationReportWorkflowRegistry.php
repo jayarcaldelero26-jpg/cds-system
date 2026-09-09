@@ -3,6 +3,7 @@
 namespace App\Services\Conservation;
 
 use App\Models\ModuleDefinition;
+use App\Services\Reports\ReportRequirementRegistry;
 
 final class ConservationReportWorkflowRegistry
 {
@@ -34,6 +35,13 @@ final class ConservationReportWorkflowRegistry
 
     /** @return array<string, mixed>|null */
     public function find(string $key): ?array
+    {
+        return app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::PA, $key)
+            ?? $this->defaultFind($key);
+    }
+
+    /** Static defaults used only when seeding/backfilling canonical definitions. */
+    public function defaultFind(string $key): ?array
     {
         $workflow = self::WORKFLOWS[$key] ?? null;
         if (! $workflow) {
@@ -128,13 +136,31 @@ final class ConservationReportWorkflowRegistry
     /** @return list<string> */
     public function keys(): array
     {
+        try {
+            return collect($this->all())->pluck('key')->all();
+        } catch (\Throwable) {
+            // Pest data providers and early bootstrap can resolve the legacy
+            // adapter before Laravel has opened a database connection.
+            return $this->defaultKeys();
+        }
+    }
+
+    /** @return list<string> */
+    public function defaultKeys(): array
+    {
         return array_keys(self::WORKFLOWS);
     }
 
     /** @return list<array<string, mixed>> */
     public function all(): array
     {
-        return array_values(array_filter(array_map(fn (string $key) => $this->find($key), $this->keys())));
+        $definitions = app(ReportRequirementRegistry::class)
+            ->definitions(ReportRequirementRegistry::PA, true, ModuleDefinition::IMPLEMENTATION_GENERIC)
+            ->all();
+
+        return $definitions !== []
+            ? $definitions
+            : array_values(array_filter(array_map(fn (string $key) => $this->defaultFind($key), $this->defaultKeys())));
     }
 
     /** @return array{working_days: int, timeliness_standard: 'A'|'B'} */
@@ -159,6 +185,28 @@ final class ConservationReportWorkflowRegistry
 
     /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
     public function deadlineRule(string $workflowKey, ?string $activityName, ?string $documentType): array
+    {
+        $definition = $this->find($workflowKey);
+        $default = $this->defaultDeadlineRule($workflowKey, $activityName, $documentType);
+        if (! $definition) return $default;
+
+        $metadata = $definition['requirement_metadata'] ?? [];
+        $canonicalMode = $metadata['canonical_deadline_mode'] ?? $default['deadline_mode'];
+        $canonicalDays = $metadata['canonical_deadline_days'] ?? $default['deadline_days'];
+
+        return [
+            'deadline_mode' => ($definition['deadline_mode'] ?? $canonicalMode) !== $canonicalMode
+                ? $definition['deadline_mode']
+                : $default['deadline_mode'],
+            'deadline_days' => ($definition['default_deadline_days'] ?? $canonicalDays) !== $canonicalDays
+                ? (int) ($definition['default_deadline_days'] ?? 0)
+                : $default['deadline_days'],
+            'timeliness_standard' => $default['timeliness_standard'],
+        ];
+    }
+
+    /** Static policy used for canonical seed/backfill metadata. */
+    public function defaultDeadlineRule(string $workflowKey, ?string $activityName, ?string $documentType): array
     {
         $rule = $this->submissionRule($workflowKey, $activityName, $documentType);
         $mode = in_array($workflowKey, [...PambComplianceCalculator::MEETING_WORKFLOWS, PambComplianceCalculator::MANUAL_WORKFLOW], true)
