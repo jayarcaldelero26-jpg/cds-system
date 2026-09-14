@@ -51,50 +51,40 @@ function organizationalArea(User $owner, string $name = 'Aliwagwag Protected Lan
     return $area;
 }
 
-test('registration exposes only organizational request options and no super admin', function () {
+test('registration exposes the canonical Operational Group catalog and no Super Admin choice', function () {
     $this->get('/register')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->has('registrationOptions.units', 2)
-            ->where('registrationOptions.units.0.value', 'conservation')
-            ->where('registrationOptions.units.1.value', 'development')
-            ->where('registrationOptions.categories.conservation.5.value', 'PAMO')
-            ->missing('registrationOptions.categories.development.5'));
+            ->has('registrationOptions.operationalGroups', 2)
+            ->where('registrationOptions.operationalGroups.0.value', 'cenro')
+            ->where('registrationOptions.operationalGroups.1.value', 'penro')
+            ->where('registrationOptions.operationalGroups.1.categories.2.value', 'PENRO_TSD_CHIEF'));
 });
-
-test('public registration stores unit and PA request without granting the requested role', function () {
-    $owner = User::factory()->create();
-    $area = organizationalArea($owner);
-
+test('public registration rejects unsupported PAMO accounts', function () {
     $this->post('/register', [
         'name' => 'PAMO Applicant', 'email' => 'pamo-applicant@example.com',
-        'unit_assignment' => 'conservation', 'section' => 'PAMO',
-        'office_designated' => 'PENRO Davao Oriental', 'protected_area_id' => $area->id,
+        'operational_group' => 'pamo', 'section' => 'PAMO',
         'password' => 'password', 'password_confirmation' => 'password',
-    ])->assertRedirect(route('login'));
+    ])->assertSessionHasErrors(['operational_group', 'section']);
 
-    $applicant = User::where('email', 'pamo-applicant@example.com')->firstOrFail();
-    expect($applicant->unit_assignment)->toBe('conservation')
-        ->and($applicant->protected_area_id)->toBe($area->id)
-        ->and($applicant->is_active)->toBeFalse()
-        ->and($applicant->roles()->pluck('name')->all())->toBe(['no_role']);
+    expect(User::where('email', 'pamo-applicant@example.com')->exists())->toBeFalse();
 });
 
 test('invalid development PAMO request and PA scope are rejected', function () {
     $this->post('/register', [
         'name' => 'Invalid Applicant', 'email' => 'invalid-org@example.com',
-        'unit_assignment' => 'development', 'section' => 'PAMO',
+        'operational_group' => 'cenro', 'unit_assignment' => null, 'section' => 'PAMO',
         'office_designated' => 'CENRO Baganga',
         'password' => 'password', 'password_confirmation' => 'password',
     ])->assertSessionHasErrors('section');
 });
 
-test('explicit conservation and development users are isolated at the route boundary', function () {
+test('CENRO focal users cover both units at the route boundary', function () {
     $conservation = organizationalUser('CENRO CDS Focal Person', 'conservation');
     $development = organizationalUser('CENRO CDS Focal Person', 'development');
 
-    $this->actingAs($conservation)->get('/engp-reports/summary')->assertForbidden();
-    $this->actingAs($development)->get('/conservation-reports/regular_pamb')->assertForbidden();
+    $this->actingAs($conservation)->get('/engp-reports/summary')->assertOk();
+    $this->actingAs($development)->get('/conservation-reports/regular_pamb')->assertOk();
 
     $this->actingAs($conservation)->get('/conservation-reports/regular_pamb')->assertOk();
     $this->actingAs($development)->get('/engp-reports/summary')->assertOk();

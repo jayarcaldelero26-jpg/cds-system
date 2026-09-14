@@ -11,8 +11,8 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function (): void {
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 09:00:00', 'Asia/Manila'));
-    $this->user = User::factory()->create(['section' => 'CDS']);
-    $this->normalPa = protectedArea('Pujada Bay Protected Landscape', $this->user);
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
+    $this->normalPa = protectedArea('Pujada Bay Protected Landscape', $this->user, 'PBPLS');
     $this->mhrws = protectedArea('Mt. Hamiguitan Range Wildlife Sanctuary', $this->user, 'MHRWS');
 });
 
@@ -224,7 +224,7 @@ function conservationReport(ProtectedArea $area, User $user, array $overrides = 
     $data = array_merge([
         'workflow_key' => 'regular_pamb',
         'protected_area_id' => $area->id,
-        'target_office' => 'PENRO Davao Oriental',
+        'target_office' => $area->short_name === 'MHRWS' ? 'PENRO Davao Oriental' : 'CENRO Mati',
         'activity_name' => 'Regular PAMB Meetings',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 3',

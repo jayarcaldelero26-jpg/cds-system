@@ -46,17 +46,37 @@ test('user management supplies the detail view with an updated date and protecte
         ->toContain("'updated_at' => \$user->updated_at?->toDateString()");
 });
 
-test('user access forms configure category without a separate role selector', function (): void {
+test('user access forms separate Spatie role from organizational assignments', function (): void {
     $form = File::get(resource_path('js/Pages/Admin/Users/Form.jsx'));
     $controller = File::get(app_path('Http/Controllers/Admin/UserController.php'));
 
     expect($form)
-        ->toContain('label="User category"')
-        ->not->toContain('form-role')
-        ->not->toContain('roles.map')
-        ->not->toContain("label=\"Role\"");
+        ->toContain('id="form-account-role"')
+        ->toContain('label="Account Role"')
+        ->toContain('accountRoleOptions.map')
+        ->toContain('label="User Category"')
+        ->toContain('label="CENRO Office"')
+        ->toContain('Protected Area / PAMO assignment');
 
     expect($controller)
-        ->toContain('roleForCategory($data[\'section\'])')
-        ->not->toContain("'roles' => \$this->availableRoles()");
+        ->toContain("'accountRoles' => \$organization->accountRoleOptions()")
+        ->toContain("'offices' => app(OrganizationalAccessService::class)->officeOptions()")
+        ->toContain('resolveInternalRole')
+        ->not->toContain("syncRoles([\$roleForCategory])");
+});
+
+test('user edit form exposes status as read-only and keeps activation in administrative actions', function (): void {
+    $form = File::get(resource_path('js/Pages/Admin/Users/Form.jsx'));
+
+    expect($form)
+        ->not->toContain('id="form-account-status"')
+        ->not->toContain("label='Account status'")
+        ->not->toContain('is_active:')
+        ->toContain('password_confirmation');
+
+    $index = File::get(resource_path('js/Pages/Admin/Users/Index.jsx'));
+
+    expect($index)
+        ->toContain('Deactivate Account')
+        ->toContain('Activate Account');
 });

@@ -16,7 +16,7 @@ uses(RefreshDatabase::class);
 
 function moduleManager(): User
 {
-    $user = User::factory()->create();
+    $user = User::factory()->create(['section' => 'PENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']);
     $user->givePermissionTo([
         Permission::findOrCreate('module-definitions.view', 'web'),
         Permission::findOrCreate('module-definitions.create', 'web'),
@@ -97,7 +97,7 @@ test('module deadline policy uses the existing business calendar service for sta
 });
 
 test('active generic definitions use the existing conservation report route while inactive definitions remain historically readable', function () {
-    $viewer = User::factory()->create();
+    $viewer = User::factory()->create(['section' => 'PENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']);
     $viewer->givePermissionTo(Permission::findOrCreate('technical-reports.view', 'web'));
     $definition = ModuleDefinition::query()->create([...modulePayload(), 'code' => 'registry_backed_module']);
 

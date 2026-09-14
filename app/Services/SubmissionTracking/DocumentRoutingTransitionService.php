@@ -6,6 +6,7 @@ use App\Models\DocumentRoutingEvent;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
+use App\Services\Notifications\EdatsInAppNotificationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model as EloquentModel;
 use Illuminate\Support\Collection;
@@ -18,6 +19,7 @@ final class DocumentRoutingTransitionService
     public function __construct(
         private readonly DocumentRoutingProfileRegistry $profiles,
         private readonly DocumentRoutingAccessService $access,
+        private readonly EdatsInAppNotificationService $notifications,
     ) {}
 
     /** @param Collection<int,DocumentRoutingEvent>|null $events */
@@ -27,16 +29,16 @@ final class DocumentRoutingTransitionService
         if (method_exists($record, 'protectedArea') && ! $record->relationLoaded('protectedArea')) {
             $record->load('protectedArea');
         }
-        $direct = $sourceKey !== 'conservation' || ! app(\App\Services\Conservation\PambComplianceCalculator::class)->applies((string) $record->getAttribute('workflow_key'))
-            ? app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record)
-            : false;
+        $direct = $sourceKey !== 'engp'
+            && ($sourceKey !== 'conservation' || ! app(\App\Services\Conservation\PambComplianceCalculator::class)->applies((string) $record->getAttribute('workflow_key')))
+            && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record);
         $profile = $this->profiles->actionProfile($sourceKey, $direct);
         $last = $events->sortBy(fn (DocumentRoutingEvent $event): string => ($event->occurred_at?->toDateTimeString() ?? '').sprintf('%010d', $event->id))->last();
         $bootstrapped = false;
         $stage = $last?->to_stage;
 
         if (! $stage) {
-            [$stage, $bootstrapped] = $this->legacyStage($record, $direct, $actor);
+            [$stage, $bootstrapped] = $this->legacyStage($record, $direct, $actor, $sourceKey);
         }
 
         return [
@@ -45,6 +47,8 @@ final class DocumentRoutingTransitionService
             'events' => $events->sortBy(fn (DocumentRoutingEvent $event): string => ($event->occurred_at?->toDateTimeString() ?? '').sprintf('%010d', $event->id))->values(),
             'profile' => $profile['profile'],
             'actions' => $profile['actions'],
+            'correction' => $last?->event_key === 'returned_for_correction',
+            'correction_event' => $last?->event_key === 'returned_for_correction' ? $last : null,
         ];
     }
 
@@ -77,7 +81,7 @@ final class DocumentRoutingTransitionService
         $actor = $userId ? User::query()->findOrFail($userId) : auth()->user();
         abort_unless($actor, 403);
 
-        return DB::transaction(function () use ($record, $sourceKey, $actionKey, $actor, $remarks): DocumentRoutingEvent {
+        $event = DB::transaction(function () use ($record, $sourceKey, $actionKey, $actor, $remarks): DocumentRoutingEvent {
             /** @var EloquentModel $locked */
             $locked = $record->newQuery()->lockForUpdate()->findOrFail($record->getKey());
             $state = $this->state($locked, $sourceKey, $this->events($locked, $sourceKey), $actor);
@@ -87,6 +91,9 @@ final class DocumentRoutingTransitionService
             }
             $ability = $this->ability($sourceKey);
             abort_unless($this->access->canPerform($actor, $locked, $sourceKey, $action, $ability), 403);
+            if (($action['correction'] ?? false) && blank(trim((string) $remarks))) {
+                throw ValidationException::withMessages(['remarks' => 'Correction remarks are required.']);
+            }
 
             $event = DocumentRoutingEvent::query()->create([
                 'source_type' => $sourceKey,
@@ -100,15 +107,61 @@ final class DocumentRoutingTransitionService
                 'occurred_at' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
                 'recorded_by' => $actor->getKey(),
                 'remarks' => $remarks,
-                'metadata' => ['state_source' => $state['bootstrapped'] ? 'imported_existing_milestones' : 'routing_events'],
+                'metadata' => ['state_source' => $state['bootstrapped'] ? 'imported_existing_milestones' : 'routing_events', 'action_key' => $action['key'], 'correction' => (bool) ($action['correction'] ?? false)],
             ]);
 
-            $this->syncCompatibilityMilestone($locked, $action['key']);
+            $this->syncCompatibilityMilestone($locked, $sourceKey, $action['key']);
             return $event->load('recordedBy:id,name,section');
         });
+        $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
+        try {
+            $this->notifications->notifyGenericTransition($record, $sourceKey, $event, $action);
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+        return $event;
     }
 
     /** @return array<string,mixed> */
+    /** @param array<string,mixed> $override */
+    public function transitionAsOverride(EloquentModel $record, string $sourceKey, string $actionKey, User $actor, array $override, ?string $remarks = null): DocumentRoutingEvent
+    {
+        $event = DB::transaction(function () use ($record, $sourceKey, $actionKey, $actor, $override, $remarks): DocumentRoutingEvent {
+            /** @var EloquentModel $locked */
+            $locked = $record->newQuery()->lockForUpdate()->findOrFail($record->getKey());
+            $state = $this->state($locked, $sourceKey, $this->events($locked, $sourceKey), null);
+            $action = collect($state['actions'])->firstWhere('key', $actionKey);
+            if (! $action || $action['from'] !== $state['stage']) {
+                throw ValidationException::withMessages(['stage' => 'This document is no longer awaiting that routing action.']);
+            }
+            if (($action['correction'] ?? false) && blank(trim((string) $remarks))) {
+                throw ValidationException::withMessages(['remarks' => 'Correction remarks are required.']);
+            }
+            $event = DocumentRoutingEvent::query()->create([
+                'source_type' => $sourceKey,
+                'source_id' => $locked->getKey(),
+                'workflow_key' => $locked->getAttribute('workflow_key'),
+                'event_key' => $action['event_key'],
+                'from_stage' => $action['from'],
+                'to_stage' => $action['to'],
+                'from_office' => $action['from_office'],
+                'to_office' => $action['to_office'],
+                'occurred_at' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
+                'recorded_by' => $actor->getKey(),
+                'remarks' => $remarks,
+                'metadata' => ['state_source' => 'routing_events', 'action_key' => $action['key'], 'correction' => (bool) ($action['correction'] ?? false), 'administrative_override' => true, ...$override],
+            ]);
+            $this->syncCompatibilityMilestone($locked, $action['key']);
+            return $event->load('recordedBy:id,name,section');
+        });
+        $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
+        try {
+            $this->notifications->notifyGenericTransition($record, $sourceKey, $event, $action);
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
+        return $event;
+    }
     public function presentation(EloquentModel $record, string $sourceKey, ?Collection $events = null, ?User $actor = null): array
     {
         $state = $this->state($record, $sourceKey, $events, $actor);
@@ -119,18 +172,28 @@ final class DocumentRoutingTransitionService
     }
 
     /** @return array{0:string,1:bool} */
-    private function legacyStage(EloquentModel $record, bool $direct, ?User $actor): array
+    private function legacyStage(EloquentModel $record, bool $direct, ?User $actor, string $sourceKey): array
     {
+        if ($sourceKey === 'engp') return [DocumentRoutingProfileRegistry::PREPARATION, false];
         if ($record->getAttribute('date_endorsed_regional')) return [DocumentRoutingProfileRegistry::RELEASED_REGIONAL, true];
         if ($record->getAttribute('date_received_penro')) return [DocumentRoutingProfileRegistry::PENRO_RECORDS, true];
         if ($record->getAttribute('date_report_released_cenro')) return [DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS, true];
-        if ($direct) return [DocumentRoutingProfileRegistry::PENRO_ORIGIN, false];
-        if ($actor && app(OrganizationalAccessService::class)->effectiveCategory($actor) === OrganizationalAccessService::PAMO) return [DocumentRoutingProfileRegistry::PAMO_ORIGIN, false];
+        if ($direct) {
+            if ($actor && app(OrganizationalAccessService::class)->effectiveCategory($actor) === OrganizationalAccessService::PAMO) {
+                return [DocumentRoutingProfileRegistry::PAMO_ORIGIN, false];
+            }
+
+            return [DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS, false];
+        }
+        if ($actor && app(OrganizationalAccessService::class)->effectiveCategory($actor) === OrganizationalAccessService::PAMO) {
+            return [DocumentRoutingProfileRegistry::PAMO_ORIGIN, false];
+        }
         return [DocumentRoutingProfileRegistry::PREPARATION, false];
     }
 
-    private function syncCompatibilityMilestone(EloquentModel $record, string $actionKey): void
+    private function syncCompatibilityMilestone(EloquentModel $record, string $sourceKey, string $actionKey): void
     {
+        if ($sourceKey === 'engp') return;
         $changes = match ($actionKey) {
             'forward_to_penro_records' => ['date_report_released_cenro' => now(BusinessCalendarService::TIMEZONE)->toDateString()],
             'receive_at_penro_records' => ['date_received_penro' => now(BusinessCalendarService::TIMEZONE)->toDateString()],
@@ -143,7 +206,7 @@ final class DocumentRoutingTransitionService
     private function ability(string $sourceKey): ?string
     {
         return match ($sourceKey) {
-            'bms' => 'bms.update', 'bams', 'imea', 'imea-maintenance' => 'imea.update', 'aws' => 'aws.update',
+            'bms' => 'bms.update', 'bams' => 'bams.update', 'imea', 'imea-maintenance' => 'imea.update', 'aws' => 'aws.update',
             'management-plans' => 'management-plans.update', default => 'technical-reports.update',
         };
     }

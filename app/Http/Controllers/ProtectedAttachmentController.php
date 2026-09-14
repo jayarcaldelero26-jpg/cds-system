@@ -17,18 +17,10 @@ final class ProtectedAttachmentController extends Controller
     {
         $definition = $this->attachments->definition($source);
         abort_unless($definition, 404);
-        abort_unless(request()->user()?->can($definition['ability']), 403);
 
         $model = $definition['model'];
         $recordModel = $model::query()->when($model === ConservationReportSubmission::class, fn ($query) => $query->with('protectedArea'))->findOrFail($record);
-        if ($recordModel instanceof ConservationReportSubmission) {
-            abort_unless($this->pambAccess->canView(request()->user(), $recordModel), 403);
-        }
-        if ($recordModel instanceof EngpReportSubmission) {
-            abort_unless($this->organization->canViewDevelopmentRecord(request()->user(), $recordModel), 403);
-        } else {
-            abort_unless($this->organization->canAccessProtectedAreaRecord(request()->user(), $recordModel), 403);
-        }
+        abort_unless($this->organization->canViewSubmissionAttachment(request()->user(), $recordModel), 403);
 
         return $this->attachments->response($source, $recordModel, $attachment);
     }

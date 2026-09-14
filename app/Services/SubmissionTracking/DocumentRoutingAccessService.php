@@ -13,24 +13,30 @@ final class DocumentRoutingAccessService
 
     public function canView(User $user, Model $record, string $sourceKey, ?string $ability = null): bool
     {
-        if (! $this->organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) return false;
         if ($this->organization->isGlobal($user)) return true;
-        if (! $this->organization->isGlobal($user) && $ability && ! $user->can($ability)) return false;
-        return $this->organization->canAccessProtectedAreaRecord($user, $record);
+        if ($ability && ! $this->organization->canUseSubmissionTrackingSource($user, $sourceKey, $ability)) return false;
+        return $sourceKey === 'engp'
+            ? $this->organization->canViewDevelopmentRecord($user, $record)
+            : $this->organization->canAccessProtectedAreaRecord($user, $record);
     }
 
     /** @param array<string,mixed> $action */
     public function canPerform(User $user, Model $record, string $sourceKey, array $action, ?string $ability = null): bool
     {
         if (! $this->canView($user, $record, $sourceKey, $ability)) return false;
-        if ($this->organization->isGlobal($user)) return true;
 
         $category = $this->organization->effectiveCategory($user);
         if (! in_array($category, $action['categories'] ?? [], true)) return false;
 
         if (in_array($category, [OrganizationalAccessService::CENRO_FOCAL, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_RECORDS], true)
-            && ! $this->same($user->office_designated, $record->getAttribute('target_office'))) return false;
-        if (in_array($category, [OrganizationalAccessService::PENRO_RECORDS, OrganizationalAccessService::PENRO_FOCAL, OrganizationalAccessService::PENRO_CHIEF], true)
+            && ! $this->same($user->office_designated, $sourceKey === 'engp' ? $record->getAttribute('office') : $record->getAttribute('target_office'))) return false;
+        if (in_array($category, [
+            OrganizationalAccessService::PENRO_RECORDS,
+            OrganizationalAccessService::OFFICE_PENRO,
+            OrganizationalAccessService::PENRO_TSD_CHIEF,
+            OrganizationalAccessService::PENRO_FOCAL,
+            OrganizationalAccessService::PENRO_CHIEF,
+        ], true)
             && ! str_starts_with(mb_strtolower(trim((string) $user->office_designated)), 'penro ')) return false;
         if ($category === OrganizationalAccessService::PAMO && ! $this->organization->canAccessProtectedArea($user, $record->getAttribute('protected_area_id'))) return false;
 
@@ -50,6 +56,7 @@ final class DocumentRoutingAccessService
             'canCorrect' => $user->can('submission-tracking.correct-routing'),
             'canRelease' => $types->contains('released'),
             'canEndorse' => $types->contains('endorsed') || $types->contains('released'),
+            'canReturnForCorrection' => $types->contains('returned_for_correction'),
         ];
     }
 

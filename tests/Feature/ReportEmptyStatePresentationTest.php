@@ -7,8 +7,8 @@ test('CrudTable keeps its existing default and supports an opt-in compact report
 
     expect($table)->toContain('compactEmpty = false')
         ->and($table)->toContain('compactEmpty ? <CompactReportEmptyState')
-        ->and($table)->toContain('const showHeader = !compactEmpty || !empty;')
-        ->and($table)->toContain('const showPagination = pagination && (!compactEmpty || !empty);')
+        ->and($table)->toContain('const showHeader = !compactEmpty || !empty || preserveFrameWhenEmpty;')
+        ->and($table)->toContain('const showPagination = pagination && (!compactEmpty || !empty || preserveFrameWhenEmpty);')
         ->and($table)->toContain('No records found');
 });
 

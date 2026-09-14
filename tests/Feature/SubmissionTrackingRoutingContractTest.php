@@ -31,7 +31,8 @@ test('active non-PAMB sources share the canonical routing profile contract', fun
             ->and($profile['detailed_route_requires_confirmation'])->toBeFalse();
     }
 
-    expect($registry->profile('engp')['route_granularity'])->toBe('release_components');
+    expect($registry->profile('engp')['key'])->toBe('canonical_cenro_penro_regional')
+        ->and($registry->profile('engp')['route_granularity'])->toBe('detailed');
 });
 
 test('generic tracking presents server-derived location and keeps forward separate from receipt', function (): void {
@@ -54,9 +55,13 @@ test('generic tracking presents server-derived location and keeps forward separa
     $tracking->transition('bms', $report->id, 'forward_to_cenro_chief', null, $this->user->id);
     $released = $tracking->records()->firstWhere(fn (array $row): bool => $row['source'] === 'bms' && (int) $row['source_id'] === $report->id);
     expect(DocumentRoutingEvent::query()->count())->toBe(1)
-        ->and($released['routing']['current_location'])->toBe('In transit to CENRO CDS Chief')
+        ->and($released['routing']['current_location'])->toBe('In Transit')
         ->and($released['routing']['in_transit_to'])->toBe('CENRO CDS Chief')
-        ->and($released['routing']['current_status'])->toBe('In Transit to CENRO CDS Chief')
+        ->and($released['routing']['current_status'])->toBe('Awaiting Receipt by CENRO CDS Chief')
+        ->and($released['routing']['responsible_office'])->toBe('CENRO Mati')
+        ->and($released['routing']['responsible_user_category'])->toBe('CENRO CDS Chief')
+        ->and(collect($released['routing']['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::PREPARATION)['status'])->toBe('completed')
+        ->and(collect($released['routing']['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::PREPARATION)['occurred_at'])->toBeNull()
         ->and(collect($released['routing']['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)['event_type'])->toBe('forwarded')
         ->and(collect($released['routing']['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)['recorded_by'])->toBe($this->user->name)
         ->and(collect($released['routing']['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::CENRO_CHIEF)['occurred_at'])->toBeNull();
@@ -74,20 +79,58 @@ test('CENRO tracker scope includes routed non-PAMB records for its office', func
     expect(app(SubmissionTrackingService::class)->records()->firstWhere(fn (array $row): bool => $row['source'] === 'bms' && (int) $row['source_id'] === $report->id))->not->toBeNull();
 });
 
-test('ENGP keeps its release-component route while using the shared contract', function (): void {
+test('ENGP uses the canonical CENRO-to-PENRO route through the shared contract', function (): void {
+    $this->actingAs($this->user);
+
     $report = EngpReportSubmission::create([
         'workflow_key' => 'ngp_produce', 'office' => 'CENRO Mati', 'section_name' => 'NGP',
         'activity_name' => 'ENGP Produce', 'document_type' => 'Quarterly Report', 'reporting_year' => 2026,
         'period_key' => 'Q1', 'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
     ]);
-    $report->releaseEvents()->create(['period_component' => '2026-01', 'component_label' => 'January', 'date_report_released_cenro' => '2026-01-10']);
 
     $row = app(SubmissionTrackingService::class)->records()->firstWhere(fn (array $item): bool => $item['source'] === 'engp' && (int) $item['source_id'] === $report->id);
 
-    expect($row['routing']['profile_key'])->toBe('engp_release_components')
-        ->and($row['routing']['route_granularity'])->toBe('release_components')
-        ->and(collect($row['routing']['timeline'])->firstWhere('key', 'cenro_release:2026-01')['event_type'])->toBe('forwarded')
-        ->and(collect($row['routing']['timeline'])->last()['key'])->toBe(SubmissionTrackingService::PENRO_RECEIPT);
+    expect($row['routing']['profile_key'])->toBe('canonical_cenro_penro_regional')
+        ->and($row['routing']['route_granularity'])->toBe('detailed')
+        ->and($row['routing']['current_stage'])->toBe(DocumentRoutingProfileRegistry::PREPARATION)
+        ->and(collect($row['routing']['actions'])->pluck('key')->all())->toContain('forward_to_cenro_chief')
+        ->and(collect($row['routing']['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::CENRO_CHIEF)['status'])->toBe('pending');
+});
+
+test('CENRO-managed ENGP follows the canonical CENRO Chief and Records handoffs', function (): void {
+    $report = EngpReportSubmission::create([
+        'workflow_key' => 'ngp_produce', 'office' => 'CENRO Mati', 'section_name' => 'NGP',
+        'activity_name' => 'ENGP Routing Contract', 'document_type' => 'Quarterly Report', 'reporting_year' => 2026,
+        'period_key' => 'Q2', 'period_label' => 'Quarter 2', 'deadline_submission' => '2026-06-10',
+    ]);
+
+    $focal = $this->user;
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Mati']);
+    $records = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'office_designated' => 'CENRO Mati']);
+    $penroRecords = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'office_designated' => 'PENRO Davao Oriental']);
+    $tracking = app(SubmissionTrackingService::class);
+
+    $this->actingAs($focal);
+    $tracking->transition('engp', $report->id, 'forward_to_cenro_chief', null, $focal->id);
+
+    $this->actingAs($chief);
+    $tracking->transition('engp', $report->id, 'receive_at_cenro_chief', null, $chief->id);
+    $tracking->transition('engp', $report->id, 'forward_to_cenro_records', null, $chief->id);
+
+    $this->actingAs($records);
+    $tracking->transition('engp', $report->id, 'receive_at_cenro_records', null, $records->id);
+    $tracking->transition('engp', $report->id, 'forward_to_penro_records', null, $records->id);
+
+    $inTransit = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'engp');
+    expect($inTransit['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and(collect($inTransit['events'])->pluck('event_key')->all())->toBe(['forwarded', 'received', 'endorsed', 'received', 'forwarded']);
+
+    $this->actingAs($penroRecords);
+    $tracking->transition('engp', $report->id, 'receive_at_penro_records', null, $penroRecords->id);
+
+    $finalState = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'engp');
+    expect($finalState['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and(collect($finalState['events'])->pluck('event_key')->last())->toBe('received');
 });
 
 test('PAMB retains its detailed routing profile through the shared contract adapter', function (): void {

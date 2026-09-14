@@ -10,10 +10,12 @@ use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
     Storage::fake('local');
-    $this->user = User::factory()->create(['section' => 'CDS']);
+    $this->user = User::factory()->create(['section' => 'CDS', 'is_active' => true]);
+    $this->user->assignRole(Role::findOrCreate('Super Admin', 'web'));
 
     foreach (['technical-reports.create', 'technical-reports.view', 'bms.create', 'bms.view', 'bams.create', 'bams.view', 'imea.create', 'imea.view'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));

@@ -4,7 +4,7 @@ import StatusBadge from '@/Components/StatusBadge';
 import TimelinessBadge from '@/Components/TimelinessBadge';
 import MonitoringPageHeader from '@/Components/Dashboard/MonitoringPageHeader';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { router } from '@inertiajs/react';
+import { router, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import { Icon } from '@iconify/react';
 import { parseDateOnly } from '@/Utils/dateFormatters';
@@ -199,6 +199,21 @@ function PaContent({ rows = [], pagination = {}, filters = {}, paMatrix = [], ro
     return <><PaSubmissionTracking rows={rows} pagination={pagination} filters={filters} /><div className="grid gap-3 xl:grid-cols-3"><PaMatrix rows={paMatrix} /><RoutingBottlenecks data={routingBottlenecks} /><TopOverdueCard overdue={topOverdueReports} /></div><PaInterpretation items={executiveInterpretation} /></>;
 }
 
-export default function Dashboard({ view = 'pa', engp, rows, pagination, filterOptions, filters, summary, paMatrix, routingBottlenecks, topOverdueReports, executiveInterpretation }) {
-    return <AuthenticatedLayout title="eDATS Monitoring Dashboard"><div className="space-y-3"><ViewTabs view={view} />{view === 'engp' ? <><EngpSummary data={engp || {}} /><EngpContent data={engp || {}} /></> : <><PaSummary filterOptions={filterOptions} filters={filters} summary={summary} /><PaContent rows={rows} pagination={pagination} filters={filters} paMatrix={paMatrix} routingBottlenecks={routingBottlenecks} topOverdueReports={topOverdueReports} executiveInterpretation={executiveInterpretation} /></>}</div></AuthenticatedLayout>;
+function RoutingActionQueue({ rows = [] }) {
+    return <section className="space-y-3">
+        <MonitoringPageHeader title="Action Queue" description="Routing work currently assigned to your office. Open each record in Submission Tracking to review the canonical route and act." periodTitle="Current responsibility" periodSubtitle="Only active accountable stages are shown" icon="solar:route-linear" />
+        <SectionCard title="Needs My Action" subtitle="Each row opens the selected submission in Submission Tracking." icon="solar:checklist-minimalistic-linear">
+            {rows.length ? <div className="divide-y divide-gray-100 dark:divide-gray-800">{rows.map(row => <div key={`${row.source}-${row.source_id}`} className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_auto] md:items-center">
+                <div className="min-w-0"><p className="break-words text-sm font-semibold text-gray-900 dark:text-white">{row.protected_area || row.responsible_office || 'Submission'}</p><p className="mt-0.5 break-words text-xs text-gray-600 dark:text-gray-300">{row.module || 'Report'}{row.activity_name ? ` · ${row.activity_name}` : ''}</p>{row.reporting_period && <p className="mt-0.5 text-[11px] text-gray-500">{row.reporting_period}</p>}</div>
+                <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Current Status</p><p className="mt-0.5 break-words text-sm font-medium text-gray-800 dark:text-gray-200">{row.status || 'Active routing stage'}</p></div>
+                <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Required Action</p><p className="mt-0.5 break-words text-sm font-semibold text-green-800 dark:text-green-300">{row.required_action}</p></div>
+                <a href={row.source_url} className="inline-flex items-center justify-center rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white transition hover:bg-green-800">Open in Submission Tracking</a>
+            </div>)}</div> : <div className="px-4 py-10 text-center"><p className="text-sm font-semibold text-gray-800 dark:text-gray-200">No submissions currently require your action.</p><a href={route('submission-tracking.index')} className="mt-2 inline-flex text-xs font-bold text-green-700 hover:text-green-900 dark:text-green-400">View Submission Tracking</a></div>}
+        </SectionCard>
+    </section>;
+}
+export default function Dashboard({ view = 'pa', engp, rows, pagination, filterOptions, filters, summary, paMatrix, routingBottlenecks, topOverdueReports, executiveInterpretation, actionQueue = [] }) {
+    const { props } = usePage();
+    const routingOnly = ['CENRO_RECORDS', 'PENRO_RECORDS', 'OFFICE_OF_THE_PENRO', 'PENRO_TSD_CHIEF'].includes(props.auth?.user?.user_category);
+    return <AuthenticatedLayout title="eDATS Monitoring Dashboard"><div className="space-y-3">{routingOnly ? <RoutingActionQueue rows={actionQueue} /> : <><ViewTabs view={view} />{view === 'engp' ? <><EngpSummary data={engp || {}} /><EngpContent data={engp || {}} /></> : <><PaSummary filterOptions={filterOptions} filters={filters} summary={summary} /><PaContent rows={rows} pagination={pagination} filters={filters} paMatrix={paMatrix} routingBottlenecks={routingBottlenecks} topOverdueReports={topOverdueReports} executiveInterpretation={executiveInterpretation} /></>}</>}</div></AuthenticatedLayout>;
 }

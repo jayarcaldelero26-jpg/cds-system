@@ -21,15 +21,17 @@ use Carbon\Carbon;
 use Inertia\Inertia;
 use App\Services\Authorization\OrganizationalAccessService;
 
+use App\Services\SubmissionTracking\SubmissionTrackingService;
+
 class DashboardController extends Controller
 {
-    public function __construct(private readonly DashboardMonitoringService $monitoring, private readonly EngpDashboardMonitoringService $engpMonitoring) {}
+    public function __construct(private readonly DashboardMonitoringService $monitoring, private readonly EngpDashboardMonitoringService $engpMonitoring, private readonly SubmissionTrackingService $tracking) {}
 
     public function index(Request $request)
     {
         $user = $request->user();
 
-        if ($user->hasRole('no_role') || !$user->is_active) {
+        if (!$user->is_active) {
             return Inertia::render('Auth/WaitingApproval');
         }
 
@@ -56,6 +58,7 @@ class DashboardController extends Controller
                 ...$this->monitoring->overview([...$filters, 'program' => 'conservation']),
                 'view' => $view,
                 'protectedAreasCount' => $protectedAreasCount,
+                'actionQueue' => $this->tracking->dashboardActionQueue($user),
             ]);
         }
 

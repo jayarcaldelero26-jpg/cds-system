@@ -37,11 +37,52 @@ class AppServiceProvider extends ServiceProvider
 
         $this->registerReportAuditHooks();
 
+        Gate::define('submission-tracking.view', fn ($user) =>
+            app(\App\Services\Authorization\OrganizationalAccessService::class)->canViewSubmissionTracking($user));
+
+        Gate::define('passkeys.manage', fn ($user) =>
+            app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($user));
+
         Gate::before(function ($user, $ability, array $arguments) {
             // User deletion has non-bypassable policy invariants (self-delete
             // and last-CDS-Admin protection). Let UserPolicy::delete() decide.
             if ($ability === 'delete' && ($arguments[0] ?? null) instanceof \App\Models\User) {
                 return null;
+            }
+
+            $conservationReadAbilities = [
+                'technical-reports.view', 'protected-areas.view', 'management-plans.view',
+                'bms.view', 'bams.view', 'imea.view', 'aws.view',
+            ];
+            if (in_array($ability, $conservationReadAbilities, true)
+                && app(\App\Services\Authorization\OrganizationalAccessService::class)->canViewConservationModules($user)) {
+                return true;
+            }
+
+            $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+            if (request()->is('engp-reports', 'engp-reports/*') && $organization->canViewDevelopmentModules($user)) {
+                if ($ability === 'technical-reports.view') return true;
+                if (in_array($ability, ['technical-reports.create', 'technical-reports.update'], true)
+                    && in_array($organization->effectiveCategory($user), [\App\Services\Authorization\OrganizationalAccessService::CENRO_FOCAL, \App\Services\Authorization\OrganizationalAccessService::PENRO_FOCAL], true)) {
+                    return true;
+                }
+            }
+
+            $paPreparationSource = match ($ability) {
+                'technical-reports.create', 'technical-reports.update' => 'technical-reports',
+                'management-plans.create', 'management-plans.update' => 'management-plans',
+                'bms.create', 'bms.update' => 'bms',
+                'bams.create', 'bams.update' => 'bams',
+                'imea.create', 'imea.update' => 'imea',
+                'aws.create', 'aws.update' => 'aws',
+                default => null,
+            };
+            if ($paPreparationSource !== null) {
+                $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+                $category = $organization->effectiveCategory($user);
+                if (! $organization->isGlobal($user) && in_array($category, [\App\Services\Authorization\OrganizationalAccessService::CENRO_RECORDS, \App\Services\Authorization\OrganizationalAccessService::CENRO_CHIEF, \App\Services\Authorization\OrganizationalAccessService::CENRO_FOCAL], true)) {
+                    return $organization->canPrepareProtectedAreaSource($user, $paPreparationSource);
+                }
             }
 
             return $user->hasAnyRole(['CDS Admin', 'Super Admin']) ? true : null;

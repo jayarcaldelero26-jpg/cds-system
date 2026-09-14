@@ -56,6 +56,7 @@ export default function Index({ users, status }) {
         router.patch(`/admin/users/${userToDeactivate.id}`, {
             name: userToDeactivate.name,
             email: userToDeactivate.email,
+            account_role: userToDeactivate.account_role || 'User',
             office_designated: userToDeactivate.office_designated || '',
             section: userToDeactivate.section || '',
             unit_assignment: userToDeactivate.unit_assignment || '',
@@ -91,8 +92,9 @@ export default function Index({ users, status }) {
     const columns = [
         { key: 'name', label: 'Name', render: (user) => <span className="font-semibold text-gray-900 dark:text-white">{user.name}</span> },
         { key: 'email', label: 'Email' },
+        { key: 'account_role', label: 'Account Role', render: (user) => display(user.account_role) },
         { key: 'unit_assignment', label: 'Unit', render: (user) => display(user.unit_assignment) },
-        { key: 'scope', label: 'Office / Protected Area', render: (user) => <div className="min-w-0 whitespace-normal"><div className="font-medium">{display(user.office_designated)}</div>{user.effective_category === 'PAMO' && user.protected_area_name && <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{user.protected_area_name}</div>}</div> },
+        { key: 'scope', label: 'Office / Protected Area', render: (user) => <div className="min-w-0 whitespace-normal"><div className="font-medium">{display(user.office_designated)}</div>{user.protected_area_name && <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{user.protected_area_name}</div>}</div> },
         { key: 'category', label: 'User Category', render: (user) => display(categoryLabels[user.effective_category || user.section] || user.effective_category || user.section) },
         { key: 'is_active', label: 'Account Status', render: (user) => { const current = accountStatus(user); return <StatusBadge variant={current.variant}>{current.label}</StatusBadge>; } },
     ];
@@ -142,14 +144,15 @@ export default function Index({ users, status }) {
                 deleteLabel="Delete User"
             >
                 {selectedUser && <>
-                    <CrudSummaryGrid items={[{ label: 'Account Status', render: () => <StatusBadge variant={selectedStatus.variant}>{selectedStatus.label}</StatusBadge> }, { label: 'User Category', value: display(categoryLabels[selectedUser.effective_category || selectedUser.section] || selectedUser.effective_category || selectedUser.section) }, { label: 'Unit', value: display(selectedUser.unit_assignment) }, { label: 'Office', value: display(selectedUser.office_designated) }]} />
+                    <CrudSummaryGrid items={[{ label: 'Account Status', render: () => <StatusBadge variant={selectedStatus.variant}>{selectedStatus.label}</StatusBadge> }, { label: 'Account Role', value: display(selectedUser.account_role) }, { label: 'User Category', value: display(categoryLabels[selectedUser.effective_category || selectedUser.section] || selectedUser.effective_category || selectedUser.section) }, { label: 'Unit', value: display(selectedUser.unit_assignment) }, { label: 'Office', value: display(selectedUser.office_designated) }]} />
                     <CrudSection title="Account Information">
                         <dl className="grid min-w-0 gap-x-6 gap-y-5 sm:grid-cols-2">
                             <Detail label="Name" value={selectedUser.name} />
                             <Detail label="Email Address" value={selectedUser.email} />
+                            <Detail label="Account Role" value={selectedUser.account_role} />
                             <Detail label="User Category" value={categoryLabels[selectedUser.effective_category || selectedUser.section] || selectedUser.effective_category || selectedUser.section} />
                             <Detail label="Office Designated" value={selectedUser.office_designated} />
-                            <Detail label="Protected Area / PAMO Assignment" value={selectedUser.effective_category === 'PAMO' ? selectedUser.protected_area_name : null} />
+                            <Detail label="Protected Area / PAMO Assignment" value={selectedUser.protected_area_name} />
                             <Detail label="Registration Date" value={selectedUser.created_at} />
                             <Detail label="Last Updated" value={selectedUser.updated_at} />
                         </dl>
@@ -184,7 +187,7 @@ export default function Index({ users, status }) {
             <ConfirmDialog
                 open={Boolean(userToDeactivate)}
                 title="Deactivate this account?"
-                message="The user will no longer be able to sign in until the account is reactivated. The assigned role and organizational scope will be preserved."
+                message="The user will no longer be able to sign in until the account is reactivated. The account role and organizational scope will be preserved."
                 confirmLabel="Deactivate Account"
                 onCancel={() => !deactivating && setUserToDeactivate(null)}
                 onConfirm={deactivateUser}

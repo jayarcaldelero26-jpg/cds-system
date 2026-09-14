@@ -17,7 +17,7 @@ function migrationProtectedArea(): ProtectedArea
     $user = \App\Models\User::factory()->create();
 
     return ProtectedArea::create([
-        'name' => 'Attachment Migration Test PA',
+        'name' => 'Attachment Migration Test PA', 'short_name' => 'BPL',
         'category' => 'Protected Landscape',
         'municipality' => 'Baganga',
         'province' => 'Davao Oriental',
@@ -193,7 +193,7 @@ test('the protected resolver serves a file after migration without rewriting its
     expect($record->fresh()->attachment)->toBe('bms-attachments/resolved.pdf')
         ->and($descriptor['url'])->toContain('/attachments/bms-data/'.$record->id.'/attachment');
 
-    $viewer = User::factory()->create();
+    $viewer = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Baganga']);
     $viewer->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
     $this->actingAs($viewer)
         ->get($descriptor['url'])

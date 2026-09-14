@@ -119,6 +119,39 @@ final class DashboardMonitoringService
         ];
     }
 
+    /**
+     * Return a public-safe monthly submission trend. Only month labels and
+     * aggregate counts leave the service; report rows remain internal.
+     *
+     * @return list<array{label:string,count:int}>
+     */
+    public function publicSubmissionTrend(int $months = 12): array
+    {
+        $months = max(1, min(24, $months));
+        $submittedDates = $this->tracking->records()
+            ->map(fn (array $row): ?CarbonImmutable => $this->date($row['date_received_penro'] ?? null))
+            ->filter()
+            ->values();
+
+        if ($submittedDates->isEmpty()) {
+            return [];
+        }
+
+        $latestMonth = $submittedDates->max()->startOfMonth();
+        $firstMonth = $latestMonth->subMonths($months - 1);
+
+        return collect(range(0, $months - 1))
+            ->map(function (int $offset) use ($firstMonth, $submittedDates): array {
+                $month = $firstMonth->addMonths($offset);
+
+                return [
+                    'label' => $month->format('M y'),
+                    'count' => $submittedDates->filter(fn (CarbonImmutable $date): bool => $date->year === $month->year && $date->month === $month->month)->count(),
+                ];
+            })
+            ->all();
+    }
+
     /** @return Collection<int, array<string, mixed>> */
     private function groupByModule(Collection $rows): Collection
     {

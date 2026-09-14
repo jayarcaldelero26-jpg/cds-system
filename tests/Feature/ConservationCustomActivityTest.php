@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
-    $this->user = User::factory()->create(['section' => 'CDS']);
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
     foreach (['technical-reports.view', 'technical-reports.create', 'technical-reports.update', 'technical-reports.delete'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }
@@ -38,6 +38,7 @@ test('a Conservation report updates to an activity name outside the registry', f
         'activity_name' => 'Training on Homestay Program',
         'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
     $this->actingAs($this->user)->put(route('conservation-reports.update', ['workflow' => 'homestay', 'submission' => $submission]), [

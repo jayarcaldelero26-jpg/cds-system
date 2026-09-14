@@ -1,6 +1,47 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Homepage-only premium type system. The fallbacks keep the public page
+   functional in offline/local environments where the named fonts are absent. */
+.edats-homepage {
+    font-family: 'Inter', system-ui, sans-serif;
+}
+
+.edats-homepage .edats-display,
+.edats-homepage h1,
+.edats-homepage h2,
+.edats-homepage h3,
+.edats-homepage .edats-kpi-label,
+.edats-homepage dd {
+    font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+}
+
+
+.edats-auth-page {
+    font-family: 'Inter', system-ui, sans-serif;
+}
+
+.edats-auth-page h1,
+.edats-auth-page h2 {
+    font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+}
+.edats-trend-empty {
+    margin-top: 1rem;
+    min-height: 8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px dashed rgb(21 128 61 / 0.22);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    color: rgb(100 116 139);
+    font-size: 0.7rem;
+    line-height: 1.25rem;
+    text-align: center;
+}
 
 @keyframes floating-field-autofill {
     from { opacity: 0.99; }
@@ -207,4 +248,31 @@ textarea:-webkit-autofill {
 @media (prefers-reduced-motion: reduce) {
     .premium-time-trigger, .premium-time-tabs button, .premium-time-wheel-item { transition: none; }
     .premium-time-popover { animation: none; }
+}
+
+/* Submission Tracking keeps the shared table behavior but uses a page-scoped
+   operational presentation. */
+.submission-tracking-page {
+    font-family: 'Inter', system-ui, sans-serif;
+}
+
+.submission-tracking-page h1,
+.submission-tracking-page h2,
+.submission-tracking-page h3,
+.submission-tracking-page [role='tab'] {
+    font-family: 'Manrope', 'Inter', system-ui, sans-serif;
+}
+
+.submission-tracking-queue {
+    box-shadow: 0 8px 24px rgb(15 23 42 / 0.06);
+}
+
+.submission-tracking-empty-state {
+    min-height: 190px;
+}
+
+@media (max-width: 639px) {
+    .submission-tracking-empty-state {
+        min-height: 180px;
+    }
 }

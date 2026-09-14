@@ -42,7 +42,48 @@ class AuthenticatedSessionController extends Controller
 
         $request->session()->regenerate();
 
-        return redirect()->intended(route('dashboard', absolute: false));
+        // Successful authentication always starts from the dashboard. Stale or unauthorized intended URLs must not control landing.
+        $request->session()->forget(['url.intended', 'auth.login_destination']);
+
+        return redirect()->route('dashboard');
+    }
+
+    private function canFollowIntended(Request $request, string $intended): bool
+    {
+        // Never dispatch an intended request here: controllers may have side
+        // effects. Only preserve destinations whose route gates can be checked.
+        $parts = parse_url($intended);
+        if ($parts === false || isset($parts['user']) || isset($parts['pass'])
+            || str_contains($intended, chr(92))
+            || (isset($parts['host']) && strcasecmp($parts['host'], $request->getHost()) !== 0)
+            || (isset($parts['scheme']) && $parts['scheme'] !== $request->getScheme())
+            || (isset($parts['port']) && $parts['port'] !== $request->getPort())) {
+            return false;
+        }
+
+        try {
+            $probe = Request::create($intended, 'GET');
+            $probe->setUserResolver(fn () => $request->user());
+            $route = app('router')->getRoutes()->match($probe);
+            $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+
+            foreach ($route->gatherMiddleware() as $middleware) {
+                [$name, $parameters] = array_pad(explode(':', $middleware, 2), 2, null);
+                if ($name === 'guest') return false;
+                if ($name === 'admin' && ! $organization->isGlobal($request->user())) return false;
+                if ($name === 'can' && $parameters !== null && ! str_contains($parameters, ',')
+                    && ! $request->user()->can($parameters)) return false;
+                if ($name === 'unit' && ! $organization->canAccessUnit($request->user(), $parameters ?? '')) return false;
+            }
+
+            // Reuse the existing path-based unit classification as well.
+            app(\App\Http\Middleware\EnsureOrganizationalUnit::class)
+                ->handle($probe, fn () => response('', 204));
+
+            return true;
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+            return false;
+        }
     }
 
     /**

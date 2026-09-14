@@ -215,7 +215,6 @@ class ConservationReportSubmissionController extends Controller
         if ($user = request()->user()) {
             $submission->loadMissing('protectedArea');
             abort_unless($this->pambAccess->canView($user, $submission), 403);
-            abort_unless(! $this->pambAccess->isCenro($user) || $this->pambCompliance->isMeeting($workflow), 403);
         }
     }
 
@@ -224,7 +223,6 @@ class ConservationReportSubmissionController extends Controller
         $user = $request->user();
         if (! $user) return;
         if ($this->pambAccess->isCenro($user)) {
-            abort_unless($this->pambCompliance->isMeeting($workflow), 403);
             $organization = app(OrganizationalAccessService::class);
             abort_unless($targetOffice !== null && $organization->normalizeOffice($targetOffice) === $organization->normalizeOffice($user->office_designated), 403);
 

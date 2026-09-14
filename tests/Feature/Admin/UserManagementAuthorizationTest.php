@@ -1,238 +1,172 @@
 <?php
 
-use App\Models\User;
-use App\Policies\UserPolicy;
 use App\Models\ProtectedArea;
-use Illuminate\Support\Facades\Gate;
+use App\Models\User;
+use App\Services\Authorization\OrganizationalAccessService;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 
-beforeEach(function () {
-    foreach (['CDS Admin', 'Technical Staff', 'Viewer', 'no_role', 'CENRO CDS Focal Person', 'PAMO', 'CENRO CDS Chief'] as $role) {
-        Role::findOrCreate($role, 'web');
+beforeEach(function (): void {
+    Role::findOrCreate('CDS Admin', 'web');
+    Role::findOrCreate('no_role', 'web');
+});
+
+function accessAdmin(): User
+{
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+
+    return $admin;
+}
+
+test('normal users cannot access User Management', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('no_role');
+
+    $this->actingAs($user)->get(route('admin.users.index'))->assertForbidden();
+});
+
+test('an admin creates a CENRO conservation focal using the Operational Group contract', function (): void {
+    $admin = accessAdmin();
+
+    $this->actingAs($admin)->post(route('admin.users.store'), [
+        'name' => 'CENRO Focal', 'email' => 'viewer@example.com',
+        'account_role' => 'User', 'operational_group' => 'cenro',
+        'office_designated' => 'CENRO Baganga', 'section' => 'CENRO_CDS_FOCAL',
+        'password' => 'Password123!', 'password_confirmation' => 'Password123!', 'is_active' => false,
+    ])->assertRedirect(route('admin.users.index'));
+
+    $user = User::where('email', 'viewer@example.com')->firstOrFail();
+    expect($user->is_active)->toBeFalse()
+        ->and($user->section)->toBe(OrganizationalAccessService::CENRO_FOCAL)
+        ->and($user->unit_assignment)->toBeNull()
+        ->and($user->getRoleNames()->all())->toBe(['no_role']);
+});
+
+test('admin creation rejects group and category mismatches', function (): void {
+    $admin = accessAdmin();
+
+    $this->actingAs($admin)->post(route('admin.users.store'), [
+        'name' => 'Invalid group', 'email' => 'invalid-group@example.com',
+        'account_role' => 'User', 'operational_group' => 'penro',
+        'section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Baganga',
+        'password' => 'Password123!', 'password_confirmation' => 'Password123!', 'is_active' => false,
+    ])->assertSessionHasErrors('section');
+
+    expect(User::where('email', 'invalid-group@example.com')->exists())->toBeFalse();
+});
+
+test('admin creation and edit pages share operational groups', function (): void {
+    $admin = accessAdmin();
+    $managed = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => 'development', 'office_designated' => 'CENRO Mati']);
+    $managed->assignRole('no_role');
+
+    $this->actingAs($admin)->get(route('admin.users.create'))->assertInertia(fn (Assert $page) => $page
+        ->component('Admin/Users/Create')
+        ->has('operationalGroups', 2));
+
+    $this->get(route('admin.users.edit', $managed))->assertInertia(fn (Assert $page) => $page
+        ->component('Admin/Users/Edit')
+        ->where('user.operational_group', 'cenro')
+        ->has('operationalGroups', 2));
+});
+
+test('admin creation rejects unsupported PAMO accounts', function (): void {
+    $admin = accessAdmin();
+    $this->actingAs($admin)->post(route('admin.users.store'), [
+        'name' => 'MHRWS PAMO', 'email' => 'mhrws-staff@example.com',
+        'account_role' => 'User', 'operational_group' => 'pamo', 'section' => 'PAMO',
+        'password' => 'Password123!', 'password_confirmation' => 'Password123!', 'is_active' => false,
+    ])->assertSessionHasErrors(['operational_group', 'section']);
+
+    expect(User::where('email', 'mhrws-staff@example.com')->exists())->toBeFalse();
+});
+
+test('legacy PAMO accounts remain viewable but are not supported as new account options', function (): void {
+    $admin = accessAdmin();
+    $legacy = User::factory()->create([
+        'section' => 'PAMO',
+        'office_designated' => 'PENRO Davao Oriental',
+        'protected_area_id' => null,
+    ]);
+    $legacy->assignRole('no_role');
+
+    $this->actingAs($admin)->get(route('admin.users.edit', $legacy))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('user.section', 'PAMO')
+            ->where('operationalGroups', fn ($groups) => collect($groups)->pluck('value')->all() === ['cenro', 'penro']));
+});
+
+test('fully configured CENRO and PENRO accounts activate without a legacy Technical Staff role', function (): void {
+    $admin = accessAdmin();
+    $cenro = User::factory()->create(['is_active' => false, 'unit_assignment' => 'development', 'section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Baganga']);
+    $cenro->assignRole('no_role');
+    $penro = User::factory()->create(['is_active' => false, 'unit_assignment' => null, 'section' => 'PENRO_TSD_CHIEF', 'office_designated' => 'PENRO Davao Oriental']);
+    $penro->assignRole('no_role');
+
+    foreach ([$cenro, $penro] as $managed) {
+        $this->actingAs($admin)->patch(route('admin.users.activate', $managed))->assertRedirect(route('admin.users.index'));
+        expect($managed->fresh()->is_active)->toBeTrue()->and($managed->fresh()->getRoleNames()->all())->toBe(['no_role']);
     }
 });
 
-test('technical staff cannot access user management', function () {
+test('a CDS admin cannot delete their own account', function (): void {
+    $admin = accessAdmin();
+
+    $this->actingAs($admin)
+        ->delete(route('admin.users.destroy', $admin))
+        ->assertForbidden();
+
+    expect(User::query()->whereKey($admin->id)->exists())->toBeTrue();
+});
+
+test('the last CDS admin cannot be deleted by the Super Admin', function (): void {
+    Role::findOrCreate('Super Admin', 'web');
+    $superAdmin = User::factory()->create();
+    $superAdmin->assignRole('Super Admin');
+    $admin = accessAdmin();
+
+    $this->actingAs($superAdmin)
+        ->delete(route('admin.users.destroy', $admin))
+        ->assertForbidden();
+
+    expect(User::query()->whereKey($admin->id)->exists())->toBeTrue();
+});
+
+test('a CDS admin can delete another CDS admin while one remains', function (): void {
+    $admin = accessAdmin();
+    $managed = User::factory()->create();
+    $managed->assignRole('CDS Admin');
+
+    $this->actingAs($admin)
+        ->delete(route('admin.users.destroy', $managed))
+        ->assertRedirect(route('admin.users.index'));
+
+    expect(User::query()->whereKey($managed->id)->exists())->toBeFalse()
+        ->and(User::query()->whereKey($admin->id)->exists())->toBeTrue();
+});
+
+test('a CDS admin can delete an eligible normal user', function (): void {
+    $admin = accessAdmin();
+    $managed = User::factory()->create();
+    $managed->assignRole('no_role');
+
+    $this->actingAs($admin)
+        ->delete(route('admin.users.destroy', $managed))
+        ->assertRedirect(route('admin.users.index'));
+
+    expect(User::query()->whereKey($managed->id)->exists())->toBeFalse();
+});
+
+test('normal users cannot delete managed accounts', function (): void {
     $user = User::factory()->create();
-    $user->assignRole('Technical Staff');
+    $user->assignRole('no_role');
+    $managed = User::factory()->create();
+    $managed->assignRole('no_role');
 
     $this->actingAs($user)
-        ->get(route('admin.users.index'))
-        ->assertForbidden();
-});
-
-test('a CDS admin can create an inactive user from the operational category', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-
-    $response = $this->actingAs($admin)->post(route('admin.users.store'), [
-        'name' => 'CENRO Focal',
-        'email' => 'viewer@example.com',
-        'office_designated' => 'CENRO Baganga',
-        'section' => 'CENRO_CDS_FOCAL',
-        'unit_assignment' => 'conservation',
-        'password' => 'Password123!',
-        'password_confirmation' => 'Password123!',
-        'is_active' => false,
-    ]);
-
-    $response->assertRedirect(route('admin.users.index'));
-
-    $user = User::query()->where('email', 'viewer@example.com')->firstOrFail();
-
-    expect($user->is_active)->toBeFalse()
-        ->and($user->hasRole('CENRO CDS Focal Person'))->toBeTrue();
-});
-
-test('a CDS admin can activate a fully configured user without resubmitting a role', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-    $managedUser = User::factory()->create([
-        'is_active' => false,
-        'unit_assignment' => 'conservation',
-        'section' => 'CENRO_CDS_FOCAL',
-        'office_designated' => 'CENRO Baganga',
-    ]);
-    $managedUser->assignRole('CENRO CDS Focal Person');
-
-    $this->actingAs($admin)
-        ->patch(route('admin.users.activate', $managedUser), [])
-        ->assertRedirect(route('admin.users.index'))
-        ->assertSessionHas('success', 'User account activated successfully.');
-
-    $activatedUser = $managedUser->fresh();
-    expect($activatedUser->is_active)->toBeTrue()
-        ->and($activatedUser->hasRole('CENRO CDS Focal Person'))->toBeTrue()
-        ->and($activatedUser->unit_assignment)->toBe('conservation')
-        ->and($activatedUser->office_designated)->toBe('CENRO Baganga');
-
-    $this->post('/logout');
-    $this->post('/login', ['email' => $managedUser->email, 'password' => 'password'])
-        ->assertRedirect(route('dashboard', absolute: false));
-    $this->assertAuthenticatedAs($managedUser->fresh());
-});
-
-test('changing a PAMO user to a CENRO role normalizes category and clears PA scope atomically', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-    $area = ProtectedArea::create(['name' => 'Aliwagwag Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $admin->id, 'updated_by' => $admin->id]);
-    $managedUser = User::factory()->create(['unit_assignment' => 'conservation', 'section' => 'PAMO', 'office_designated' => 'PENRO Davao Oriental', 'protected_area_id' => $area->id, 'is_active' => false]);
-    $managedUser->assignRole('PAMO');
-
-    $this->actingAs($admin)->patch(route('admin.users.update', $managedUser), [
-        'name' => $managedUser->name,
-        'email' => $managedUser->email,
-        'unit_assignment' => 'conservation',
-        'section' => 'CENRO_CDS_CHIEF',
-        'office_designated' => 'CENRO Baganga',
-        'protected_area_id' => '',
-        'is_active' => false,
-    ])->assertRedirect(route('admin.users.index'));
-
-    $updated = $managedUser->fresh();
-    expect($updated->section)->toBe('CENRO_CDS_CHIEF')
-        ->and($updated->protected_area_id)->toBeNull()
-        ->and($updated->office_designated)->toBe('CENRO Baganga')
-        ->and($updated->hasRole('CENRO CDS Chief'))->toBeTrue();
-});
-
-test('an account without a configured operational role cannot be activated', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-    $managedUser = User::factory()->create([
-        'is_active' => false,
-        'unit_assignment' => 'conservation',
-        'section' => 'CENRO_CDS_FOCAL',
-        'office_designated' => 'CENRO Baganga',
-    ]);
-    $managedUser->assignRole('no_role');
-
-    $this->actingAs($admin)
-        ->patch(route('admin.users.activate', $managedUser), [])
-        ->assertRedirect()
-        ->assertSessionHas('error', 'Please complete the user\'s access role and organizational assignment before activating this account.');
-
-    expect($managedUser->fresh()->is_active)->toBeFalse();
-});
-
-test('an account with an invalid organizational scope cannot be activated', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-    $managedUser = User::factory()->create([
-        'is_active' => false,
-        'unit_assignment' => 'conservation',
-        'section' => 'CENRO_CDS_FOCAL',
-        'office_designated' => 'PENRO Davao Oriental',
-    ]);
-    $managedUser->assignRole('CENRO CDS Focal Person');
-
-    $this->actingAs($admin)
-        ->patch(route('admin.users.activate', $managedUser), [])
-        ->assertRedirect()
-        ->assertSessionHas('error', 'Please complete the user\'s access role and organizational assignment before activating this account.');
-
-    expect($managedUser->fresh()->is_active)->toBeFalse();
-});
-
-test('CDS admin user management pages render with the admin navigation link', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-
-    $managedUser = User::factory()->create();
-    $managedUser->assignRole('Viewer');
-
-    $this->actingAs($admin)
-        ->get(route('admin.users.index'))
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page
-            ->component('Admin/Users/Index')
-            ->has('users.data', 2)
-            ->where('users.data.1.email', $managedUser->email));
-
-    $this->get(route('admin.users.create'))
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page->component('Admin/Users/Create'));
-
-    $this->get(route('admin.users.edit', $managedUser))
-        ->assertOk()
-        ->assertInertia(fn (Assert $page) => $page
-            ->component('Admin/Users/Edit')
-            ->where('user.email', $managedUser->email));
-});
-
-test('a CDS admin cannot delete their own account', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-
-    $response = $this->actingAs($admin)->delete(route('admin.users.destroy', $admin));
-    $response->assertForbidden();
-
-    $this->assertDatabaseHas('users', ['id' => $admin->id]);
-    expect(Gate::forUser($admin)->allows('delete', $admin))->toBeFalse();
-});
-
-test('the last CDS admin cannot be deleted', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-
-    $actor = Mockery::mock(User::class);
-    $actor->shouldReceive('hasRole')->with('CDS Admin')->andReturnTrue();
-    $actor->shouldReceive('is')->with($admin)->andReturnFalse();
-
-    expect(app(UserPolicy::class)->delete($actor, $admin))->toBeFalse();
-    $this->assertDatabaseHas('users', ['id' => $admin->id]);
-});
-
-test('a CDS admin can delete another CDS admin while one remains', function () {
-    $actor = User::factory()->create();
-    $actor->assignRole('CDS Admin');
-    $managedUser = User::factory()->create();
-    $managedUser->assignRole('CDS Admin');
-
-    $this->actingAs($actor)
-        ->delete(route('admin.users.destroy', $managedUser))
-        ->assertRedirect(route('admin.users.index'));
-
-    $this->assertDatabaseMissing('users', ['id' => $managedUser->id]);
-    $this->assertDatabaseHas('users', ['id' => $actor->id]);
-});
-
-test('a CDS admin can delete an eligible normal user', function () {
-    $admin = User::factory()->create();
-    $admin->assignRole('CDS Admin');
-    $managedUser = User::factory()->create();
-    $managedUser->assignRole('Viewer');
-
-    $this->actingAs($admin)
-        ->delete(route('admin.users.destroy', $managedUser))
-        ->assertRedirect(route('admin.users.index'));
-
-    $this->assertDatabaseMissing('users', ['id' => $managedUser->id]);
-});
-
-test('technical staff cannot delete users', function () {
-    $staff = User::factory()->create();
-    $staff->assignRole('Technical Staff');
-    $managedUser = User::factory()->create();
-    $managedUser->assignRole('Viewer');
-
-    $this->actingAs($staff)
-        ->delete(route('admin.users.destroy', $managedUser))
+        ->delete(route('admin.users.destroy', $managed))
         ->assertForbidden();
 
-    $this->assertDatabaseHas('users', ['id' => $managedUser->id]);
-});
-
-test('viewers cannot delete users', function () {
-    $viewer = User::factory()->create();
-    $viewer->assignRole('Viewer');
-    $managedUser = User::factory()->create();
-    $managedUser->assignRole('Viewer');
-
-    $this->actingAs($viewer)
-        ->delete(route('admin.users.destroy', $managedUser))
-        ->assertForbidden();
-
-    $this->assertDatabaseHas('users', ['id' => $managedUser->id]);
+    expect(User::query()->whereKey($managed->id)->exists())->toBeTrue();
 });

@@ -10,7 +10,7 @@ use Spatie\Permission\Models\Permission;
 
 function protectedAttachmentUser(bool $authorized = true): User
 {
-    $user = User::factory()->create(['section' => 'CDS']);
+    $user = User::factory()->create(['section' => $authorized ? 'CENRO_CDS_FOCAL' : 'UNKNOWN', 'unit_assignment' => null, 'office_designated' => 'CENRO Baganga']);
     if ($authorized) {
         $user->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
     }
@@ -22,7 +22,7 @@ function protectedAttachmentRecord(string $path = 'bms-attachments/record.pdf'):
 {
     $owner = User::factory()->create();
     $area = ProtectedArea::create([
-        'name' => 'Protected Attachment Test PA',
+        'name' => 'Protected Attachment Test PA', 'short_name' => 'BPL',
         'category' => 'Protected Landscape',
         'municipality' => 'Baganga',
         'province' => 'Davao Oriental',

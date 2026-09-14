@@ -5,6 +5,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 
@@ -125,7 +126,7 @@ test('the MHRWS routing rule applies to another protected-area report source', f
     ]);
 
     $record = app(SubmissionTrackingService::class)->records()->firstWhere(fn (array $item): bool => $item['source'] === 'bms' && $item['source_id'] === $report->id);
-    expect($record['stage'])->toBe(SubmissionTrackingService::PENRO_RECEIPT)
+    expect($record['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
         ->and($record['cenro_release_applicable'])->toBeFalse();
 });
 

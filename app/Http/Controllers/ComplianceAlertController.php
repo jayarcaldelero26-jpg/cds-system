@@ -382,7 +382,7 @@ class ComplianceAlertController extends Controller
         ]);
         $automaticChanged = (bool) $data['automatic_send_enabled'] !== (bool) $current['automatic_send_enabled'];
         if ($automaticChanged) {
-            abort_unless($request->user()?->hasRole('CDS Admin'), 403);
+            abort_unless(app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($request->user()), 403);
         }
         if ($automaticChanged && ! $request->filled('current_password')) {
             throw ValidationException::withMessages(['current_password' => 'Your current password is required when changing automatic email delivery.']);

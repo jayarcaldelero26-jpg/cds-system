@@ -61,10 +61,27 @@ final class GlobalSearchService
         ];
 
         return collect($items)->filter(fn (array $item): bool => !isset($item['ability']) || $user->can($item['ability']))
+            ->filter(fn (array $item): bool => $this->canViewNavigationItem($user, $item))
             ->filter(fn (array $item): bool => $this->matches($query, $item['title'].' '.$item['subtitle']))
             ->take(self::PER_GROUP_LIMIT)->map(fn (array $item): array => [
                 'type' => 'navigation', 'title' => $item['title'], 'subtitle' => $item['subtitle'], 'url' => $item['url'], 'icon' => $item['icon'], 'badge' => 'Navigation',
             ])->values()->all();
+    }
+
+    private function canViewNavigationItem(User $user, array $item): bool
+    {
+        $url = (string) ($item['url'] ?? '');
+        $ability = (string) ($item['ability'] ?? '');
+
+        if (str_starts_with($url, '/engp-reports/')) {
+            return $this->organization->canBrowseModule($user, 'engp', OrganizationalAccessService::DEVELOPMENT);
+        }
+
+        if ($ability === 'technical-reports.view' || in_array($ability, ['bms.view', 'bams.view', 'imea.view', 'aws.view'], true)) {
+            return $this->organization->canBrowseModule($user, $url, OrganizationalAccessService::CONSERVATION);
+        }
+
+        return true;
     }
 
     /** @return list<array<string, string>> */
@@ -73,13 +90,13 @@ final class GlobalSearchService
         return $this->tracking->records()
             ->filter(fn (array $record): bool => $this->canViewReport($user, (string) ($record['source'] ?? '')))
             ->filter(fn (array $record): bool => $this->matches($query, implode(' ', [$record['module'] ?? '', $record['target_office'] ?? '', $record['protected_area'] ?? '', $record['reporting_period'] ?? '', $record['activity_name'] ?? '', $record['document_type'] ?? ''])))
-            ->take(self::PER_GROUP_LIMIT)->map(function (array $record): array {
+            ->take(self::PER_GROUP_LIMIT)->map(function (array $record) use ($user): array {
                 $context = collect([$record['target_office'] ?? null, $record['protected_area'] ?? null])->filter()->implode(' · ');
                 $period = trim((string) ($record['reporting_period'] ?? ''));
                 return [
                     'type' => 'report', 'title' => (string) ($record['module'] ?? 'Monitored report'),
                     'subtitle' => trim($context.($period !== '' ? ($context !== '' ? ' · ' : '').$period : '')) ?: 'Monitored report',
-                    'url' => (string) ($record['source_url'] ?? '/dashboard'), 'icon' => 'document', 'badge' => 'Report',
+                    'url' => $this->organization->canBrowseModule($user, (string) ($record['source'] ?? ''), (string) (($record['source'] ?? '') === 'engp' ? OrganizationalAccessService::DEVELOPMENT : OrganizationalAccessService::CONSERVATION)) ? (string) ($record['source_url'] ?? '/dashboard') : '/submission-tracking', 'icon' => 'document', 'badge' => 'Report',
                 ];
             })->values()->all();
     }
@@ -108,13 +125,14 @@ final class GlobalSearchService
             $builder->where('name', 'like', $like)->orWhere('email', 'like', $like)->orWhere('office_designated', 'like', $like)->orWhere('section', 'like', $like);
         })->orderBy('name')->limit(self::PER_GROUP_LIMIT)->get(['id', 'name', 'office_designated', 'section'])
             ->map(function (User $managedUser): array {
-                $context = collect([$managedUser->office_designated, $managedUser->section, $managedUser->roles->first()?->name])->filter()->implode(' · ');
+                $context = collect([$managedUser->office_designated, $managedUser->section, $this->organization->accountRole($managedUser)])->filter()->implode(' · ');
                 return ['type' => 'user', 'title' => (string) $managedUser->name, 'subtitle' => $context ?: 'User account', 'url' => '/admin/users/'.$managedUser->id.'/edit', 'icon' => 'user', 'badge' => 'User'];
             })->all();
     }
 
     private function canViewReport(User $user, string $source): bool
     {
+        if ($this->organization->canViewSubmissionTracking($user)) return true;
         return match ($source) {
             'bms' => $user->can('bms.view'), 'bams' => $user->can('bams.view'), 'imea' => $user->can('imea.view'), 'aws' => $user->can('aws.view'),
             'engp', 'conservation', 'ipaf-management' => $user->can('technical-reports.view'), default => false,

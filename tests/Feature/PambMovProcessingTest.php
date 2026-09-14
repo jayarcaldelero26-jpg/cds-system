@@ -4,6 +4,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\SubmissionTracking\PambMovProcessingService;
+use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -17,7 +18,7 @@ uses(RefreshDatabase::class);
 
 function pambRoleUser(string $role, string $section, string $office = 'CENRO Mati', array $attributes = []): User
 {
-    $user = User::factory()->create([...$attributes, 'section' => $section, 'office_designated' => $office]);
+    $user = User::factory()->create(['unit_assignment' => 'conservation', ...$attributes, 'section' => $section, 'office_designated' => $office]);
     $spatieRole = Role::findOrCreate($role, 'web');
     $permissions = collect([
         'reports.view',
@@ -215,10 +216,10 @@ test('For Review status presents the Chief as the next action owner', function (
         ->toContain('Awaiting Review by CENRO CDS Chief')
         ->toContain('Next Action: CENRO CDS Chief must review this MOV/report.')
         ->toContain('Edit / Correct Submission')
-        ->and($page)->toContain("details.mov_processing?.applicable ? 'Workflow Status' : 'Routing Status'")
-        ->toContain('details.mov_processing?.applicable ? details.mov_processing.workflow_status : details.submission_status');
-});
+        ->and(preg_replace('/\\s+/', ' ', $page))->toContain('mov_processing')
+        ->toContain('workflow_status')->toContain('submission_status')->toContain('Workflow Status')->toContain('Routing Status');
 
+});
 test('needs correction requires remarks and returns the record to the focal queue', function (): void {
     $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
     $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
@@ -257,7 +258,7 @@ test('CENRO office scope and PAMO protected-area scope are enforced on tracking 
 
     $this->actingAs($cenro)->get(route('submission-tracking.index'))->assertInertia(fn ($page) => $page->where('queues.for_release', fn ($queue) => collect($queue)->pluck('source_id')->doesntContain($hidden->id)));
     $this->actingAs($cenro)->get(route('attachments.show', ['conservation-report', $hidden->id, 'mov']))->assertForbidden();
-    $this->actingAs($pamo)->get(route('submission-tracking.index'))->assertOk();
+    $this->actingAs($pamo)->get(route('submission-tracking.index'))->assertForbidden();
     expect($visible->protected_area_id)->toBe($area->id);
 });
 
@@ -297,4 +298,338 @@ test('turnaround status uses the authoritative PAMB calendar and configured non-
     } finally {
         CarbonImmutable::setTestNow();
     }
+});
+
+
+test('PambSubmissionAccess enforces one actor per internal stage', function (): void {
+    $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    $tsd = pambRoleUser('PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
+    $focal = pambRoleUser('PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $chief = pambRoleUser('PENRO CDS Chief', 'PENRO_CDS_CHIEF', 'PENRO Davao Oriental');
+    $report = pambReport($records, [
+        'date_report_released_cenro' => '2026-08-10',
+        'date_received_penro' => null,
+    ]);
+    $access = app(\App\Services\SubmissionTracking\PambSubmissionAccessService::class);
+
+    expect($access->canPerformForSubmission($records, 'penro_receipt', $report))->toBeTrue()
+        ->and($access->canPerformForSubmission($focal, 'penro_receipt', $report))->toBeFalse()
+        ->and($access->canPerformForSubmission($chief, 'penro_receipt', $report))->toBeFalse()
+        ->and($access->canRecordInternalRouting($records, $report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeFalse();
+
+    $report->update(['date_received_penro' => '2026-08-11']);
+    expect($access->canRecordInternalRouting($records, $report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeTrue()
+        ->and($access->canRecordInternalRouting($office, $report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, '2026-08-11 09:00:00', $records->id);
+
+    expect($access->canRecordInternalRouting($office, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_PENRO))->toBeTrue()
+        ->and($access->canRecordInternalRouting($tsd, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_PENRO))->toBeFalse()
+        ->and($access->canRecordInternalRouting($focal, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_PENRO))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_PENRO, '2026-08-11 09:00:00', $office->id);
+    expect($access->canRecordInternalRouting($office, $report->fresh(), PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD))->toBeTrue()
+        ->and($access->canRecordInternalRouting($tsd, $report->fresh(), PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-11 09:00:00', $office->id);
+    expect($access->canRecordInternalRouting($tsd, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_TSD))->toBeTrue()
+        ->and($access->canRecordInternalRouting($office, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_TSD))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_TSD, '2026-08-11 09:00:00', $tsd->id);
+    expect($access->canRecordInternalRouting($tsd, $report->fresh(), PambRoutingTimelineService::FORWARDED_TSD_TO_CDS))->toBeTrue()
+        ->and($access->canRecordInternalRouting($focal, $report->fresh(), PambRoutingTimelineService::FORWARDED_TSD_TO_CDS))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, '2026-08-11 09:00:00', $tsd->id);
+    expect($access->canRecordInternalRouting($focal, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_CDS))->toBeTrue()
+        ->and($access->canRecordInternalRouting($chief, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_CDS))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_CDS, '2026-08-11 09:00:00', $focal->id);
+    expect($access->canRecordInternalRouting($focal, $report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF))->toBeTrue()
+        ->and($access->canRecordInternalRouting($office, $report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF))->toBeFalse()
+        ->and($access->canRecordInternalRouting($tsd, $report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF, '2026-08-11 09:00:00', $focal->id);
+    expect($access->canRecordInternalRouting($chief, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF))->toBeTrue()
+        ->and($access->canRecordInternalRouting($focal, $report->fresh(), PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF))->toBeFalse();
+
+    timelineServiceForBatch1()->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF, '2026-08-11 09:00:00', $chief->id);
+    expect($access->canRecordInternalRouting($chief, $report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO))->toBeTrue()
+        ->and($access->canRecordInternalRouting($office, $report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO))->toBeFalse();
+});
+
+test('PAMB review uses the correct Chief for the routing context', function (): void {
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $cenroChief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $penroChief = pambRoleUser('PENRO CDS Chief', 'PENRO_CDS_CHIEF', 'PENRO Davao Oriental');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+
+    $cenroReport = pambReport($focal, [
+        'mov_file_path' => 'conservation-report-movs/cenro-review.pdf',
+        'mov_processing_status' => PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+    ]);
+    $directArea = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary',
+        'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary',
+        'municipality' => 'San Isidro',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $focal->id,
+        'updated_by' => $focal->id,
+    ]);
+    $directReport = pambReport($focal, [
+        'protected_area_id' => $directArea->id,
+        'target_office' => 'PENRO Davao Oriental',
+        'mov_file_path' => 'conservation-report-movs/penro-review.pdf',
+        'mov_processing_status' => PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+    ]);
+    $access = app(\App\Services\SubmissionTracking\PambSubmissionAccessService::class);
+
+    expect($access->canPerformForSubmission($cenroChief, 'review', $cenroReport))->toBeTrue()
+        ->and($access->canPerformForSubmission($penroChief, 'review', $cenroReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($penroChief, 'review', $directReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($cenroChief, 'review', $directReport))->toBeFalse();
+
+    $this->actingAs($penroChief)->post(route('submission-tracking.mov.review', ['conservation', $cenroReport->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertForbidden();
+
+    $this->actingAs($penroChief)->post(route('submission-tracking.mov.review', ['conservation', $directReport->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertForbidden();
+
+    expect($access->canPerformForSubmission($penroChief, 'penro_receipt', $directReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($penroRecords, 'penro_receipt', $directReport))->toBeTrue()
+        ->and($directReport->fresh()->date_received_penro)->toBeNull()
+        ->and(app(PambMovProcessingService::class)->present($directReport->fresh())['workflow_status'])->toBe('Awaiting PENRO Records Receipt');
+});
+
+test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', function (): void {
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $cenroChief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $cenroRecords = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $penroFocal = pambRoleUser('PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $penroChief = pambRoleUser('PENRO CDS Chief', 'PENRO_CDS_CHIEF', 'PENRO Davao Oriental');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    $tsd = pambRoleUser('PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
+    $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/full-flow.pdf']);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    $this->actingAs($penroChief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertForbidden();
+    $this->actingAs($cenroChief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertSessionHasNoErrors();
+
+    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE]), [
+        'stage' => SubmissionTrackingService::CENRO_RELEASE,
+        'date' => '2026-08-10',
+    ])->assertForbidden();
+    $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE]), [
+        'stage' => SubmissionTrackingService::CENRO_RELEASE,
+        'date' => '2026-08-10',
+    ])->assertSessionHasNoErrors();
+
+    foreach ([$penroFocal, $penroChief] as $wrongActor) {
+        $this->actingAs($wrongActor)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+            'stage' => SubmissionTrackingService::PENRO_RECEIPT,
+            'date' => '2026-08-11',
+        ])->assertForbidden();
+    }
+    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT,
+        'date' => '2026-08-11',
+    ])->assertSessionHasNoErrors();
+
+    $actorStages = [
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO, $office],
+        [PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, $office],
+        [PambRoutingTimelineService::RECEIVED_BY_TSD, $tsd],
+        [PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, $tsd],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS, $penroFocal],
+        [PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF, $penroFocal],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF, $penroChief],
+        [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, $penroChief],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL, $office],
+        [PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, $office],
+        [PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS, $office],
+    ];
+
+    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), [
+        'stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+    ])->assertSessionHasNoErrors();
+
+    foreach ($actorStages as [$stage, $expectedActor]) {
+        foreach ([$penroFocal, $penroChief, $penroRecords, $office, $tsd] as $wrongActor) {
+            if ($wrongActor->is($expectedActor)) continue;
+            $this->actingAs($wrongActor)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $stage]), [
+                'stage' => $stage,
+            ])->assertForbidden();
+        }
+        $this->actingAs($expectedActor)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $stage]), [
+            'stage' => $stage,
+        ])->assertSessionHasNoErrors();
+    }
+
+    $finalStage = PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL;
+    foreach ([$penroFocal, $penroChief] as $wrongActor) {
+        $this->actingAs($wrongActor)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $finalStage]), [
+            'stage' => $finalStage,
+        ])->assertForbidden();
+    }
+    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $finalStage]), [
+        'stage' => $finalStage,
+    ])->assertSessionHasNoErrors();
+
+    foreach ([$penroFocal, $penroChief] as $wrongActor) {
+        $this->actingAs($wrongActor)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), [
+            'stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT,
+            'date' => '2026-08-12',
+        ])->assertForbidden();
+    }
+    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), [
+        'stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT,
+        'date' => '2026-08-12',
+    ])->assertSessionHasNoErrors();
+
+    expect($report->fresh()->date_endorsed_regional->toDateString())->toBe('2026-08-12');
+});
+
+function timelineServiceForBatch1(): PambRoutingTimelineService
+{
+    return app(PambRoutingTimelineService::class);
+}
+
+
+test('PAMB negative authority matrix denies cross-category operations', function (): void {
+    $cenroFocal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $cenroChief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $cenroRecords = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $penroFocal = pambRoleUser('PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $penroChief = pambRoleUser('PENRO CDS Chief', 'PENRO_CDS_CHIEF', 'PENRO Davao Oriental');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    $tsd = pambRoleUser('PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
+    $area = ProtectedArea::create([
+        'name' => 'Assigned PAMB Area',
+        'short_name' => 'APAMB',
+        'category' => 'Protected Landscape',
+        'municipality' => 'Mati',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $cenroFocal->id,
+        'updated_by' => $cenroFocal->id,
+    ]);
+    $pamo = pambRoleUser('PAMO', 'PAMO', 'PENRO Davao Oriental', ['protected_area_id' => $area->id]);
+    $reviewReport = pambReport($cenroFocal, ['mov_processing_status' => PambMovProcessingService::SUBMITTED_FOR_REVIEW]);
+    $readyReport = pambReport($cenroFocal, ['mov_processing_status' => PambMovProcessingService::READY_FOR_RELEASE]);
+    $receiptReport = pambReport($cenroFocal, ['date_report_released_cenro' => '2026-08-10']);
+    $internalReport = pambReport($cenroFocal, [
+        'date_report_released_cenro' => '2026-08-10',
+        'date_received_penro' => '2026-08-11',
+    ]);
+    $pamoReport = pambReport($pamo, ['protected_area_id' => $area->id]);
+    $access = app(\App\Services\SubmissionTracking\PambSubmissionAccessService::class);
+
+    expect($access->canPerformForSubmission($cenroChief, 'review', $reviewReport))->toBeTrue()
+        ->and($access->canPerformForSubmission($penroChief, 'review', $reviewReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($pamo, 'review', $pamoReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($cenroFocal, 'review', $reviewReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($cenroRecords, 'review', $reviewReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($cenroRecords, 'release', $readyReport))->toBeTrue()
+        ->and($access->canPerformForSubmission($cenroChief, 'release', $readyReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($cenroFocal, 'release', $readyReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($pamo, 'release', $pamoReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($penroRecords, 'release', $receiptReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($penroRecords, 'penro_receipt', $receiptReport))->toBeTrue()
+        ->and($access->canPerformForSubmission($penroFocal, 'penro_receipt', $receiptReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($penroChief, 'penro_receipt', $receiptReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($cenroRecords, 'penro_receipt', $receiptReport))->toBeFalse()
+        ->and($access->canPerformForSubmission($pamo, 'penro_receipt', $pamoReport))->toBeFalse()
+        ->and($access->canRecordInternalRouting($penroRecords, $internalReport, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeTrue()
+        ->and($access->canRecordInternalRouting($penroFocal, $internalReport, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeFalse()
+        ->and($access->canRecordInternalRouting($penroChief, $internalReport, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeFalse()
+        ->and($access->canRecordInternalRouting($cenroRecords, $internalReport, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeFalse()
+        ->and($access->canRecordInternalRouting($pamo, $pamoReport, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeFalse();
+});
+
+test('legacy PAMO accounts cannot submit MHRWS MOVs inside eDATS', function (): void {
+    $pamo = pambRoleUser('PAMO', 'PAMO', 'PENRO Davao Oriental');
+
+    $this->actingAs($pamo)->get('/submission-tracking')->assertForbidden();
+});
+
+test('MHRWS Office of the PENRO correction loop stays inside PENRO and preserves history', function (): void {
+    $pamo = pambRoleUser('PAMO', 'PAMO', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    $tsd = pambRoleUser('PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
+    $penroFocal = pambRoleUser('PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $penroChief = pambRoleUser('PENRO CDS Chief', 'PENRO_CDS_CHIEF', 'PENRO Davao Oriental');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+
+    $area = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary',
+        'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary',
+        'municipality' => 'San Isidro',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $pamo->id,
+        'updated_by' => $pamo->id,
+    ]);
+    $pamo->update(['protected_area_id' => $area->id]);
+    $report = pambReport($pamo, [
+        'protected_area_id' => $area->id,
+        'target_office' => 'PENRO Davao Oriental',
+        'date_received_penro' => '2026-09-01',
+    ]);
+
+    $timeline = app(PambRoutingTimelineService::class);
+    $seed = [
+        [PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, $penroRecords],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO, $office],
+        [PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, $office],
+        [PambRoutingTimelineService::RECEIVED_BY_TSD, $tsd],
+        [PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, $tsd],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS, $penroFocal],
+        [PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF, $penroFocal],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF, $penroChief],
+        [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, $penroChief],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL, $office],
+    ];
+    foreach ($seed as [$stage, $actor]) {
+        $timeline->record($report->fresh(), $stage, '2026-09-01 09:00:00', $actor->id);
+    }
+
+    $this->actingAs($office)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION]), [
+        'stage' => PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION,
+        'remarks' => 'Please correct the missing technical attachment.',
+    ])->assertSessionHasNoErrors();
+
+    expect($report->fresh()->routingEvents()->where('stage_key', PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION)->count())->toBe(1);
+
+    $cycleTwo = [
+        [PambRoutingTimelineService::RECEIVED_BY_CDS.'__cycle_2', $penroFocal],
+        [PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF.'__cycle_2', $penroFocal],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF.'__cycle_2', $penroChief],
+        [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO.'__cycle_2', $penroChief],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL.'__cycle_2', $office],
+    ];
+    foreach ($cycleTwo as [$stage, $actor]) {
+        $this->actingAs($actor)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $stage]), [
+            'stage' => $stage,
+        ])->assertSessionHasNoErrors();
+    }
+
+    $history = $timeline->present($report->fresh());
+    expect($report->fresh()->routingEvents()->where('stage_key', 'like', '%__cycle_2')->count())->toBe(5)
+        ->and(collect($history['timeline'])->pluck('key')->all())
+            ->toContain(PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION)
+            ->and(collect($history['timeline'])->pluck('key')->filter(fn (string $key): bool => str_contains($key, 'cenro'))->all())
+            ->toBeEmpty()
+            ->and(collect($history['timeline'])->firstWhere('status', 'current')['key'])
+            ->toBe(PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL.'__cycle_2');
 });

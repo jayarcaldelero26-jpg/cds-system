@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
-    $this->user = User::factory()->create();
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Baganga', 'unit_assignment' => null]);
     foreach (['reports.view', 'technical-reports.view', 'technical-reports.create', 'technical-reports.update', 'technical-reports.delete'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }
@@ -57,18 +57,21 @@ test('ENGP uses signed calendar-day compliance and source timeliness thresholds'
         ->and((new EngpReportSubmission(engpPayload(['date_received_penro' => '2026-01-22'])))->timeliness_rating)->toBe('Poor');
 });
 
-test('quarterly ENGP tracking preserves three monthly CENRO releases and bypasses Regional Endorsement', function () {
-    $report = EngpReportSubmission::create(engpPayload(['workflow_key' => 'ngp_produce', 'activity_name' => 'ENGP Produce', 'document_type' => 'Quarterly Report', 'period_key' => 'Q1', 'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10', 'created_by' => $this->user->id, 'updated_by' => $this->user->id]));
+test('ENGP tracking uses the canonical CENRO-to-PENRO route instead of release components', function () {
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'ngp_produce', 'activity_name' => 'ENGP Produce', 'document_type' => 'Quarterly Report',
+        'period_key' => 'Q1', 'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]));
     $tracking = app(SubmissionTrackingService::class);
-    foreach (['2026-01-10', '2026-02-10', '2026-03-10'] as $date) {
-        $tracking->transition('engp', $report->id, SubmissionTrackingService::CENRO_RELEASE, $date, $this->user->id);
-    }
-    expect($report->releaseEvents()->count())->toBe(3)
-        ->and($tracking->records()->firstWhere('source_id', $report->id)['stage'])->toBe(SubmissionTrackingService::PENRO_RECEIPT);
 
-    $tracking->transition('engp', $report->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-03-11', $this->user->id);
-    expect($tracking->queues()[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->where('source_id', $report->id))->toBeEmpty()
-        ->and($tracking->queues()['history']->firstWhere('source_id', $report->id))->not->toBeNull();
+    $this->actingAs($this->user);
+    $tracking->transition('engp', $report->id, 'forward_to_cenro_chief', null, $this->user->id);
+
+    $row = $tracking->records()->firstWhere('source_id', $report->id);
+    expect($report->releaseEvents()->count())->toBe(0)
+        ->and($row['routing']['current_stage'])->toBe('transit_to_cenro_chief')
+        ->and(app(SubmissionTrackingService::class)->genericTransitionKeys('engp', $report->id))->toContain('receive_at_cenro_chief');
 });
 
 test('ENGP report creation is optional-MOV and its ordinary alert closes at PENRO receipt', function () {
@@ -117,36 +120,21 @@ test('ENGP store updates an existing submission instead of inserting a duplicate
     ]);
 });
 
-test('authorized ENGP users can advance a report through CENRO release and PENRO receipt', function () {
+test('authorized ENGP users can advance a report to CENRO Chief through Submission Tracking', function () {
     $report = EngpReportSubmission::create(engpPayload([
-        'workflow_key' => 'site_visit',
-        'activity_name' => 'ENGP Site Visit Report',
-        'document_type' => 'Quarterly Report',
-        'period_key' => 'Q1',
-        'period_label' => 'Quarter 1',
-        'deadline_submission' => '2026-03-10',
-        'created_by' => $this->user->id,
-        'updated_by' => $this->user->id,
+        'workflow_key' => 'site_visit', 'activity_name' => 'ENGP Site Visit Report',
+        'document_type' => 'Quarterly Report', 'period_key' => 'Q1', 'period_label' => 'Quarter 1',
+        'deadline_submission' => '2026-03-10', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]));
 
-    foreach (['2026-01-10', '2026-02-10', '2026-03-10'] as $date) {
-        $this->actingAs($this->user)
-            ->post(route('submission-tracking.transition', ['engp', $report->id, SubmissionTrackingService::CENRO_RELEASE]), [
-                'stage' => SubmissionTrackingService::CENRO_RELEASE,
-                'date' => $date,
-            ])
-            ->assertSessionHasNoErrors();
-    }
-
     $this->actingAs($this->user)
-        ->post(route('submission-tracking.transition', ['engp', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
-            'stage' => SubmissionTrackingService::PENRO_RECEIPT,
-            'date' => '2026-03-11',
+        ->post(route('submission-tracking.transition', ['engp', $report->id, 'forward_to_cenro_chief']), [
+            'stage' => 'forward_to_cenro_chief',
         ])
         ->assertSessionHasNoErrors();
 
-    expect($report->fresh()->date_received_penro?->toDateString())->toBe('2026-03-11')
-        ->and($report->releaseEvents()->count())->toBe(3);
+    expect($report->fresh()->releaseEvents()->count())->toBe(0)
+        ->and(app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id)['routing']['current_stage'])->toBe('transit_to_cenro_chief');
 });
 
 test('unauthorized users cannot perform an ENGP tracking transition', function () {

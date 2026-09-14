@@ -45,13 +45,13 @@ afterEach(function () {
 
 function complianceUser(): User
 {
-    return User::factory()->create(['is_active' => true]);
+    return User::factory()->create(['is_active' => true, 'section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
 }
 
 function complianceArea(User $user): ProtectedArea
 {
     return ProtectedArea::create([
-        'name' => 'Pujada Bay Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Mati',
+        'name' => 'Pujada Bay Protected Landscape', 'short_name' => 'PBPLS', 'category' => 'Protected Landscape', 'municipality' => 'Mati',
         'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
 }
@@ -91,6 +91,7 @@ function engpForDeadline(User $user, string $deadline, array $overrides = []): E
 
 function complianceManager(User $user): User
 {
+    $user->forceFill(['section' => 'PENRO_CDS_CHIEF', 'office_designated' => 'PENRO Davao Oriental', 'unit_assignment' => null, 'protected_area_id' => null])->save();
     $role = Role::findOrCreate('Compliance Manager', 'web');
     $role->syncPermissions([
         Permission::findOrCreate('reports.view', 'web'),
@@ -361,6 +362,7 @@ test('Compliance Alerts No Recipient Mapping card counts current candidates and 
 
 test('destination coverage remains distinct and separate from current alert coverage', function () {
     $manager = complianceManager(complianceUser());
+    $manager->assignRole(Role::findOrCreate('Super Admin', 'web'));
     engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-1', 'office' => 'CENRO Baganga']);
     engpForDeadline($manager, '2026-09-30', ['period_key' => 'MAPPED-2', 'office' => 'CENRO Lupon']);
     engpForDeadline($manager, '2026-09-30', ['period_key' => 'UNMAPPED-1', 'office' => 'CENRO Manay']);

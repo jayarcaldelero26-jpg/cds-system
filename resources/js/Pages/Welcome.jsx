@@ -1,4 +1,6 @@
 import { Head, Link } from '@inertiajs/react';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import heroBackground from '../../images/homepage/homepage-environmental-hero.png';
 
 const features = [
     { title: 'Integrated Monitoring', description: 'Consolidated monitoring across Conservation and Development activities.', icon: 'layers' },
@@ -33,20 +35,41 @@ function Icon({ name, className = 'h-5 w-5' }) {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">{paths[name]}</svg>;
 }
 
-export default function Welcome({ overview = {} }) {
+function OverviewTrend({ points = [] }) {
+    return (
+        <div className="mt-4" aria-label="Overall report trend chart">
+            <div className="mb-2 flex items-center justify-between gap-3">
+                <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-emerald-900/70">Overall Report Trend</p>
+                {points.length > 0 && <span className="text-[10px] font-semibold text-slate-500">Submitted reports</span>}
+            </div>
+            {points.length ? <div className="h-32 w-full min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={points} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
+                        <CartesianGrid stroke="#d1fae5" strokeDasharray="3 4" vertical={false} />
+                        <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                        <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} width={32} />
+                        <Tooltip cursor={{ stroke: '#86efac', strokeDasharray: '3 3' }} contentStyle={{ border: '1px solid #d1fae5', borderRadius: 10, boxShadow: '0 8px 20px rgb(15 118 110 / 0.12)', fontSize: 11 }} formatter={(value) => [value, 'Submitted']} />
+                        <Line type="monotone" dataKey="count" stroke="#15803d" strokeWidth={2.5} dot={{ r: 2.5, fill: '#15803d', strokeWidth: 0 }} activeDot={{ r: 4, fill: '#166534', stroke: '#dcfce7', strokeWidth: 2 }} />
+                    </LineChart>
+                </ResponsiveContainer>
+            </div> : <div className="edats-trend-empty">No report trend data available yet.</div>}
+        </div>
+    );
+}
+export default function Welcome({ overview = {}, reportTrend = [] }) {
     const metrics = [
-        ['Tracked Reports', overview.tracked_reports],
-        ['Submitted', overview.submitted],
-        ['Overdue', overview.overdue],
-        ['Due / In Progress', overview.reports_due],
-        ['Compliant', overview.compliant],
-        ['Monitoring Sources', overview.monitoring_sources],
+        { label: 'Tracked Reports', value: overview.tracked_reports, icon: 'layers', helper: 'Active monitoring records' },
+        { label: 'Submitted', value: overview.submitted, icon: 'check', helper: 'Reports received by PENRO' },
+        { label: 'Overdue', value: overview.overdue, icon: 'bell', helper: 'Past the authoritative deadline' },
+        { label: 'Due / In Progress', value: overview.reports_due, icon: 'calendar', helper: 'Open deadline items' },
+        { label: 'Compliant', value: overview.compliant, icon: 'shield', helper: 'Submitted on time' },
+        { label: 'Monitoring Sources', value: overview.monitoring_sources, icon: 'dashboard', helper: 'Connected report sources' },
     ];
 
     return (
         <>
             <Head title="eDATS | PENRO Mati" />
-            <main className="min-h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+            <main className="edats-homepage min-h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
                 <header className="border-b border-emerald-950/10 bg-white/95 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/95">
                     <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-5 px-5 py-4 sm:px-6 lg:px-8">
                         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
@@ -63,28 +86,47 @@ export default function Welcome({ overview = {} }) {
                     </div>
                 </header>
 
-                <section className="relative isolate overflow-hidden bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-800">
-                    <div className="absolute inset-0 -z-10 opacity-30" aria-hidden="true">
-                        <div className="absolute -left-20 bottom-0 h-64 w-[58%] rounded-tr-[100%] bg-emerald-500/45" />
-                        <div className="absolute right-0 top-0 h-72 w-2/3 rounded-bl-[100%] bg-cyan-300/20" />
-                        <svg className="absolute inset-x-0 bottom-0 h-48 w-full text-emerald-300/30" viewBox="0 0 1440 240" preserveAspectRatio="none"><path d="M0 196 190 104l170 72L558 48l190 142 216-102 197 94 279-128v186H0Z" fill="currentColor" /></svg>
+                <section className="relative isolate overflow-hidden bg-emerald-950">
+                    <div className="absolute inset-0 -z-10 bg-cover bg-center" style={{ backgroundImage: `url(${heroBackground})` }} aria-hidden="true" />
+                    <div className="absolute inset-0 -z-10 bg-gradient-to-br from-emerald-950/95 via-emerald-950/80 to-teal-900/75" aria-hidden="true" />
+                    <div className="pointer-events-none absolute inset-0 -z-10 opacity-30" aria-hidden="true">
+                        <svg className="absolute inset-0 h-full w-full text-emerald-100/80" viewBox="0 0 1440 520" preserveAspectRatio="none">
+                            <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1">
+                                <path d="M-110 438C72 350 216 334 358 271s264-47 398 25 263 95 410 18 255-88 446-28" />
+                                <path d="M-110 461C75 371 218 357 361 294s261-47 395 25 264 95 412 18 255-88 446-28" />
+                                <path d="M-110 484C77 392 220 380 364 317s258-47 392 25 265 95 414 18 255-88 446-28" />
+                                <path d="M-110 507C80 413 222 403 367 340s255-47 389 25 266 95 416 18 255-88 446-28" />
+                            </g>
+                            <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth=".9" opacity=".68">
+                                <path d="M1090-18c84 47 123 89 160 160 43 82 102 118 190 126" />
+                                <path d="M1046-18c92 50 136 98 174 171 43 82 103 116 220 128" />
+                                <path d="M1002-18c100 54 148 108 188 182 43 82 104 114 250 130" />
+                                <path d="M958-18c108 58 161 117 201 193 43 82 105 112 280 132" />
+                            </g>
+                            <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth=".8" opacity=".55">
+                                <path d="M-24 118c128-58 238-56 337-8 106 51 193 58 288 12 110-53 204-48 312 7 118 61 235 68 405 2" />
+                                <path d="M-24 141c128-58 238-56 337-8 106 51 193 58 288 12 110-53 204-48 312 7 118 61 235 68 405 2" />
+                                <path d="M-24 164c128-58 238-56 337-8 106 51 193 58 288 12 110-53 204-48 312 7 118 61 235 68 405 2" />
+                            </g>
+                        </svg>
                     </div>
                     <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:px-6 md:py-20 lg:grid-cols-[1.15fr_.85fr] lg:items-center lg:px-8">
                         <div className="max-w-3xl">
                             <span className="inline-flex rounded-full border border-emerald-100/30 bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-50">CDS Integrated Monitoring and Management System</span>
-                            <h1 className="mt-6 text-4xl font-extrabold leading-[1.04] tracking-tight text-white sm:text-5xl lg:text-6xl">Enhanced Digital<br />Alert and Tracking System<br /><span className="text-emerald-200">(eDATS)</span></h1>
+                            <h1 className="edats-display mt-6 text-4xl font-extrabold leading-[1.04] tracking-tight text-white sm:text-5xl lg:text-6xl">Enhanced Digital<br />Alert and Tracking System<br /><span className="text-emerald-200">(eDATS)</span></h1>
                             <p className="mt-5 text-lg font-semibold text-emerald-100 sm:text-xl">One System. All CDS Monitoring. Better Decisions.</p>
                              <p className="mt-5 max-w-2xl text-sm leading-7 text-emerald-50/90 sm:text-base">eDATS consolidates monitoring, report submissions, deadlines, supporting documents, alerts, performance, Conservation activities, and Development/ENGP monitoring in one workspace.</p>
                              <Link href="/login" className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-emerald-900 shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white" aria-label="Access eDATS login">Access Login <Icon name="arrow" className="h-4 w-4" /></Link>
                         </div>
 
-                        <section className="rounded-2xl border border-white/20 bg-white/95 p-5 shadow-2xl shadow-emerald-950/25 backdrop-blur dark:bg-slate-900/95 sm:p-6" aria-labelledby="overview-title">
+                        <section className="rounded-2xl border border-white/60 bg-white/[0.94] p-5 shadow-2xl shadow-emerald-950/25 backdrop-blur sm:p-6" aria-labelledby="overview-title">
                             <div className="flex items-start justify-between gap-3">
-                                <div><h2 id="overview-title" className="text-sm font-extrabold tracking-wide text-emerald-950 dark:text-emerald-300">eDATS OVERVIEW SUMMARY</h2><p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Current safe monitoring aggregates</p></div>
-                                <Icon name="dashboard" className="h-6 w-6 text-emerald-700 dark:text-emerald-400" />
+                                <div><h2 id="overview-title" className="text-sm font-extrabold tracking-wide text-emerald-950">eDATS OVERVIEW SUMMARY</h2><p className="mt-1 text-xs text-slate-600">Current safe monitoring aggregates</p></div>
+                                <Icon name="dashboard" className="h-6 w-6 text-emerald-700" />
                             </div>
-                            <dl className="mt-5 grid grid-cols-2 gap-3">
-                                {metrics.map(([label, value]) => <div key={label} className="rounded-xl border border-emerald-900/10 bg-emerald-50/70 p-3 dark:border-emerald-300/15 dark:bg-emerald-950/30"><dt className="text-[10px] font-bold uppercase leading-4 tracking-[0.08em] text-slate-600 dark:text-slate-300">{label}</dt><dd className="mt-1 text-2xl font-extrabold text-emerald-900 dark:text-emerald-300">{Number(value || 0).toLocaleString()}</dd></div>)}
+                            <OverviewTrend points={reportTrend} />
+                            <dl className="mt-4 divide-y divide-emerald-900/10 border-y border-emerald-900/10">
+                                {metrics.map(({ label, value, icon, helper }) => <div key={label} className="flex items-center gap-3 py-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100/80 text-emerald-800"><Icon name={icon} className="h-4 w-4" /></span><dt className="min-w-0 flex-1"><span className="block edats-kpi-label text-xs font-extrabold text-slate-800">{label}</span><span className="block truncate text-[10px] text-slate-500">{helper}</span></dt><dd className="edats-display text-xl font-extrabold tabular-nums text-emerald-900">{Number(value || 0).toLocaleString()}</dd></div>)}
                             </dl>
                         </section>
                     </div>
@@ -99,7 +141,7 @@ export default function Welcome({ overview = {} }) {
 
                 <section className="border-y border-emerald-900/10 bg-emerald-50 dark:border-emerald-300/10 dark:bg-emerald-950/25" aria-label="eDATS values"><div className="mx-auto grid max-w-7xl gap-6 px-5 py-8 sm:grid-cols-2 sm:px-6 lg:grid-cols-4 lg:px-8">{values.map(([title, description]) => <div key={title}><h2 className="text-sm font-extrabold text-emerald-900 dark:text-emerald-300">{title}</h2><p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p></div>)}</div></section>
 
-                <footer className="bg-slate-950 px-5 py-8 text-center text-xs leading-6 text-slate-300 sm:px-6 lg:px-8"><p className="font-semibold text-white">eDATS is a system of the Conservation and Development Section, PENRO Mati.</p><p className="mt-1">For authorized users only. System activities may be monitored and logged.</p><p className="mt-3 text-slate-400">© {new Date().getFullYear()} Department of Environment and Natural Resources. All rights reserved.</p></footer>
+                <footer className="bg-slate-950 px-5 py-8 text-center text-xs leading-6 text-slate-300 sm:px-6 lg:px-8"><p className="font-semibold text-white">eDATS is a system of the Conservation and Development Section, PENRO Mati.</p><p className="mt-1">Department of Environment and Natural Resources</p><p className="mt-1">For authorized users only. System activities may be monitored and logged.</p><p className="mt-3 text-slate-400">© 2026 Provincial Environment and Natural Resources Office. All rights reserved.</p></footer>
             </main>
         </>
     );

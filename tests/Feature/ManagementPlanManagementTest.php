@@ -11,10 +11,10 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
-    foreach (['CDS Admin', 'Technical Staff', 'Viewer'] as $role) Role::findOrCreate($role, 'web');
+    foreach (['CDS Admin', 'CDS Admin', 'Viewer'] as $role) Role::findOrCreate($role, 'web');
     foreach (['management-plans.view', 'management-plans.create', 'management-plans.update', 'management-plans.delete'] as $permission) Permission::findOrCreate($permission, 'web');
     Role::findByName('CDS Admin')->syncPermissions(['management-plans.view', 'management-plans.create', 'management-plans.update', 'management-plans.delete']);
-    Role::findByName('Technical Staff')->syncPermissions(['management-plans.view', 'management-plans.create', 'management-plans.update']);
+    Role::findByName('CDS Admin')->syncPermissions(['management-plans.view', 'management-plans.create', 'management-plans.update']);
     Role::findByName('Viewer')->syncPermissions(['management-plans.view']);
 });
 
@@ -29,7 +29,7 @@ function managementPlanReportPayload(int $areaId, array $overrides = []): array
 }
 
 test('authorized users can access the dynamic management plan workspace', function () {
-    $staff = User::factory()->create(); $staff->assignRole('Technical Staff');
+    $staff = User::factory()->create(); $staff->assignRole('CDS Admin');
     $type = ManagementPlanType::create(['name' => 'PAMP', 'slug' => 'pamp', 'created_by' => $staff->id, 'updated_by' => $staff->id]);
 
     $this->actingAs($staff)->get(route('management-plans.types.show', $type->slug))
@@ -37,7 +37,7 @@ test('authorized users can access the dynamic management plan workspace', functi
 });
 
 test('viewers can view the management plan index but cannot create a plan type', function () {
-    $viewer = User::factory()->create(); $viewer->assignRole('Viewer');
+    $viewer = User::factory()->create(['section' => 'PENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']); $viewer->assignRole('Viewer');
     $this->actingAs($viewer)->get(route('management-plans.index'))->assertOk()->assertInertia(fn (Assert $page) => $page->component('ManagementPlans/Index')->has('planTypes', 0));
     $this->actingAs($viewer)->post(route('management-plans.types.store'), ['name' => 'PAMP'])->assertForbidden();
 });
@@ -55,13 +55,13 @@ test('authorized users can create, update, and soft delete reports in a dynamic 
 });
 
 test('management plan reports require an existing protected area', function () {
-    $staff = User::factory()->create(); $staff->assignRole('Technical Staff');
+    $staff = User::factory()->create(); $staff->assignRole('CDS Admin');
     $type = ManagementPlanType::create(['name' => 'PAMP', 'slug' => 'pamp', 'created_by' => $staff->id, 'updated_by' => $staff->id]);
     $this->actingAs($staff)->from(route('management-plans.types.reports.create', $type->slug))->post(route('management-plans.types.reports.store', $type->slug), managementPlanReportPayload(99999))->assertRedirect(route('management-plans.types.reports.create', $type->slug))->assertSessionHasErrors('protected_area_id');
 });
 
 test('authorized users receive 404 for a missing management plan attachment', function () {
-    $user = User::factory()->create(); $user->assignRole('Technical Staff');
+    $user = User::factory()->create(); $user->assignRole('CDS Admin');
     $this->actingAs($user)->get('/view-file/non-existent.pdf')->assertStatus(404);
 });
 

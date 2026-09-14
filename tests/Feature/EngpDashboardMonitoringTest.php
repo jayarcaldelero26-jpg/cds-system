@@ -30,13 +30,6 @@ function dashboardDevelopmentUser(array $attributes = []): User
     return $user;
 }
 
-function dashboardGlobalUser(): User
-{
-    $role = Role::findOrCreate('Super Admin', 'web');
-    $user = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
-    $user->assignRole($role);
-    return $user;
-}
 
 function dashboardEngpSubmission(array $overrides = []): EngpReportSubmission
 {
@@ -167,6 +160,7 @@ test('development users without technical report permission cannot receive ENGP 
     dashboardEngpSubmission(['date_received_penro' => '2026-08-18']);
 
     $this->actingAs($user)->get(route('dashboard', ['view' => 'engp']))
+        ->assertStatus(200)
         ->assertInertia(fn (Assert $page) => $page
             ->where('engp.summary.expected', 0)
             ->where('engp.summary.submitted', 0)

@@ -21,7 +21,7 @@ export default function Login() {
     };
 
     return (
-        <AuthLayout title="Sign in" contentClassName="max-w-[30rem]">
+        <AuthLayout title="Sign in" contentClassName="max-w-[30rem]" cleanBackground>
             <SuccessDialog
                 open={pendingApproval}
                 title="Account Pending Approval"

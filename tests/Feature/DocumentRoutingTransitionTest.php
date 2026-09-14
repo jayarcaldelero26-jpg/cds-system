@@ -51,7 +51,10 @@ test('generic CENRO custody route persists separate forward and receive events',
     $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $cenroRecords = routingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
     $penroRecords = routingActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $officePenro = routingActor(OrganizationalAccessService::OFFICE_PENRO, 'PENRO Davao Oriental');
+    $tsdChief = routingActor(OrganizationalAccessService::PENRO_TSD_CHIEF, 'PENRO Davao Oriental');
     $penroFocal = routingActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $penroChief = routingActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
     $report = routingReport();
     $service = app(DocumentRoutingTransitionService::class);
     $deadline = $report->deadline_submission;
@@ -80,22 +83,59 @@ test('generic CENRO custody route persists separate forward and receive events',
     performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
     expect($report->fresh()->date_received_penro)->not->toBeNull();
     performRouting($service, $report, 'forward_to_office_penro', $penroRecords);
-    performRouting($service, $report, 'receive_at_office_penro', $penroFocal);
-    performRouting($service, $report, 'forward_to_tsd', $penroFocal);
-    performRouting($service, $report, 'receive_at_tsd', $penroFocal);
-    performRouting($service, $report, 'forward_to_cds', $penroFocal);
-    performRouting($service, $report, 'receive_at_cds', $penroFocal);
-    performRouting($service, $report, 'forward_back_to_office_penro', $penroFocal);
-    performRouting($service, $report, 'receive_at_office_penro_return', $penroFocal);
-    performRouting($service, $report, 'forward_to_penro_records_final', $penroFocal);
+    expect(fn () => performRouting($service, $report, 'receive_at_office_penro', $penroFocal))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'receive_at_office_penro', $officePenro);
+
+    expect(fn () => performRouting($service, $report, 'assign_to_tsd_chief', $tsdChief))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'assign_to_tsd_chief', $officePenro);
+
+    expect(fn () => performRouting($service, $report, 'receive_at_tsd_chief', $officePenro))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'receive_at_tsd_chief', $tsdChief);
+
+    expect(fn () => performRouting($service, $report, 'forward_to_cds_focal', $penroFocal))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'forward_to_cds_focal', $tsdChief);
+
+    expect(fn () => performRouting($service, $report, 'receive_at_cds_focal', $tsdChief))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'receive_at_cds_focal', $penroFocal);
+
+    expect(fn () => performRouting($service, $report, 'forward_to_cds_chief', $penroChief))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'forward_to_cds_chief', $penroFocal);
+
+    expect(fn () => performRouting($service, $report, 'receive_at_cds_chief', $penroFocal))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'receive_at_cds_chief', $penroChief);
+
+    expect(fn () => performRouting($service, $report, 'recommend_to_office_penro', $officePenro))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'recommend_to_office_penro', $penroChief);
+
+    expect(fn () => performRouting($service, $report, 'receive_at_office_penro_final', $penroChief))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'receive_at_office_penro_final', $officePenro);
+
+    expect(fn () => performRouting($service, $report, 'approve_for_regional_release', $penroChief))
+        ->toThrow(HttpException::class);
+    performRouting($service, $report, 'approve_for_regional_release', $officePenro);
+
+    expect(fn () => performRouting($service, $report, 'receive_at_penro_records_final', $officePenro))
+        ->toThrow(HttpException::class);
     performRouting($service, $report, 'receive_at_penro_records_final', $penroRecords);
+
+    expect(fn () => performRouting($service, $report, 'release_to_regional', $officePenro))
+        ->toThrow(HttpException::class);
     performRouting($service, $report, 'release_to_regional', $penroRecords);
 
     $state = $service->state($report->fresh(), 'bms');
     expect($state['stage'])->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL)
         ->and($report->fresh()->date_endorsed_regional)->not->toBeNull()
         ->and($report->fresh()->deadline_submission)->toBe($deadline)
-        ->and(DocumentRoutingEvent::query()->count())->toBe(17);
+        ->and(DocumentRoutingEvent::query()->count())->toBe(19);
 });
 
 test('generic transition endpoint records a server-timestamped action without a user date', function (): void {
@@ -113,38 +153,44 @@ test('generic transition endpoint records a server-timestamped action without a 
     ]);
 });
 
-test('direct PENRO protected-area routing has no fabricated CENRO stages', function (): void {
-    $penroFocal = routingActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+test('legacy PAMO accounts do not create a canonical generic routing stage 1', function (): void {
+    $pamo = routingActor(OrganizationalAccessService::PAMO, '');
     $report = routingReport('Mt. Hamiguitan Range Wildlife Sanctuary');
+    $pamo->update(['protected_area_id' => $report->protected_area_id]);
     $service = app(DocumentRoutingTransitionService::class);
 
-    $state = $service->state($report, 'bms', null, $penroFocal);
-    expect($state['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_ORIGIN)
-        ->and(collect($state['actions'])->pluck('key')->all())->toContain('forward_from_penro_origin')
+    $state = $service->state($report, 'bms', null, $pamo);
+    $presentation = $service->presentation($report, 'bms', null, $pamo);
+
+    expect($state['stage'])->not->toBe(DocumentRoutingProfileRegistry::PAMO_ORIGIN)
+        ->and(collect($presentation['allowed_actions'])->pluck('key')->all())->not->toContain('forward_from_pamo')
         ->and(collect($state['actions'])->pluck('key')->all())->not->toContain('forward_to_cenro_chief');
 });
-
-test('PAMO origin enters PENRO custody without a fabricated CENRO route', function (): void {
-    $areaOwner = routingActor(OrganizationalAccessService::PAMO, 'PAMO');
-    $area = ProtectedArea::create([
-        'name' => 'PAMO Routing PA', 'short_name' => 'PRP', 'category' => 'Protected Landscape',
-        'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI',
-        'created_by' => $areaOwner->id, 'updated_by' => $areaOwner->id,
-    ]);
-    $areaOwner->update(['protected_area_id' => $area->id]);
-    $report = BmsReportSubmission::create([
-        'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati',
-        'activity_name' => 'PAMO routing report', 'document_type' => 'Report',
-        'semester' => '1st Semester', 'date_accomplished' => '2026-08-03',
-    ]);
+test('legacy PAMO accounts do not create a canonical generic routing stage 2', function (): void {
+    $pamo = routingActor(OrganizationalAccessService::PAMO, '');
+    $report = routingReport('Mt. Hamiguitan Range Wildlife Sanctuary');
+    $pamo->update(['protected_area_id' => $report->protected_area_id]);
     $service = app(DocumentRoutingTransitionService::class);
 
-    $state = $service->state($report, 'bms', null, $areaOwner);
-    expect($state['stage'])->toBe(DocumentRoutingProfileRegistry::PAMO_ORIGIN)
-        ->and(collect($state['actions'])->firstWhere('key', 'forward_from_pamo'))->not->toBeNull();
+    $state = $service->state($report, 'bms', null, $pamo);
+    $presentation = $service->presentation($report, 'bms', null, $pamo);
 
-    performRouting($service, $report, 'forward_from_pamo', $areaOwner);
-    expect($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS);
+    expect($state['stage'])->not->toBe(DocumentRoutingProfileRegistry::PAMO_ORIGIN)
+        ->and(collect($presentation['allowed_actions'])->pluck('key')->all())->not->toContain('forward_from_pamo')
+        ->and(collect($state['actions'])->pluck('key')->all())->not->toContain('forward_to_cenro_chief');
+});
+test('legacy PAMO accounts do not create a canonical generic routing stage 3', function (): void {
+    $pamo = routingActor(OrganizationalAccessService::PAMO, '');
+    $report = routingReport('Mt. Hamiguitan Range Wildlife Sanctuary');
+    $pamo->update(['protected_area_id' => $report->protected_area_id]);
+    $service = app(DocumentRoutingTransitionService::class);
+
+    $state = $service->state($report, 'bms', null, $pamo);
+    $presentation = $service->presentation($report, 'bms', null, $pamo);
+
+    expect($state['stage'])->not->toBe(DocumentRoutingProfileRegistry::PAMO_ORIGIN)
+        ->and(collect($presentation['allowed_actions'])->pluck('key')->all())->not->toContain('forward_from_pamo')
+        ->and(collect($state['actions'])->pluck('key')->all())->not->toContain('forward_to_cenro_chief');
 });
 
 test('legacy milestone state starts the canonical routing timeline at its current stage', function (): void {

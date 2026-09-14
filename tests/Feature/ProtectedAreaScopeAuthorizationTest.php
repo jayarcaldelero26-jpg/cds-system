@@ -55,82 +55,20 @@ function scopedBmsRecord(int $areaId): BmsRecord
     ]);
 }
 
-test('PAMO BMS access is scoped for reads, writes, and mixed bulk deletes', function (): void {
+test('legacy PAMO accounts cannot access BMS module data', function (): void {
     $area = scopedArea('Assigned BMS Area');
-    $otherArea = scopedArea('Other BMS Area');
     $user = scopedUser($area, ['bms.view', 'bms.create', 'bms.update', 'bms.delete', 'reports.export']);
-    $allowed = scopedBmsRecord($area->id);
-    $denied = scopedBmsRecord($otherArea->id);
 
-    $this->actingAs($user)->get(route('bms.index'))
-        ->assertInertia(fn (Assert $page) => $page
-            ->has('bmsRecords', 1)
-            ->where('bmsRecords.0.id', $allowed->id)
-            ->has('protectedAreas', 1)
-            ->where('protectedAreas.0.id', $area->id));
-
-    $this->actingAs($user)->put(route('bms.update', $denied), [
-        'protected_area_id' => $otherArea->id,
-        'monitoring_date' => '2026-08-01',
-        'taxonomic_group' => 'Bird',
-        'species_scientific_name' => 'Tampered species',
-        'count' => '1',
-    ])->assertForbidden();
-
-    $this->actingAs($user)->post(route('bms.store'), [
-        'protected_area_id' => $otherArea->id,
-        'monitoring_date' => '2026-08-01',
-        'taxonomic_group' => 'Bird',
-        'species_scientific_name' => 'Tampered species',
-        'count' => '1',
-    ])->assertForbidden();
-
-    $this->actingAs($user)->post(route('bms.bulk-destroy'), [
-        'ids' => [$allowed->id, $denied->id],
-    ])->assertForbidden();
-    $this->actingAs($user)->get(route('bms.export-pdf', ['protected_area_id' => $otherArea->id]))
-        ->assertForbidden();
-    expect(BmsRecord::query()->whereKey([$allowed->id, $denied->id])->count())->toBe(2);
+    $this->actingAs($user)->get(route('bms.index'))->assertForbidden();
+    $this->actingAs($user)->post(route('bms.store'), ['protected_area_id' => $area->id])->assertForbidden();
 });
 
-test('PAMO IMEA reads and facility writes reject another protected area', function (): void {
+test('legacy PAMO accounts cannot access IMEA module data', function (): void {
     $area = scopedArea('Assigned IMEA Area');
-    $otherArea = scopedArea('Other IMEA Area');
     $user = scopedUser($area, ['imea.view', 'imea.create', 'imea.update', 'imea.delete', 'imea.export', 'imea.import']);
-    $assessment = ImeaAssessment::create([
-        'protected_area_id' => $area->id,
-        'pamo_name' => 'Assigned PAMO',
-        'assessment_year' => 2026,
-        'assessment_period' => 'Annual',
-        'created_by' => $user->id,
-        'updated_by' => $user->id,
-    ]);
-    ImeaAssessment::create([
-        'protected_area_id' => $otherArea->id,
-        'pamo_name' => 'Other PAMO',
-        'assessment_year' => 2026,
-        'assessment_period' => 'Annual',
-        'created_by' => $user->id,
-        'updated_by' => $user->id,
-    ]);
 
-    $this->actingAs($user)->get(route('imea.index'))
-        ->assertInertia(fn (Assert $page) => $page
-            ->where('assessments.data.0.id', $assessment->id)
-            ->has('protectedAreas', 1)
-            ->where('protectedAreas.0.id', $area->id));
-
-    $this->actingAs($user)->get(route('imea.report', ['protected_area_id' => $otherArea->id]))
-        ->assertForbidden();
-    $this->actingAs($user)->get(route('imea.report'))
-        ->assertInertia(fn (Assert $page) => $page->has('assessmentsList', 1)->where('assessmentsList.0.id', $assessment->id));
-
-    $this->actingAs($user)->post(route('imea.store'), [
-        'protected_area_id' => $otherArea->id,
-        'pamo_name' => 'Other PAMO',
-        'assessment_year' => 2026,
-        'assessment_period' => 'Annual',
-    ])->assertForbidden();
+    $this->actingAs($user)->get(route('imea.index'))->assertForbidden();
+    $this->actingAs($user)->get(route('imea.report'))->assertForbidden();
 });
 
 test('PAMO BAMS writes reject another protected area', function (): void {

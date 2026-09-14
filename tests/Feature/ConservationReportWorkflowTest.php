@@ -16,7 +16,7 @@ use Spatie\Permission\Models\Permission;
 beforeEach(function (): void {
     BusinessCalendarService::forgetCache();
     Storage::fake('local');
-    $this->user = User::factory()->create(['section' => 'CDS']);
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
     foreach (['technical-reports.view', 'technical-reports.create', 'technical-reports.update', 'technical-reports.delete'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }
@@ -69,7 +69,7 @@ test('Regular PAMB retains its workbook configuration', function () {
 test('Regular PAMB returns its selected reporting period and protected area filters', function () {
     $area = ProtectedArea::create([
         'name' => 'Pujada Bay Protected Landscape',
-        'short_name' => 'Pujada Bay',
+        'short_name' => 'PBPLS',
         'category' => 'Protected Landscape',
         'municipality' => 'Mati',
         'province' => 'Davao Oriental',
@@ -80,7 +80,7 @@ test('Regular PAMB returns its selected reporting period and protected area filt
     ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb',
         'protected_area_id' => $area->id,
-        'target_office' => 'PENRO Mati',
+        'target_office' => 'CENRO Mati',
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 1',
@@ -194,7 +194,7 @@ test('meeting PAMB stores independent dates and uses Date Accomplished when pres
     ])->assertSessionHasNoErrors();
 
     $report = ConservationReportSubmission::query()->latest('id')->firstOrFail();
-    $cenroQueue = app(SubmissionTrackingService::class)->queues()[SubmissionTrackingService::CENRO_RELEASE];
+    $cenroQueue = app(SubmissionTrackingService::class)->queues()['for_submission'];
 
     expect($report->date_conducted)->toBe('2026-08-26')
         ->and($report->date_accomplished->toDateString())->toBe('2026-09-30')

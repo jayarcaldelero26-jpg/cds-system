@@ -18,7 +18,7 @@ test('new users register as pending and are not authenticated', function () {
     $response = $this->post('/register', [
         'name' => 'Test User',
         'email' => 'test@example.com',
-        'unit_assignment' => 'conservation',
+        'operational_group' => 'cenro',
         'office_designated' => 'CENRO Baganga',
         'section' => 'CENRO_CDS_FOCAL',
         'password' => 'password',
@@ -35,7 +35,7 @@ test('registration success flash is available once on the login page', function 
     $this->post('/register', [
         'name' => 'Flash Test User',
         'email' => 'flash-test@example.com',
-        'unit_assignment' => 'conservation',
+        'operational_group' => 'cenro',
         'office_designated' => 'CENRO Baganga',
         'section' => 'CENRO_CDS_FOCAL',
         'password' => 'password',
@@ -55,7 +55,7 @@ test('registration accepts the supported user category without assigning access'
     $response = $this->post('/register', [
         'name' => 'Category Test User',
         'email' => $email,
-        'unit_assignment' => $section === 'PAMO' ? 'conservation' : 'development',
+        'operational_group' => $section === 'CENRO_CDS_FOCAL' ? 'cenro' : 'penro',
         'office_designated' => $section === 'PAMO' || str_starts_with($section, 'PENRO_') ? 'PENRO Davao Oriental' : 'CENRO Baganga',
         'section' => $section,
         ...($section === 'PAMO' ? ['protected_area_id' => null] : []),

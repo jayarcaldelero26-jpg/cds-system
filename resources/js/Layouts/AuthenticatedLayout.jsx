@@ -118,7 +118,17 @@ const allNavigation = [
     { label: 'Integrated Watershed Management', href: '#', icon: 'watershed', comingSoon: true, section: 'CDS', unit: 'development' },
 
     { label: 'eDATS MONITORING', heading: true, section: 'BOTH' },
-    { label: 'Submission Tracking', href: '/submission-tracking', icon: 'submission-tracking', permission: 'canViewReports', section: 'CDS' },
+    {
+        label: 'Submission Tracking',
+        icon: 'submission-tracking',
+        permission: 'canViewSubmissionTracking',
+        section: 'BOTH',
+        children: [
+            { label: 'Incoming', href: '/submission-tracking?view=incoming', permission: 'canViewSubmissionTracking', exact: true },
+            { label: 'Outgoing', href: '/submission-tracking?view=outgoing', permission: 'canViewSubmissionTracking', exact: true },
+            { label: 'History', href: '/submission-tracking?view=history', permission: 'canViewSubmissionTracking', exact: true },
+        ],
+    },
     { label: 'Alerts', href: '/compliance-alerts', icon: 'alerts', permission: 'canViewComplianceAlerts', section: 'CDS' },
     { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewReports', section: 'BOTH' },
 
@@ -201,7 +211,10 @@ function withGenericModuleNavigation(navigation, modules) {
         const area = Object.entries(areas).find(([, value]) => value.label === item.label)?.[0];
         if (!area || !grouped[area]) return item;
         represented.add(area);
-        return { ...item, groupOnly: false, comingSoon: false, children: [...(item.children || []), ...grouped[area]] };
+        const existingChildren = item.children || [];
+        const existingKeys = new Set(existingChildren.map((child) => `${child.label}|${child.href || ''}`));
+        const additions = grouped[area].filter((child) => !existingKeys.has(`${child.label}|${child.href || ''}`));
+        return { ...item, groupOnly: false, comingSoon: false, children: [...existingChildren, ...additions] };
     });
 
     Object.entries(grouped).forEach(([area, children]) => {
@@ -213,11 +226,15 @@ function withGenericModuleNavigation(navigation, modules) {
     return merged;
 }
 
-function filterNavigationByUnit(items, unit, inheritedUnit = null) {
+function filterNavigationByUnit(items, unit, inheritedUnit = null, auth = {}) {
     return items.map((item) => {
+        if (item.permission && !auth[item.permission]) return null;
+
         const itemUnit = item.unit || inheritedUnit;
+        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false) return null;
+        if (itemUnit === 'development' && auth.canBrowseDevelopmentModules === false) return null;
         if (unit && itemUnit && itemUnit !== unit) return null;
-        const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit) : null;
+        const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit, auth) : null;
         if (item.children && !children?.length) return null;
         return children ? { ...item, children } : item;
     }).filter(Boolean);
@@ -296,6 +313,8 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     const filteredNavigation = filterNavigationByUnit(
         navigation.filter(item => !userUnit || item.section === 'BOTH' || item.section === 'CDS'),
         userUnit,
+        null,
+        safeAuth,
     );
 
     const renderChildren = (children, depth = 0, engpContext = false) => children.map((child) => {

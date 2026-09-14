@@ -76,6 +76,7 @@ class PermissionSeeder extends Seeder
             'reports.export',
             'compliance-alerts.manage',
             'submission-tracking.correct-routing',
+            'submission-tracking.admin-override',
 
             // Technical / general report submissions
             'technical-reports.view',

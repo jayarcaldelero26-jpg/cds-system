@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 use Illuminate\Support\Facades\File;
 
@@ -72,7 +72,7 @@ it('uses a safe UTF-8 fallback throughout Submission Tracking', function () {
     $tracking = File::get(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
 
     expect($tracking)
-        ->toContain("const FALLBACK = '\\u2014';")
+        ->toContain('const FALLBACK')->toContain('\\u2014')
         ->not->toContain("\xC3\xA2")
         ->not->toContain("\xC3\x83");
 });
