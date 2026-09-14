@@ -5,11 +5,6 @@ use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\ProtectedAreaController;
 use App\Http\Controllers\ManagementPlanController;
 use App\Http\Controllers\ManagementPlanProfileController;
-use App\Http\Controllers\EcotourismMonitoringController;
-use App\Http\Controllers\IssueMonitoringController;
-use App\Http\Controllers\LawinMonitoringController;
-use App\Http\Controllers\CdsLawinMonitoringController;
-use App\Http\Controllers\ProgramProjectActivityController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\GlobalSearchController;
 use App\Http\Controllers\BmsController;
@@ -42,7 +37,8 @@ use Inertia\Inertia;
 Route::get('/', function (DashboardMonitoringService $monitoring) {
     // The public page deliberately receives aggregates only. The dashboard
     // service remains the single source of report-monitoring calculations.
-    $dashboard = $monitoring->overview();
+    // Public visits must not allocate tracking references as a side effect.
+    $dashboard = $monitoring->overview([], false);
     $summary = $dashboard['summary'];
 
     return Inertia::render('Welcome', [
@@ -86,6 +82,7 @@ Route::middleware('auth')->group(function () {
     Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])->middleware('can:protected-areas.delete')->name('protected-areas.destroy');
 
     Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
+    Route::get('reports/export/{format}', [ReportController::class, 'export'])->whereIn('format', ['pdf', 'xlsx', 'docx'])->middleware(['can:reports.view', 'can:reports.export'])->name('reports.export');
     Route::get('engp-reports/summary', [EngpReportController::class, 'index'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.summary');
     Route::get('engp-reports/{workflow}', [EngpReportController::class, 'index'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.index');
     Route::post('engp-reports/{workflow}', [EngpReportController::class, 'store'])->middleware(['unit:development', 'can:technical-reports.create'])->name('engp-reports.store');

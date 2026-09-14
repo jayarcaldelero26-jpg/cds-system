@@ -27,7 +27,7 @@ ChartJS.register(
   Filler
 );
 
-export default function AwsGraph({ chartRecords = [], protectedAreas = [], filters = {} }) {
+export default function AwsGraph({ chartRecords = [], protectedAreas = [], filters = {}, scoped = false }) {
   const [graphMetric, setGraphMetric] = useState('air_temperature');
   const [graphStartDate, setGraphStartDate] = useState(filters.graph_start_date || '');
   const [graphEndDate, setGraphEndDate] = useState(filters.graph_end_date || '');
@@ -35,11 +35,16 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
   const [rangePreset, setRangePreset] = useState(String(filters.graph_range || '30'));
   const [analysisView, setAnalysisView] = useState('overall');
   useEffect(() => {
+    if (scoped) return;
     setGraphStartDate(filters.graph_start_date || '');
     setGraphEndDate(filters.graph_end_date || '');
     setSelectedPaId(filters.protected_area_id || '');
     setRangePreset(String(filters.graph_range || '30'));
-  }, [filters.graph_start_date, filters.graph_end_date, filters.protected_area_id, filters.graph_range]);
+  }, [filters.graph_start_date, filters.graph_end_date, filters.protected_area_id, filters.graph_range, scoped]);
+
+  useEffect(() => {
+    if (scoped) setSelectedPaId(filters.protected_area_id || '');
+  }, [filters.protected_area_id, scoped]);
 
   const metricConfig = {
     air_temperature: {
@@ -244,6 +249,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
   const allPaMode = selectedPaId === '';
 
   const toNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   };
@@ -338,8 +344,8 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
         };
       }
 
-      const value = Number(record?.[graphMetric]);
-      if (Number.isFinite(value)) {
+      const value = toNumber(record?.[graphMetric]);
+      if (value !== null) {
         groups[date].values.push(value);
       }
 
@@ -389,8 +395,8 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
       }
 
       const pushNumber = (bucket, value) => {
-        const number = Number(value);
-        if (Number.isFinite(number)) {
+        const number = toNumber(value);
+        if (number !== null) {
           bucket.push(number);
         }
       };
@@ -438,8 +444,13 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
       let dry = 0;
 
       sorted.forEach((record) => {
-        const precipitation = Number(record?.precipitation);
-        const isWet = Number.isFinite(precipitation) && precipitation > 0;
+        const precipitation = toNumber(record?.precipitation);
+        if (precipitation === null) {
+          wet = 0;
+          dry = 0;
+          return;
+        }
+        const isWet = precipitation > 0;
 
         if (isWet) {
           wet += 1;
@@ -460,12 +471,13 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     if (!chartRecords || chartRecords.length === 0) return null;
 
     const toNumber = (value) => {
+      if (value === null || value === undefined || value === '') return null;
       const n = Number(value);
       return Number.isFinite(n) ? n : null;
     };
 
-    const rawRecords = [...chartRecords].
-    map((record) => ({
+    const rawRecords = [...chartRecords]
+    .map((record) => ({
       ...record,
       date: parseDateOnly(record.start_date),
       temperature: toNumber(record.air_temperature),
@@ -481,9 +493,9 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
       rainfallDifferencePercent: toNumber(record.rainfall_difference_percent),
       rainfallCrosscheckStatus: record.rainfall_crosscheck_status || 'Unavailable',
       soilConditionContext: record.soil_condition_context || 'Unavailable'
-    })).
-    filter((record) => record.date)
-    sort((a, b) => a.date - b.date);
+    }))
+    .filter((record) => record.date)
+    .sort((a, b) => a.date - b.date);
 
     const isAllPa = selectedPaId === '';
     const networkDaily = isAllPa ?
@@ -620,7 +632,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     };
 
     const completenessValues = rawRecords.
-    map((record) => Number(record.data_completeness)).
+    map((record) => toNumber(record.data_completeness)).
     filter((value) => Number.isFinite(value));
 
     const avgCompleteness = completenessValues.length ?
@@ -905,10 +917,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
   overallDailySeries.map((item) => item.date) :
   chartRecords.map((record) => record.start_date);
 
-  const metricValues = chartSourceRecords.map((record) => {
-    const value = Number(record?.[graphMetric]);
-    return Number.isFinite(value) ? value : null;
-  });
+  const metricValues = chartSourceRecords.map((record) => toNumber(record?.[graphMetric]));
 
   const validMetricValues = metricValues.filter((value) => value !== null);
   const graphAverage = validMetricValues.length ?
@@ -1114,22 +1123,15 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                 {/* FILTERS + GRAPH HEADER */}
                 <div className="flex flex-col gap-4">
                     <div className="rounded-2xl border border-gray-200/60 bg-gray-50/80 p-4 backdrop-blur-sm dark:border-gray-700/60 dark:bg-gray-800/40">
-                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                            <div>
-
-
-
+                        <div className={`grid grid-cols-1 gap-3 ${scoped ? 'max-w-md' : 'lg:grid-cols-3'}`}>
+                            {!scoped && <div>
                                 <FloatingSelect id="awsgraph-protected-area" label="Protected Area"
-                value={selectedPaId}
-                onChange={handleProtectedAreaChange}>
-
-
+                  value={selectedPaId}
+                  onChange={handleProtectedAreaChange}>
                                     <option value="">All Protected Areas</option>
-                                    {protectedAreas.map((pa) =>
-                  <option key={pa.id} value={pa.id}>{pa.name}</option>
-                  )}
+                                    {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                 </FloatingSelect>
-                            </div>
+                            </div>}
 
                             <div>
 
@@ -1148,28 +1150,23 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                 </FloatingSelect>
                             </div>
 
-                            <div>
-
-
-
+                            {!scoped && <div>
                                 <FloatingSelect id="awsgraph-quick-range" label="Quick Range"
-                value={rangePreset}
-                onChange={(e) => applyRangePreset(e.target.value)}>
-
-
+                  value={rangePreset}
+                  onChange={(e) => applyRangePreset(e.target.value)}>
                                     <option value="7">Last 7 Days</option>
                                     <option value="30">Last 30 Days</option>
                                     <option value="90">Last 90 Days</option>
                                     <option value="365">Last 12 Months</option>
                                     <option value="custom">Custom Range</option>
                                 </FloatingSelect>
-                            </div>
+                            </div>}
                         </div>
 
-{rangePreset === 'custom' && <div className="mt-3 grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+{!scoped && rangePreset === 'custom' && <div className="mt-3 grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                             <DateRangePicker id="awsgraph-custom-range" label="Date Range" value={{ from: graphStartDate, to: graphEndDate }} onChange={({ from, to }) => { setRangePreset('custom'); setGraphStartDate(from); setGraphEndDate(to); triggerUpdate(undefined, from, to, 'custom'); }} />
                             <button type="button" onClick={clearGraphRange} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-xs font-semibold text-gray-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">Clear Date Filter</button>
-                        </div>}                        {rangePreset !== 'custom' && (graphStartDate || graphEndDate) &&
+                        </div>}                        {!scoped && rangePreset !== 'custom' && (graphStartDate || graphEndDate) &&
             <div className="mt-3 flex justify-end">
                                 <button
                 type="button"
@@ -1345,13 +1342,13 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                         </div>
           }
 
-{rangePreset === 'custom' && graphStartDate && graphEndDate && graphStartDate > graphEndDate &&
+{!scoped && rangePreset === 'custom' && graphStartDate && graphEndDate && graphStartDate > graphEndDate &&
           <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-300">
                             Start date must be on or before the end date.
                         </div>
           }
 
-                    {(graphStartDate || graphEndDate) &&
+                    {!scoped && (graphStartDate || graphEndDate) &&
           <div className="text-[10px] font-medium text-gray-500 dark:text-gray-400">
                             Showing {graphStartDate || 'start'} to {graphEndDate || 'latest available record'}.
                         </div>

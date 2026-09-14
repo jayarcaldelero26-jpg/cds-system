@@ -10,6 +10,9 @@ use App\Services\Compliance\ComplianceMovService;
 use App\Services\AwsMonthlySummaryService;
 use App\Services\AwsMonthlySummaryXlsxService;
 use App\Services\AwsSummaryDocxService;
+use App\Services\AwsWeatherConditionService;
+use App\Services\AwsImportRowReader;
+use App\Services\AwsProtectedAreaScope;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
@@ -27,14 +30,20 @@ class AwsController extends Controller
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
+        private readonly AwsProtectedAreaScope $awsScope,
         private readonly AwsMonthlySummaryService $monthlySummary,
         private readonly AwsMonthlySummaryXlsxService $monthlySummaryXlsx,
         private readonly AwsSummaryDocxService $monthlySummaryDocx,
+        private readonly AwsWeatherConditionService $weather,
+        private readonly AwsImportRowReader $importRows,
     ) {}
     public function index(Request $request)
     {
+        [$summaryMode, $summaryPeriod, $summaryProtectedAreaId, $summaryPeriodLabel, $summaryCaption] = $this->summarySelection($request);
+        [$summaryStart, $summaryEnd] = $this->summaryBounds($summaryMode, $summaryPeriod);
+
         // 1. REPORTS QUERY: Kuhaon lang kadtong mga pormal nga report (walay timestamps/raw data flag)
-        $reportsQuery = $this->organization->scopeProtectedAreaQuery(Aws::with('protectedArea'), $request->user())->whereNull('timestamps')->latest();
+        $reportsQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNull('timestamps')->latest();
 
         if ($request->has('protected_area_id') && $request->protected_area_id) {
             $reportsQuery->where('protected_area_id', $request->protected_area_id);
@@ -54,65 +63,64 @@ class AwsController extends Controller
             ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')));
 
         // 2. RAW DATA QUERY: Kuhaon lang kadtong mga naay timestamps (mga imported CSV data)
-        $rawQuery = $this->organization->scopeProtectedAreaQuery(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->latest();
+        $rawQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->latest();
 
-        if ($request->has('protected_area_id') && $request->protected_area_id) {
-            $rawQuery->where('protected_area_id', $request->protected_area_id);
+        if ($summaryProtectedAreaId !== null) {
+            $rawQuery->where('protected_area_id', $summaryProtectedAreaId);
         }
+        $rawQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
 
-        // 3. CHART DATA QUERY (Para sa Line Graph nga naay Date Range Filter)
-        $chartQuery = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())->whereNotNull('timestamps');
+        // 3. CHART DATA QUERY: analytics keeps its own quick/custom range controls.
+        $chartQuery = $this->awsScope->query(Aws::query(), $request->user())->whereNotNull('timestamps');
 
-        if ($request->has('protected_area_id') && $request->protected_area_id) {
-            $chartQuery->where('protected_area_id', $request->protected_area_id);
-        }
+        if ($request->input('tab') === 'analytics') {
+            if ($request->filled('protected_area_id')) {
+                $chartQuery->where('protected_area_id', (int) $request->input('protected_area_id'));
+            }
 
-        $graphRange = (int) $request->input('graph_range', 30);
-        if (! in_array($graphRange, [7, 30, 90, 365], true)) {
-            $graphRange = 30;
-        }
+            $graphRange = (int) $request->input('graph_range', 30);
+            if (! in_array($graphRange, [7, 30, 90, 365], true)) {
+                $graphRange = 30;
+            }
 
-        if ($request->filled('graph_start_date') && $request->filled('graph_end_date')) {
-            // Explicit Custom Range: use the exact dates selected by the user.
-            $chartQuery->whereBetween('start_date', [
-                $request->graph_start_date,
-                $request->graph_end_date,
-            ]);
-        } elseif ($request->filled('protected_area_id')) {
-            // One specific PA: calculate the quick-range window from that PA's own latest date.
-            $latestDate = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())->whereNotNull('timestamps')
-                ->where('protected_area_id', $request->protected_area_id)
-                ->max('start_date');
+            if ($request->filled('graph_start_date') && $request->filled('graph_end_date')) {
+                $chartQuery->whereBetween('start_date', [
+                    $request->input('graph_start_date'),
+                    $request->input('graph_end_date'),
+                ]);
+            } elseif ($request->filled('protected_area_id')) {
+                $latestDate = $this->awsScope->query(Aws::query(), $request->user())
+                    ->whereNotNull('timestamps')
+                    ->where('protected_area_id', (int) $request->input('protected_area_id'))
+                    ->max('start_date');
 
-            if ($latestDate) {
-                $defaultStart = date(
-                    'Y-m-d',
-                    strtotime($latestDate . ' -' . ($graphRange - 1) . ' days')
-                );
+                if ($latestDate) {
+                    $chartQuery->whereBetween('start_date', [
+                        CarbonImmutable::parse($latestDate)->subDays($graphRange - 1)->toDateString(),
+                        CarbonImmutable::parse($latestDate)->toDateString(),
+                    ]);
+                }
+            } else {
+                $latestDates = $this->awsScope->query(Aws::query(), $request->user())
+                    ->whereNotNull('timestamps')
+                    ->whereNotNull('protected_area_id')
+                    ->selectRaw('protected_area_id, MAX(start_date) as latest_date')
+                    ->groupBy('protected_area_id')
+                    ->pluck('latest_date');
 
-                $chartQuery->whereBetween('start_date', [$defaultStart, $latestDate]);
+                if ($latestDates->isNotEmpty()) {
+                    $commonEndDate = CarbonImmutable::parse($latestDates->min());
+                    $chartQuery->whereBetween('start_date', [
+                        $commonEndDate->subDays($graphRange - 1)->toDateString(),
+                        $commonEndDate->toDateString(),
+                    ]);
+                }
             }
         } else {
-            // All Protected Areas / Compare PAs:
-            // Use one common calendar window for every PA so the series share
-            // the same X-axis dates. End at the earliest latest-date among PAs.
-            $latestDates = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())
-                ->whereNotNull('timestamps')
-                ->whereNotNull('protected_area_id')
-                ->selectRaw('protected_area_id, MAX(start_date) as latest_date')
-                ->groupBy('protected_area_id')
-                ->pluck('latest_date');
-
-            if ($latestDates->isNotEmpty()) {
-                $commonEndDate = $latestDates->min();
-
-                $commonStartDate = date(
-                    'Y-m-d',
-                    strtotime($commonEndDate . ' -' . ($graphRange - 1) . ' days')
-                );
-
-                $chartQuery->whereBetween('start_date', [$commonStartDate, $commonEndDate]);
+            if ($summaryProtectedAreaId !== null) {
+                $chartQuery->where('protected_area_id', $summaryProtectedAreaId);
             }
+            $chartQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
         }
 
         $chartData = $chartQuery
@@ -120,7 +128,6 @@ class AwsController extends Controller
             ->orderBy('protected_area_id', 'asc')
             ->get();
 
-        [$summaryMode, $summaryPeriod, $summaryProtectedAreaId, $summaryPeriodLabel, $summaryCaption] = $this->summarySelection($request);
         $summaryRows = $this->monthlySummary->summarizePeriod($request->user(), $summaryMode, $summaryPeriod, $summaryProtectedAreaId);
 
 
@@ -128,8 +135,8 @@ class AwsController extends Controller
             'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString()->through(fn (Aws $report) => $this->reportData($report)),
             'rawRecords'     => $rawQuery->paginate(15, ['*'], 'raw_page')->withQueryString()->through(fn (Aws $record) => $this->rawData($record)),
             'chartRecords'   => $chartData,
-            'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(),
-            'allProtectedAreasMode' => ! $request->filled('protected_area_id'),
+            'protectedAreas' => $this->awsScope->options($request->user()),
+            'allProtectedAreasMode' => $summaryProtectedAreaId === null,
             'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range']),
             'monthlySummary' => $summaryRows->values()->all(),
             'monthlyFilters' => [
@@ -160,7 +167,7 @@ class AwsController extends Controller
         [$mode, $period, $protectedAreaId, $periodLabel, $caption] = $this->summarySelection($request);
         $rows = $this->monthlySummary->summarizePeriod($request->user(), $mode, $period, $protectedAreaId);
         $protectedAreaName = $protectedAreaId !== null
-            ? $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->findOrFail($protectedAreaId)->name
+            ? $this->awsScope->options($request->user())->firstWhere('id', $protectedAreaId)?->name
             : null;
         $filename = $this->summaryFilename($mode, $period, $format);
 
@@ -168,7 +175,7 @@ class AwsController extends Controller
             'pdf' => Pdf::loadView('aws.monthly-summary-pdf', [
                 'rows' => $rows, 'mode' => $mode, 'periodLabel' => $periodLabel,
                 'caption' => $caption, 'protectedAreaName' => $protectedAreaName,
-            ])->setPaper('a4', 'landscape')->download($filename),
+            ])->setPaper('a4', 'portrait')->download($filename),
             'xlsx' => $this->monthlySummaryXlsx->download($rows, $periodLabel, $filename),
             'docx' => $this->monthlySummaryDocx->download($rows, $mode, $periodLabel, $filename),
         };
@@ -263,9 +270,26 @@ class AwsController extends Controller
         if ($protectedAreaId === null && ($request->has('mode') || $request->has('date') || $request->has('date_from') || $request->has('year') || $request->has('month') || $request->has('from_month'))) {
             $protectedAreaId = $request->filled('protected_area_id') ? (int) $request->input('protected_area_id') : null;
         }
-        if ($protectedAreaId !== null) $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+        if ($protectedAreaId !== null) $this->awsScope->assertCanAccess($request->user(), $protectedAreaId);
 
         return [$mode, $period, $protectedAreaId, $label, $caption];
+    }
+
+    /** @param array<string,mixed> $period @return array{0:CarbonImmutable,1:CarbonImmutable} */
+    private function summaryBounds(string $mode, array $period): array
+    {
+        if ($mode === 'one_month' || $mode === 'month') {
+            $start = CarbonImmutable::createSafe((int) $period['year'], (int) ($period['month'] ?? $period['from_month']), 1)->startOfMonth();
+            $end = CarbonImmutable::createSafe((int) $period['year'], (int) ($period['to_month'] ?? $period['month'] ?? $period['from_month']), 1)->endOfMonth();
+        } elseif ($mode === 'custom_range' || $mode === 'range') {
+            $start = CarbonImmutable::parse((string) $period['date_from'])->startOfDay();
+            $end = CarbonImmutable::parse((string) $period['date_to'])->endOfDay();
+        } else {
+            $start = CarbonImmutable::parse((string) $period['date'])->startOfDay();
+            $end = $start->endOfDay();
+        }
+
+        return [$start, $end];
     }
 
     /** @param array<string,mixed> $period */
@@ -291,7 +315,7 @@ class AwsController extends Controller
         $validated = $request->validate($this->validationRules(fileRequired: true), [
             'report_file.required' => 'A report attachment / MOV is required.',
         ]);
-        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
+        $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id']);
         $storedPath = null;
 
         try {
@@ -317,7 +341,7 @@ class AwsController extends Controller
         $aws = $this->authorizedRecord($request, $aws->id);
         abort_unless($aws->timestamps === null, 404);
         $validated = $request->validate($this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type));
-        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
+        $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
         if (! $request->hasFile('report_file') && ! app(ComplianceMovService::class)->hasValidSingleFile($aws, 'report_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['report_file' => ComplianceMovService::MESSAGE]);
         }
@@ -368,12 +392,12 @@ class AwsController extends Controller
             'ids.*' => ['integer', 'distinct', 'exists:aws,id'],
         ]);
 
-        $records = $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())
+        $records = $this->awsScope->query(Aws::query(), $request->user())
             ->whereIn('id', $validated['ids'])->get();
         abort_unless($records->count() === count($validated['ids']), 403);
 
         DB::transaction(function () use ($validated, $request) {
-            $this->organization->scopeProtectedAreaQuery(Aws::query(), $request->user())
+            $this->awsScope->query(Aws::query(), $request->user())
                 ->whereIn('id', $validated['ids'])->delete();
         });
 
@@ -393,38 +417,13 @@ class AwsController extends Controller
 
         $validated = $request->validate([
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'file'              => ['required', 'file', 'mimes:csv,txt', 'max:51200'],
+            'file'              => ['required', 'file', 'mimes:csv,txt,xlsx', 'max:51200'],
         ]);
-        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
+        $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id']);
 
         try {
             $file = $request->file('file');
-            $handle = fopen($file->getRealPath(), 'r');
-
-            $header = null;
-            $currentRow = 0;
-
-            while (($row = fgetcsv($handle)) !== false) {
-                $currentRow++;
-                $loweredRow = array_map(function($h) {
-                    return strtolower(trim(str_replace("\xEF\xBB\xBF", '', $h)));
-                }, $row);
-
-                if (in_array('timestamps', $loweredRow) || in_array('timestamp', $loweredRow)) {
-                    $header = $row;
-                    fgetcsv($handle);
-                    break;
-                }
-
-                if ($currentRow > 10) {
-                    break;
-                }
-            }
-
-            if (!$header) {
-                fclose($handle);
-                return back()->withErrors(['file' => 'No valid timestamp header found inside the CSV file. Please check file format.']);
-            }
+            ['header' => $header, 'rows' => $importRows] = $this->importRows->read($file);
 
             $cleanedHeader = array_map(function($h) {
                 return strtolower(trim(str_replace("\xEF\xBB\xBF", '', $h)));
@@ -474,7 +473,23 @@ class AwsController extends Controller
                 return $matches[$occurrence] ?? null;
             };
 
-            $timestampIndex = $firstIndex(['timestamps', 'timestamp', 'date_time', 'datetime', 'date']);
+            $timestampAliases = [
+                'timestamps', 'timestamp', 'time stamp', 'date time', 'datetime',
+                'date and time', 'record time', 'sample time',
+            ];
+            $timestampIndex = null;
+            foreach ($cleanedHeader as $index => $name) {
+                $normalizedTimestamp = preg_replace(
+                    '/\s+/',
+                    ' ',
+                    str_replace(['&', '/', '\\', '-', '_'], ' ', $name)
+                ) ?? $name;
+
+                if (in_array($normalizedTimestamp, $timestampAliases, true)) {
+                    $timestampIndex = $index;
+                    break;
+                }
+            }
 
             $port1PrecipIndex = $findIndexContaining(['mm precipitation'], 0);
             $port2PrecipIndex = $findIndexContaining(['mm precipitation'], 1);
@@ -495,7 +510,7 @@ class AwsController extends Controller
             $rowsByDate = [];
             $seenTimestampsByDate = [];
 
-            while (($row = fgetcsv($handle)) !== false) {
+            foreach ($importRows as $row) {
                 if (empty(array_filter($row))) {
                     continue;
                 }
@@ -551,7 +566,7 @@ class AwsController extends Controller
 
                 $cleanDecimal = function($val) {
                     $val = trim($val ?? '');
-                    if ($val === '' || strtoupper($val) === 'N/A' || $val === '—' || $val === '–') {
+                    if ($val === '' || strtoupper($val) === 'N/A' || $val === 'â€”' || $val === 'â€“') {
                         return null;
                     }
                     $val = str_replace([","], "", $val);
@@ -577,16 +592,15 @@ class AwsController extends Controller
                 $appendIndexed($rowsByDate[$dateKey]['relative_humidity'], $relativeHumidityIndex);
                 $appendIndexed($rowsByDate[$dateKey]['atmospheric_pressure'], $pressureIndex);
 
-                // Port 2 / ECRN-100 — hidden rainfall reference.
+                // Port 2 / ECRN-100 â€” hidden rainfall reference.
                 $appendIndexed($rowsByDate[$dateKey]['port2_precipitation'], $port2PrecipIndex);
                 $appendIndexed($rowsByDate[$dateKey]['port2_max_precipitation_rate'], $port2MaxRateIndex);
 
-                // Port 3 / TEROS 12 — hidden soil-condition context.
+                // Port 3 / TEROS 12 â€” hidden soil-condition context.
                 $appendIndexed($rowsByDate[$dateKey]['port3_water_content'], $port3WaterIndex);
                 $appendIndexed($rowsByDate[$dateKey]['port3_soil_temperature'], $port3SoilTempIndex);
                 $appendIndexed($rowsByDate[$dateKey]['port3_ec'], $port3EcIndex);
             }
-            fclose($handle);
 
             if (empty($rowsByDate)) {
                 return back()->withErrors(['file' => 'No valid timestamp rows found inside the CSV file.']);
@@ -594,7 +608,8 @@ class AwsController extends Controller
 
             // --- DUPLICATE CHECK ---
             $dates = array_keys($rowsByDate);
-            $existingDates = Aws::where('protected_area_id', $request->protected_area_id)
+            $existingDates = $this->awsScope->query(Aws::query(), $request->user())
+                ->where('protected_area_id', $request->protected_area_id)
                 ->whereIn('start_date', $dates)
                 ->whereNotNull('timestamps')
                 ->pluck('start_date')
@@ -616,8 +631,8 @@ class AwsController extends Controller
             }
             // ------------------------------------
 
-            // Wind direction is circular data. Example: 359° and 1° average to 0° (North),
-            // not 180°. Use circular mean before converting to the compass label.
+            // Wind direction is circular data. Example: 359Â° and 1Â° average to 0Â° (North),
+            // not 180Â°. Use circular mean before converting to the compass label.
             $circularMeanDegrees = function(array $degrees): ?float {
                 if (empty($degrees)) {
                     return null;
@@ -650,38 +665,12 @@ class AwsController extends Controller
             };
 
             $degreesToCompass = function($deg) {
-                if ($deg === null) return '—';
+                if ($deg === null) return 'â€”';
                 $deg = fmod((float)$deg, 360);
                 if ($deg < 0) $deg += 360;
                 $directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW', 'N'];
                 $index = (int) round($deg / 22.5);
                 return $directions[$index] ?? 'N';
-            };
-
-            $generateRemarks = function($precip, $windSpd, $temp) {
-                $remarks = [];
-
-                if ($precip !== null && $precip > 50) {
-                    $remarks[] = "Heavy Rainfall Advisory (Total: {$precip}mm)";
-                } elseif ($precip !== null && $precip > 15) {
-                    $remarks[] = "Moderate Rain Observed";
-                }
-
-                if ($windSpd !== null && $windSpd > 10) {
-                    $remarks[] = "Strong Wind Alert ({$windSpd} m/s)";
-                }
-
-                if ($temp !== null && $temp > 32) {
-                    $remarks[] = "High Temperature ({$temp}°C)";
-                } elseif ($temp !== null && $temp < 20) {
-                    $remarks[] = "Cool Conditions ({$temp}°C)";
-                }
-
-                if (empty($remarks)) {
-                    return "Normal Weather Conditions";
-                }
-
-                return implode(" | ", $remarks);
             };
 
             DB::beginTransaction();
@@ -690,7 +679,7 @@ class AwsController extends Controller
             foreach ($rowsByDate as $date => $metrics) {
                 $totalPrecip = !empty($metrics['precipitation'])
                     ? array_sum($metrics['precipitation'])
-                    : 0;
+                    : null;
 
                 // Port 2: independent precipitation reference. We retain it but
                 // do not replace the displayed Port 1 rainfall value.
@@ -718,7 +707,7 @@ class AwsController extends Controller
                 $rainfallDifferencePercent = null;
                 $crosscheckStatus = 'Unavailable';
 
-                if ($port2Precip !== null) {
+                if ($port2Precip !== null && $totalPrecip !== null) {
                     $rainfallDifferenceMm = abs($totalPrecip - $port2Precip);
                     $referenceBase = max(abs($totalPrecip), abs($port2Precip), 0.01);
                     $rainfallDifferencePercent = ($rainfallDifferenceMm / $referenceBase) * 100;
@@ -748,10 +737,15 @@ class AwsController extends Controller
                 $avgPress    = !empty($metrics['atmospheric_pressure']) ? array_sum($metrics['atmospheric_pressure']) / count($metrics['atmospheric_pressure']) : null;
 
                 $windDirectionLabel = $degreesToCompass($avgWindDir);
-                $calculatedRemarks = $generateRemarks($totalPrecip, $avgWindSpd, $avgTemp);
+                $calculatedRemarks = $this->weather->classifyDaily([
+                    'precipitation' => $totalPrecip,
+                    'wind_speed' => $avgWindSpd,
+                    'air_temperature' => $avgTemp,
+                ]);
                 $formattedDate = date('F d, Y', strtotime($date));
 
-                $expectedObservations = 96;
+                $samplingInterval = max(1, min(1440, (int) config('aws.sampling_interval_minutes', 15)));
+                $expectedObservations = intdiv(1440, $samplingInterval);
                 $observationCount = (int) ($metrics['observation_count'] ?? 0);
                 $completenessPercent = min(
                     100,
@@ -770,7 +764,7 @@ class AwsController extends Controller
                     'atmospheric_pressure' => $avgPress !== null ? round($avgPress, 2) : null,
                     'air_temperature'      => $avgTemp !== null ? round($avgTemp, 2) : null,
                     'relative_humidity'    => $avgHum !== null ? round($avgHum, 2) : null,
-                    'precipitation'        => round($totalPrecip, 2),
+                    'precipitation'        => $totalPrecip !== null ? round($totalPrecip, 2) : null,
                     'wind_speed'           => $avgWindSpd !== null ? round($avgWindSpd, 2) : null,
                     'wind_direction'       => $windDirectionLabel,
                     'remarks'              => $calculatedRemarks,
@@ -784,7 +778,7 @@ class AwsController extends Controller
                 $awsRecord->port3_ec = $avgPort3Ec !== null ? round($avgPort3Ec, 3) : null;
                 $awsRecord->rainfall_difference_mm = $rainfallDifferenceMm !== null ? round($rainfallDifferenceMm, 2) : null;
                 $awsRecord->rainfall_difference_percent = $rainfallDifferencePercent !== null ? round($rainfallDifferencePercent, 2) : null;
-                $awsRecord->rainfall_crosscheck_days = $port2Precip !== null ? 1 : 0;
+                $awsRecord->rainfall_crosscheck_days = ($port2Precip !== null && $totalPrecip !== null) ? 1 : 0;
                 $awsRecord->rainfall_crosscheck_status = $crosscheckStatus;
                 $awsRecord->soil_condition_context = $soilContext;
 
@@ -798,7 +792,7 @@ class AwsController extends Controller
             }
 
             DB::commit();
-            return redirect()->route('aws.index', ['tab' => 'raw-data'])->with('success', "Successfully imported {$successCount} daily weather records from Zentra file!");
+            return redirect()->route('aws.index', ['tab' => 'monitoring-summary'])->with('success', "Successfully imported {$successCount} daily weather records from Zentra file!");
         } catch (\Exception $e) {
             DB::rollBack();
             return back()->withErrors(['file' => 'Error importing file: ' . $e->getMessage()]);
@@ -808,7 +802,7 @@ class AwsController extends Controller
     private function authorizedRecord(Request $request, int $id): Aws
     {
         $record = Aws::query()->findOrFail($id);
-        $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id);
+        $this->awsScope->assertCanAccess($request->user(), $record->protected_area_id);
 
         return $record;
     }

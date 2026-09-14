@@ -27,7 +27,10 @@ use Throwable;
 
 class IpafController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
+    public function __construct(
+        private readonly ProtectedAttachmentService $attachments,
+        private readonly OrganizationalAccessService $organization,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -331,11 +334,11 @@ class IpafController extends Controller
             ->orderBy('protected_area_id')
             ->get()
             ->map(fn (IpafAccountingStatus $row) => ['protected_area_name' => $row->protectedArea?->name, 'bank_balance' => (string) $row->bank_balance]);
-        $years = IpafRevenueCollection::query()->distinct()->pluck('reporting_year')
-            ->merge(IpafRevenueTarget::query()->distinct()->pluck('reporting_year'))
-            ->merge(IpafAccountingStatus::query()->distinct()->pluck('reporting_year'))
+        $years = $this->organization->scopeProtectedAreaQuery(IpafRevenueCollection::query(), $request->user())->distinct()->pluck('reporting_year')
+            ->merge($this->organization->scopeProtectedAreaQuery(IpafRevenueTarget::query(), $request->user())->distinct()->pluck('reporting_year'))
+            ->merge($this->organization->scopeProtectedAreaQuery(IpafAccountingStatus::query(), $request->user())->distinct()->pluck('reporting_year'))
             ->push((int) now()->year)->unique()->sortDesc()->values();
-        $accountingYears = IpafAccountingStatus::query()->distinct()->pluck('reporting_year')
+        $accountingYears = $this->organization->scopeProtectedAreaQuery(IpafAccountingStatus::query(), $request->user())->distinct()->pluck('reporting_year')
             ->merge([$accountingYear, (int) now()->year, (int) now()->year - 1, (int) config('ipaf.accounting_sheet.known_source_year')])
             ->filter(fn ($year) => (int) $year >= 2000)
             ->map(fn ($year) => (int) $year)

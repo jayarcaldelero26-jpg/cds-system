@@ -1,31 +1,52 @@
-import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
-import Card from '../../Components/Card';
-import PageHeader from '../../Components/PageHeader';
+import { router } from '@inertiajs/react';
+import { useEffect, useState } from 'react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import Card from '@/Components/Card';
+import { FloatingSelect } from '@/Components/Form';
+import PageHeader from '@/Components/PageHeader';
+import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 
-export default function Index({ stats = {} }) {
-    return (
-        <AuthenticatedLayout title="Executive Reports">
-            <PageHeader
-                title="Executive Summary & Reports"
-                description="Current eDATS operational indicators. Historical retired-module records are excluded from active reporting."
-                actions={<button type="button" onClick={() => window.print()} className="rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white">Print Summary Report</button>}
-            />
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {[
-                    ['Protected Areas', stats.protected_areas_count, 'Authorized active registry records'],
-                    ['Management Plans', stats.management_plans_count, 'Authorized active plan records'],
-                    ['BMS Records', stats.bms_records_count, 'Current biodiversity monitoring records'],
-                    ['BAMS Records', stats.bams_records_count, 'Current biodiversity assessment records'],
-                    ['IMEA Assessments', stats.imea_assessments_count, 'Current effectiveness assessments'],
-                    ['AWS Records', stats.aws_records_count, 'Current AWS monitoring records'],
-                ].map(([label, value, description]) => (
-                    <Card key={label} className="border border-gray-100 shadow-xs dark:border-gray-800">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</p>
-                        <p className="mt-2 text-3xl font-bold text-gray-900 dark:text-white">{value ?? 0}</p>
-                        <p className="mt-1 text-xs text-green-600">{description}</p>
-                    </Card>
-                ))}
-            </div>
-        </AuthenticatedLayout>
-    );
+const FALLBACK = '\u2014';
+const cards = [
+    ['Expected Reports', 'expected'], ['Submitted Reports', 'submitted'], ['Submission Compliance', 'compliance_rate', '%'],
+    ['Overdue / Not Submitted', 'overdue'], ['Pending PENRO Receipt', 'pending_receipt'],
+];
+
+function value(valueToShow, suffix = '') { return valueToShow === null || valueToShow === undefined ? FALLBACK : `${valueToShow}${suffix}`; }
+
+function PerformanceTable({ title, rows = [], first = 'Report Family' }) {
+    const columns = [first, 'Expected', 'Submitted', 'Compliance', 'Overdue'];
+    return <Card className="overflow-hidden border border-gray-100 shadow-sm dark:border-gray-800"><div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800"><h2 className="font-bold text-gray-900 dark:text-white">{title}</h2><p className="text-xs text-gray-500">Expected-versus-submitted management view</p></div><div className="overflow-x-auto"><table className="min-w-[620px] w-full text-left text-xs"><thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500 dark:bg-gray-800/60"><tr>{columns.map(label => <th key={label} className="px-3 py-2.5">{label}</th>)}</tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{rows.length ? rows.map(row => <tr key={row.label} className="text-gray-700 dark:text-gray-200"><td className="max-w-[260px] px-3 py-2.5 font-semibold">{row.label}</td><td className="px-3 py-2.5">{value(row.expected)}</td><td className="px-3 py-2.5">{value(row.submitted)}</td><td className="px-3 py-2.5">{value(row.compliance_rate, '%')}</td><td className="px-3 py-2.5">{value(row.overdue)}</td></tr>) : <tr><td colSpan={columns.length} className="px-3 py-6 text-center text-gray-500">No Data</td></tr>}</tbody></table></div></Card>;
+}
+
+function TrendChart({ rows = [] }) {
+    return <Card className="border border-gray-100 shadow-sm dark:border-gray-800"><div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800"><h2 className="font-bold text-gray-900 dark:text-white">Period Compliance Trend</h2><p className="text-xs text-gray-500">Expected and submitted requirements for the selected scope</p></div>{rows.length ? <div className="h-64 p-3"><ResponsiveContainer width="100%" height="100%"><BarChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="period" tick={{ fontSize: 10 }} /><YAxis allowDecimals={false} width={32} /><Tooltip /><Bar dataKey="expected" name="Expected" fill="#86efac" radius={[4, 4, 0, 0]} /><Bar dataKey="submitted" name="Submitted" fill="#166534" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div> : <p className="p-8 text-center text-sm text-gray-500">No period data available.</p>}</Card>;
+}
+
+export default function Index({ report = {} }) {
+    const filters = report.filters || {};
+    const options = report.filter_options || {};
+    const [year, setYear] = useState(filters.year || '');
+    const [domain, setDomain] = useState(filters.domain || 'all');
+    const [period, setPeriod] = useState(filters.period || '');
+    const [office, setOffice] = useState(filters.office || '');
+    const [protectedAreaId, setProtectedAreaId] = useState(filters.protected_area_id || '');
+    const [workflow, setWorkflow] = useState(filters.workflow || '');
+    const [status, setStatus] = useState(filters.status || '');
+
+    useEffect(() => {
+        setYear(filters.year || ''); setDomain(filters.domain || 'all'); setPeriod(filters.period || ''); setOffice(filters.office || '');
+        setProtectedAreaId(filters.protected_area_id || ''); setWorkflow(filters.workflow || ''); setStatus(filters.status || '');
+    }, [filters.year, filters.domain, filters.period, filters.office, filters.protected_area_id, filters.workflow, filters.status]);
+
+    const apply = event => { event.preventDefault(); router.get(route('reports.index'), { year: year || undefined, domain: domain || undefined, period: period || undefined, office: office || undefined, protected_area_id: protectedAreaId || undefined, workflow: workflow || undefined, status: status || undefined }, { preserveState: true, preserveScroll: true, replace: true }); };
+    const reset = () => router.get(route('reports.index'));
+    const exportUrl = format => route('reports.export', { format, year, domain, period, office, protected_area_id: protectedAreaId, workflow, status });
+    const summary = report.summary || {};
+
+    return <AuthenticatedLayout title="Reports"><PageHeader title="Executive Report Monitoring" description="Formal management summary for authorized PA and ENGP report compliance and timeliness." actions={<div className="flex flex-wrap gap-2"><a href={exportUrl('pdf')} className="rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20">Export PDF</a><a href={exportUrl('xlsx')} className="rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20">Export Excel</a><a href={exportUrl('docx')} className="rounded-lg bg-white/10 px-3 py-2 text-xs font-bold text-white hover:bg-white/20">Export Word</a></div>} />
+        <div className="mt-6 space-y-5"><Card className="border border-gray-100 shadow-sm dark:border-gray-800"><form onSubmit={apply} className="grid gap-3 md:grid-cols-4 xl:grid-cols-8"><FloatingSelect id="executive-year" label="Reporting Year" value={year} onChange={event => setYear(event.target.value)} size="sm">{(options.years || []).map(item => <option key={item} value={item}>{item}</option>)}</FloatingSelect><FloatingSelect id="executive-domain" label="Domain" value={domain} onChange={event => setDomain(event.target.value)} size="sm"><option value="all">All Authorized</option><option value="pa">PA Monitoring</option><option value="engp">ENGP Monitoring</option></FloatingSelect><FloatingSelect id="executive-period" label="Period" value={period} onChange={event => setPeriod(event.target.value)} size="sm"><option value="">All periods</option>{(options.periods || []).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</FloatingSelect><FloatingSelect id="executive-office" label="Office" value={office} onChange={event => setOffice(event.target.value)} size="sm"><option value="">All offices</option>{(options.offices || []).map(item => <option key={item} value={item}>{item}</option>)}</FloatingSelect><FloatingSelect id="executive-pa" label="Protected Area" value={protectedAreaId} onChange={event => setProtectedAreaId(event.target.value)} size="sm"><option value="">All protected areas</option>{(options.protected_areas || []).map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</FloatingSelect><FloatingSelect id="executive-family" label="Report Family" value={workflow} onChange={event => setWorkflow(event.target.value)} size="sm"><option value="">All report families</option>{(options.families || []).map(item => <option key={`${item.domain}-${item.value}`} value={item.value}>{item.label}</option>)}</FloatingSelect><FloatingSelect id="executive-status" label="Status" value={status} onChange={event => setStatus(event.target.value)} size="sm"><option value="">All statuses</option>{(options.statuses || []).map(item => <option key={item}>{item}</option>)}</FloatingSelect><div className="flex items-end gap-2"><button className="rounded-xl bg-green-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-green-800">Apply</button><button type="button" onClick={reset} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-bold text-gray-700 dark:border-gray-700 dark:text-gray-200">Reset</button></div></form><p className="mt-3 text-xs text-gray-500">{filters.scope_label || 'All authorized reports'} · active effective registry requirements are used for expected counts.</p></Card>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">{cards.map(([label, key, suffix = '']) => <Card key={key} className="border border-gray-100 shadow-sm dark:border-gray-800"><p className="text-[10px] font-bold uppercase tracking-wider text-gray-500">{label}</p><p className="mt-1 text-2xl font-black text-gray-900 dark:text-white">{value(summary[key], suffix)}</p></Card>)}</div><Card className="border border-green-100 bg-green-50/60 shadow-sm dark:border-green-900/40 dark:bg-green-950/20"><p className="text-[10px] font-bold uppercase tracking-wider text-green-700 dark:text-green-300">Executive Interpretation</p><p className="mt-1 text-sm text-gray-700 dark:text-gray-200">{report.interpretation || 'No Data'}</p></Card><TrendChart rows={report.period_trend} /><PerformanceTable title="Protected Area Performance" rows={report.pa_performance} first="Protected Area" /><PerformanceTable title="Office Performance" rows={report.office_performance} first="Office" /><PerformanceTable title="Report Family Performance" rows={report.family_performance} /><Card className="border border-gray-100 shadow-sm dark:border-gray-800"><div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800"><h2 className="font-bold text-gray-900 dark:text-white">Timeliness</h2></div><div className="grid grid-cols-2 gap-3 p-4 text-sm sm:grid-cols-4"><div><p className="text-xs text-gray-500">On-time rated</p><p className="font-bold">{value(report.timeliness?.on_time)}</p></div><div><p className="text-xs text-gray-500">Late rated</p><p className="font-bold">{value(report.timeliness?.late)}</p></div><div><p className="text-xs text-gray-500">Rated records</p><p className="font-bold">{value(report.timeliness?.rated)}</p></div><div><p className="text-xs text-gray-500">Average days complied</p><p className="font-bold">{value(report.timeliness?.average_days_complied, ' d')}</p></div></div></Card><Card className="overflow-hidden border border-amber-100 shadow-sm dark:border-amber-900/40"><div className="border-b border-amber-100 px-4 py-3 dark:border-amber-900/40"><h2 className="font-bold text-gray-900 dark:text-white">Reports Requiring Attention</h2><p className="text-xs text-gray-500">Authorized reports that are overdue or awaiting receipt</p></div><div className="overflow-x-auto"><table className="min-w-[850px] w-full text-left text-xs"><thead className="bg-amber-50 text-[10px] uppercase text-gray-500 dark:bg-amber-950/20"><tr>{['Tracking No.', 'Report', 'PA / Office', 'Period', 'Status', 'Deadline', 'Reason'].map(label => <th key={label} className="px-3 py-2.5">{label}</th>)}</tr></thead><tbody className="divide-y divide-gray-100 dark:divide-gray-800">{(report.attention || []).length ? report.attention.map((row, index) => <tr key={`${row.tracking_number || row.report}-${index}`}><td className="px-3 py-2.5 font-semibold">{row.tracking_number || FALLBACK}</td><td className="px-3 py-2.5">{row.report || FALLBACK}</td><td className="px-3 py-2.5">{row.scope || FALLBACK}</td><td className="px-3 py-2.5">{row.period || FALLBACK}</td><td className="px-3 py-2.5">{row.status || FALLBACK}</td><td className="px-3 py-2.5">{row.deadline || FALLBACK}</td><td className="px-3 py-2.5">{row.reason || FALLBACK}</td></tr>) : <tr><td colSpan="7" className="px-3 py-6 text-center text-gray-500">No reports require attention for this scope.</td></tr>}</tbody></table></div></Card>
+        </div>
+    </AuthenticatedLayout>;
 }

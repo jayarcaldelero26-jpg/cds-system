@@ -133,11 +133,33 @@ test('ENGP year and period filters produce an empty state without inventing reco
             ->where('engp.summary.expected', 8)
             ->has('engp.rows', 8));
 
-    $this->actingAs($user)->get(route('dashboard', ['view' => 'engp', 'year' => 2025]))
+    $this->actingAs($user)->get(route('dashboard', ['view' => 'engp', 'year' => 2027]))
         ->assertInertia(fn (Assert $page) => $page
-            ->where('engp.summary.expected', 0)
-            ->has('engp.rows', 0)
-            ->where('engp.pagination.total', 0));
+            ->where('engp.summary.expected', 160)
+            ->where('engp.summary.submitted', 0)
+            ->has('engp.rows', 25)
+            ->where('engp.pagination.total', 160));
+});
+
+test('ENGP dashboard rolls over to 2027 with scheduled requirements and year-isolated submissions', function (): void {
+    $user = dashboardDevelopmentUser();
+    dashboardEngpSubmission([
+        'reporting_year' => 2027,
+        'period_key' => '2027-01',
+        'period_label' => 'January 2027',
+        'deadline_submission' => '2027-01-20',
+        'date_received_penro' => '2027-01-18',
+    ]);
+
+    $this->actingAs($user)->get(route('dashboard', [
+        'view' => 'engp', 'year' => 2027, 'office' => 'CENRO Baganga', 'frequency' => 'monthly', 'period' => '2027-01',
+    ]))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('engp.filters.year', 2027)
+        ->where('engp.summary.scheduled_requirements', 8)
+        ->where('engp.summary.reports_submitted', 1)
+        ->where('engp.summary.compliance_rate', 12.5)
+        ->where('engp.rows', fn ($rows): bool => collect($rows)->contains(fn (array $row): bool => $row['deadline'] === '2027-01-20' && $row['record_source'] === 'Actual encoded submission'))
+        ->where('engp.filterOptions.years', fn ($years): bool => collect($years)->contains(2027) && collect($years)->contains(2028)));
 });
 
 test('CENRO scope cannot see another CENRO through dashboard filters', function (): void {

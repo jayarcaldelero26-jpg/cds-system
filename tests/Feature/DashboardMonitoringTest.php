@@ -82,7 +82,6 @@ test('dashboard page exposes the unified monitoring props', function () {
             ->has('filterOptions.programs', 1)
             ->where('filters.program', 'conservation')
             ->has('paMatrix')
-            ->has('routingBottlenecks')
             ->has('topOverdueReports')
             ->has('complianceSnapshot')
             ->has('executiveInterpretation'));
@@ -161,8 +160,9 @@ test('PA dashboard presents only PA monitoring surfaces', function () {
     $dashboardSource = file_get_contents(resource_path('js/Pages/Dashboard.jsx'));
 
     expect($dashboardSource)->toContain('PA Report Monitoring Matrix')
-        ->toContain('Current Routing Bottlenecks')
         ->toContain('Top Overdue Reports')
+        ->not->toContain('Current Routing Bottlenecks')
+        ->not->toContain('Average Routing Time')
         ->not->toContain('Compliance Snapshot')
         ->toContain('Executive Interpretation')
         ->toContain('report_type')

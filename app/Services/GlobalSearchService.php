@@ -50,9 +50,9 @@ final class GlobalSearchService
             ['title' => 'BAMS', 'subtitle' => 'Biodiversity Assessment and Monitoring System', 'url' => '/bams', 'icon' => 'leaf', 'ability' => 'bams.view'],
             ['title' => 'IMEA', 'subtitle' => 'Integrated Management Effectiveness Assessment', 'url' => '/imea', 'icon' => 'chart', 'ability' => 'imea.view'],
             ['title' => 'AWS', 'subtitle' => 'Automated Weather Station monitoring', 'url' => '/aws', 'icon' => 'cloud', 'ability' => 'aws.view'],
-            ['title' => 'IPAF', 'subtitle' => 'Integrated Protected Area Fund monitoring', 'url' => '/ipaf', 'icon' => 'document', 'ability' => 'technical-reports.view'],
+            ['title' => 'IPAF', 'subtitle' => 'Integrated Protected Area Fund records and accounting', 'url' => '/ipaf', 'icon' => 'document', 'ability' => 'technical-reports.view'],
             ['title' => 'Management of IPAF', 'subtitle' => 'IPAF management reports', 'url' => '/ipaf?ipaf_tab=management', 'icon' => 'document', 'ability' => 'technical-reports.view'],
-            ['title' => 'Revenue Collection', 'subtitle' => 'IPAF revenue collection monitoring', 'url' => '/ipaf?ipaf_tab=revenue', 'icon' => 'document', 'ability' => 'technical-reports.view'],
+            ['title' => 'Revenue Collection', 'subtitle' => 'IPAF revenue collection records', 'url' => '/ipaf?ipaf_tab=revenue', 'icon' => 'document', 'ability' => 'technical-reports.view'],
             ['title' => 'ENGP Summary Monitoring', 'subtitle' => 'National Greening Program', 'url' => '/engp-reports/summary', 'icon' => 'chart', 'ability' => 'technical-reports.view'],
             ['title' => 'CBEP', 'subtitle' => 'ENGP monthly report workflow', 'url' => '/engp-reports/cbep', 'icon' => 'document', 'ability' => 'technical-reports.view'],
             ['title' => 'ELCAC', 'subtitle' => 'ENGP monthly report workflow', 'url' => '/engp-reports/elcac', 'icon' => 'document', 'ability' => 'technical-reports.view'],
@@ -87,15 +87,15 @@ final class GlobalSearchService
     /** @return list<array<string, string>> */
     private function reports(User $user, string $query): array
     {
-        return $this->tracking->records()
+        return $this->tracking->search($query)
             ->filter(fn (array $record): bool => $this->canViewReport($user, (string) ($record['source'] ?? '')))
-            ->filter(fn (array $record): bool => $this->matches($query, implode(' ', [$record['module'] ?? '', $record['target_office'] ?? '', $record['protected_area'] ?? '', $record['reporting_period'] ?? '', $record['activity_name'] ?? '', $record['document_type'] ?? ''])))
+            ->filter(fn (array $record): bool => $this->matches($query, implode(' ', [$record['tracking_number'] ?? '', $record['module'] ?? '', $record['target_office'] ?? '', $record['protected_area'] ?? '', $record['reporting_period'] ?? '', $record['activity_name'] ?? '', $record['document_type'] ?? ''])))
             ->take(self::PER_GROUP_LIMIT)->map(function (array $record) use ($user): array {
-                $context = collect([$record['target_office'] ?? null, $record['protected_area'] ?? null])->filter()->implode(' · ');
+                $context = collect([$record['target_office'] ?? null, $record['protected_area'] ?? null])->filter()->implode(' Ã‚Â· ');
                 $period = trim((string) ($record['reporting_period'] ?? ''));
                 return [
                     'type' => 'report', 'title' => (string) ($record['module'] ?? 'Monitored report'),
-                    'subtitle' => trim($context.($period !== '' ? ($context !== '' ? ' · ' : '').$period : '')) ?: 'Monitored report',
+                    'subtitle' => trim($context.($period !== '' ? ($context !== '' ? ' Ã‚Â· ' : '').$period : '')) ?: 'Monitored report',
                     'url' => $this->organization->canBrowseModule($user, (string) ($record['source'] ?? ''), (string) (($record['source'] ?? '') === 'engp' ? OrganizationalAccessService::DEVELOPMENT : OrganizationalAccessService::CONSERVATION)) ? (string) ($record['source_url'] ?? '/dashboard') : '/submission-tracking', 'icon' => 'document', 'badge' => 'Report',
                 ];
             })->values()->all();
@@ -111,7 +111,7 @@ final class GlobalSearchService
         })->orderBy('name')->limit(self::PER_GROUP_LIMIT)->get(['name', 'category', 'municipality'])
             ->map(fn (ProtectedArea $area): array => [
                 'type' => 'protected_area', 'title' => (string) $area->name,
-                'subtitle' => collect([$area->category, $area->municipality])->filter()->implode(' · ') ?: 'Protected Area',
+                'subtitle' => collect([$area->category, $area->municipality])->filter()->implode(' Ã‚Â· ') ?: 'Protected Area',
                 'url' => '/protected-areas?search='.rawurlencode((string) $area->name), 'icon' => 'map', 'badge' => 'Protected Area',
             ])->all();
     }
@@ -125,7 +125,7 @@ final class GlobalSearchService
             $builder->where('name', 'like', $like)->orWhere('email', 'like', $like)->orWhere('office_designated', 'like', $like)->orWhere('section', 'like', $like);
         })->orderBy('name')->limit(self::PER_GROUP_LIMIT)->get(['id', 'name', 'office_designated', 'section'])
             ->map(function (User $managedUser): array {
-                $context = collect([$managedUser->office_designated, $managedUser->section, $this->organization->accountRole($managedUser)])->filter()->implode(' · ');
+                $context = collect([$managedUser->office_designated, $managedUser->section, $this->organization->accountRole($managedUser)])->filter()->implode(' Ã‚Â· ');
                 return ['type' => 'user', 'title' => (string) $managedUser->name, 'subtitle' => $context ?: 'User account', 'url' => '/admin/users/'.$managedUser->id.'/edit', 'icon' => 'user', 'badge' => 'User'];
             })->all();
     }

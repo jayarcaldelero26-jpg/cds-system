@@ -31,7 +31,7 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        if (!$user->is_active) {
+        if ($user->hasRole('no_role') || !$user->is_active) {
             return Inertia::render('Auth/WaitingApproval');
         }
 

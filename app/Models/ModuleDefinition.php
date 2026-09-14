@@ -12,6 +12,18 @@ class ModuleDefinition extends Model
 {
     use HasFactory;
 
+    protected static function booted(): void
+    {
+        $forgetRegistry = static function (): void {
+            if (app()->bound(\App\Services\Reports\ReportRequirementRegistry::class)) {
+                app(\App\Services\Reports\ReportRequirementRegistry::class)->forgetCache();
+            }
+        };
+
+        static::saved($forgetRegistry);
+        static::deleted($forgetRegistry);
+    }
+
     public const IMPLEMENTATION_GENERIC = 'generic';
     public const IMPLEMENTATION_SPECIALIZED = 'specialized';
     public const TYPE_REGULAR_TARGET = 'regular_target';
@@ -30,6 +42,8 @@ class ModuleDefinition extends Model
         'name', 'code', 'program_area', 'implementation_type', 'module_type', 'reporting_frequency',
         'plan_duration_years', 'deadline_mode', 'default_deadline_days', 'allow_deadline_override',
         'is_active', 'description', 'existing_route_name', 'existing_source_key', 'display_order',
+        'requirement_domain', 'requirement_key', 'requirement_metadata', 'effective_from', 'effective_to',
+        'first_applicable_year',
     ];
 
     protected function casts(): array
@@ -41,6 +55,10 @@ class ModuleDefinition extends Model
             'allow_deadline_override' => 'boolean',
             'is_active' => 'boolean',
             'display_order' => 'integer',
+            'requirement_metadata' => 'array',
+            'effective_from' => 'date:Y-m-d',
+            'effective_to' => 'date:Y-m-d',
+            'first_applicable_year' => 'integer',
         ];
     }
 
@@ -57,6 +75,25 @@ class ModuleDefinition extends Model
     public function scopeNotRetired(Builder $query): Builder
     {
         return $query->whereNotIn('code', self::RETIRED_CODES);
+    }
+
+    public function scopeRequirementDomain(Builder $query, string $domain): Builder
+    {
+        return $query->where(function (Builder $scoped) use ($domain): void {
+            $scoped->where('requirement_domain', $domain);
+
+            if ($domain === 'pa') {
+                $scoped->orWhere(function (Builder $legacy) use ($domain): void {
+                    $legacy->whereNull('requirement_domain')->where('program_area', '!=', ProgramArea::ENGP->value);
+                });
+            }
+
+            if ($domain === 'engp') {
+                $scoped->orWhere(function (Builder $legacy): void {
+                    $legacy->whereNull('requirement_domain')->where('program_area', ProgramArea::ENGP->value);
+                });
+            }
+        });
     }
 
     public static function isRetiredCode(?string $code): bool

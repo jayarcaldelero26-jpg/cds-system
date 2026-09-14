@@ -11,7 +11,11 @@ use Illuminate\Support\Collection;
 
 final class AwsMonthlySummaryService
 {
-    public function __construct(private readonly OrganizationalAccessService $organization) {}
+    public function __construct(
+        private readonly OrganizationalAccessService $organization,
+        private readonly AwsProtectedAreaScope $awsScope,
+        private readonly AwsWeatherConditionService $weather,
+    ) {}
 
     /** @return Collection<int, array<string, mixed>> */
     public function summarize(User $user, int $year, int $month, ?int $protectedAreaId = null): Collection
@@ -22,7 +26,7 @@ final class AwsMonthlySummaryService
     /** @param array<string, mixed> $period @return Collection<int, array<string, mixed>> */
     public function summarizePeriod(User $user, string $mode, array $period, ?int $protectedAreaId = null): Collection
     {
-        if ($protectedAreaId !== null) $this->organization->assertCanAccessProtectedArea($user, $protectedAreaId);
+        if ($protectedAreaId !== null) $this->awsScope->assertCanAccess($user, $protectedAreaId);
 
         $mode = strtolower(trim($mode));
 
@@ -65,7 +69,7 @@ final class AwsMonthlySummaryService
                 return $this->summarizeAreas($rows, $periodStart, $periodEnd, $periodStart->format('F Y'));
             }
 
-            return $this->summarizeMonthlyRange($rows, $periodStart, $periodEnd);
+            return $this->summarizeMonthlyRange($user, $rows, $periodStart, $periodEnd, $protectedAreaId);
         }
 
         if ($mode === 'day') {
@@ -87,8 +91,9 @@ final class AwsMonthlySummaryService
 
     private function rowsBetween(User $user, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, ?int $protectedAreaId): Collection
     {
-        return $this->organization->scopeProtectedAreaQuery(Aws::query(), $user)
+        return $this->awsScope->query(Aws::query(), $user)
             ->whereNotNull('protected_area_id')
+            ->whereNotNull('timestamps')
             ->whereBetween('start_date', [$periodStart->toDateString(), $periodEnd->toDateString()])
             ->when($protectedAreaId !== null, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
             ->with('protectedArea:id,name')
@@ -161,7 +166,7 @@ final class AwsMonthlySummaryService
 
     private function areasFor(User $user, ?int $protectedAreaId): Collection
     {
-        return $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id')
+        return $this->awsScope->query(ProtectedArea::query(), $user, 'id')
             ->when($protectedAreaId !== null, fn ($query) => $query->whereKey($protectedAreaId))
             ->orderBy('name')
             ->get(['id', 'name']);
@@ -184,11 +189,12 @@ final class AwsMonthlySummaryService
     {
         return ['protected_area_id' => $protectedAreaId, 'protected_area_name' => $protectedAreaName, 'period' => $periodLabel, 'average_atmospheric_pressure' => null, 'average_air_temperature' => null, 'average_vapor_pressure_deficit' => null, 'average_vapor_pressure' => null, 'average_relative_humidity' => null, 'mean_wind_direction' => null, 'total_precipitation' => null, 'average_wind_speed' => null, 'observation_count' => 0, 'expected_observations' => $this->expectedObservations($periodStart, $periodEnd), 'data_completeness' => 0.0, 'remarks' => 'No Data'];
     }
-    private function summarizeMonthlyRange(Collection $rows, CarbonImmutable $periodStart, CarbonImmutable $periodEnd): Collection
+    private function summarizeMonthlyRange(User $user, Collection $rows, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, ?int $protectedAreaId): Collection
     {
         $result = collect();
 
-        foreach ($rows->groupBy('protected_area_id') as $areaRows) {
+        foreach ($this->areasFor($user, $protectedAreaId) as $area) {
+            $areaRows = $rows->where('protected_area_id', $area->id);
             $month = $periodStart->startOfMonth();
 
             while ($month->lessThanOrEqualTo($periodEnd->startOfMonth())) {
@@ -201,7 +207,7 @@ final class AwsMonthlySummaryService
                 })->values();
 
                 $result->push($monthRows->isEmpty()
-                    ? $this->emptyAreaSummary($areaRows->first(), $monthStart, $monthEnd, $periodLabel)
+                    ? $this->emptyAreaSummaryForArea((int) $area->id, $area->name, $monthStart, $monthEnd, $periodLabel)
                     : $this->aggregateArea($monthRows, $monthStart, $monthEnd, $periodLabel));
 
                 $month = $month->addMonth();
@@ -226,7 +232,8 @@ final class AwsMonthlySummaryService
         $decimalPlaces = (int) $summaryConfig['number_decimals'];
         $weighted = [
             'atmospheric_pressure' => ['sum' => 0.0, 'weight' => 0.0], 'air_temperature' => ['sum' => 0.0, 'weight' => 0.0],
-            'vapor_pressure_deficit' => ['sum' => 0.0, 'weight' => 0.0], 'relative_humidity' => ['sum' => 0.0, 'weight' => 0.0],
+            'vapor_pressure_deficit' => ['sum' => 0.0, 'weight' => 0.0], 'vapor_pressure' => ['sum' => 0.0, 'weight' => 0.0],
+            'relative_humidity' => ['sum' => 0.0, 'weight' => 0.0],
             'wind_speed' => ['sum' => 0.0, 'weight' => 0.0],
         ];
         $directions = ['sin' => 0.0, 'cos' => 0.0, 'weight' => 0.0];
@@ -235,10 +242,14 @@ final class AwsMonthlySummaryService
         $actualObservations = 0;
         $expectedObservations = $this->expectedObservations($periodStart, $periodEnd);
         $integrityIssue = false;
+        $dailyRemarks = [];
 
         foreach ($rows as $row) {
             $rowObservationCount = $this->observationWeight($row, $integrityIssue);
             $actualObservations += $rowObservationCount;
+            if ($rowObservationCount > 0) {
+                $dailyRemarks[] = $this->weather->classifyDaily($row);
+            }
 
             foreach (['atmospheric_pressure', 'air_temperature', 'relative_humidity', 'wind_speed'] as $metric) {
                 $value = $this->metricValue($row->{$metric}, $ranges[$metric], $integrityIssue);
@@ -251,7 +262,10 @@ final class AwsMonthlySummaryService
             $temperature = $this->metricValue($row->air_temperature, $ranges['air_temperature'], $integrityIssue);
             $humidity = $this->metricValue($row->relative_humidity, $ranges['relative_humidity'], $integrityIssue);
             if ($temperature !== null && $humidity !== null) {
-                $vpd = $this->derivedVaporPressure($temperature, $humidity);
+                $vaporPressure = $this->derivedVaporPressure($temperature, $humidity);
+                $vpd = $this->derivedVaporPressureDeficit($temperature, $humidity);
+                $weighted['vapor_pressure']['sum'] += $vaporPressure * $rowObservationCount;
+                $weighted['vapor_pressure']['weight'] += $rowObservationCount;
                 $weighted['vapor_pressure_deficit']['sum'] += $vpd * $rowObservationCount;
                 $weighted['vapor_pressure_deficit']['weight'] += $rowObservationCount;
             }
@@ -273,7 +287,9 @@ final class AwsMonthlySummaryService
 
         $completeness = $expectedObservations > 0 ? min(100.0, round(($actualObservations / $expectedObservations) * 100, 1)) : 0.0;
 
-        return $this->summaryValues($rows->first(), $periodLabel, $weighted, $directions, $hasPrecipitation ? round($precipitation, $decimalPlaces) : null, $actualObservations, $expectedObservations, $completeness, $integrityIssue, $summaryConfig);
+        $remarks = $actualObservations === 0 ? 'No Data' : $this->weather->summarizeMonthly($dailyRemarks);
+
+        return $this->summaryValues($rows->first(), $periodLabel, $weighted, $directions, $hasPrecipitation ? round($precipitation, $decimalPlaces) : null, $actualObservations, $expectedObservations, $completeness, $integrityIssue, $summaryConfig, $remarks);
     }
 
     private function emptyAreaSummary(Aws $row, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, string $periodLabel): array
@@ -283,15 +299,17 @@ final class AwsMonthlySummaryService
 
     private function expectedObservations(CarbonImmutable $periodStart, CarbonImmutable $periodEnd): int
     {
-        return (int) (($periodStart->startOfDay()->diffInDays($periodEnd->startOfDay()) + 1) * intdiv(1440, (int) config('aws.sampling_interval_minutes', 15)));
+        $samplingInterval = max(1, min(1440, (int) config('aws.sampling_interval_minutes', 15)));
+        return (int) (($periodStart->startOfDay()->diffInDays($periodEnd->startOfDay()) + 1) * intdiv(1440, $samplingInterval));
     }
 
-    private function summaryValues(Aws $first, string $periodLabel, array $weighted, array $directions, ?float $precipitation, int $actualObservations, int $expectedObservations, float $completeness, bool $integrityIssue, array $summaryConfig): array
+    private function summaryValues(Aws $first, string $periodLabel, array $weighted, array $directions, ?float $precipitation, int $actualObservations, int $expectedObservations, float $completeness, bool $integrityIssue, array $summaryConfig, string $remarks): array
     {
         $decimalPlaces = (int) $summaryConfig['number_decimals'];
         $vpd = $this->weightedAverage($weighted['vapor_pressure_deficit'], (int) $summaryConfig['vapor_pressure_decimals']);
+        $vaporPressure = $this->weightedAverage($weighted['vapor_pressure'], (int) $summaryConfig['vapor_pressure_decimals']);
 
-        return ['protected_area_id' => (int) $first->protected_area_id, 'protected_area_name' => $first->protectedArea?->name, 'period' => $periodLabel, 'average_atmospheric_pressure' => $this->weightedAverage($weighted['atmospheric_pressure'], $decimalPlaces), 'average_air_temperature' => $this->weightedAverage($weighted['air_temperature'], $decimalPlaces), 'average_vapor_pressure_deficit' => $vpd, 'average_vapor_pressure' => $vpd, 'average_relative_humidity' => $this->weightedAverage($weighted['relative_humidity'], $decimalPlaces), 'mean_wind_direction' => $this->circularMean($directions, $decimalPlaces), 'total_precipitation' => $precipitation, 'average_wind_speed' => $this->weightedAverage($weighted['wind_speed'], $decimalPlaces), 'observation_count' => $actualObservations, 'expected_observations' => $expectedObservations, 'data_completeness' => $completeness, 'remarks' => $this->remarks($actualObservations, $completeness, $integrityIssue, $summaryConfig)];
+        return ['protected_area_id' => (int) $first->protected_area_id, 'protected_area_name' => $first->protectedArea?->name, 'period' => $periodLabel, 'average_atmospheric_pressure' => $this->weightedAverage($weighted['atmospheric_pressure'], $decimalPlaces), 'average_air_temperature' => $this->weightedAverage($weighted['air_temperature'], $decimalPlaces), 'average_vapor_pressure_deficit' => $vpd, 'average_vapor_pressure' => $vaporPressure, 'average_relative_humidity' => $this->weightedAverage($weighted['relative_humidity'], $decimalPlaces), 'mean_wind_direction' => $this->circularMean($directions, $decimalPlaces), 'total_precipitation' => $precipitation, 'average_wind_speed' => $this->weightedAverage($weighted['wind_speed'], $decimalPlaces), 'observation_count' => $actualObservations, 'expected_observations' => $expectedObservations, 'data_completeness' => $completeness, 'remarks' => $remarks];
     }
 
     private function observationWeight(Aws $row, bool &$integrityIssue): int
@@ -328,6 +346,12 @@ final class AwsMonthlySummaryService
         return $saturation * ($humidity / 100);
     }
 
+    private function derivedVaporPressureDeficit(float $temperature, float $humidity): float
+    {
+        $saturation = 0.6108 * exp((17.27 * $temperature) / ($temperature + 237.3));
+        return $saturation - $this->derivedVaporPressure($temperature, $humidity);
+    }
+
     private function weightedAverage(array $metric, int $decimals): ?float { return $metric['weight'] > 0 ? round($metric['sum'] / $metric['weight'], $decimals) : null; }
 
     private function circularMean(array $directions, int $decimals): ?float
@@ -339,12 +363,4 @@ final class AwsMonthlySummaryService
         return round($mean, $decimals);
     }
 
-    private function remarks(int $actual, float $completeness, bool $integrityIssue, array $config): string
-    {
-        if ($actual === 0) return 'No Data';
-        if ($integrityIssue) return 'Data Requires Review';
-        if ($completeness < $config['insufficient_completeness_maximum']) return 'Insufficient Data';
-        if ($completeness < $config['regular_completeness_minimum']) return 'Incomplete Data';
-        return 'Regular';
-    }
 }

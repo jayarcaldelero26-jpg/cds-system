@@ -17,6 +17,7 @@ use App\Services\Compliance\OverdueReport;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\CalendarMovEventService;
 use App\Services\BusinessCalendarService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Database\QueryException;
@@ -211,9 +212,26 @@ class ComplianceAlertController extends Controller
         $modules = collect($calendarEvents->modules($request->user()));
         $module = $request->string('module')->toString();
         $module = $modules->contains('key', $module) ? $module : null;
-        $protectedAreaId = $request->filled('protected_area_id') && ProtectedArea::query()->whereKey($request->integer('protected_area_id'))->exists()
-            ? $request->integer('protected_area_id')
-            : null;
+        $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+        $protectedAreaId = null;
+        if ($request->filled('protected_area_id')) {
+            $protectedAreaId = $request->integer('protected_area_id');
+            $category = $organization->effectiveCategory($request->user()) ?: $organization->normalizeCategory($request->user()->section);
+            if (in_array($category, [OrganizationalAccessService::CENRO_RECORDS, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_FOCAL], true) || $category === OrganizationalAccessService::PAMO) {
+                $organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
+            }
+        }
+        $category = $organization->effectiveCategory($request->user()) ?: $organization->normalizeCategory($request->user()->section);
+        $protectedAreaQuery = $category === null
+            ? ProtectedArea::query()
+            : ($category === OrganizationalAccessService::PAMO
+                ? ProtectedArea::query()->whereKey($request->user()->protected_area_id)
+                : $organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id'));
+        $protectedAreas = $protectedAreaQuery
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map->only(['id', 'name'])
+            ->values();
 
         $nonWorkingDays = NonWorkingDay::query()
             ->whereBetween('date', [
@@ -235,7 +253,7 @@ class ComplianceAlertController extends Controller
             'month' => $month->format('Y-m'),
             'filters' => ['module' => $module, 'protected_area_id' => $protectedAreaId],
             'modules' => $modules->values(),
-            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name'])->values(),
+            'protectedAreas' => $protectedAreas,
             'movEvents' => $view === 'month' ? $calendarEvents->events($request->user(), $month, $module, $protectedAreaId) : [],
             'yearSummary' => $yearSummary,
             'nonWorkingDays' => $nonWorkingDays,

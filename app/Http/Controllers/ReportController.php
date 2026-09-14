@@ -2,39 +2,41 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\ProtectedArea;
-use App\Models\ManagementPlan;
-use App\Models\EcotourismMonitoring;
-use App\Models\IssueMonitoring;
-use App\Models\LawinMonitoring;
-use App\Models\ProgramProjectActivity;
-use App\Models\BmsRecord;
-use App\Models\BamsFlora;
-use App\Models\ImeaAssessment;
-use App\Models\Aws;
-use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
+use Inertia\Response;
+use App\Services\Reports\ExecutiveReportExportService;
+use App\Services\Reports\ExecutiveReportService;
 
 class ReportController extends Controller
 {
-    public function __construct(private readonly OrganizationalAccessService $organization) {}
+    public function __construct(private readonly ExecutiveReportService $reports) {}
 
-    public function index(Request $request)
+    public function index(Request $request): Response
     {
-        $user = $request->user();
-        $pa = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id');
-        $management = $this->organization->scopeProtectedAreaQuery(ManagementPlan::query(), $user);
+        $report = $this->reports->report($this->validatedFilters($request));
 
         return Inertia::render('Reports/Index', [
-            'stats' => [
-                'protected_areas_count' => $pa->count(),
-                'management_plans_count' => $management->count(),
-                'bms_records_count' => $this->organization->scopeProtectedAreaQuery(BmsRecord::query(), $user)->count(),
-                'bams_records_count' => $this->organization->scopeProtectedAreaQuery(BamsFlora::query(), $user)->count(),
-                'imea_assessments_count' => $this->organization->scopeProtectedAreaQuery(ImeaAssessment::query(), $user)->count(),
-                'aws_records_count' => $this->organization->scopeProtectedAreaQuery(Aws::query(), $user)->count(),
-            ],
+            'report' => $report,
+        ]);
+    }
+
+    public function export(Request $request, string $format, ExecutiveReportExportService $exports)
+    {
+        return $exports->download($this->reports->report($this->validatedFilters($request)), $format);
+    }
+
+    /** @return array<string,mixed> */
+    private function validatedFilters(Request $request): array
+    {
+        return $request->validate([
+            'year' => ['nullable', 'integer', 'between:2000,2100'],
+            'period' => ['nullable', 'string', 'max:100'],
+            'domain' => ['nullable', 'in:all,pa,engp'],
+            'office' => ['nullable', 'string', 'max:150'],
+            'protected_area_id' => ['nullable', 'integer'],
+            'workflow' => ['nullable', 'string', 'max:100'],
+            'status' => ['nullable', 'string', 'max:100'],
         ]);
     }
 }

@@ -15,7 +15,7 @@ beforeEach(function (): void {
     }
 });
 
-test('IPAF index supplies the restored analytics, annual target, and accounting data sections', function () {
+test('IPAF index supplies core revenue analysis, annual target, and accounting data sections', function () {
     $this->actingAs($this->user)->get(route('ipaf.index'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page

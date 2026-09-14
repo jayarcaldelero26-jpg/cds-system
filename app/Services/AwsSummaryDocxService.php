@@ -41,7 +41,7 @@ final class AwsSummaryDocxService
         $subtitle = $mode === 'one_month' ? 'Daily Monitoring Summary | '.$periodLabel : ($mode === 'custom_range' || $mode === 'month' ? 'Monthly Monitoring Summary | '.$periodLabel : ($mode === 'day' ? 'Daily Monitoring Summary' : 'Monitoring Summary'));
         $xml .= $this->paragraph($subtitle, 'Subtitle');
         if ($mode === 'day') $xml .= $this->paragraph('Reporting Date: '.$periodLabel, 'Meta');
-        if ($mode === 'range') $xml .= $this->paragraph('Reporting Period: '.$periodLabel, 'Meta');
+        if (in_array($mode, ['custom_range', 'range'], true)) $xml .= $this->paragraph('Reporting Period: '.$periodLabel, 'Meta');
 
         if (in_array($mode, ['one_month', 'custom_range', 'month'], true)) {
             $groups = collect($rows)->groupBy('protected_area_id')->values();
@@ -56,7 +56,7 @@ final class AwsSummaryDocxService
             if (count($rows) === 0) $xml .= $this->paragraph('No Data', 'Meta');
         }
 
-        $xml .= '<w:sectPr><w:pgSz w:w="15840" w:h="12240" w:orient="landscape"/><w:pgMar w:top="500" w:right="500" w:bottom="500" w:left="500" w:header="250" w:footer="250" w:gutter="0"/></w:sectPr></w:body></w:document>';
+        $xml .= '<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/><w:pgMar w:top="792" w:right="792" w:bottom="792" w:left="792" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body></w:document>';
 
         return $xml;
     }
@@ -66,16 +66,16 @@ final class AwsSummaryDocxService
     {
         $degree = "\u{00B0}";
         $headers = $includeProtectedArea
-            ? ['Protected Area', 'Reporting Period', 'Average Atmospheric Pressure (kPa)', 'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)', 'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')', 'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Data Completeness (%)', 'Remarks']
-            : [($mode === 'one_month' ? 'Reporting Date' : 'Month / Reporting Period'), 'Average Atmospheric Pressure (kPa)', 'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)', 'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')', 'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Data Completeness (%)', 'Remarks'];
-        $widths = $includeProtectedArea ? [1500, 1300, 1750, 1550, 1850, 1550, 1500, 1500, 1450, 950, 940] : [1600, 1800, 1550, 1800, 1650, 1550, 1600, 1550, 1200, 1540];
+            ? ['Protected Area', 'Reporting Period', 'Average Atmospheric Pressure (kPa)', 'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)', 'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')', 'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Remarks']
+            : [($mode === 'one_month' ? 'Reporting Date' : 'Month / Reporting Period'), 'Average Atmospheric Pressure (kPa)', 'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)', 'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')', 'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Remarks'];
+        $widths = $includeProtectedArea ? [1250, 1120, 1080, 1080, 1250, 950, 850, 850, 850, 1040] : [1150, 1160, 1080, 1260, 1150, 900, 850, 850, 1920];
 
-        $xml = '<w:tbl><w:tblPr><w:tblW w:w="15840" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="82938A"/><w:left w:val="single" w:sz="4" w:color="82938A"/><w:bottom w:val="single" w:sz="4" w:color="82938A"/><w:right w:val="single" w:sz="4" w:color="82938A"/><w:insideH w:val="single" w:sz="4" w:color="82938A"/><w:insideV w:val="single" w:sz="4" w:color="82938A"/></w:tblBorders></w:tblPr>';
+        $xml = '<w:tbl><w:tblPr><w:tblW w:w="10320" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="82938A"/><w:left w:val="single" w:sz="4" w:color="82938A"/><w:bottom w:val="single" w:sz="4" w:color="82938A"/><w:right w:val="single" w:sz="4" w:color="82938A"/><w:insideH w:val="single" w:sz="4" w:color="82938A"/><w:insideV w:val="single" w:sz="4" w:color="82938A"/></w:tblBorders></w:tblPr>';
         $xml .= $this->tableRow($headers, $widths, true, true);
         foreach ($rows as $index => $row) {
             $values = $includeProtectedArea
-                ? [$row['protected_area_name'], $row['period'], $row['average_atmospheric_pressure'], $row['average_air_temperature'], $row['average_vapor_pressure_deficit'], $row['average_relative_humidity'], $row['mean_wind_direction'], $row['total_precipitation'], $row['average_wind_speed'], $row['data_completeness'], $row['remarks']]
-                : [$row['period'], $row['average_atmospheric_pressure'], $row['average_air_temperature'], $row['average_vapor_pressure_deficit'], $row['average_relative_humidity'], $row['mean_wind_direction'], $row['total_precipitation'], $row['average_wind_speed'], $row['data_completeness'], $row['remarks']];
+                ? [$row['protected_area_name'], $row['period'], $row['average_atmospheric_pressure'], $row['average_air_temperature'], $row['average_vapor_pressure_deficit'], $row['average_relative_humidity'], $row['mean_wind_direction'], $row['total_precipitation'], $row['average_wind_speed'], $row['remarks']]
+                : [$row['period'], $row['average_atmospheric_pressure'], $row['average_air_temperature'], $row['average_vapor_pressure_deficit'], $row['average_relative_humidity'], $row['mean_wind_direction'], $row['total_precipitation'], $row['average_wind_speed'], $row['remarks']];
             $xml .= $this->tableRow($values, $widths, false, $index % 2 === 1);
         }
         $xml .= '</w:tbl>';
@@ -86,18 +86,18 @@ final class AwsSummaryDocxService
     /** @param array<int, mixed> $values @param array<int, int> $widths */
     private function tableRow(array $values, array $widths, bool $header, bool $alternate): string
     {
-        $xml = '<w:tr>'.($header ? '<w:trPr><w:tblHeader/></w:trPr>' : '');
+        $xml = '<w:tr>'.($header ? '<w:trPr><w:tblHeader/></w:trPr>' : '<w:trPr><w:cantSplit/></w:trPr>');
         foreach (array_values($values) as $index => $value) {
             $fill = $header ? '166534' : ($alternate ? 'F0F6F1' : 'FFFFFF');
             $text = $value === null || $value === '' ? "\u{2014}" : (string) $value;
-            $xml .= '<w:tc><w:tcPr><w:tcW w:w="'.($widths[$index] ?? 1500).'" w:type="dxa"/><w:shd w:fill="'.$fill.'"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:sz w:val="'.($header ? '12' : '14').'"/>'.($header ? '<w:color w:val="FFFFFF"/><w:b/>' : '').'</w:rPr><w:t xml:space="preserve">'.$this->xml($text).'</w:t></w:r></w:p></w:tc>';
+            $xml .= '<w:tc><w:tcPr><w:tcW w:w="'.($widths[$index] ?? 1000).'" w:type="dxa"/><w:shd w:fill="'.$fill.'"/></w:tcPr><w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/>'.($header ? '<w:color w:val="FFFFFF"/><w:b/>' : '').'</w:rPr><w:t xml:space="preserve">'.$this->xml($text).'</w:t></w:r></w:p></w:tc>';
         }
         return $xml.'</w:tr>';
     }
 
     private function paragraph(string $text, string $style): string
     {
-        return '<w:p><w:pPr><w:pStyle w:val="'.$style.'"/></w:pPr><w:r><w:t xml:space="preserve">'.$this->xml($text).'</w:t></w:r></w:p>';
+        return '<w:p><w:pPr><w:pStyle w:val="'.$style.'"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/></w:rPr><w:t xml:space="preserve">'.$this->xml($text).'</w:t></w:r></w:p>';
     }
 
     private function xml(string $value): string
@@ -122,7 +122,7 @@ final class AwsSummaryDocxService
 
     private function styles(): string
     {
-        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="14"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="80"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="180"/></w:pPr><w:rPr><w:sz w:val="20"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="22"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Meta"><w:name w:val="Meta"/><w:basedOn w:val="Normal"/><w:rPr><w:sz w:val="16"/></w:rPr></w:style></w:styles>';
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="80"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="80"/></w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:b/><w:sz w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:basedOn w:val="Normal"/><w:pPr><w:jc w:val="center"/><w:spacing w:after="180"/></w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:spacing w:before="160" w:after="80"/></w:pPr><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:b/><w:sz w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Meta"><w:name w:val="Meta"/><w:basedOn w:val="Normal"/><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:style></w:styles>';
     }
 
     private function settings(): string

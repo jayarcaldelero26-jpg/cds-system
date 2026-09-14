@@ -3,12 +3,16 @@
 use App\Models\NonWorkingDay;
 use App\Models\BmsReportSubmission;
 use App\Models\BamsReportSubmission;
+use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 uses(RefreshDatabase::class);
 
@@ -163,4 +167,143 @@ test('calendar ENGP events and year summaries respect the development office sco
         ->assertInertia(fn ($page) => $page
             ->where('yearSummary.months.08.submitted_movs', 1)
             ->where('yearSummary.overview.submitted_movs', 1));
+});
+
+test('calendar month and year views scope PA events and options to the PAMO assignment', function (): void {
+    $pamo = User::factory()->create([
+        'unit_assignment' => 'conservation',
+        'section' => 'PAMO',
+        'office_designated' => 'PENRO Davao Oriental',
+    ]);
+    $pamo->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'),
+        Permission::findOrCreate('bms.view', 'web'),
+    ]);
+
+    $area = ProtectedArea::query()->create([
+        'name' => 'PAMO Assigned Area', 'category' => 'National Park', 'municipality' => 'Mati',
+        'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $pamo->id, 'updated_by' => $pamo->id,
+    ]);
+    $otherArea = ProtectedArea::query()->create([
+        'name' => 'PAMO Unrelated Area', 'category' => 'Protected Landscape', 'municipality' => 'Baganga',
+        'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $pamo->id, 'updated_by' => $pamo->id,
+    ]);
+    $pamo->update(['protected_area_id' => $area->id]);
+
+    BmsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-20']);
+    BmsReportSubmission::query()->create(['protected_area_id' => $otherArea->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-21']);
+
+    $this->actingAs($pamo)->get(route('business-calendar.index', ['month' => '2026-08']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movEvents', 1)
+            ->where('movEvents.0.protected_area_id', $area->id)
+            ->has('protectedAreas', 1)
+            ->where('protectedAreas.0.id', $area->id));
+
+    $this->actingAs($pamo)->get(route('business-calendar.index', ['view' => 'year', 'year' => 2026]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('yearSummary.overview.submitted_movs', 1)
+            ->has('protectedAreas', 1)
+            ->where('protectedAreas.0.id', $area->id));
+
+    $this->actingAs($pamo)->get(route('business-calendar.index', ['month' => '2026-08', 'protected_area_id' => $otherArea->id]))
+        ->assertForbidden();
+});
+
+test('calendar PA sources scope CENRO events and options to supervised areas', function (): void {
+    $cenro = User::factory()->create([
+        'unit_assignment' => 'conservation',
+        'section' => 'CENRO_CDS_FOCAL',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    $cenro->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'),
+        Permission::findOrCreate('technical-reports.view', 'web'),
+        Permission::findOrCreate('bms.view', 'web'),
+    ]);
+    $owner = User::factory()->create();
+    $bagangaOffice = OrganizationalOffice::query()->where('name', 'CENRO Baganga')->firstOrFail();
+    $matiOffice = OrganizationalOffice::query()->where('name', 'CENRO Mati')->firstOrFail();
+
+    $supervised = ProtectedArea::query()->create([
+        'name' => 'CENRO Supervised Area', 'category' => 'National Park', 'municipality' => 'Baganga',
+        'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    $unsupervised = ProtectedArea::query()->create([
+        'name' => 'CENRO Unsupervised Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati',
+        'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $supervised->id,
+        'organizational_office_id' => $bagangaOffice->id,
+        'assignment_type' => 'supervising',
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $unsupervised->id,
+        'organizational_office_id' => $matiOffice->id,
+        'assignment_type' => 'supervising',
+    ]);
+
+    BmsReportSubmission::query()->create(['protected_area_id' => $supervised->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-20']);
+    BmsReportSubmission::query()->create(['protected_area_id' => $unsupervised->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-21']);
+    ConservationReportSubmission::query()->create([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $supervised->id, 'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Regular PAMB', 'document_type' => 'Report', 'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-15', 'date_received_penro' => '2026-08-22',
+    ]);
+    ConservationReportSubmission::query()->create([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $unsupervised->id, 'target_office' => 'CENRO Mati',
+        'activity_name' => 'Regular PAMB', 'document_type' => 'Report', 'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-15', 'date_received_penro' => '2026-08-23',
+    ]);
+
+    $this->actingAs($cenro)->get(route('business-calendar.index', ['month' => '2026-08']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('movEvents', 2)
+            ->where('movEvents.0.protected_area_id', $supervised->id)
+            ->where('movEvents.1.protected_area_id', $supervised->id)
+            ->has('protectedAreas', 1)
+            ->where('protectedAreas.0.id', $supervised->id));
+
+    $this->actingAs($cenro)->get(route('business-calendar.index', ['view' => 'year', 'year' => 2026]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('yearSummary.overview.submitted_movs', 2)
+            ->has('protectedAreas', 1)
+            ->where('protectedAreas.0.id', $supervised->id));
+
+    $this->actingAs($cenro)->get(route('business-calendar.index', ['month' => '2026-08', 'protected_area_id' => $unsupervised->id]))
+        ->assertForbidden();
+});
+
+test('PENRO and global calendar users retain broad PA visibility', function (): void {
+    $owner = User::factory()->create();
+    $areas = collect(['Calendar PENRO Area', 'Calendar Global Area'])->map(fn (string $name) => ProtectedArea::query()->create([
+        'name' => $name, 'category' => 'National Park', 'municipality' => 'Mati', 'province' => 'Davao Oriental',
+        'region' => 'XI', 'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]));
+    foreach ($areas as $area) {
+        BmsReportSubmission::query()->create(['protected_area_id' => $area->id, 'semester' => '1st Semester', 'date_received_penro' => '2026-08-20']);
+    }
+
+    $penro = User::factory()->create([
+        'unit_assignment' => 'conservation', 'section' => 'PENRO_CDS_FOCAL', 'office_designated' => 'PENRO Davao Oriental',
+    ]);
+    $penro->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'), Permission::findOrCreate('bms.view', 'web'),
+    ]);
+    $this->actingAs($penro)->get(route('business-calendar.index', ['month' => '2026-08', 'module' => 'bms']))
+        ->assertInertia(fn ($page) => $page->has('movEvents', 2)->has('protectedAreas', 2));
+
+    $adminRole = Role::findOrCreate('Super Admin', 'web');
+    $adminRole->syncPermissions([
+        Permission::findOrCreate('reports.view', 'web'), Permission::findOrCreate('bms.view', 'web'),
+    ]);
+    $admin = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $admin->assignRole($adminRole);
+    $this->actingAs($admin)->get(route('business-calendar.index', ['month' => '2026-08', 'module' => 'bms']))
+        ->assertInertia(fn ($page) => $page->has('movEvents', 2)->has('protectedAreas', 2));
 });

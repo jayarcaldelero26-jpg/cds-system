@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 360" role="img" aria-label="Layered green mountain and forest landscape">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#176b48"/>
+      <stop offset="0.55" stop-color="#0d573c"/>
+      <stop offset="1" stop-color="#073b2b"/>
+    </linearGradient>
+    <linearGradient id="far-ridge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#83b99a" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#3d8764" stop-opacity=".34"/>
+    </linearGradient>
+    <linearGradient id="middle-ridge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2d7957" stop-opacity=".76"/>
+      <stop offset="1" stop-color="#14553b" stop-opacity=".9"/>
+    </linearGradient>
+    <linearGradient id="front-ridge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#104d36"/>
+      <stop offset="1" stop-color="#042a1e"/>
+    </linearGradient>
+    <radialGradient id="atmosphere" cx="78%" cy="20%" r="42%">
+      <stop offset="0" stop-color="#b6e2c2" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#b6e2c2" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soften" x="-10%" y="-20%" width="120%" height="140%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <path id="pine" d="M0 76V53l13-18L6 35 18 17 30 35l-7 0 13 18v23H0Z"/>
+  </defs>
+
+  <rect width="1920" height="360" fill="url(#sky)"/>
+  <rect width="1920" height="360" fill="url(#atmosphere)"/>
+
+  <path d="M0 213 C116 174 177 164 278 190 C378 216 445 148 550 157 C656 166 710 214 812 181 C920 147 980 110 1080 145 C1182 180 1275 138 1376 163 C1479 188 1574 128 1668 157 C1760 185 1840 149 1920 131 V360 H0Z" fill="url(#far-ridge)" filter="url(#soften)"/>
+  <path d="M0 239 C112 207 199 180 295 214 C402 252 493 175 596 191 C704 208 756 250 869 202 C974 157 1040 150 1145 192 C1241 230 1314 185 1419 199 C1516 213 1593 166 1688 193 C1782 220 1850 185 1920 174 V360 H0Z" fill="url(#far-ridge)"/>
+
+  <path d="M0 275 C97 246 154 213 250 239 C348 266 412 206 509 228 C607 250 669 274 766 230 C858 188 925 184 1020 226 C1116 269 1191 218 1291 235 C1389 252 1451 209 1540 237 C1636 267 1714 209 1811 231 C1859 242 1894 228 1920 218 V360 H0Z" fill="url(#middle-ridge)"/>
+  <path d="M0 309 C118 274 195 251 292 282 C380 310 461 265 555 283 C655 303 727 319 822 273 C913 229 1004 237 1098 278 C1194 321 1270 274 1370 290 C1464 305 1540 264 1630 288 C1718 311 1817 269 1920 257 V360 H0Z" fill="url(#front-ridge)"/>
+
+  <path d="M0 331 C93 310 155 293 249 319 C333 342 410 305 487 323 C582 346 650 351 746 315 C825 286 900 286 975 319 C1059 357 1144 314 1226 326 C1325 340 1391 305 1477 326 C1570 349 1648 312 1738 324 C1819 335 1873 316 1920 309 V360 H0Z" fill="#03251a"/>
+
+  <g fill="#021f16" opacity=".98">
+    <use href="#pine" transform="translate(16 273) scale(1.25 1.3)"/>
+    <use href="#pine" transform="translate(92 295) scale(.78 .83)"/>
+    <use href="#pine" transform="translate(168 269) scale(1.05 1.12)"/>
+    <use href="#pine" transform="translate(247 300) scale(.72 .75)"/>
+    <use href="#pine" transform="translate(322 278) scale(1.35 1.38)"/>
+    <use href="#pine" transform="translate(422 296) scale(.9 .92)"/>
+    <use href="#pine" transform="translate(502 270) scale(1.12 1.18)"/>
+    <use href="#pine" transform="translate(594 301) scale(.75 .78)"/>
+    <use href="#pine" transform="translate(672 278) scale(1.3 1.32)"/>
+    <use href="#pine" transform="translate(782 293) scale(.84 .87)"/>
+    <use href="#pine" transform="translate(859 266) scale(1.22 1.28)"/>
+    <use href="#pine" transform="translate(965 298) scale(.8 .84)"/>
+    <use href="#pine" transform="translate(1046 274) scale(1.35 1.4)"/>
+    <use href="#pine" transform="translate(1158 297) scale(.78 .8)"/>
+    <use href="#pine" transform="translate(1233 270) scale(1.15 1.2)"/>
+    <use href="#pine" transform="translate(1332 300) scale(.7 .74)"/>
+    <use href="#pine" transform="translate(1408 275) scale(1.3 1.35)"/>
+    <use href="#pine" transform="translate(1515 294) scale(.86 .9)"/>
+    <use href="#pine" transform="translate(1594 269) scale(1.18 1.23)"/>
+    <use href="#pine" transform="translate(1698 297) scale(.76 .8)"/>
+    <use href="#pine" transform="translate(1778 273) scale(1.32 1.36)"/>
+    <use href="#pine" transform="translate(1880 294) scale(.9 .94)"/>
+  </g>
+
+  <path d="M0 346 C160 326 271 340 398 348 C522 356 661 331 789 345 C915 358 1045 335 1175 348 C1309 362 1431 333 1559 347 C1680 359 1807 336 1920 344 V360 H0Z" fill="#011a12"/>
+</svg>

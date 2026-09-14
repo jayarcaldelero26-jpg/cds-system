@@ -18,7 +18,9 @@ use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 
@@ -31,6 +33,7 @@ final class CalendarMovEventService
         private readonly ConservationReportWorkflowRegistry $conservationWorkflows,
         private readonly EngpReportWorkflowRegistry $engpWorkflows,
         private readonly OrganizationalAccessService $organization,
+        private readonly PambSubmissionAccessService $pambAccess,
     ) {}
 
     /** @return list<array{key:string,label:string}> */
@@ -62,11 +65,13 @@ final class CalendarMovEventService
                     return;
                 }
 
-                $query = $source['model']::query()
-                    ->whereBetween($source['date'], [$year->startOfYear()->toDateString(), $year->endOfYear()->toDateString()]);
-                if ($key === 'engp') {
-                    $this->organization->scopeDevelopmentQuery($query, $user);
-                }
+                $query = $this->scopeSourceQuery(
+                    $source['model']::query()
+                        ->whereBetween($source['date'], [$year->startOfYear()->toDateString(), $year->endOfYear()->toDateString()]),
+                    $source,
+                    $key,
+                    $user,
+                );
                 if ($source['protected_area'] !== null && $protectedAreaId !== null) {
                     $query->where($source['protected_area'], $protectedAreaId);
                 }
@@ -120,11 +125,12 @@ final class CalendarMovEventService
                     return collect();
                 }
 
-                $query = $source['model']::query()
-                    ->whereBetween($source['date'], [$start, $end]);
-                if ($key === 'engp') {
-                    $this->organization->scopeDevelopmentQuery($query, $user);
-                }
+                $query = $this->scopeSourceQuery(
+                    $source['model']::query()->whereBetween($source['date'], [$start, $end]),
+                    $source,
+                    $key,
+                    $user,
+                );
 
                 if ($source['protected_area'] !== null) {
                     $query->when($protectedAreaId !== null, fn ($query) => $query->where($source['protected_area'], $protectedAreaId))
@@ -139,6 +145,35 @@ final class CalendarMovEventService
             })
             ->sortBy([['submission_date', 'asc'], ['module', 'asc'], ['title', 'asc']])
             ->values();
+    }
+
+    /**
+     * Apply organizational visibility before calendar records are loaded or
+     * normalized. PAMB submissions retain their stricter workflow scope.
+     */
+    private function scopeSourceQuery(Builder $query, array $source, string $key, User $user): Builder
+    {
+        if ($key === 'engp') {
+            return $this->organization->scopeDevelopmentQuery($query, $user);
+        }
+
+        if (($source['protected_area'] ?? null) === null) {
+            return $query;
+        }
+
+        $category = $this->organization->effectiveCategory($user) ?: $this->organization->normalizeCategory($user->section);
+        if ($category === null) {
+            return $query;
+        }
+        if ($category === OrganizationalAccessService::PAMO) {
+            return $query->where($source['protected_area'], $user->protected_area_id);
+        }
+
+        if ($key === 'conservation-reports') {
+            return $this->pambAccess->scopeQuery($query, $user);
+        }
+
+        return $this->organization->scopeProtectedAreaQuery($query, $user, $source['protected_area']);
     }
 
     /** @return array<string, array<string, mixed>> */

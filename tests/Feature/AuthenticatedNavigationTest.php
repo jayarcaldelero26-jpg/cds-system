@@ -51,6 +51,19 @@ test('sidebar scopes the current Inertia URL for active navigation checks', func
         ->and($sidebar)->toContain('genericModuleNavigation');
 });
 
+test('active report monitoring navigation exposes Executive Reports without a duplicate export item', function () {
+    $sidebar = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
+    $reports = strpos($sidebar, "{ label: 'Reports', href: '/reports'");
+    $tracking = strpos($sidebar, "{ label: 'Submission Tracking'");
+
+    expect($reports)->toBeGreaterThan(-1)
+        ->and($reports)->toBeLessThan($tracking)
+        ->and(substr_count($sidebar, "label: 'Reports'"))->toBe(1)
+        ->and($sidebar)->toContain("permission: 'canViewReports'")
+        ->and($sidebar)->toContain("href: '/reports'")
+        ->and($sidebar)->not->toContain("href: '/reports/export'");
+});
+
 test('sidebar preserves desktop scroll without active-item auto-scrolling', function () {
     $sidebar = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
 

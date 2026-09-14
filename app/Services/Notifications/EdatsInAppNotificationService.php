@@ -29,6 +29,24 @@ final class EdatsInAppNotificationService
         return in_array($data['type'] ?? null, [self::DUE_SOON, self::OVERDUE, self::WORKFLOW], true);
     }
 
+    /**
+     * Bell alerts are operational reminders. Resolve them to the authorized
+     * tracking workspace instead of persisting a privileged admin page URL.
+     */
+    public static function actionUrl(array $data, User $user): string
+    {
+        if (! $user->can('reports.view')) {
+            return route('dashboard');
+        }
+
+        $source = self::trackingSource((string) ($data['source_type'] ?? ''));
+        $sourceId = filter_var($data['source_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+        return $source !== null && $sourceId !== false
+            ? route('submission-tracking.index', ['focus_source' => $source, 'focus_id' => $sourceId])
+            : route('submission-tracking.index');
+    }
+
     public function syncDeadlineNotifications(?CarbonImmutable $today = null): void
     {
        $today ??= CarbonImmutable::now('Asia/Manila')->startOfDay();
@@ -46,7 +64,6 @@ final class EdatsInAppNotificationService
             'location' => $report->protectedAreaName !== 'Protected Area not specified' ? $report->protectedAreaName : $report->targetOffice,
             'office' => $report->targetOffice,
             'protected_area' => $report->protectedAreaName,
-            'url' => route('compliance-alerts.index'),
         ];
         $this->deliver($context + [
             'type' => $type,
@@ -175,9 +192,26 @@ final class EdatsInAppNotificationService
         foreach ($this->recipients($payload['office'] ?? null) as $user) {
             $exists = $user->notifications()->get()->contains(fn ($notification): bool => ($notification->data['dedup_key'] ?? null) === $payload['dedup_key']);
             if (! $exists) {
-                $user->notify(new EdatsInAppNotification($payload));
+                $user->notify(new EdatsInAppNotification([...$payload, 'url' => self::actionUrl($payload, $user)]));
             }
         }
+    }
+
+    private static function trackingSource(string $sourceType): ?string
+    {
+        return match ($sourceType) {
+            \App\Models\ConservationReportSubmission::class => 'conservation',
+            \App\Models\EngpReportSubmission::class => 'engp',
+            \App\Models\BmsReportSubmission::class => 'bms',
+            \App\Models\BamsReportSubmission::class => 'bams',
+            \App\Models\ImeaReportSubmission::class => 'imea',
+            \App\Models\ImeaFacilityMaintenanceReport::class => 'imea-maintenance',
+            \App\Models\Aws::class => 'aws',
+            \App\Models\IpafManagementReport::class => 'ipaf-management',
+            \App\Models\IpafRevenueCollection::class => 'revenue',
+            \App\Models\ManagementPlan::class => 'management-plans',
+            default => null,
+        };
     }
 
     /** @return Collection<int, User> */

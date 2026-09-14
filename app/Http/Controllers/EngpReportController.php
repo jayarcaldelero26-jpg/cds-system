@@ -30,7 +30,7 @@ class EngpReportController extends Controller
         }
         $config = $workflow ? $this->workflows->find($workflow) : null;
         abort_if($workflow && ! $config, 404);
-        $year = $request->integer('year') ?: 2026;
+        $year = $this->resolveYear($request->input('year') ?? $request->input('reporting_year'));
         $query = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->when($workflow, fn ($q) => $q->where('workflow_key', $workflow));
         $query->when($request->filled('office'), fn ($q) => $q->where('office', $request->input('office')))
             ->when($request->filled('period_key'), fn ($q) => $q->where('period_key', $request->input('period_key')))
@@ -45,6 +45,12 @@ class EngpReportController extends Controller
                 $q->where(fn ($inner) => $inner->where('office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('section_name', 'like', "%{$search}%"));
             });
         $rows = $query->with('releaseEvents')->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString()->through(fn (EngpReportSubmission $row) => $this->data($row));
+        $existingYears = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())
+            ->select('reporting_year')->distinct()->pluck('reporting_year')->all();
+        $years = $this->workflows->availableYears($existingYears, $year);
+        $periodsByYear = $config
+            ? collect($years)->mapWithKeys(fn (int $candidateYear): array => [(string) $candidateYear => $this->workflows->periods($workflow, $candidateYear)])->all()
+            : [];
         $offices = collect($config['offices'] ?? $this->allOffices())
             ->filter(fn (string $office): bool => $this->organization->canUseDevelopmentOffice($request->user(), $office))
             ->values()
@@ -55,9 +61,12 @@ class EngpReportController extends Controller
             'workflowConfig' => $config,
             'workflows' => $this->workflows->all(),
             'submissions' => $rows,
+            'year' => $year,
             'periods' => $config ? $this->workflows->periods($workflow, $year) : [],
+            'periodsByYear' => $periodsByYear,
+            'years' => $years,
             'offices' => $offices,
-            'filters' => $request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']),
+            'filters' => [...$request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']), 'year' => $year],
             'summary' => $workflow ? null : $this->summary($year, $request->user()),
             'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with('releaseEvents')->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
         ]);
@@ -103,12 +112,12 @@ class EngpReportController extends Controller
 
     private function validateData(Request $request, string $workflow, array $config, bool $editing): array
     {
-        $year = $request->integer('reporting_year') ?: 2026;
+        $year = $request->integer('reporting_year') ?: CarbonImmutable::now('Asia/Manila')->year;
         $periodKeys = collect($this->workflows->periods($workflow, $year))->pluck('key')->all();
         return $request->validate([
             'office' => ['required', Rule::in($config['offices'])],
             'section_name' => ['nullable', 'string', 'max:255'],
-            'reporting_year' => ['required', 'integer', 'between:2000,2100', Rule::in([2026])],
+            'reporting_year' => ['required', 'integer', 'between:2000,2100'],
             'period_key' => ['required', Rule::in($periodKeys)],
             'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx', 'max:10240'],
             'mov_external_url' => ['nullable', 'url', 'max:2048', function (string $attribute, mixed $value, \Closure $fail): void {
@@ -240,5 +249,14 @@ class EngpReportController extends Controller
     private function allOffices(): array
     {
         return collect($this->workflows->all())->flatMap(fn (array $workflow) => $workflow['offices'])->unique()->values()->all();
+    }
+
+    private function resolveYear(mixed $value): int
+    {
+        $year = filter_var($value, FILTER_VALIDATE_INT);
+
+        return $year !== false && $year >= 2000 && $year <= 2100
+            ? (int) $year
+            : CarbonImmutable::now('Asia/Manila')->year;
     }
 }
