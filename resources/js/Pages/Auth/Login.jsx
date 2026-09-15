@@ -10,10 +10,12 @@ export default function Login() {
     const { data, setData, post, processing, errors } = useForm({ email: '', password: '', remember: false });
     const [showPassword, setShowPassword] = useState(false);
     const [pendingApproval, setPendingApproval] = useState(Boolean(flash.pending_approval));
+    const [inactiveAccount, setInactiveAccount] = useState(Boolean(flash.account_inactive));
 
     useEffect(() => {
         if (flash.pending_approval) setPendingApproval(true);
-    }, [flash.pending_approval]);
+        if (flash.account_inactive) setInactiveAccount(true);
+    }, [flash.account_inactive, flash.pending_approval]);
 
     const submit = (event) => {
         event.preventDefault();
@@ -27,6 +29,12 @@ export default function Login() {
                 title="Account Pending Approval"
                 message="Your registration request is still awaiting administrator approval. Please contact the system administrator if you need assistance with your account activation."
                 onClose={() => setPendingApproval(false)}
+            />
+            <SuccessDialog
+                open={inactiveAccount}
+                title="Account Inactive"
+                message="This account has been deactivated. Please contact the system administrator if you need access restored."
+                onClose={() => setInactiveAccount(false)}
             />
             <div className="mt-5">
                 <div className="border-b border-slate-200/80 pb-4 dark:border-emerald-100/15">

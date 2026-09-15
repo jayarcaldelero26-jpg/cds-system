@@ -31,8 +31,12 @@ class DashboardController extends Controller
     {
         $user = $request->user();
 
-        if ($user->hasRole('no_role') || !$user->is_active) {
+        if (! $user->is_approved) {
             return Inertia::render('Auth/WaitingApproval');
+        }
+
+        if (! $user->is_active) {
+            return redirect()->route('login')->with('account_inactive', true);
         }
 
         if ($request->string('view')->toString() === 'combined') {

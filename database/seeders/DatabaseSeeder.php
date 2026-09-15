@@ -27,8 +27,14 @@ class DatabaseSeeder extends Seeder
         // The initial administrator password must be supplied explicitly for a
         // deliberate local/bootstrap seed. Never keep a usable credential in
         // tracked source code.
-        $adminEmail = trim((string) env('EDATS_SEED_ADMIN_EMAIL', 'tempcdsims@gmail.com'));
+        $adminEmail = trim((string) env('EDATS_SEED_ADMIN_EMAIL', ''));
         $adminPassword = (string) env('EDATS_SEED_ADMIN_PASSWORD', '');
+
+        if ($adminEmail === '') {
+            $this->command?->warn('Seeded administrator and sample records were skipped. Set EDATS_SEED_ADMIN_EMAIL and EDATS_SEED_ADMIN_PASSWORD for an explicit local/bootstrap seed.');
+            return;
+        }
+
         $admin = User::where('email', $adminEmail)->first();
         if (!$admin) {
             if ($adminPassword === '') {
@@ -42,12 +48,22 @@ class DatabaseSeeder extends Seeder
                 'password' => Hash::make($adminPassword),
                 'office_designated' => 'PENRO Davao Oriental',
                 'section' => 'CDS',
+                'is_approved' => true,
                 'is_active' => true,
             ]);
         }
 
         if (!$admin->hasRole('CDS Admin')) {
             $admin->assignRole($adminRole);
+        }
+
+        // An explicitly configured bootstrap administrator is never left in
+        // the ordinary registration approval state.
+        if (! $admin->is_approved || ! $admin->is_active) {
+            $admin->update([
+                'is_approved' => true,
+                'is_active' => true,
+            ]);
         }
 
         // 💡 4. ILAGAY DINHI ANG EMAIL SA IMONG MGA STAFF

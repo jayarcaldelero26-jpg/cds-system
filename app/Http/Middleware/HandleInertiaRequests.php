@@ -19,13 +19,28 @@ class HandleInertiaRequests extends Middleware
 
     public function handle(Request $request, Closure $next)
     {
-        // I-check kung naka-login ang user pero gi-deactivate siya (is_active = false)
-        if (Auth::check() && !Auth::user()->is_active) {
+        $user = Auth::user();
+
+        // Keep legacy privileged accounts usable after approval state was
+        // introduced. Ordinary users never receive this compatibility path.
+        if ($user && app(OrganizationalAccessService::class)->isGlobal($user) && ! $user->is_approved) {
+            $user->forceFill(['is_approved' => true])->saveQuietly();
+        }
+
+        if ($user && ! $user->is_approved) {
             Auth::guard('web')->logout();
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
             return redirect()->route('login')->with('pending_approval', true);
+        }
+
+        if ($user && ! $user->is_active) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+
+            return redirect()->route('login')->with('account_inactive', true);
         }
 
         return parent::handle($request, $next);
@@ -76,6 +91,7 @@ class HandleInertiaRequests extends Middleware
                     'account_role' => $organization->accountRole($user),
                     'user_category' => $organization->effectiveCategory($user),
                     'is_active' => $user->is_active,
+                    'is_approved' => $user->is_approved,
                 ] : null,
                 'canManageUsers' => $isAdmin,
                 'canManagePasskeys' => $isAdmin,
@@ -213,6 +229,7 @@ class HandleInertiaRequests extends Middleware
                 'error' => fn () => $request->session()->get('error'),
                 'registration_success' => fn () => $request->session()->get('registration_success'),
                 'pending_approval' => fn () => $request->session()->get('pending_approval'),
+                'account_inactive' => fn () => $request->session()->get('account_inactive'),
             ],
             'status' => fn (): ?string => $request->session()->get('status'),
         ];

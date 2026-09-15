@@ -29,8 +29,13 @@ class AuthenticatedSessionController extends Controller
 
         $user = $request->user();
 
-        // 🚀 I-check kung aktibo ba ang user account
-        if ($user && !$user->is_active) {
+        // Legacy privileged accounts predate is_approved. Their authority is
+        // role-based, so normalize only CDS Admin/Super Admin accounts here.
+        if ($user && app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($user) && ! $user->is_approved) {
+            $user->forceFill(['is_approved' => true])->saveQuietly();
+        }
+
+        if ($user && ! $user->is_approved) {
             Auth::guard('web')->logout();
 
             $request->session()->invalidate();
@@ -38,6 +43,16 @@ class AuthenticatedSessionController extends Controller
             $request->session()->regenerateToken();
 
             return redirect()->route('login')->with('pending_approval', true);
+        }
+
+        if ($user && ! $user->is_active) {
+            Auth::guard('web')->logout();
+
+            $request->session()->invalidate();
+
+            $request->session()->regenerateToken();
+
+            return redirect()->route('login')->with('account_inactive', true);
         }
 
         $request->session()->regenerate();

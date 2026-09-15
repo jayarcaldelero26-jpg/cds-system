@@ -26,13 +26,17 @@ test('user details exposes the saved assignment and state-specific administrativ
     $page = File::get(resource_path('js/Pages/Admin/Users/Index.jsx'));
 
     expect($page)
+        ->toContain("if (!user?.is_approved) return { label: 'Pending Approval', variant: 'pending' }")
+        ->toContain("if (user?.is_active) return { label: 'Active', variant: 'active' }")
         ->toContain('User Category')
         ->toContain('Office Designated')
         ->toContain('Protected Area / PAMO Assignment')
         ->toContain('Registration Date')
         ->toContain('Last Updated')
         ->toContain('Activate Account')
+        ->toContain('Approve Account')
         ->toContain('Deactivate Account')
+        ->toContain('Approval Status')
         ->toContain('Delete User')
         ->toContain('router.patch(`/admin/users/${userToActivate.id}/activate`');
 });
@@ -77,6 +81,7 @@ test('user edit form exposes status as read-only and keeps activation in adminis
     $index = File::get(resource_path('js/Pages/Admin/Users/Index.jsx'));
 
     expect($index)
+        ->toContain('/approve')
         ->toContain('Deactivate Account')
         ->toContain('Activate Account');
 });

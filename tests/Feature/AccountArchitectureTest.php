@@ -3,6 +3,7 @@
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
+use Database\Seeders\DatabaseSeeder;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 
@@ -18,6 +19,24 @@ test('business account roles are only User and Super Admin', function (): void {
         ['value' => 'User', 'label' => 'User'],
         ['value' => 'Super Admin', 'label' => 'Super Admin'],
     ]);
+});
+
+test('the explicit bootstrap administrator is seeded approved and active', function (): void {
+    putenv('EDATS_SEED_ADMIN_EMAIL=bootstrap-admin@example.test');
+    putenv('EDATS_SEED_ADMIN_PASSWORD=Password123!');
+
+    try {
+        $this->seed(DatabaseSeeder::class);
+    } finally {
+        putenv('EDATS_SEED_ADMIN_EMAIL');
+        putenv('EDATS_SEED_ADMIN_PASSWORD');
+    }
+
+    $admin = User::where('email', 'bootstrap-admin@example.test')->firstOrFail();
+
+    expect($admin->is_approved)->toBeTrue()
+        ->and($admin->is_active)->toBeTrue()
+        ->and($admin->hasRole('CDS Admin'))->toBeTrue();
 });
 
 test('supported operational groups contain every category once with PENRO TSD Chief in the PENRO group', function (): void {

@@ -50,6 +50,7 @@ class UserController extends Controller
                     'account_role' => $organization->accountRole($user),
                     'protected_area_name' => $user->protectedArea?->name,
                     'access_configured' => $user->roles->contains(fn ($role): bool => $role->name !== 'no_role'),
+                    'is_approved' => (bool) $user->is_approved,
                     'is_active' => (bool) $user->is_active,
                     'created_at' => $user->created_at?->toDateString(),
                     'updated_at' => $user->updated_at?->toDateString(),
@@ -120,6 +121,7 @@ class UserController extends Controller
                 'unit_assignment' => $user->unit_assignment,
                 'effective_category' => app(OrganizationalAccessService::class)->effectiveCategory($user),
                 'operational_group' => $organization->operationalGroupForCategory(app(OrganizationalAccessService::class)->effectiveCategory($user), $user->unit_assignment),
+                'is_approved' => (bool) $user->is_approved,
                 'is_active' => (bool) $user->is_active,
             ],
             'operationalGroups' => $organization->operationalGroups(),
@@ -158,6 +160,10 @@ class UserController extends Controller
             $data['is_active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN);
         }
 
+        if (($data['is_active'] ?? null) === true && ! $user->is_approved) {
+            throw ValidationException::withMessages(['is_active' => 'Approve the account before activating it.']);
+        }
+
         if (! $user->is_active && ($data['is_active'] ?? false)) {
             $activationError = $this->activationError($user, $data, $role);
             if ($activationError) {
@@ -180,6 +186,10 @@ class UserController extends Controller
     public function activate(User $user): RedirectResponse
     {
         $this->authorize('update', $user);
+
+        if (! $user->is_approved) {
+            return back()->with('error', 'Approve the account before activating it.');
+        }
 
         if ($user->is_active) {
             return back()->with('error', 'This account is already active.');
@@ -223,6 +233,40 @@ class UserController extends Controller
         );
 
         return to_route('admin.users.index')->with('success', 'User account activated successfully.');
+    }
+
+    /** Approve and activate a pending account without changing its access data. */
+    public function approve(User $user): RedirectResponse
+    {
+        $this->authorize('update', $user);
+
+        if ($user->is_approved) {
+            return back()->with('error', 'This account is already approved.');
+        }
+
+        $before = $user->only(['is_approved', 'is_active']);
+
+        DB::transaction(function () use ($user): void {
+            $user->update([
+                'is_approved' => true,
+                'is_active' => true,
+            ]);
+        });
+
+        app(AuditLogService::class)->record(
+            'user_management',
+            'User Approved',
+            User::class,
+            $user->id,
+            'User Management',
+            'Approved a pending user account.',
+            [
+                'before' => $before,
+                'after' => $user->fresh()->only(['is_approved', 'is_active']),
+            ],
+        );
+
+        return to_route('admin.users.index')->with('success', 'User account approved successfully.');
     }
 
     /**

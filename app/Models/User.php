@@ -20,6 +20,7 @@ use Laravel\Passkeys\PasskeyAuthenticatable;
     'office_designated', // 🚀 Gidugang na diri
     'section',           // 🚀 Gidugang na diri
     'unit_assignment',
+    'is_approved',
     'is_active',
     'protected_area_id'
 ])]
@@ -38,6 +39,7 @@ class User extends Authenticatable implements PasskeyUser
     {
         return [
             'email_verified_at' => 'datetime',
+            'is_approved' => 'boolean',
             'is_active' => 'boolean',
             'password' => 'hashed',
         ];

@@ -12,7 +12,8 @@ import StatusBadge from '../../../Components/StatusBadge';
 const statusMessages = {
     'user-created': 'User account created successfully.',
     'user-updated': 'User account updated successfully.',
-    'user-deleted': 'User account deleted successfully.'
+    'user-deleted': 'User account deleted successfully.',
+    'user-approved': 'User account approved successfully.'
 };
 
 const categoryLabels = {
@@ -25,8 +26,8 @@ const categoryLabels = {
 };
 
 function accountStatus(user) {
+    if (!user?.is_approved) return { label: 'Pending Approval', variant: 'pending' };
     if (user?.is_active) return { label: 'Active', variant: 'active' };
-    if (!user?.access_configured) return { label: 'Pending Approval', variant: 'pending' };
     return { label: 'Inactive', variant: 'inactive' };
 }
 
@@ -42,9 +43,11 @@ export default function Index({ users, status }) {
     const { flash = {} } = usePage().props;
     const [selectedUser, setSelectedUser] = useState(null);
     const [userToDelete, setUserToDelete] = useState(null);
+    const [userToApprove, setUserToApprove] = useState(null);
     const [userToActivate, setUserToActivate] = useState(null);
     const [userToDeactivate, setUserToDeactivate] = useState(null);
     const [deleting, setDeleting] = useState(false);
+    const [approving, setApproving] = useState(false);
     const [activating, setActivating] = useState(false);
     const [deactivating, setDeactivating] = useState(false);
 
@@ -74,6 +77,16 @@ export default function Index({ users, status }) {
         setDeleting(true);
         router.delete(`/admin/users/${userToDelete.id}`, {
             onFinish: () => { setDeleting(false); setUserToDelete(null); }
+        });
+    };
+
+    const approveUser = () => {
+        if (!userToApprove || approving) return;
+        setApproving(true);
+        router.patch(`/admin/users/${userToApprove.id}/approve`, {}, {
+            preserveScroll: true,
+            onSuccess: () => setUserToApprove(null),
+            onFinish: () => setApproving(false),
         });
     };
 
@@ -144,12 +157,14 @@ export default function Index({ users, status }) {
                 deleteLabel="Delete User"
             >
                 {selectedUser && <>
-                    <CrudSummaryGrid items={[{ label: 'Account Status', render: () => <StatusBadge variant={selectedStatus.variant}>{selectedStatus.label}</StatusBadge> }, { label: 'Account Role', value: display(selectedUser.account_role) }, { label: 'User Category', value: display(categoryLabels[selectedUser.effective_category || selectedUser.section] || selectedUser.effective_category || selectedUser.section) }, { label: 'Unit', value: display(selectedUser.unit_assignment) }, { label: 'Office', value: display(selectedUser.office_designated) }]} />
+                    <CrudSummaryGrid items={[{ label: 'Approval Status', render: () => <StatusBadge variant={selectedUser.is_approved ? 'active' : 'pending'}>{selectedUser.is_approved ? 'Approved' : 'Pending Approval'}</StatusBadge> }, { label: 'Account Status', render: () => <StatusBadge variant={selectedStatus.variant}>{selectedStatus.label}</StatusBadge> }, { label: 'Account Role', value: display(selectedUser.account_role) }, { label: 'User Category', value: display(categoryLabels[selectedUser.effective_category || selectedUser.section] || selectedUser.effective_category || selectedUser.section) }, { label: 'Unit', value: display(selectedUser.unit_assignment) }, { label: 'Office', value: display(selectedUser.office_designated) }]} />
                     <CrudSection title="Account Information">
                         <dl className="grid min-w-0 gap-x-6 gap-y-5 sm:grid-cols-2">
                             <Detail label="Name" value={selectedUser.name} />
                             <Detail label="Email Address" value={selectedUser.email} />
                             <Detail label="Account Role" value={selectedUser.account_role} />
+                            <Detail label="Approval Status" value={selectedUser.is_approved ? 'Approved' : 'Pending Approval'} />
+                            <Detail label="Account Status" value={selectedStatus.label} />
                             <Detail label="User Category" value={categoryLabels[selectedUser.effective_category || selectedUser.section] || selectedUser.effective_category || selectedUser.section} />
                             <Detail label="Office Designated" value={selectedUser.office_designated} />
                             <Detail label="Protected Area / PAMO Assignment" value={selectedUser.protected_area_name} />
@@ -159,12 +174,21 @@ export default function Index({ users, status }) {
                     </CrudSection>
                     <CrudSection title="Administrative Actions">
                         <div className="flex flex-wrap gap-2">
-                            {selectedUser.is_active ? <button type="button" onClick={() => { setUserToDeactivate(selectedUser); closeDetails(); }} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300">Deactivate Account</button> : <button type="button" onClick={() => { setUserToActivate(selectedUser); closeDetails(); }} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300">Activate Account</button>}
+                            {!selectedUser.is_approved ? <button type="button" onClick={() => { setUserToApprove(selectedUser); closeDetails(); }} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300">Approve Account</button> : selectedUser.is_active ? <button type="button" onClick={() => { setUserToDeactivate(selectedUser); closeDetails(); }} className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300">Deactivate Account</button> : <button type="button" onClick={() => { setUserToActivate(selectedUser); closeDetails(); }} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300">Activate Account</button>}
                         </div>
                     </CrudSection>
                 </>}
             </CrudDetailsModal>
 
+            <ConfirmDialog
+                open={Boolean(userToApprove)}
+                title="Approve this account?"
+                message={userToApprove ? `User: ${userToApprove.name}\nEmail: ${userToApprove.email}\nApproval will not change the account status, role, or organizational assignment.` : ''}
+                confirmLabel="Approve Account"
+                onCancel={() => !approving && setUserToApprove(null)}
+                onConfirm={approveUser}
+                processing={approving}
+            />
             <ConfirmDialog
                 open={Boolean(userToDelete)}
                 variant="danger"

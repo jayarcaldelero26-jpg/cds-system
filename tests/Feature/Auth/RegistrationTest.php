@@ -28,7 +28,7 @@ test('new users register as pending and are not authenticated', function () {
     $this->assertGuest();
     $response->assertRedirect(route('login'));
     $response->assertSessionHas('registration_success', 'Your account has been created successfully and is awaiting administrator approval. You may sign in once your account has been activated.');
-    $this->assertDatabaseHas('users', ['email' => 'test@example.com', 'is_active' => false]);
+    $this->assertDatabaseHas('users', ['email' => 'test@example.com', 'is_approved' => false, 'is_active' => false]);
 });
 
 test('registration success flash is available once on the login page', function () {
@@ -69,6 +69,7 @@ test('registration accepts the supported user category without assigning access'
     $user = User::where('email', $email)->firstOrFail();
 
     expect($user->section)->toBe($section)
+        ->and($user->is_approved)->toBeFalse()
         ->and($user->is_active)->toBeFalse()
         ->and($user->roles()->pluck('name')->all())->toBe(['no_role']);
 })->with(['CENRO_CDS_FOCAL', 'PENRO_CDS_FOCAL']);

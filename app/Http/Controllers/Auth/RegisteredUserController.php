@@ -65,6 +65,7 @@ class RegisteredUserController extends Controller
             'section' => $data['section'],
             'unit_assignment' => $data['unit_assignment'] ?? null,
             'protected_area_id' => $data['protected_area_id'] ?? null,
+            'is_approved' => false,
             'is_active' => false,
         ]);
 

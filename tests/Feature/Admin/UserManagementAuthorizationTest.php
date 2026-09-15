@@ -99,15 +99,105 @@ test('legacy PAMO accounts remain viewable but are not supported as new account 
 
 test('fully configured CENRO and PENRO accounts activate without a legacy Technical Staff role', function (): void {
     $admin = accessAdmin();
-    $cenro = User::factory()->create(['is_active' => false, 'unit_assignment' => 'development', 'section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Baganga']);
+    $cenro = User::factory()->create(['is_approved' => true, 'is_active' => false, 'unit_assignment' => 'development', 'section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Baganga']);
     $cenro->assignRole('no_role');
-    $penro = User::factory()->create(['is_active' => false, 'unit_assignment' => null, 'section' => 'PENRO_TSD_CHIEF', 'office_designated' => 'PENRO Davao Oriental']);
+    $penro = User::factory()->create(['is_approved' => true, 'is_active' => false, 'unit_assignment' => null, 'section' => 'PENRO_TSD_CHIEF', 'office_designated' => 'PENRO Davao Oriental']);
     $penro->assignRole('no_role');
 
     foreach ([$cenro, $penro] as $managed) {
         $this->actingAs($admin)->patch(route('admin.users.activate', $managed))->assertRedirect(route('admin.users.index'));
         expect($managed->fresh()->is_active)->toBeTrue()->and($managed->fresh()->getRoleNames()->all())->toBe(['no_role']);
     }
+});
+
+test('an administrator can approve and immediately activate a pending user without changing access data', function (): void {
+    $admin = accessAdmin();
+    $managed = User::factory()->create([
+        'is_approved' => false,
+        'is_active' => false,
+        'office_designated' => 'CENRO Baganga',
+        'section' => 'CENRO_CDS_FOCAL',
+        'unit_assignment' => 'development',
+    ]);
+    $managed->assignRole('no_role');
+    $before = $managed->only(['name', 'email', 'password', 'is_active', 'office_designated', 'section', 'unit_assignment', 'protected_area_id']);
+    $permissionsBefore = $managed->getAllPermissions()->pluck('name')->sort()->values()->all();
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.approve', $managed))
+        ->assertRedirect(route('admin.users.index'))
+        ->assertSessionHas('success', 'User account approved successfully.');
+
+    $after = $managed->fresh();
+    expect($after->is_approved)->toBeTrue()
+        ->and($after->is_active)->toBeTrue()
+        ->and($after->name)->toBe($before['name'])
+        ->and($after->email)->toBe($before['email'])
+        ->and($after->password)->toBe($before['password'])
+        ->and($after->office_designated)->toBe($before['office_designated'])
+        ->and($after->section)->toBe($before['section'])
+        ->and($after->unit_assignment)->toBe($before['unit_assignment'])
+        ->and($after->protected_area_id)->toBe($before['protected_area_id'])
+        ->and($after->getRoleNames()->all())->toBe(['no_role'])
+        ->and($after->getAllPermissions()->pluck('name')->sort()->values()->all())->toBe($permissionsBefore);
+
+    $this->actingAs($admin)->get(route('admin.users.index'))
+        ->assertInertia(fn ($page) => $page->where('users.data', function ($rows) use ($after): bool {
+            return collect($rows)->contains(fn (array $row): bool => $row['id'] === $after->id
+                && $row['is_approved'] === true
+                && $row['is_active'] === true);
+        }));
+
+    $this->post('/logout');
+
+    $this->post('/login', [
+        'email' => $after->email,
+        'password' => 'password',
+    ])->assertRedirect(route('dashboard'));
+    $this->assertAuthenticatedAs($after);
+    $this->get(route('dashboard'))->assertOk();
+});
+
+test('a non administrator cannot approve a user', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('no_role');
+    $managed = User::factory()->create(['is_approved' => false]);
+
+    $this->actingAs($user)
+        ->patch(route('admin.users.approve', $managed))
+        ->assertForbidden();
+
+    expect($managed->fresh()->is_approved)->toBeFalse();
+});
+
+test('an unapproved user cannot be activated before approval', function (): void {
+    $admin = accessAdmin();
+    $managed = User::factory()->create(['is_approved' => false, 'is_active' => false]);
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.activate', $managed))
+        ->assertRedirect()
+        ->assertSessionHas('error', 'Approve the account before activating it.');
+
+    expect($managed->fresh()->is_approved)->toBeFalse()
+        ->and($managed->fresh()->is_active)->toBeFalse();
+});
+
+test('user management exposes the three separate approval and account states', function (): void {
+    $admin = accessAdmin();
+    User::factory()->create(['is_approved' => false, 'is_active' => true]);
+    User::factory()->create(['is_approved' => true, 'is_active' => true]);
+    User::factory()->create(['is_approved' => true, 'is_active' => false]);
+
+    $this->actingAs($admin)->get(route('admin.users.index'))
+        ->assertInertia(fn ($page) => $page
+            ->where('users.data', function ($rows): bool {
+                $states = collect($rows)->map(fn (array $row): string => ($row['is_approved'] ? 'approved' : 'pending').':'.($row['is_active'] ? 'active' : 'inactive'));
+
+                return $states->contains('pending:active')
+                    && $states->contains('approved:active')
+                    && $states->contains('approved:inactive');
+            }));
 });
 
 test('a CDS admin cannot delete their own account', function (): void {
