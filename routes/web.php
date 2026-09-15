@@ -249,6 +249,8 @@ Route::middleware(['auth', 'admin'])
     ->group(function (): void {
         Route::patch('users/{user}/approve', [UserController::class, 'approve'])
             ->name('users.approve');
+        Route::patch('users/{user}/deactivate', [UserController::class, 'deactivate'])
+            ->name('users.deactivate');
         Route::patch('users/{user}/activate', [UserController::class, 'activate'])
             ->name('users.activate');
         Route::resource('users', UserController::class)->except('show');

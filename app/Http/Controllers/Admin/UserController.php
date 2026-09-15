@@ -160,6 +160,10 @@ class UserController extends Controller
             $data['is_active'] = filter_var($data['is_active'], FILTER_VALIDATE_BOOLEAN);
         }
 
+        if (($data['is_active'] ?? null) === false) {
+            $this->authorize('deactivate', $user);
+        }
+
         if (($data['is_active'] ?? null) === true && ! $user->is_approved) {
             throw ValidationException::withMessages(['is_active' => 'Approve the account before activating it.']);
         }
@@ -207,14 +211,8 @@ class UserController extends Controller
             return back()->with('error', $activationError);
         }
 
-        DB::transaction(function () use ($user, $assignment): void {
-            $user->update([
-                'unit_assignment' => $assignment['unit_assignment'],
-                'section' => $assignment['section'],
-                'office_designated' => $assignment['office_designated'] ?? null,
-                'protected_area_id' => $assignment['protected_area_id'] ?? null,
-                'is_active' => true,
-            ]);
+        DB::transaction(function () use ($user): void {
+            $user->update(['is_active' => true]);
         });
 
         app(AuditLogService::class)->record(
@@ -233,6 +231,44 @@ class UserController extends Controller
         );
 
         return to_route('admin.users.index')->with('success', 'User account activated successfully.');
+    }
+
+    /** Deactivate an approved account without changing its access data. */
+    public function deactivate(User $user): RedirectResponse
+    {
+        $this->authorize('deactivate', $user);
+
+        if (! $user->is_approved) {
+            return back()->with('error', 'Approve the account before deactivating it.');
+        }
+
+        if (! $user->is_active) {
+            return back()->with('error', 'This account is already inactive.');
+        }
+
+        DB::transaction(function () use ($user): void {
+            $user->update(['is_active' => false]);
+        });
+
+        app(AuditLogService::class)->record(
+            'user_management',
+            'User Deactivated',
+            User::class,
+            $user->id,
+            'User Management',
+            'Deactivated an approved user account.',
+            [
+                'is_approved' => $user->is_approved,
+                'is_active' => false,
+                'role' => $user->roles()->first()?->name,
+                'office_designated' => $user->office_designated,
+                'section' => $user->section,
+                'unit_assignment' => $user->unit_assignment,
+                'protected_area_id' => $user->protected_area_id,
+            ],
+        );
+
+        return to_route('admin.users.index')->with('success', 'User account deactivated successfully.');
     }
 
     /** Approve and activate a pending account without changing its access data. */

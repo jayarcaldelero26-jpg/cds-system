@@ -103,11 +103,67 @@ test('fully configured CENRO and PENRO accounts activate without a legacy Techni
     $cenro->assignRole('no_role');
     $penro = User::factory()->create(['is_approved' => true, 'is_active' => false, 'unit_assignment' => null, 'section' => 'PENRO_TSD_CHIEF', 'office_designated' => 'PENRO Davao Oriental']);
     $penro->assignRole('no_role');
+    $before = collect([$cenro, $penro])->mapWithKeys(fn (User $user): array => [$user->id => $user->only(['is_approved', 'office_designated', 'section', 'unit_assignment', 'protected_area_id'])]);
 
     foreach ([$cenro, $penro] as $managed) {
         $this->actingAs($admin)->patch(route('admin.users.activate', $managed))->assertRedirect(route('admin.users.index'));
-        expect($managed->fresh()->is_active)->toBeTrue()->and($managed->fresh()->getRoleNames()->all())->toBe(['no_role']);
+        $after = $managed->fresh();
+        expect($after->is_approved)->toBeTrue()
+            ->and($after->is_active)->toBeTrue()
+            ->and($after->only(['is_approved', 'office_designated', 'section', 'unit_assignment', 'protected_area_id']))->toBe($before[$managed->id])
+            ->and($after->getRoleNames()->all())->toBe(['no_role']);
     }
+});
+
+test('an administrator can deactivate an approved account without changing approval or access data', function (): void {
+    $admin = accessAdmin();
+    $managed = User::factory()->create([
+        'is_approved' => true,
+        'is_active' => true,
+        'office_designated' => 'CENRO Baganga',
+        'section' => 'CENRO_CDS_FOCAL',
+        'unit_assignment' => null,
+        'protected_area_id' => null,
+    ]);
+    $managed->assignRole('no_role');
+    $before = $managed->only(['name', 'email', 'password', 'is_approved', 'office_designated', 'section', 'unit_assignment', 'protected_area_id']);
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.deactivate', $managed))
+        ->assertRedirect(route('admin.users.index'))
+        ->assertSessionHas('success', 'User account deactivated successfully.');
+
+    $after = $managed->fresh();
+    expect($after->is_approved)->toBeTrue()
+        ->and($after->is_active)->toBeFalse()
+        ->and($after->name)->toBe($before['name'])
+        ->and($after->email)->toBe($before['email'])
+        ->and($after->password)->toBe($before['password'])
+        ->and($after->office_designated)->toBe($before['office_designated'])
+        ->and($after->section)->toBe($before['section'])
+        ->and($after->unit_assignment)->toBe($before['unit_assignment'])
+        ->and($after->protected_area_id)->toBe($before['protected_area_id'])
+        ->and($after->getRoleNames()->all())->toBe(['no_role']);
+
+    $this->actingAs($admin)->get(route('admin.users.index'))
+        ->assertInertia(fn ($page) => $page->where('users.data', function ($rows) use ($after): bool {
+            return collect($rows)->contains(fn (array $row): bool => $row['id'] === $after->id
+                && $row['is_approved'] === true
+                && $row['is_active'] === false);
+        }));
+});
+
+test('an administrator cannot deactivate their own account', function (): void {
+    $admin = accessAdmin();
+
+    expect(\Illuminate\Support\Facades\Gate::forUser($admin)->allows('deactivate', $admin))->toBeFalse();
+
+    $this->actingAs($admin)
+        ->patch(route('admin.users.deactivate', $admin))
+        ->assertForbidden();
+
+    expect($admin->fresh()->is_approved)->toBeTrue()
+        ->and($admin->fresh()->is_active)->toBeTrue();
 });
 
 test('an administrator can approve and immediately activate a pending user without changing access data', function (): void {
@@ -168,6 +224,23 @@ test('a non administrator cannot approve a user', function (): void {
         ->assertForbidden();
 
     expect($managed->fresh()->is_approved)->toBeFalse();
+});
+
+test('a non administrator cannot deactivate or activate users', function (): void {
+    $user = User::factory()->create();
+    $user->assignRole('no_role');
+    $active = User::factory()->create(['is_approved' => true, 'is_active' => true]);
+    $inactive = User::factory()->create(['is_approved' => true, 'is_active' => false]);
+
+    $this->actingAs($user)
+        ->patch(route('admin.users.deactivate', $active))
+        ->assertForbidden();
+    $this->actingAs($user)
+        ->patch(route('admin.users.activate', $inactive))
+        ->assertForbidden();
+
+    expect($active->fresh()->is_active)->toBeTrue()
+        ->and($inactive->fresh()->is_active)->toBeFalse();
 });
 
 test('an unapproved user cannot be activated before approval', function (): void {

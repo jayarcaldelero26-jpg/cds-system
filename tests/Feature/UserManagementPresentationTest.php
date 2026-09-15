@@ -82,6 +82,7 @@ test('user edit form exposes status as read-only and keeps activation in adminis
 
     expect($index)
         ->toContain('/approve')
+        ->toContain('/deactivate')
         ->toContain('Deactivate Account')
         ->toContain('Activate Account');
 });

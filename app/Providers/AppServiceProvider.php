@@ -47,9 +47,10 @@ class AppServiceProvider extends ServiceProvider
             app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($user));
 
         Gate::before(function ($user, $ability, array $arguments) {
-            // User deletion has non-bypassable policy invariants (self-delete
-            // and last-CDS-Admin protection). Let UserPolicy::delete() decide.
-            if ($ability === 'delete' && ($arguments[0] ?? null) instanceof \App\Models\User) {
+            // User deletion and deactivation have non-bypassable policy
+            // invariants (self-action and administrator safety). Let the
+            // UserPolicy methods decide these actions.
+            if (in_array($ability, ['delete', 'deactivate'], true) && ($arguments[0] ?? null) instanceof \App\Models\User) {
                 return null;
             }
 

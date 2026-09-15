@@ -56,16 +56,7 @@ export default function Index({ users, status }) {
     const deactivateUser = () => {
         if (!userToDeactivate || deactivating) return;
         setDeactivating(true);
-        router.patch(`/admin/users/${userToDeactivate.id}`, {
-            name: userToDeactivate.name,
-            email: userToDeactivate.email,
-            account_role: userToDeactivate.account_role || 'User',
-            office_designated: userToDeactivate.office_designated || '',
-            section: userToDeactivate.section || '',
-            unit_assignment: userToDeactivate.unit_assignment || '',
-            protected_area_id: userToDeactivate.protected_area_id || '',
-            is_active: false,
-        }, {
+        router.patch(`/admin/users/${userToDeactivate.id}/deactivate`, {}, {
             preserveScroll: true,
             onSuccess: () => setUserToDeactivate(null),
             onFinish: () => setDeactivating(false),

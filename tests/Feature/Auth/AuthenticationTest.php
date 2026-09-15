@@ -114,6 +114,21 @@ test('an approved but manually deactivated user cannot access the dashboard', fu
     $this->assertGuest();
 });
 
+test('an authenticated user is forced out on the next protected request after deactivation', function () {
+    $user = User::factory()->create(['is_approved' => true, 'is_active' => true]);
+
+    $this->actingAs($user)->get(route('dashboard'))->assertOk();
+
+    $user->update(['is_active' => false]);
+
+    $this->get(route('dashboard'))
+        ->assertRedirect(route('login'))
+        ->assertSessionHas('account_inactive', true)
+        ->assertSessionMissing('pending_approval');
+
+    $this->assertGuest();
+});
+
 test('legacy privileged accounts are normalized by role and can still access User Management', function () {
     \Spatie\Permission\Models\Role::findOrCreate('CDS Admin', 'web');
     $admin = User::factory()->create([
