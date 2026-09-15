@@ -74,21 +74,24 @@ test('generic Homestay uses canonical routing actions and never exposes PAMB MOV
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertStatus(422);
 
-    $tracking->transition('conservation', $report->id, 'forward_to_cenro_chief', null, $focal->id);
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])
+        ->assertSessionHas('success', 'Document forwarded successfully.');
     $this->actingAs($chief);
     assertGenericQueueContains($tracking, 'for_review', $report->id);
 });
 
 
-test('workspace Incoming and Outgoing mirror the accountable handoff', function (): void {
+test('workspace Incoming and Outgoing preserve handoff semantics while categorizing current actions', function (): void {
     $focal = genericQueueUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = genericQueueUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $records = genericQueueUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
     $report = genericQueueReport($focal);
     $tracking = app(SubmissionTrackingService::class);
 
     $this->actingAs($focal);
     $workspace = $tracking->workspaceQueues();
     expect($workspace['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('forward')
         ->and($workspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $tracking->transition('conservation', $report->id, 'forward_to_cenro_chief', null, $focal->id);
@@ -100,7 +103,26 @@ test('workspace Incoming and Outgoing mirror the accountable handoff', function 
     $this->actingAs($chief);
     $workspace = $tracking->workspaceQueues();
     expect($workspace['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('receive')
         ->and($workspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
+
+    $tracking->transition('conservation', $report->id, 'receive_at_cenro_chief', null, $chief->id);
+    $this->actingAs($chief);
+    $workspace = $tracking->workspaceQueues();
+    expect($workspace['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('forward')
+        ->and($workspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($workspace['history']->pluck('source_id')->all())->not->toContain($report->id);
+
+    $tracking->transition('conservation', $report->id, 'forward_to_cenro_records', null, $chief->id);
+    $this->actingAs($chief);
+    $workspace = $tracking->workspaceQueues();
+    expect($workspace['incoming']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($workspace['outgoing']->pluck('source_id')->all())->toContain($report->id);
+
+    $this->actingAs($records);
+    $workspace = $tracking->workspaceQueues();
+    expect($workspace['incoming']->pluck('source_id')->all())->toContain($report->id);
 });
 test('generic Homestay remains discoverable through the complete shared custody chain', function (): void {
     $focal = genericQueueUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
@@ -154,6 +176,13 @@ test('generic Homestay remains discoverable through the complete shared custody 
         $tracking->transition('conservation', $report->id, $action, null, $actor->id);
         $this->actingAs($queueViewers[$queue]);
         assertGenericQueueContains($tracking, $queue, $report->id);
+
+        if ($action === 'receive_at_office_penro_final') {
+            $workspace = $tracking->workspaceQueues();
+            expect($workspace['incoming']->pluck('source_id')->all())->toContain($report->id)
+                ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('decision')
+                ->and($workspace['history']->pluck('source_id')->all())->not->toContain($report->id);
+        }
 
         if (in_array($action, [
             'forward_to_penro_records',

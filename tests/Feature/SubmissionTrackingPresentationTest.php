@@ -27,9 +27,8 @@ test('canonical routing action labels distinguish CENRO release from later recei
 test('Submission Tracking labels Super Admin queues as global monitoring without changing operational labels', function (): void {
     $tracking = file_get_contents(base_path('resources/js/Pages/SubmissionTracking/Index.jsx'));
 
-    expect($tracking)->toContain('Active Routing')
-        ->and($tracking)->toContain('Routing Handoffs')
-        ->and($tracking)->toContain('Active submissions currently owned by their respective accountable offices and categories.')
-        ->and($tracking)->toContain('Incoming Submissions')
-        ->and($tracking)->toContain('Outgoing Submissions');
+    expect($tracking)->toContain('incoming: "Incoming Submissions"')
+        ->and($tracking)->toContain('outgoing: "Outgoing Submissions"')
+        ->and($tracking)->toContain('receive: "Receive"')
+        ->and($tracking)->toContain('release: "Release"');
 });

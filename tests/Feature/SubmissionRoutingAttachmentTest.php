@@ -4,6 +4,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\PambRoutingEvent;
 use App\Models\SubmissionRoutingAttachment;
 use App\Models\User;
+use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Spatie\Permission\Models\Permission;
@@ -13,6 +14,7 @@ use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Inertia\Testing\AssertableInertia as Assert;
 
 uses(RefreshDatabase::class);
 
@@ -24,6 +26,16 @@ function attachmentPambReport(): ConservationReportSubmission
         'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-03',
         'date_accomplished' => '2026-08-03', 'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
+}
+
+function effectiveDocumentAuditUser(string $category, string $office = 'CENRO Mati'): User
+{
+    $user = User::factory()->create(['unit_assignment' => $category === 'Super Admin' ? null : 'conservation', 'section' => $category === 'Super Admin' ? 'CDS' : $category, 'office_designated' => $office]);
+    $user->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+    $user->givePermissionTo(Permission::findOrCreate('technical-reports.view', 'web'));
+    if ($category === 'Super Admin') $user->assignRole(Role::findOrCreate('Super Admin', 'web'));
+
+    return $user;
 }
 
 test('canonical PAMB attachment is linked to the exact canonical routing event', function (): void {
@@ -174,4 +186,78 @@ test('original MOV is the current document when no routed copy exists', function
         ->and($row['current_document']['source'])->toBe('Original MOV / report')
         ->and($row['current_document']['download_url'])->not->toBeEmpty()
         ->and($row['current_document']['name'])->not->toBeEmpty();
+});
+
+test('effective document prefers the latest routing version and preserves exact event history', function (): void {
+    Storage::fake('local');
+    $report = attachmentPambReport();
+    $actor = User::query()->firstOrFail();
+    $report->update(['mov_file_path' => 'conservation-report-movs/original.pdf', 'mov_file_name' => 'original.pdf']);
+    Storage::disk('local')->put($report->mov_file_path, '%PDF original');
+    $original = app(ProtectedAttachmentService::class)->descriptor('conservation-report', $report, 'mov');
+    $attachments = app(RoutingAttachmentService::class);
+    $firstEvent = $report->routingEvents()->create(['workflow_key' => $report->workflow_key, 'stage_key' => 'routing-copy-one', 'occurred_at' => '2026-09-01 09:00:00', 'recorded_by' => $actor->id]);
+    $secondEvent = $report->routingEvents()->create(['workflow_key' => $report->workflow_key, 'stage_key' => 'routing-copy-two', 'occurred_at' => '2026-09-02 09:00:00', 'recorded_by' => $actor->id]);
+    $firstFile = UploadedFile::fake()->create('signed-one.pdf', 12, 'application/pdf');
+    $secondFile = UploadedFile::fake()->create('signed-final.pdf', 14, 'application/pdf');
+    $first = $attachments->create('conservation', $report->id, $firstFile, $attachments->store($firstFile), $actor, $firstEvent->stage_key, $firstEvent->stage_key, null, null, $firstEvent);
+    $latest = $attachments->create('conservation', $report->id, $secondFile, $attachments->store($secondFile), $actor, $secondEvent->stage_key, $secondEvent->stage_key, null, null, $secondEvent);
+
+    $current = $attachments->currentDescriptor('conservation', $report->id, $original);
+
+    expect($current['id'])->toBe($latest->id)
+        ->and($current['name'])->toBe('signed-final.pdf')
+        ->and($current['is_routing_copy'])->toBeTrue()
+        ->and($current['version_source'])->toBe('routing')
+        ->and(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(2)
+        ->and(SubmissionRoutingAttachment::findOrFail($first->id)->pamb_routing_event_id)->toBe($firstEvent->id)
+        ->and(SubmissionRoutingAttachment::findOrFail($latest->id)->pamb_routing_event_id)->toBe($secondEvent->id)
+        ->and(Storage::disk('local')->exists($report->mov_file_path))->toBeTrue();
+});
+
+test('Conservation Full Details exposes the effective completed copy to scoped viewers', function (): void {
+    Storage::fake('local');
+    $creator = effectiveDocumentAuditUser(OrganizationalAccessService::CENRO_FOCAL);
+    $report = attachmentPambReport();
+    $report->update([
+        'target_office' => 'CENRO Mati',
+        'date_report_released_cenro' => '2026-09-10',
+        'date_received_penro' => '2026-09-11',
+        'date_endorsed_regional' => '2026-09-12',
+        'mov_file_path' => 'conservation-report-movs/module-original.pdf',
+        'mov_file_name' => 'module-original.pdf',
+        'created_by' => $creator->id,
+        'updated_by' => $creator->id,
+    ]);
+    Storage::disk('local')->put($report->mov_file_path, '%PDF original module MOV');
+    $actor = User::factory()->create();
+    $attachments = app(RoutingAttachmentService::class);
+    $event = $report->routingEvents()->create(['workflow_key' => $report->workflow_key, 'stage_key' => 'signed-current-document', 'occurred_at' => '2026-09-13 09:00:00', 'recorded_by' => $actor->id]);
+    $file = UploadedFile::fake()->create('final-signed-copy.pdf', 18, 'application/pdf');
+    $latest = $attachments->create('conservation', $report->id, $file, $attachments->store($file), $actor, $event->stage_key, $event->stage_key, null, null, $event);
+
+    foreach ([
+        $creator,
+        effectiveDocumentAuditUser('Super Admin', 'PENRO Davao Oriental'),
+        effectiveDocumentAuditUser(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental'),
+        effectiveDocumentAuditUser(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental'),
+    ] as $viewer) {
+        $this->actingAs($viewer)
+            ->get(route('conservation-reports.index', 'regular_pamb'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->component('ConservationReports/Index')
+                ->where('submissions.data.0.current_document.id', $latest->id)
+                ->where('submissions.data.0.current_document.name', 'final-signed-copy.pdf'));
+
+        $this->get(route('submission-tracking.routing-attachments.show', ['conservation', $report->id, $latest->id]))->assertOk();
+        $serviceRow = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+        expect($serviceRow['routing_complete'])->toBeTrue()
+            ->and($serviceRow['current_document']['id'])->toBe($latest->id);
+    }
+
+    $outOfScope = effectiveDocumentAuditUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $this->actingAs($outOfScope)
+        ->get(route('submission-tracking.routing-attachments.show', ['conservation', $report->id, $latest->id]))
+        ->assertForbidden();
 });

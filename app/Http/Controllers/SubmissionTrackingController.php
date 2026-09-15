@@ -84,9 +84,10 @@ class SubmissionTrackingController extends Controller
                 'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
             ]);
             abort_unless($data['stage'] === $stage, 422);
+            $this->assertRoutingAttachmentAllowed($source, $record, $stage, $request->hasFile('attachment'));
             $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null);
 
-            return back()->with('success', 'Routing action recorded.');
+            return back()->with('success', $this->routingSuccessMessage($stage));
         }
         $data = $request->validate([
             'date' => ['required', 'date'],
@@ -94,13 +95,14 @@ class SubmissionTrackingController extends Controller
             'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
         ]);
         abort_unless(($data['stage'] ?? $stage) === $stage, 422);
+        $this->assertRoutingAttachmentAllowed($source, $record, $stage, $request->hasFile('attachment'));
 
         $this->transitionWithAttachment($request, $source, $record, $stage, $data['date'], null);
 
         return back()->with('success', match ($stage) {
-            SubmissionTrackingService::CENRO_RELEASE => 'Released by CENRO to PENRO. MOV Processing: 100% complete.',
-            SubmissionTrackingService::PENRO_RECEIPT => 'PENRO receipt recorded.',
-            default => 'Regional endorsement recorded.',
+            SubmissionTrackingService::CENRO_RELEASE => 'Document released successfully. MOV Processing: 100% complete.',
+            SubmissionTrackingService::PENRO_RECEIPT => 'Document received successfully.',
+            default => 'Document forwarded successfully.',
         });
     }
 
@@ -118,7 +120,7 @@ class SubmissionTrackingController extends Controller
         $data = $request->validate([
             'stage' => ['nullable', 'string', function (string $attribute, mixed $value, \Closure $fail) use ($timeline): void {
                 if (! $timeline->isInternalStageKey((string) $value)) {
-                    $fail('This routing stage is not valid for PAMB.');
+                    $fail('This routing stage is not valid for this workflow.');
                 }
             }],
             'remarks' => ['nullable', 'string', 'max:2000'],
@@ -132,6 +134,9 @@ class SubmissionTrackingController extends Controller
         }
 
         abort_unless($this->pambAccess->canRecordInternalRouting($request->user(), $submission, $stage), 403);
+        if ($request->hasFile('attachment') && ! $this->tracking->canAttachRoutingCopy($source, $submission, $stage)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => 'A routing document copy cannot be attached to this receipt-only or completed action.']);
+        }
         $file = $request->file('attachment');
         $path = $file ? $this->routingAttachments->store($file) : null;
         $committed = false;
@@ -143,7 +148,30 @@ class SubmissionTrackingController extends Controller
             $committed = true;
         } catch (\Throwable $exception) { if ($path && ! $committed) $this->routingAttachments->discard($path); throw $exception; }
 
-        return back()->with('success', 'PAMB internal routing event recorded.');
+        return back()->with('success', $this->routingSuccessMessage($stage));
+    }
+
+    private function routingSuccessMessage(string $action): string
+    {
+        $key = strtolower($action);
+
+        if (str_contains($key, 'correction') || str_starts_with($key, 'return_')) {
+            return 'Document returned for correction successfully.';
+        }
+        if (str_contains($key, 'approv')) {
+            return 'Routing approval recorded successfully.';
+        }
+        if (str_contains($key, 'receive') || str_contains($key, 'receipt') || str_starts_with($key, 'received_')) {
+            return 'Document received successfully.';
+        }
+        if (str_contains($key, 'release_to_regional') || str_contains($key, 'released_to_regional')) {
+            return 'Document released successfully.';
+        }
+        if (str_contains($key, 'forward') || str_contains($key, 'assign') || str_contains($key, 'recommend') || str_contains($key, 'release')) {
+            return 'Document forwarded successfully.';
+        }
+
+        return 'Routing event recorded successfully.';
     }
 
     public function submitMovForReview(Request $request, string $source, int $record): RedirectResponse
@@ -213,5 +241,17 @@ class SubmissionTrackingController extends Controller
             });
             $committed = true;
         } catch (\Throwable $exception) { if ($path && ! $committed) $this->routingAttachments->discard($path); throw $exception; }
+    }
+
+    private function assertRoutingAttachmentAllowed(string $source, int $record, string $stage, bool $hasAttachment): void
+    {
+        if (! $hasAttachment) return;
+
+        $sourceConfig = $this->tracking->source($source);
+        abort_unless($sourceConfig, 404);
+        $submission = $sourceConfig['model']::query()->findOrFail($record);
+        if (! $this->tracking->canAttachRoutingCopy($source, $submission, $stage)) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => 'A routing document copy cannot be attached to this receipt-only or completed action.']);
+        }
     }
 }

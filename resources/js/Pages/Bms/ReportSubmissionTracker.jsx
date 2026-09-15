@@ -89,7 +89,16 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
 
   useEffect(() => () => {if (preview?.temporary) URL.revokeObjectURL(preview.url);}, [preview]);
 
-  const currentMov = (report) => report?.mov ? { ...report.mov, url: report.mov.url || submissionRoutes.mov(report), temporary: false } : (report?.mov_url ? { url: submissionRoutes.mov(report), name: report.mov_file_name || 'Current MOV attachment', type: report.mov_mime_type || '', temporary: false } : null);
+  const sourceMov = (report) => report?.mov
+    ? { ...report.mov, url: report.mov.url || submissionRoutes.mov(report), download_url: report.mov.download_url || report.mov.url || submissionRoutes.mov(report), temporary: false }
+    : (report?.mov_url ? { url: submissionRoutes.mov(report), download_url: submissionRoutes.mov(report), name: report.mov_file_name || 'Original MOV attachment', type: report.mov_mime_type || '', temporary: false } : null);
+  const currentMov = (report) => {
+    const effective = report?.current_document || report?.effective_document;
+    const effectiveUrl = effective?.preview_url || effective?.url || effective?.download_url;
+    return effectiveUrl
+      ? { ...effective, url: effectiveUrl, download_url: effective.download_url || effective.url || effective.preview_url, type: effective.type || effective.mime_type || '', temporary: false }
+      : sourceMov(report);
+  };
   const resetFormState = () => {setPreview(null);form.reset();form.clearErrors();};
   const closeAll = () => {setModal(null);setSelectedReport(null);resetFormState();};
   const openDetails = (report) => {setSelectedReport(report);setModal('details');};
@@ -99,14 +108,14 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
     setSelectedReport(report);
     form.clearErrors();
     form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', [periodField]: report[periodField] || '', date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), mov: null, remarks: report.remarks || '' });
-    setPreview(currentMov(report));
+    setPreview(sourceMov(report));
     setModal('edit');
   };
   const openMov = (report) => {
     setSelectedReport(report);
     form.clearErrors();
     form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', [periodField]: report[periodField] || '', date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), mov: null, remarks: report.remarks || '' });
-    setPreview(currentMov(report));
+    setPreview(sourceMov(report));
     setModal('mov');
   };
   const backFromForm = () => {
@@ -115,7 +124,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   };
   const selectMov = (file) => {
     form.setData({ ...form.data, mov: file });
-    setPreview(file ? { url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true } : currentMov(selectedReport));
+    setPreview(file ? { url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true } : sourceMov(selectedReport));
   };
   const submit = (event) => {
     event.preventDefault();
@@ -180,6 +189,8 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
 
   const pagination = submissions?.links?.length > 3 ? <div className="flex flex-wrap gap-1">{submissions.links.map((link, index) => <button key={index} type="button" disabled={!link.url} onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${link.active ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-green-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'} disabled:cursor-not-allowed disabled:opacity-40`} dangerouslySetInnerHTML={{ __html: link.label }} />)}</div> : null;
   const detailsMov = currentMov(selectedReport);
+  const originalMov = sourceMov(selectedReport);
+  const completedSubmission = selectedReport?.submission_status === 'Completed';
   const reportAttachmentLabel = `Report Attachment / ${documentLabel(form.data.document_type || selectedReport?.document_type)}`;
   const cenroReleaseApplicable = selectedReport?.cenro_release_applicable !== false;
 
@@ -191,12 +202,12 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
 
         <CrudTable compactEmpty={true} title={rows.length > 0 ? `${moduleLabel} Report` : undefined} subtitle={rows.length > 0 ? `${submissions?.total ?? rows.length} report submission${(submissions?.total ?? rows.length) === 1 ? '' : 's'}` : undefined} helperText={rows.length > 0 ? 'Click any row to view full details' : undefined} caption={`${moduleLabel} report submission tracker`} columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} emptyTitle="No report submissions found" emptyDescription={`No ${moduleLabel} report submissions match the selected filters.`} pagination={rows.length > 0 ? pagination : null} />
 
-        <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canUpdate} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
+        <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canUpdate && !completedSubmission} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
     { label: 'Reporting Period', value: selectedReport[periodField] || '-' },
     { label: 'Report Status', render: () => <Badge value={selectedReport.submission_status} /> },
     { label: 'Deadline', value: display(selectedReport.deadline_submission) },
     { label: 'Timeliness Rating', render: () => <TimelinessBadge value={selectedReport.timeliness} /> }]
-    } />} attachments={selectedReport && (detailsMov ? <CrudSection title={reportAttachmentLabel}><div className="space-y-3"><div className="flex justify-end">{canUpdate && <button type="button" onClick={() => openMov(selectedReport)} className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100">Replace Attachment</button>}</div><FilePreviewPanel file={detailsMov} title={reportAttachmentLabel} heightClass="h-[480px]" /></div></CrudSection> : <CrudSection title={reportAttachmentLabel}><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canUpdate && <button type="button" onClick={() => openMov(selectedReport)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800">Attach Report</button>}</CrudSection>)}>
+    } />} attachments={selectedReport && (detailsMov ? <CrudSection title={reportAttachmentLabel}><div className="space-y-3"><div className="flex flex-wrap justify-end gap-2">{completedSubmission && (detailsMov.download_url || detailsMov.url) && <a href={detailsMov.download_url || detailsMov.url} download={detailsMov.name || undefined} className="rounded-xl bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800">Download Current Copy</a>}{canUpdate && !completedSubmission && <button type="button" onClick={() => openMov(selectedReport)} className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100">Replace Attachment</button>}</div><FilePreviewPanel file={detailsMov} title={reportAttachmentLabel} heightClass="h-[480px]" /></div></CrudSection> : <CrudSection title={reportAttachmentLabel}><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canUpdate && !completedSubmission && <button type="button" onClick={() => openMov(selectedReport)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800">Attach Report</button>}</CrudSection>)}>
             {selectedReport && <div className="space-y-6">
                 <CrudSection title="Report Information"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Target Office">{display(selectedReport.target_office)}</Detail><Detail label="Protected Area">{display(selectedReport.protected_area?.name)}</Detail><Detail label="Name of Activity">{display(selectedReport.activity_name)}</Detail><Detail label="Type of Document">{display(selectedReport.document_type)}</Detail><Detail label="Date Conducted">{display(selectedReport.date_conducted)}</Detail><Detail label="Date Accomplished">{display(dateValue(selectedReport.date_accomplished))}</Detail><Detail label="Days Complied">{display(selectedReport[daysCompliedField])}</Detail></div></CrudSection>
                 <CrudSection title="Submission Timeline"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Date Report Released by CENRO Records">{cenroReleaseApplicable ? display(dateValue(selectedReport.date_report_released_cenro)) : <Badge value="Not Applicable \u2014 PENRO-managed Protected Area" />}</Detail><Detail label="Date Received by PENRO Records">{display(dateValue(selectedReport.date_received_penro))}</Detail><Detail label="Regional Endorsement">{!cenroReleaseApplicable ? (!selectedReport.date_received_penro ? <Badge value="Not Yet Available" /> : !selectedReport.date_endorsed_regional ? <Badge value="For Endorsement" /> : display(dateValue(selectedReport.date_endorsed_regional))) : (!selectedReport.date_report_released_cenro ? <Badge value="Not Yet Available" /> : selectedReport.date_received_penro && !selectedReport.date_endorsed_regional ? <Badge value="For Endorsement" /> : display(dateValue(selectedReport.date_endorsed_regional)))}</Detail><Detail label="Total Number of Days Delayed at PENRO">{display(selectedReport[penroDelayField])}</Detail></div></CrudSection>
@@ -204,8 +215,8 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
             </div>}
         </CrudDetailsModal>
 
-        <CrudFormModal open={modal === 'mov'} mode="edit" title={detailsMov ? 'Replace Report Attachment' : 'Attach Report'} subtitle="Attach or replace the primary report document." onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} saveLabel={detailsMov ? 'Replace Attachment' : 'Attach Report'} maxWidth="max-w-xl">
-            <CrudSection title={reportAttachmentLabel}><FileAttachmentPanel id="reportsubmissiontracker-mov" label={reportAttachmentLabel} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={detailsMov ? [detailsMov] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /></CrudSection>
+        <CrudFormModal open={modal === 'mov'} mode="edit" title={originalMov ? 'Replace Report Attachment' : 'Attach Report'} subtitle="Attach or replace the primary report document." onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} saveLabel={originalMov ? 'Replace Attachment' : 'Attach Report'} maxWidth="max-w-xl">
+            <CrudSection title={reportAttachmentLabel}><FileAttachmentPanel id="reportsubmissiontracker-mov" label={reportAttachmentLabel} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={originalMov ? [originalMov] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /></CrudSection>
         </CrudFormModal>
 
         <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} icon={workflowConfig ? undefined : '\uD83D\uDCCB'} title={modal === 'edit' ? `Edit ${moduleLabel} Report Submission` : `Add ${moduleLabel} Report Submission`} subtitle={modal === 'edit' ? 'Update report details and review the MOV side-by-side.' : 'Report compliance details and supporting MOV.'} onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} canDelete={modal === 'edit' && canDelete} onDelete={() => requestDelete(selectedReport)} saveLabel={modal === 'edit' ? 'Save Changes' : 'Save Report'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}>

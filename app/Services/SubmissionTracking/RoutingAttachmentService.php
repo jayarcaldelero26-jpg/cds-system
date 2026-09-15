@@ -27,7 +27,57 @@ final class RoutingAttachmentService
     public function forDocumentEvents(iterable $ids): array { return SubmissionRoutingAttachment::query()->whereIn('document_routing_event_id', collect($ids)->filter()->all())->get()->keyBy('document_routing_event_id')->all(); }
     public function forPambEvents(iterable $ids): array { return SubmissionRoutingAttachment::query()->whereIn('pamb_routing_event_id', collect($ids)->filter()->all())->get()->keyBy('pamb_routing_event_id')->all(); }
     public function forStages(string $source, int $sourceId): array { return SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->latest('id')->get()->unique('stage_key')->keyBy('stage_key')->all(); }
-    public function descriptor(SubmissionRoutingAttachment $attachment): array { $base = route('submission-tracking.routing-attachments.show', [$attachment->source, $attachment->source_id, $attachment]); return ['id' => $attachment->id, 'name' => $attachment->original_name, 'mime_type' => $attachment->mime_type, 'size' => $attachment->file_size, 'uploaded_at' => $attachment->created_at?->toIso8601String(), 'download_url' => $base, 'preview_url' => $base.'?preview=1']; }
+    public function descriptor(SubmissionRoutingAttachment $attachment): array
+    {
+        $base = route('submission-tracking.routing-attachments.show', [$attachment->source, $attachment->source_id, $attachment]);
+
+        return [
+            'id' => $attachment->id,
+            'name' => $attachment->original_name,
+            'mime_type' => $attachment->mime_type,
+            'type' => $attachment->mime_type,
+            'size' => $attachment->file_size,
+            'uploaded_at' => $attachment->created_at?->toIso8601String(),
+            'source' => 'Routing attachment',
+            'is_routing_copy' => true,
+            'version_source' => 'routing',
+            'url' => $base.'?preview=1',
+            'download_url' => $base,
+            'preview_url' => $base.'?preview=1',
+        ];
+    }
+
+    /** Resolve the effective current copy without changing event/version history. */
+    public function currentDescriptor(string $source, int $sourceId, ?array $original = null, ?string $fallbackUrl = null, ?string $fallbackName = null): ?array
+    {
+        $latest = $this->latest($source, $sourceId);
+        if ($latest) {
+            return $this->descriptor($latest);
+        }
+
+        $url = $original['url'] ?? $original['preview_url'] ?? $fallbackUrl;
+        if (! is_string($url) || trim($url) === '') {
+            return null;
+        }
+
+        $mimeType = $original['mime_type'] ?? $original['type'] ?? null;
+        $downloadUrl = $original['download_url'] ?? $url;
+
+        return [
+            'id' => $original['id'] ?? null,
+            'name' => $original['name'] ?? $fallbackName ?? 'Original MOV / report',
+            'mime_type' => $mimeType,
+            'type' => $mimeType,
+            'size' => $original['size'] ?? null,
+            'uploaded_at' => $original['uploaded_at'] ?? null,
+            'source' => 'Original MOV / report',
+            'is_routing_copy' => false,
+            'version_source' => 'original',
+            'url' => $url,
+            'download_url' => $downloadUrl,
+            'preview_url' => $original['preview_url'] ?? $url,
+        ];
+    }
     public function response(Model $record, SubmissionRoutingAttachment $attachment, bool $preview = false): BinaryFileResponse
     {
         abort_unless($this->organization->canViewSubmissionAttachment(request()->user(), $record), 403);

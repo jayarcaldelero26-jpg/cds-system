@@ -12,9 +12,12 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
+use App\Services\SubmissionTracking\RoutingAttachmentService;
+use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -23,7 +26,7 @@ class ConservationReportSubmissionController extends Controller
 {
     private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments) {}
 
     public function index(Request $request, string $workflow): Response
     {
@@ -76,6 +79,9 @@ class ConservationReportSubmissionController extends Controller
     {
         $config = $this->workflow($workflow);
         $this->ensureWorkflow($workflow, $submission);
+        if (app(SubmissionTrackingService::class)->isRoutingComplete($submission)) {
+            throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
+        }
         $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? $submission->target_office);
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? $submission->protected_area_id);
@@ -102,6 +108,9 @@ class ConservationReportSubmissionController extends Controller
     public function destroy(string $workflow, ConservationReportSubmission $submission): RedirectResponse
     {
         $this->ensureWorkflow($workflow, $submission);
+        if (app(SubmissionTrackingService::class)->isRoutingComplete($submission)) {
+            throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
+        }
         $path = $submission->mov_file_path;
         $submission->delete();
         if ($path) $this->attachments->delete($path);
@@ -258,10 +267,13 @@ class ConservationReportSubmissionController extends Controller
     {
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
 
+        $original = $this->attachments->descriptor('conservation-report', $submission, 'mov');
+
         return [
             ...collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all(),
-            'mov' => $this->attachments->descriptor('conservation-report', $submission, 'mov'),
+            'mov' => $original,
             'mov_url' => $submission->mov_file_path ? $this->attachments->url('conservation-report', $submission, 'mov') : null,
+            'current_document' => $this->routingAttachments->currentDescriptor('conservation', (int) $submission->getKey(), $original),
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
             'cenro_release_applicable' => ! $directPenro,
             'mov_processing' => $this->pambMov->present($submission),

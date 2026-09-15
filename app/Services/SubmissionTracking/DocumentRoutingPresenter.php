@@ -38,7 +38,14 @@ final class DocumentRoutingPresenter
         $summary = $pamb['routing_summary'] ?? [];
         $timeline = collect($pamb['timeline'] ?? [])->values()->all();
         $current = collect($timeline)->firstWhere('status', 'current');
-        $responsibleCategory = $this->organization->normalizeCategory($current['held_at'] ?? null);
+        $isForwarded = str_starts_with((string) ($current['stage_key'] ?? $current['key'] ?? ''), 'forwarded_');
+        $responsibleActor = $isForwarded ? ($current['destination'] ?? null) : ($current['held_at'] ?? null);
+        $responsibleCategory = $this->organization->normalizeCategory($responsibleActor);
+        $preReleaseMovOwner = $this->preReleasePambMovOwner($record);
+        if ($preReleaseMovOwner !== null) {
+            $responsibleCategory = $preReleaseMovOwner;
+            $responsibleActor = $this->organization->categoryLabel($preReleaseMovOwner);
+        }
         $last = $summary['last_action'] ?? null;
         $overrides = \App\Models\SubmissionRoutingOverride::query()->where('source', 'conservation')->where('source_record_id', $record->getKey())->get()->keyBy('action_key');
 
@@ -52,7 +59,7 @@ final class DocumentRoutingPresenter
             'final_destination' => 'Regional Office',
             'current_location' => $summary['current_location'] ?? ($pamb['current_document_location'] ?? null),
             'current_status' => $summary['current_status'] ?? null,
-            'responsible_office' => $this->officeForActor($record, $responsibleCategory, $summary['responsible_office'] ?? null),
+            'responsible_office' => $this->officeForActor($record, $responsibleActor, $isForwarded ? ($current['destination'] ?? null) : ($summary['responsible_office'] ?? null)),
             'responsible_user_category' => $responsibleCategory,
             'current_stage' => $current['stage_key'] ?? $current['key'] ?? null,
             'in_transit_to' => $this->pambTransitDestination($timeline),
@@ -61,7 +68,7 @@ final class DocumentRoutingPresenter
             'last_action' => $last,
             'last_updated' => $summary['last_updated'] ?? null,
             'recorded_by' => $last['recorded_by'] ?? null,
-            'next_expected_action' => $summary['next_expected_action'] ?? null,
+            'next_expected_action' => $this->preReleasePambMovAction($record) ?? ($summary['next_expected_action'] ?? null),
             'deadline' => $record->getAttribute('deadline_submission'),
             'compliance_status' => $record->getAttribute('timeliness'),
             'timeline' => array_map(function (array $event) use ($overrides, $record): array {
@@ -80,6 +87,42 @@ final class DocumentRoutingPresenter
             ];
             }, $timeline),
         ];
+    }
+
+    /**
+     * Before the canonical CENRO-release milestone exists, Regular PAMB is
+     * accountable to its CENRO MOV workflow. The detailed timeline still
+     * starts at the release milestone for routing history, so its generic
+     * "CENRO" holder cannot identify the operational Incoming owner.
+     */
+    private function preReleasePambMovOwner(Model $record): ?string
+    {
+        if (! $record instanceof ConservationReportSubmission
+            || $this->routingPolicy->isDirectPenro($record)
+            || $record->date_report_released_cenro !== null
+            || ! app(PambMovProcessingService::class)->isApplicable($record)) {
+            return null;
+        }
+
+        return match (app(PambMovProcessingService::class)->status($record)) {
+            PambMovProcessingService::ACTIVITY_CONDUCTED,
+            PambMovProcessingService::NEEDS_CORRECTION => OrganizationalAccessService::CENRO_FOCAL,
+            PambMovProcessingService::SUBMITTED_FOR_REVIEW => OrganizationalAccessService::CENRO_CHIEF,
+            PambMovProcessingService::READY_FOR_RELEASE => OrganizationalAccessService::CENRO_RECORDS,
+            default => null,
+        };
+    }
+
+    private function preReleasePambMovAction(Model $record): ?string
+    {
+        $owner = $this->preReleasePambMovOwner($record);
+
+        return match ($owner) {
+            OrganizationalAccessService::CENRO_FOCAL => 'Submit MOV/report for CENRO CDS Chief review',
+            OrganizationalAccessService::CENRO_CHIEF => 'Review MOV/report',
+            OrganizationalAccessService::CENRO_RECORDS => 'Release report to PENRO',
+            default => null,
+        };
     }
 
     /** @param Collection<int,\App\Models\DocumentRoutingEvent> $routingEvents */
@@ -138,6 +181,7 @@ final class DocumentRoutingPresenter
         $informationalAction = $actions->firstWhere('from', $currentStage);
         $allowed = collect($state['allowed_actions'])->map(fn (array $action): array => [
             'key' => $action['key'], 'label' => $action['label'], 'action_label' => $action['action_label'], 'to' => $action['to'], 'to_office' => $action['to_office'], 'correction' => (bool) ($action['correction'] ?? false), 'remarks_required' => (bool) ($action['correction'] ?? false),
+            'attachment_allowed' => ! in_array($action['key'], ['receive_at_penro_records', 'receive_at_penro_records_final'], true),
         ])->values()->all();
 
         $attachments = $this->routingAttachments->forDocumentEvents($state['events']->pluck('id'));

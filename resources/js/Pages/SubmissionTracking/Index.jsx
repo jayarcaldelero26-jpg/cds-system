@@ -33,9 +33,14 @@ import { useEffect, useMemo, useState } from "react";
 
 const operationalViewDescriptions = {
     incoming: "Documents currently requiring action from your office.",
-    outgoing:
-        "Documents your office has acted on and forwarded to the next office.",
+    outgoing: "Documents your office has acted on and forwarded to the next office.",
     history: "Completed routing records within your authorized scope.",
+};
+const incomingActionLabels = {
+    receive: "Receive",
+    forward: "Forward",
+    release: "Release",
+    decision: "Review / Decision",
 };
 const monitoringViewDescriptions = {
     incoming:
@@ -411,6 +416,7 @@ export default function Index({
     );
     const [status, setStatus] = useState(filters.status || "");
     const [selected, setSelected] = useState(null);
+    const [incomingActionTab, setIncomingActionTab] = useState(null);
     const [details, setDetails] = useState(
         trackingContext.selected_record || null,
     );
@@ -534,7 +540,17 @@ export default function Index({
             setOverrideProcessing(false);
         }
     };
-    const rows = workspaceQueues[tab] || [];
+    const incomingRows = workspaceQueues.incoming || [];
+    const incomingActionTabs = useMemo(() => {
+        if (isGlobalMonitoring) return [];
+        return Object.keys(incomingActionLabels).filter((category) =>
+            incomingRows.some((row) => row.incoming_action_category === category),
+        );
+    }, [incomingRows, isGlobalMonitoring]);
+    const queueRows = workspaceQueues[tab] || [];
+    const rows = tab === "incoming" && incomingActionTab
+        ? queueRows.filter((row) => row.incoming_action_category === incomingActionTab)
+        : queueRows;
     const action = [
         "Action",
         "Record routing action",
@@ -886,6 +902,12 @@ export default function Index({
         () => setTab(trackingContext.view || "incoming"),
         [trackingContext.view],
     );
+    useEffect(() => {
+        if (tab !== "incoming" || isGlobalMonitoring) return;
+        if (!incomingActionTabs.includes(incomingActionTab)) {
+            setIncomingActionTab(incomingActionTabs[0] || null);
+        }
+    }, [tab, incomingActionTab, incomingActionTabs, isGlobalMonitoring]);
     useEffect(() => setSearch(filters.search || ""), [filters.search]);
     useEffect(() => setModule(filters.module || ""), [filters.module]);
     useEffect(
@@ -967,6 +989,7 @@ export default function Index({
         if (!next) setShowFullDetails(false);
     }, [
         rows,
+        incomingRows,
         tab,
         search,
         module,
@@ -975,6 +998,22 @@ export default function Index({
         pagination.current_page,
         trackingContext.selected_record,
     ]);
+    const continueWithFreshIncomingRow = (target, page) => {
+        if (!target) return;
+        const freshIncomingRows = page?.props?.workspaceQueues?.incoming || [];
+        const continuedRow = freshIncomingRows.find(
+            (row) => row.source === target.source && row.source_id === target.source_id,
+        );
+        if (!continuedRow) {
+            setDetails(null);
+            setShowFullDetails(false);
+            return;
+        }
+        setTab("incoming");
+        setIncomingActionTab(continuedRow.incoming_action_category || null);
+        setDetails(continuedRow);
+        setShowFullDetails(true);
+    };
     const closeSelectedAction = () => { form.reset(); form.clearErrors(); setSelected(null); };
     const closeInternalRouting = () => { internalForm.reset(); internalForm.clearErrors(); setRoutingStage(null); };
     const submit = (event) => {
@@ -986,6 +1025,9 @@ export default function Index({
             form.setError("remarks", "Correction remarks are required.");
             return;
         }
+        const continuationTarget = selected
+            ? { source: selected.source, source_id: selected.source_id }
+            : null;
         form.post(
             route("submission-tracking.transition", [
                 selected.source,
@@ -995,16 +1037,10 @@ export default function Index({
             {
                 preserveScroll: true,
                 forceFormData: true,
-                onSuccess: () => {
+                onSuccess: (page) => {
+                    continueWithFreshIncomingRow(continuationTarget, page);
                     setSelected(null);
                     form.reset();
-                    router.reload({
-                        only: [
-                            "workspaceQueues",
-                            "trackingContext",
-                            "pagination",
-                        ],
-                    });
                 },
             },
         );
@@ -1027,6 +1063,9 @@ export default function Index({
     };
     const submitInternal = (event) => {
         event.preventDefault();
+        const continuationTarget = details
+            ? { source: details.source, source_id: details.source_id }
+            : null;
         internalForm.post(
             route("submission-tracking.internal-routing", [
                 details.source,
@@ -1036,16 +1075,10 @@ export default function Index({
             {
                 preserveScroll: true,
                 forceFormData: true,
-                onSuccess: () => {
+                onSuccess: (page) => {
+                    continueWithFreshIncomingRow(continuationTarget, page);
                     setRoutingStage(null);
                     internalForm.reset();
-                    router.reload({
-                        only: [
-                            "workspaceQueues",
-                            "trackingContext",
-                            "pagination",
-                        ],
-                    });
                 },
             },
         );
@@ -1102,17 +1135,11 @@ export default function Index({
         setCorrection(row);
     };
 
-    const viewLabels = isGlobalMonitoring
-        ? {
-              incoming: "Active Routing",
-              outgoing: "Routing Handoffs",
-              history: "Submission History",
-          }
-        : {
-              incoming: "Incoming Submissions",
-              outgoing: "Outgoing Submissions",
-              history: "Submission History",
-          };
+    const viewLabels = {
+        incoming: "Incoming Submissions",
+        outgoing: "Outgoing Submissions",
+        history: "Submission History",
+    };
     const tabLabel = viewLabels[tab] || viewLabels.incoming;
     const queueHelper =
         (isGlobalMonitoring
@@ -1206,6 +1233,20 @@ export default function Index({
             <div className="submission-tracking-page">
                 <PageHeader title={tabLabel} description={queueHelper} />
                 <div className="mt-4 space-y-4 sm:mt-5">
+                    {tab === "incoming" && incomingActionTabs.length > 0 && (
+                        <div className="flex flex-wrap gap-2" aria-label="Incoming action filters">
+                            {incomingActionTabs.map((category) => (
+                                <button
+                                    key={category}
+                                    type="button"
+                                    onClick={() => setIncomingActionTab(category)}
+                                    className={`rounded-lg px-3 py-2 text-xs font-bold transition ${incomingActionTab === category ? "bg-green-700 text-white" : "border border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
+                                >
+                                    {incomingActionLabels[category]}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                     <div className="submission-tracking-filterbar flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:flex-row lg:items-center">
                         <div className="min-w-0 flex-1">
                             <FloatingInput
@@ -1324,8 +1365,12 @@ export default function Index({
                                     tab === "history"
                                         ? "No completed submissions found."
                                         : tab === "incoming"
-                                          ? "No incoming submissions require your action."
-                                          : "No outgoing submissions found."
+                                          ? incomingActionTab
+                                            ? `No documents currently require ${incomingActionLabels[incomingActionTab].toLowerCase()} action from your office.`
+                                            : "No incoming submissions require your action."
+                                          : tab === "outgoing"
+                                            ? "No outgoing submissions found."
+                                            : "No submissions found."
                                 }
                                 emptyDescription={
                                     filtersActive
@@ -1534,7 +1579,9 @@ export default function Index({
                         onChange={form.setData.bind(null, "attachment")}
                         error={form.errors.attachment}
                         disabled={form.processing}
+                        processing={form.processing}
                         uploadProgress={form.progress}
+                        attachmentAllowed={genericAction?.attachment_allowed !== false && selected?.routing?.attachment_allowed !== false}
                     />
                 </CrudSection>
                 <CrudSection
@@ -1544,7 +1591,7 @@ export default function Index({
                             : "Monitoring Event"
                     }
                 >
-                    {selected?.mov_url && (
+                    {selected?.current_document && (
                         <button
                             type="button"
                             onClick={() => setPreviewRow(selected)}
@@ -1687,21 +1734,10 @@ export default function Index({
                         onChange={internalForm.setData.bind(null, "attachment")}
                         error={internalForm.errors.attachment}
                         disabled={internalForm.processing}
+                        processing={internalForm.processing}
                         uploadProgress={internalForm.progress}
+                        attachmentAllowed={routingStage?.attachment_allowed !== false && details?.routing?.attachment_allowed !== false}
                     />
-                    {details?.mov_url && (
-                        <button
-                            type="button"
-                            onClick={() => setPreviewRow(details)}
-                            className="rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 dark:text-green-200"
-                        >
-                            Preview Document
-                        </button>
-                    )}
-                    <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
-                        {details?.mov_attachment?.name ||
-                            "No MOV/report attachment is available for this submission."}
-                    </p>
                     <div className="mt-2 grid gap-1 text-xs text-gray-500 dark:text-gray-400 sm:grid-cols-2">
                         <p>
                             Current location:{" "}

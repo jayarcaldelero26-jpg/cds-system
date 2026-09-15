@@ -135,12 +135,14 @@ test('PAMB PENRO Records handoff moves workspace ownership to Office of the PENR
 
     $this->actingAs($records);
     $afterReceipt = app(SubmissionTrackingService::class)->workspaceQueues();
-    expect($afterReceipt['incoming']->pluck('source_id')->all())->toContain($report->id)
-        ->and($afterReceipt['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
+    expect($afterReceipt['incoming']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($afterReceipt['outgoing']->pluck('source_id')->all())->toContain($report->id);
 
     $this->actingAs($records)->post(route('submission-tracking.internal-routing', [
         'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-    ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertSessionHasNoErrors();
+    ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])
+        ->assertSessionHasNoErrors()
+        ->assertSessionHas('success', 'Document forwarded successfully.');
 
     $presentation = app(PambRoutingTimelineService::class)->present($report->fresh());
     expect(collect($presentation['timeline'])->firstWhere('status', 'current')['key'])
@@ -149,7 +151,7 @@ test('PAMB PENRO Records handoff moves workspace ownership to Office of the PENR
     $this->actingAs($records);
     $recordsWorkspace = app(SubmissionTrackingService::class)->workspaceQueues();
     expect($recordsWorkspace['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($recordsWorkspace['outgoing']->pluck('source_id')->all())->toContain($report->id);
+        ->and($recordsWorkspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $this->actingAs($office);
     $officeWorkspace = app(SubmissionTrackingService::class)->workspaceQueues();
@@ -181,8 +183,8 @@ test('PAMB Chief recommendation transfers final ownership back to Office of the 
 
     $this->actingAs($chief);
     $chiefBefore = app(SubmissionTrackingService::class)->workspaceQueues();
-    expect($chiefBefore['incoming']->pluck('source_id')->all())->toContain($report->id)
-        ->and($chiefBefore['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
+    expect($chiefBefore['incoming']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($chiefBefore['outgoing']->pluck('source_id')->all())->toContain($report->id);
 
     $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, '2026-08-09 10:00:00', $chief->id);
 
@@ -197,7 +199,7 @@ test('PAMB Chief recommendation transfers final ownership back to Office of the 
     $this->actingAs($chief);
     $chiefAfter = app(SubmissionTrackingService::class)->workspaceQueues();
     expect($chiefAfter['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($chiefAfter['outgoing']->pluck('source_id')->all())->toContain($report->id);
+        ->and($chiefAfter['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $this->actingAs($office);
     $officeRowBeforeReceipt = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
@@ -222,13 +224,15 @@ test('PAMB Chief recommendation transfers final ownership back to Office of the 
 
     $officeAfterReceipt = app(SubmissionTrackingService::class)->workspaceQueues();
     expect($officeAfterReceipt['incoming']->pluck('source_id')->all())->toContain($report->id)
-        ->and($officeAfterReceipt['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
+        ->and($officeAfterReceipt['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('decision')
+        ->and($officeAfterReceipt['outgoing']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($officeAfterReceipt)->not->toHaveKey('other');
 
     $timeline->record($report->fresh(), PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, '2026-08-09 12:00:00', $office->id);
 
     $officeAfterApproval = app(SubmissionTrackingService::class)->workspaceQueues();
     expect($officeAfterApproval['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($officeAfterApproval['outgoing']->pluck('source_id')->all())->toContain($report->id);
+        ->and($officeAfterApproval['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $this->actingAs($records);
     $recordsAfterApproval = app(SubmissionTrackingService::class)->workspaceQueues();
@@ -396,13 +400,13 @@ test('OfficePenroFinalReviewGatingTest: receipt precedes final review and approv
         ->and($queues['processed']->pluck('source_id')->all())->not->toContain($report->id);
 });
 
-test('RoutingTerminologyTest: workspace navigation uses Incoming, Outgoing, and History', function (): void {
+test('RoutingTerminologyTest: generic workspace navigation uses Incoming, Outgoing, and History with action filters inside Incoming', function (): void {
     $service = file_get_contents(base_path('app/Services/SubmissionTracking/SubmissionTrackingService.php'));
     $registry = file_get_contents(base_path('app/Services/SubmissionTracking/DocumentRoutingProfileRegistry.php'));
     $index = file_get_contents(base_path('resources/js/Pages/SubmissionTracking/Index.jsx'));
     $timeline = file_get_contents(base_path('resources/js/Components/SubmissionTracking/PambRoutingTimeline.jsx'));
 
-    expect($service)->toContain("return [['incoming', 'Incoming'], ['outgoing', 'Outgoing'], ['history', 'History']];")
+    expect($service)->toContain("[['incoming', 'Incoming'], ['outgoing', 'Outgoing'], ['history', 'History']]")
         ->and($service)->not->toContain("Action History")
         ->and($service)->not->toContain("Final Records")
         ->and($registry)->toContain('Received by Office of the PENRO for Final Review')

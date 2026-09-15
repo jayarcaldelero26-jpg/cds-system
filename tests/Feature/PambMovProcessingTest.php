@@ -1,7 +1,10 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\SubmissionRoutingAttachment;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
@@ -90,6 +93,140 @@ test('saving a MOV records upload without submitting it for review', function ()
     $snapshot = app(SubmissionTrackingService::class)->snapshot();
     expect($snapshot['queues']['for_submission']->pluck('source_id')->all())->toContain($report->id)
         ->and($snapshot['queues']['for_review']->pluck('source_id')->all())->not->toContain($report->id);
+});
+
+test('a newly saved CENRO-managed Regular PAMB report enters only its CENRO CDS Focal Incoming workspace', function (): void {
+    Storage::fake('local');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Baganga');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Baganga');
+    $records = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Baganga');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $penroFocal = pambRoleUser('PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $area = ProtectedArea::create([
+        'name' => 'Baganga Mangrove Swamp Forest Reserve', 'short_name' => 'BMSFR',
+        'category' => 'Protected Landscape', 'municipality' => 'Baganga',
+        'province' => 'Davao Oriental', 'region' => 'Region XI',
+        'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_baganga')->value('id'),
+        'assignment_type' => 'supervising', 'assigned_by' => $focal->id,
+    ]);
+
+    $this->actingAs($focal)->post(route('conservation-reports.store', ['workflow' => 'regular_pamb']), [
+        'target_office' => 'CENRO Baganga', 'protected_area_id' => $area->id,
+        'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes',
+        'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-09-01',
+        'date_accomplished' => '2026-09-01',
+        'mov' => UploadedFile::fake()->create('bmsfr-september.pdf', 20, 'application/pdf'),
+    ])->assertSessionHasNoErrors();
+
+    $report = ConservationReportSubmission::query()->latest('id')->firstOrFail();
+    $tracking = app(SubmissionTrackingService::class);
+    $row = $tracking->records()->firstWhere('source_id', $report->id);
+    $workspace = $tracking->workspaceQueues();
+
+    expect($row['source'])->toBe('conservation')
+        ->and($row['submission_status'])->toBe('Pending Submission by CENRO')
+        ->and($row['routing']['responsible_office'])->toBe('CENRO Baganga')
+        ->and($row['routing']['responsible_user_category'])->toBe('CENRO_CDS_FOCAL')
+        ->and($row['routing']['next_expected_action'])->toBe('Submit MOV/report for CENRO CDS Chief review')
+        ->and($workspace['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('decision')
+        ->and($workspace['history']->pluck('source_id')->all())->not->toContain($report->id);
+
+    foreach ([$chief, $records, $penroRecords, $penroFocal] as $nonOwner) {
+        $this->actingAs($nonOwner);
+        expect($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->not->toContain($report->id);
+    }
+});
+
+test('a direct-PENRO Regular PAMB report does not enter a CENRO Incoming workspace', function (): void {
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Baganga');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $area = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary', 'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro',
+        'province' => 'Davao Oriental', 'region' => 'Region XI',
+        'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    $report = pambReport($focal, [
+        'protected_area_id' => $area->id, 'target_office' => 'PENRO Davao Oriental',
+        'mov_file_path' => 'conservation-report-movs/mhrws-initial.pdf',
+    ]);
+    $tracking = app(SubmissionTrackingService::class);
+
+    $this->actingAs($focal);
+    expect($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->not->toContain($report->id);
+
+    $this->actingAs($penroRecords);
+    expect($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing']['responsible_user_category'])->toBe('PENRO_RECORDS');
+});
+
+test('PENRO Records receipt is attachment-free while its forward action retains routing-copy upload', function (): void {
+    Storage::fake('local');
+    $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $report = pambReport($records, [
+        'target_office' => 'CENRO Mati',
+        'date_report_released_cenro' => '2026-08-04',
+    ]);
+    $tracking = app(SubmissionTrackingService::class);
+
+    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeFalse();
+    $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT,
+        'date' => '2026-08-05',
+    ])->assertSessionHasNoErrors();
+    expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
+
+    $received = $report->fresh();
+    expect($tracking->canAttachRoutingCopy('conservation', $received, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeTrue();
+    $this->actingAs($records)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), [
+        'stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+        'attachment' => UploadedFile::fake()->create('penro-forwarded.pdf', 12, 'application/pdf'),
+    ])->assertSessionHasNoErrors();
+    expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(1)
+        ->and(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->firstOrFail()->pambRoutingEvent->stage_key)->toBe(PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO);
+});
+
+test('completed PAMB submissions reject source and routing attachment mutations while retaining document access', function (): void {
+    Storage::fake('local');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $report = pambReport($focal, [
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+        'date_endorsed_regional' => '2026-08-06',
+        'mov_file_path' => 'conservation-report-movs/completed.pdf',
+        'mov_file_name' => 'completed.pdf',
+    ]);
+    Storage::disk('local')->put($report->mov_file_path, '%PDF completed');
+    expect(app(SubmissionTrackingService::class)->isRoutingComplete($report))->toBeTrue()
+        ->and(app(SubmissionTrackingService::class)->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::REGIONAL_ENDORSEMENT))->toBeFalse();
+
+    $this->actingAs($focal)->put(route('conservation-reports.update', ['regular_pamb', $report->id]), [
+        'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes',
+        'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03',
+        'mov' => UploadedFile::fake()->create('replacement.pdf', 10, 'application/pdf'),
+    ])->assertSessionHasErrors('submission');
+    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), [
+        'stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT, 'date' => '2026-08-07',
+        'attachment' => UploadedFile::fake()->create('late-copy.pdf', 10, 'application/pdf'),
+    ])->assertSessionHasErrors('attachment');
+    $this->actingAs($focal)->get(route('conservation-reports.mov', ['regular_pamb', $report->id]))->assertOk();
+    expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
+});
+
+test('routing attachment UI only renders upload progress for an active selected File', function (): void {
+    $field = file_get_contents(resource_path('js/Components/SubmissionTracking/RoutingAttachmentField.jsx'));
+    $tracker = file_get_contents(resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'));
+
+    expect($field)->toContain("file instanceof File")
+        ->toContain('hasSelectedAttachment && processing && uploadProgress')
+        ->not->toContain('>Preview</a>')
+        ->and($tracker)->toContain('canUpdate && !completedSubmission');
 });
 
 test('submitting for review is idempotent within a review cycle', function (): void {
@@ -260,6 +397,119 @@ test('CENRO office scope and PAMO protected-area scope are enforced on tracking 
     $this->actingAs($cenro)->get(route('attachments.show', ['conservation-report', $hidden->id, 'mov']))->assertForbidden();
     $this->actingAs($pamo)->get(route('submission-tracking.index'))->assertForbidden();
     expect($visible->protected_area_id)->toBe($area->id);
+});
+
+test('Submission Tracking serves original Conservation MOVs through the protected attachment endpoint', function (): void {
+    Storage::fake('local');
+    Storage::fake('public');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $records = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/records-original.pdf']);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\nprotected original MOV");
+    $protectedUrl = route('attachments.show', ['source' => 'conservation-report', 'record' => $report->id, 'attachment' => 'mov']);
+
+    $this->actingAs($records)->get(route('submission-tracking.index'))->assertOk();
+    $row = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+
+    expect($row['mov_url'])->toBe($protectedUrl)
+        ->and($row['mov_attachment']['url'])->toBe($protectedUrl)
+        ->and($row['current_document']['preview_url'])->toBe($protectedUrl)
+        ->and($row['current_document']['download_url'])->toBe($protectedUrl)
+        ->and($row['current_document']['source'])->toBe('Original MOV / report');
+
+    $this->get($row['current_document']['preview_url'])
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf')
+        ->assertHeader('Content-Disposition', 'inline; filename="records-original.pdf"');
+    $this->get($row['current_document']['download_url'])->assertOk();
+
+    $this->get(route('conservation-reports.mov', ['workflow' => $report->workflow_key, 'submission' => $report->id]))
+        ->assertForbidden();
+    $this->get(route('conservation-reports.index', $report->workflow_key))->assertForbidden();
+});
+
+test('protected original MOV access follows existing office and PA scope for tracking users', function (): void {
+    Storage::fake('local');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $records = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $wrongCenro = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Baganga');
+    $area = ProtectedArea::create([
+        'name' => 'Mati Supervised Attachment PA',
+        'short_name' => 'MSAPA',
+        'category' => 'Protected Landscape',
+        'municipality' => 'Mati',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $focal->id,
+        'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $focal->id,
+    ]);
+    $report = pambReport($focal, [
+        'protected_area_id' => $area->id,
+        'mov_file_path' => 'conservation-report-movs/scoped-original.pdf',
+    ]);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\nscoped MOV");
+    $url = route('attachments.show', ['source' => 'conservation-report', 'record' => $report->id, 'attachment' => 'mov']);
+
+    $this->actingAs($records)->get($url)->assertOk();
+    $this->actingAs($wrongCenro)->get($url)->assertForbidden();
+
+    foreach ([
+        ['CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati'],
+        ['CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati'],
+        ['PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental'],
+        ['Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental'],
+        ['PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental'],
+        ['PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental'],
+        ['PENRO CDS Chief', 'PENRO_CDS_CHIEF', 'PENRO Davao Oriental'],
+    ] as [$role, $section, $office]) {
+        $user = pambRoleUser($role, $section, $office);
+        $this->actingAs($user)->get($url)->assertOk();
+    }
+
+    $admin = pambRoleUser('Super Admin', 'SUPER_ADMIN', 'PENRO Davao Oriental');
+    $this->actingAs($admin)->get($url)->assertOk();
+
+    $inactive = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $inactive->update(['is_active' => false]);
+    $this->actingAs($inactive)->get($url)->assertRedirect(route('login'));
+
+    $unapproved = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $unapproved->update(['is_approved' => false]);
+    $this->actingAs($unapproved)->get($url)->assertRedirect(route('login'));
+
+    $mhrws = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary',
+        'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary',
+        'municipality' => 'San Isidro',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $focal->id,
+        'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $mhrws->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'penro_davao_oriental')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $focal->id,
+    ]);
+    $directPenro = pambReport($focal, [
+        'protected_area_id' => $mhrws->id,
+        'target_office' => 'PENRO Davao Oriental',
+        'mov_file_path' => 'conservation-report-movs/mhrws-original.pdf',
+    ]);
+    Storage::disk('local')->put($directPenro->mov_file_path, "%PDF-1.4\ndirect PENRO MOV");
+    $directUrl = route('attachments.show', ['source' => 'conservation-report', 'record' => $directPenro->id, 'attachment' => 'mov']);
+
+    $this->actingAs($records)->get($directUrl)->assertForbidden();
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $this->actingAs($penroRecords)->get($directUrl)->assertOk();
 });
 
 test('PENRO-managed PAMB uses its legitimate PENRO MOV stages', function (): void {

@@ -51,7 +51,7 @@ function processingHistoryReport(User $owner): BmsReportSubmission
     ]);
 }
 
-test('active routed records remain Outgoing and enter History only at terminal release', function (): void {
+test('terminal records enter History only at terminal release and leave the actionable queues', function (): void {
     $actors = collect([
         'focal' => processingHistoryUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati'),
         'chief' => processingHistoryUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati'),
@@ -92,7 +92,7 @@ test('active routed records remain Outgoing and enter History only at terminal r
     $tracking = app(SubmissionTrackingService::class);
     $workspace = $tracking->workspaceQueues();
     expect($workspace['history']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($workspace['outgoing']->pluck('source_id')->all())->toContain($report->id);
+        ->and($workspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $routing->transition($report, 'bms', 'release_to_regional', $actors['penro_records']->id);
 
