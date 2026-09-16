@@ -260,6 +260,9 @@ export default function DocumentRoutingTimeline({ row, onAction }) {
                                         {event.recorded_by && event.recorded_by}
                                         {event.remarks && " · " + event.remarks}
                                     </p>
+                                    {event.correction && <p className="mt-1 text-gray-600 dark:text-gray-300">
+                                        By: {event.from || "Records office"} · Reason: {event.correction_reason || "Correction required"}{event.correction_detail ? ` · Remarks: ${event.correction_detail}` : ""} · Returned To: {event.to || "Previous accountable sender"}
+                                    </p>}
                                     <RoutingAttachmentLink attachment={event.attachment} />
                                 </li>
                             ))}

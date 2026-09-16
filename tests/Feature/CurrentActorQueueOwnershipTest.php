@@ -24,7 +24,7 @@ function currentActorOwnershipUser(string $section, string $office): User
     return $user;
 }
 
-function currentActorOwnershipReport(User $owner): ConservationReportSubmission
+function currentActorOwnershipReport(User $owner, string $workflow = 'homestay', array $overrides = []): ConservationReportSubmission
 {
     $area = ProtectedArea::create([
         'name' => 'Current Actor Queue PA',
@@ -42,15 +42,15 @@ function currentActorOwnershipReport(User $owner): ConservationReportSubmission
         'assignment_type' => 'supervising',
     ]);
 
-    return ConservationReportSubmission::create([
-        'workflow_key' => 'homestay',
+    return ConservationReportSubmission::create(array_merge([
+        'workflow_key' => $workflow,
         'activity_name' => 'Current actor ownership report',
         'target_office' => 'CENRO Mati',
         'protected_area_id' => $area->id,
         'date_accomplished' => '2026-09-10',
         'created_by' => $owner->id,
         'updated_by' => $owner->id,
-    ]);
+    ], $overrides));
 }
 
 function currentActorQueueIds(User $user, string $queue): array
@@ -81,7 +81,6 @@ test('the canonical current actor always owns exactly one active queue and hando
         [$cenroRecords, 'receive_at_cenro_records'],
         [$cenroRecords, 'forward_to_penro_records'],
         [$penroRecords, 'receive_at_penro_records'],
-        [$penroRecords, 'forward_to_office_penro'],
         [$office, 'receive_at_office_penro'],
         [$office, 'assign_to_tsd_chief'],
         [$tsd, 'receive_at_tsd_chief'],
@@ -120,4 +119,22 @@ test('the canonical current actor always owns exactly one active queue and hando
         ->filter(fn (array $row): bool => (int) ($row['source_id'] ?? 0) === $report->id)
         ->count();
     expect($chiefActiveCount)->toBe(1);
+});
+
+test('new CENRO managed records belong to the accountable focal owner and may have no document preview', function (): void {
+    $focal = currentActorOwnershipUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = currentActorOwnershipUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $record = currentActorOwnershipReport($focal);
+
+    $this->actingAs($focal);
+    $tracking = app(SubmissionTrackingService::class);
+    $row = $tracking->records()->firstWhere('source_id', $record->id);
+    expect($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->toContain($record->id)
+        ->and($tracking->workspaceQueues()['incoming']->firstWhere('source_id', $record->id)['incoming_action_category'])->toBe('forward')
+        ->and($row['current_document'])->toBeNull()
+        ->and($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->not->toContain($record->id + 1000000);
+
+    $this->actingAs($chief);
+    expect($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->not->toContain($record->id);
+    $this->get(route('submission-tracking.index'))->assertOk()->assertInertia(fn ($page) => $page->component('SubmissionTracking/Index'));
 });

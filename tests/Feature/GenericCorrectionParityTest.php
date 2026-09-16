@@ -78,13 +78,13 @@ test('generic Homestay supports CENRO, PENRO CDS Chief, and Office correction cy
         ->and($returned['routing']['correction_reason'])->toBe('Correct the technical narrative.')
         ->and($tracking->queues()['needs_correction']->pluck('source_id')->all())->toContain($report->id);
 
+    correctionParityTransition($tracking, $focal, $report->id, 'receive_correction');
     correctionParityTransition($tracking, $focal, $report->id, 'forward_to_cenro_chief');
     correctionParityTransition($tracking, $cenroChief, $report->id, 'receive_at_cenro_chief');
     correctionParityTransition($tracking, $cenroChief, $report->id, 'forward_to_cenro_records');
     correctionParityTransition($tracking, $cenroRecords, $report->id, 'receive_at_cenro_records');
     correctionParityTransition($tracking, $cenroRecords, $report->id, 'forward_to_penro_records');
     correctionParityTransition($tracking, $penroRecords, $report->id, 'receive_at_penro_records');
-    correctionParityTransition($tracking, $penroRecords, $report->id, 'forward_to_office_penro');
     correctionParityTransition($tracking, $office, $report->id, 'receive_at_office_penro');
     correctionParityTransition($tracking, $office, $report->id, 'assign_to_tsd_chief');
     correctionParityTransition($tracking, $tsd, $report->id, 'receive_at_tsd_chief');
@@ -105,6 +105,7 @@ test('generic Homestay supports CENRO, PENRO CDS Chief, and Office correction cy
         ->and($penroReturned['routing']['current_location'])->toBe('PENRO CDS')
         ->and($tracking->queues()['cds_correction']->pluck('source_id')->all())->toContain($report->id);
 
+    correctionParityTransition($tracking, $penroFocal, $report->id, 'receive_correction');
     correctionParityTransition($tracking, $penroFocal, $report->id, 'forward_to_cds_chief');
     correctionParityTransition($tracking, $penroChief, $report->id, 'receive_at_cds_chief');
     correctionParityTransition($tracking, $penroChief, $report->id, 'recommend_to_office_penro');
@@ -123,6 +124,7 @@ test('generic Homestay supports CENRO, PENRO CDS Chief, and Office correction cy
         ->and($officeReturned['routing']['responsible_user_category'])->toBe('PENRO CDS Focal Person')
         ->and($tracking->queues()['cds_correction']->pluck('source_id')->all())->toContain($report->id);
 
+    correctionParityTransition($tracking, $penroFocal, $report->id, 'receive_correction');
     correctionParityTransition($tracking, $penroFocal, $report->id, 'forward_to_cds_chief');
     correctionParityTransition($tracking, $penroChief, $report->id, 'receive_at_cds_chief');
     correctionParityTransition($tracking, $penroChief, $report->id, 'recommend_to_office_penro');

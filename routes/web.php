@@ -28,6 +28,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProtectedAttachmentController;
 use App\Http\Controllers\SubmissionRoutingAttachmentController;
 use App\Http\Controllers\ModuleDefinitionController;
+use App\Http\Controllers\SystemDiagnosticsController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Services\Dashboard\DashboardMonitoringService;
 
@@ -110,6 +111,7 @@ Route::middleware('auth')->group(function () {
     Route::get('admin/audit-logs', [AuditLogController::class, 'index'])->middleware('can:audit-logs.view')->name('audit-logs.index');
     Route::get('admin/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->middleware('can:audit-logs.view')->name('audit-logs.show');
     Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');
+    Route::get('settings/system-diagnostics', [SystemDiagnosticsController::class, 'index'])->middleware('can:system-diagnostics.view')->name('settings.system-diagnostics.index');
     Route::get('settings/module-management', [ModuleDefinitionController::class, 'index'])->middleware('can:module-definitions.view')->name('module-definitions.index');
     Route::post('settings/module-management', [ModuleDefinitionController::class, 'store'])->middleware('can:module-definitions.create')->name('module-definitions.store');
     Route::put('settings/module-management/{moduleDefinition}', [ModuleDefinitionController::class, 'update'])->middleware('can:module-definitions.update')->name('module-definitions.update');

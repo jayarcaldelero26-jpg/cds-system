@@ -19,9 +19,9 @@ final class RoutingAttachmentService
     public function __construct(private readonly OrganizationalAccessService $organization) {}
     public function store(UploadedFile $file): string { $path = $file->store(self::FOLDER, self::DISK); abort_unless(is_string($path) && $path !== '', 500); return $path; }
     public function discard(?string $path): void { if (is_string($path) && $path !== '') Storage::disk(self::DISK)->delete($path); }
-    public function create(string $source, int $sourceId, UploadedFile $file, string $path, ?User $user, ?string $stageKey, ?string $actionKey, ?string $remarks = null, ?DocumentRoutingEvent $documentEvent = null, ?PambRoutingEvent $pambEvent = null): SubmissionRoutingAttachment
+    public function create(string $source, int $sourceId, UploadedFile $file, string $path, ?User $user, ?string $stageKey, ?string $actionKey, ?string $remarks = null, ?DocumentRoutingEvent $documentEvent = null, ?PambRoutingEvent $pambEvent = null, string $purpose = 'routing_copy'): SubmissionRoutingAttachment
     {
-        return SubmissionRoutingAttachment::query()->create(['source' => $source, 'source_id' => $sourceId, 'document_routing_event_id' => $documentEvent?->getKey(), 'pamb_routing_event_id' => $pambEvent?->getKey(), 'stage_key' => $stageKey, 'action_key' => $actionKey, 'original_name' => $this->filename($file->getClientOriginalName()), 'stored_path' => $path, 'mime_type' => $file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream', 'file_size' => (int) ($file->getSize() ?: 0), 'uploaded_by' => $user?->getKey(), 'remarks' => filled($remarks) ? trim($remarks) : null]);
+        return SubmissionRoutingAttachment::query()->create(['source' => $source, 'source_id' => $sourceId, 'document_routing_event_id' => $documentEvent?->getKey(), 'pamb_routing_event_id' => $pambEvent?->getKey(), 'stage_key' => $stageKey, 'action_key' => $actionKey, 'purpose' => $purpose, 'original_name' => $this->filename($file->getClientOriginalName()), 'stored_path' => $path, 'mime_type' => $file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream', 'file_size' => (int) ($file->getSize() ?: 0), 'uploaded_by' => $user?->getKey(), 'remarks' => filled($remarks) ? trim($remarks) : null]);
     }
     public function latest(string $source, int $sourceId): ?SubmissionRoutingAttachment { return SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->latest('id')->first(); }
     public function forDocumentEvents(iterable $ids): array { return SubmissionRoutingAttachment::query()->whereIn('document_routing_event_id', collect($ids)->filter()->all())->get()->keyBy('document_routing_event_id')->all(); }
@@ -50,7 +50,7 @@ final class RoutingAttachmentService
     /** Resolve the effective current copy without changing event/version history. */
     public function currentDescriptor(string $source, int $sourceId, ?array $original = null, ?string $fallbackUrl = null, ?string $fallbackName = null): ?array
     {
-        $latest = $this->latest($source, $sourceId);
+        $latest = SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->where(function ($query): void { $query->whereNull('purpose')->orWhere('purpose', '!=', 'correction_reference'); })->latest('id')->first();
         if ($latest) {
             return $this->descriptor($latest);
         }

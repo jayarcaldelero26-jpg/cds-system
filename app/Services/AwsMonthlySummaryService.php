@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Aws;
+use App\Models\AwsObservation;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
@@ -91,7 +92,7 @@ final class AwsMonthlySummaryService
 
     private function rowsBetween(User $user, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, ?int $protectedAreaId): Collection
     {
-        return $this->awsScope->query(Aws::query(), $user)
+        $legacy = $this->awsScope->query(Aws::query(), $user)
             ->whereNotNull('protected_area_id')
             ->whereNotNull('timestamps')
             ->whereBetween('start_date', [$periodStart->toDateString(), $periodEnd->toDateString()])
@@ -99,6 +100,15 @@ final class AwsMonthlySummaryService
             ->with('protectedArea:id,name')
             ->orderBy('protected_area_id')->orderBy('start_date')
             ->get(['id', 'protected_area_id', 'start_date', 'precipitation', 'wind_direction', 'wind_speed', 'air_temperature', 'relative_humidity', 'atmospheric_pressure', 'observation_count', 'expected_observations', 'data_completeness']);
+        $observations = $this->awsScope->query(AwsObservation::query(), $user)
+            ->whereNotNull('protected_area_id')
+            ->whereBetween('start_date', [$periodStart->toDateString(), $periodEnd->toDateString()])
+            ->when($protectedAreaId !== null, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
+            ->with('protectedArea:id,name')
+            ->orderBy('protected_area_id')->orderBy('start_date')
+            ->get(['id', 'protected_area_id', 'start_date', 'precipitation', 'wind_direction', 'wind_speed', 'air_temperature', 'relative_humidity', 'atmospheric_pressure', 'observation_count', 'expected_observations', 'data_completeness']);
+
+        return $legacy->concat($observations)->sortBy(fn ($row) => [$row->protected_area_id, $row->start_date?->toDateString() ?? ''])->values();
     }
 
     private function summarizeAreas(Collection $rows, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, string $periodLabel): Collection

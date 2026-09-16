@@ -98,6 +98,7 @@ abstract class StandardAReportSubmissionController extends Controller
     {
         $submission = $this->findSubmission($reportSubmission, $request->user());
         $this->organization->assertCanAccessProtectedArea($request->user(), $submission->protected_area_id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($submission);
         $validated = $request->validate($this->rules($submission->document_type), [
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
@@ -129,6 +130,7 @@ abstract class StandardAReportSubmissionController extends Controller
     {
         $submission = $this->findSubmission($reportSubmission, request()->user());
         $this->organization->assertCanAccessProtectedArea(request()->user(), $submission->protected_area_id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($submission);
         $path = $submission->mov_file_path;
         DB::transaction(fn () => $submission->delete());
         if ($path) $this->attachments->delete($path);

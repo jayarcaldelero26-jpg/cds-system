@@ -165,6 +165,7 @@ class ManagementPlanController extends Controller
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
         $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($managementPlan);
         $this->rejectRoutingFields($request);
         $data = $request->validate([
             ...$this->reportRules(),
@@ -219,6 +220,7 @@ class ManagementPlanController extends Controller
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
         $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($managementPlan);
         $managementPlan->update(['updated_by' => $request->user()->id]);
         $managementPlan->delete();
 

@@ -51,6 +51,7 @@ class PermissionSeeder extends Seeder
 
             // Audit
             'audit-logs.view',
+            'system-diagnostics.view',
 
             // Documents
             'documents.view',

@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\SubmissionRoutingAttachment;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
@@ -165,30 +166,107 @@ test('a direct-PENRO Regular PAMB report does not enter a CENRO Incoming workspa
         ->and($tracking->records()->firstWhere('source_id', $report->id)['routing']['responsible_user_category'])->toBe('PENRO_RECORDS');
 });
 
-test('PENRO Records receipt is attachment-free while its forward action retains routing-copy upload', function (): void {
+test('PENRO Records receipt accepts a working copy and hands off directly to Office of the PENRO', function (): void {
     Storage::fake('local');
     $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
     $report = pambReport($records, [
         'target_office' => 'CENRO Mati',
         'date_report_released_cenro' => '2026-08-04',
     ]);
     $tracking = app(SubmissionTrackingService::class);
 
-    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeFalse();
+    $this->actingAs($records);
+    $before = $tracking->records()->firstWhere('source_id', $report->id);
+    expect(collect($before['routing']['actions'])->pluck('action_label')->all())
+        ->toBe(['Receive', 'Return for Correction'])
+        ->and(collect($before['routing']['actions'])->firstWhere('key', 'penro_receipt')['attachment_allowed'])->toBeTrue()
+        ->and(collect($before['routing']['actions'])->pluck('key')->all())->not->toContain('release_to_regional');
+
+    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeTrue();
     $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
         'stage' => SubmissionTrackingService::PENRO_RECEIPT,
         'date' => '2026-08-05',
+        'attachment' => UploadedFile::fake()->create('penro-received.pdf', 12, 'application/pdf'),
     ])->assertSessionHasNoErrors();
-    expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
-
-    $received = $report->fresh();
-    expect($tracking->canAttachRoutingCopy('conservation', $received, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBeTrue();
-    $this->actingAs($records)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), [
-        'stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-        'attachment' => UploadedFile::fake()->create('penro-forwarded.pdf', 12, 'application/pdf'),
-    ])->assertSessionHasNoErrors();
+    $attachment = SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->firstOrFail();
     expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(1)
-        ->and(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->firstOrFail()->pambRoutingEvent->stage_key)->toBe(PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO);
+        ->and($attachment->purpose)->toBe('routing_copy')
+        ->and($attachment->pambRoutingEvent->stage_key)->toBe(PambRoutingTimelineService::RECORDS_RECEIVED);
+
+    $this->actingAs($records);
+    $recordsWorkspace = $tracking->workspaceQueues();
+    expect($recordsWorkspace['incoming']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($recordsWorkspace['outgoing']->pluck('source_id')->all())->toContain($report->id);
+    $this->actingAs($office);
+    $officeRow = $tracking->workspaceQueues()['incoming']->firstWhere('source_id', $report->id);
+    expect($officeRow)->not->toBeNull()
+        ->and($officeRow['routing']['current_stage'])->toBe(PambRoutingTimelineService::RECEIVED_BY_PENRO)
+        ->and($officeRow['routing']['responsible_user_category'])->toBe('OFFICE_OF_THE_PENRO');
+
+    $this->actingAs($records)->post(route('submission-tracking.transition', [
+        'conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT,
+    ]), [
+        'stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT,
+        'date' => '2026-08-06',
+    ])->assertForbidden();
+});
+
+test('PENRO TSD Receive keeps ownership until the explicit Forward action', function (): void {
+    $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    $tsd = pambRoleUser('PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
+    $focal = pambRoleUser('PENRO CDS Focal Person', 'PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $report = pambReport($records, [
+        'target_office' => 'CENRO Mati',
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+    ]);
+    // A stale generic handoff must not override newer PAMB milestones.
+    DocumentRoutingEvent::create([
+        'source_type' => 'conservation',
+        'source_id' => $report->id,
+        'workflow_key' => $report->workflow_key,
+        'event_key' => 'forwarded',
+        'from_stage' => 'cenro_records',
+        'to_stage' => 'transit_to_penro_records',
+        'from_office' => 'CENRO Records Unit',
+        'to_office' => 'PENRO Records Unit',
+        'occurred_at' => '2026-08-05 08:00:00',
+        'recorded_by' => $records->id,
+        'metadata' => ['action_key' => 'forward_to_penro_records'],
+    ]);
+    $timeline = app(PambRoutingTimelineService::class);
+    $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, '2026-08-06 09:00:00', $records->id);
+    $timeline->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_PENRO, '2026-08-06 10:00:00', $office->id);
+    $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-06 11:00:00', $office->id);
+
+    $this->actingAs($tsd);
+    $tracking = app(SubmissionTrackingService::class);
+    $before = $tracking->records()->firstWhere('source_id', $report->id);
+    $beforeQueue = $tracking->workspaceQueues();
+    expect($before['routing']['responsible_user_category'])->toBe('PENRO_TSD_CHIEF')
+        ->and($before['routing']['next_expected_action'])->toBe('Record Receipt by PENRO TSD Chief')
+        ->and($beforeQueue['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id && $item['required_action'] === 'Record Receipt by PENRO TSD Chief'))->toBeTrue();
+
+    $timeline->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_TSD, '2026-08-07 09:00:00', $tsd->id);
+    $afterReceive = $tracking->records()->firstWhere('source_id', $report->id);
+    $afterReceiveQueue = $tracking->workspaceQueues();
+    expect($afterReceive['routing']['responsible_user_category'])->toBe('PENRO_TSD_CHIEF')
+        ->and($afterReceive['routing']['next_expected_action'])->toBe('Forward to PENRO CDS Focal Person')
+        ->and($afterReceiveQueue['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($afterReceiveQueue['outgoing']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id && $item['required_action'] === 'Forward to PENRO CDS Focal Person'))->toBeTrue();
+
+    $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, '2026-08-07 10:00:00', $tsd->id);
+    $afterForwardQueue = $tracking->workspaceQueues();
+    $this->actingAs($focal);
+    $focalQueue = $tracking->workspaceQueues();
+    expect($afterForwardQueue['incoming']->pluck('source_id')->all())->not->toContain($report->id)
+        ->and($afterForwardQueue['outgoing']->pluck('source_id')->all())->toContain($report->id)
+        ->and($focalQueue['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id))->toBeTrue();
 });
 
 test('completed PAMB submissions reject source and routing attachment mutations while retaining document access', function (): void {

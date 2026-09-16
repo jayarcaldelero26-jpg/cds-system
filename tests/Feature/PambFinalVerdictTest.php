@@ -138,20 +138,9 @@ test('PAMB PENRO Records handoff moves workspace ownership to Office of the PENR
     expect($afterReceipt['incoming']->pluck('source_id')->all())->not->toContain($report->id)
         ->and($afterReceipt['outgoing']->pluck('source_id')->all())->toContain($report->id);
 
-    $this->actingAs($records)->post(route('submission-tracking.internal-routing', [
-        'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-    ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])
-        ->assertSessionHasNoErrors()
-        ->assertSessionHas('success', 'Document forwarded successfully.');
-
     $presentation = app(PambRoutingTimelineService::class)->present($report->fresh());
     expect(collect($presentation['timeline'])->firstWhere('status', 'current')['key'])
         ->toBe(PambRoutingTimelineService::RECEIVED_BY_PENRO);
-
-    $this->actingAs($records);
-    $recordsWorkspace = app(SubmissionTrackingService::class)->workspaceQueues();
-    expect($recordsWorkspace['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($recordsWorkspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $this->actingAs($office);
     $officeWorkspace = app(SubmissionTrackingService::class)->workspaceQueues();
@@ -183,8 +172,8 @@ test('PAMB Chief recommendation transfers final ownership back to Office of the 
 
     $this->actingAs($chief);
     $chiefBefore = app(SubmissionTrackingService::class)->workspaceQueues();
-    expect($chiefBefore['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($chiefBefore['outgoing']->pluck('source_id')->all())->toContain($report->id);
+    expect($chiefBefore['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($chiefBefore['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
 
     $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, '2026-08-09 10:00:00', $chief->id);
 
@@ -199,7 +188,7 @@ test('PAMB Chief recommendation transfers final ownership back to Office of the 
     $this->actingAs($chief);
     $chiefAfter = app(SubmissionTrackingService::class)->workspaceQueues();
     expect($chiefAfter['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($chiefAfter['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
+        ->and($chiefAfter['outgoing']->pluck('source_id')->all())->toContain($report->id);
 
     $this->actingAs($office);
     $officeRowBeforeReceipt = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);

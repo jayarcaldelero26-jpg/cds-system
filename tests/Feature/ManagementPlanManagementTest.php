@@ -88,7 +88,6 @@ test('management plan report forms reject routing dates and ordinary edits prese
     $plan->update([
         'date_report_released_cenro' => '2026-02-03',
         'date_received_penro' => '2026-02-05',
-        'date_endorsed_regional' => '2026-02-06',
     ]);
 
     $this->actingAs($staff)
@@ -109,5 +108,5 @@ test('management plan report forms reject routing dates and ordinary edits prese
     expect($plan->activity_name)->toBe('Updated Implementation')
         ->and($plan->date_report_released_cenro?->toDateString())->toBe('2026-02-03')
         ->and($plan->date_received_penro?->toDateString())->toBe('2026-02-05')
-        ->and($plan->date_endorsed_regional?->toDateString())->toBe('2026-02-06');
+        ->and($plan->date_endorsed_regional)->toBeNull();
 });

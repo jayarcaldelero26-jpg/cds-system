@@ -370,8 +370,21 @@ final class SubmissionTrackingService
             if ((bool) ($record['routing_complete'] ?? false)) return false;
             $events = ($record['pamb_routing_applicable'] ?? false) ? collect($record['routing_timeline'] ?? []) : collect(data_get($record, 'routing.routing_history', []));
             $last = $events->filter(fn (mixed $event): bool => is_array($event) && filled($event['occurred_at'] ?? null))->sortBy(fn (array $event): string => (string) ($event['occurred_at'] ?? '').':'.str_pad((string) ($event['id'] ?? 0), 12, '0', STR_PAD_LEFT))->last();
+            if (($record['pamb_routing_applicable'] ?? false) && data_get($record, 'routing.last_action_actor_category')) {
+                $last = [
+                    'actor_category' => data_get($record, 'routing.last_action_actor_category'),
+                    'actor_office' => data_get($record, 'routing.last_action_actor_office'),
+                    'stage_key' => data_get($record, 'routing.current_stage'),
+                    'event_type' => data_get($record, 'routing.correction')
+                        ? 'returned_for_correction'
+                        : (str_contains(strtolower((string) data_get($record, 'routing.last_action.label')), 'forward') ? 'forwarded' : 'received'),
+                ];
+            }
             if (! is_array($last) || $this->organization->normalizeCategory($last['actor_category'] ?? null) !== $category) return false;
-            if (($record['pamb_routing_applicable'] ?? false) && (str_starts_with((string) ($last['stage_key'] ?? $last['key'] ?? ''), 'forwarded_') || ($last['event_type'] ?? null) === 'forwarded')) return false;
+            if (($record['pamb_routing_applicable'] ?? false)
+                && ($last['event_type'] ?? null) === 'received') return false;
+            if (($record['pamb_routing_applicable'] ?? false)
+                && data_get($record, 'routing.current_stage') === PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL) return false;
             $actorOffice = $this->organization->normalizeOffice($last['actor_office'] ?? null);
             return $actorOffice !== null ? $actorOffice === $office : (! in_array($category, $cenroCategories, true) || $this->organization->normalizeOffice($record['target_office'] ?? null) === $office);
         })->values();
@@ -382,7 +395,7 @@ final class SubmissionTrackingService
         $keys = match ($queue) {
             'pamo_origin' => ['forward_from_pamo'],
             'cenro_focal' => ['forward_to_cenro_chief'],
-            'cenro_correction' => ['forward_to_cenro_chief'],
+            'cenro_correction' => ['receive_correction', 'forward_to_cenro_chief'],
             'cenro_chief' => ['receive_at_cenro_chief', 'forward_to_cenro_records'],
             'cenro_records' => ['receive_at_cenro_records', 'forward_to_penro_records'],
             'penro_receipt' => ['receive_at_penro_records'],
@@ -390,7 +403,7 @@ final class SubmissionTrackingService
             'office_initial_routing' => ['receive_at_office_penro', 'assign_to_tsd_chief'],
             'tsd_routing' => ['receive_at_tsd_chief', 'forward_to_cds_focal'],
             'cds_processing' => ['receive_at_cds_focal', 'forward_to_cds_chief'],
-            'cds_correction' => ['forward_to_cds_chief'],
+            'cds_correction' => ['receive_correction', 'forward_to_cds_chief'],
             'cds_review' => ['receive_at_cds_chief', 'recommend_to_office_penro'],
             'office_final_verdict' => ['receive_at_office_penro_final', 'approve_for_regional_release'],
             'penro_records_final' => ['receive_at_penro_records_final', 'release_to_regional'],
@@ -421,6 +434,8 @@ final class SubmissionTrackingService
             OrganizationalAccessService::PENRO_RECORDS,
             OrganizationalAccessService::OFFICE_PENRO,
             OrganizationalAccessService::PENRO_TSD_CHIEF,
+            OrganizationalAccessService::PENRO_FOCAL,
+            OrganizationalAccessService::PENRO_CHIEF,
         ];
         if (! $user || ! in_array($this->organization->effectiveCategory($user), $routingOnly, true)) return [];
 
@@ -525,6 +540,7 @@ final class SubmissionTrackingService
 
     private function incomingActionCategory(array $row, array $queueNames = []): string
     {
+        if ((bool) data_get($row, 'routing.correction', false)) return 'correction';
         $currentAction = collect(data_get($row, 'routing.actions', []))->first(fn (mixed $action): bool => is_array($action) && filled($action['key'] ?? null) && ! ($action['correction'] ?? false));
         $currentAction ??= collect(data_get($row, 'routing.actions', []))->first(fn (mixed $action): bool => is_array($action) && filled($action['key'] ?? null));
         if (! is_array($currentAction)) {
@@ -578,8 +594,10 @@ final class SubmissionTrackingService
 
         if (! in_array($category, [OrganizationalAccessService::CENRO_FOCAL, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_RECORDS], true)) return true;
 
-        return $this->organization->normalizeOffice(data_get($row, 'routing.responsible_office'))
-            === $this->organization->normalizeOffice($user->office_designated);
+        $actorOffice = $this->organization->normalizeOffice($user->office_designated);
+        $responsibleOffice = $this->organization->normalizeOffice(data_get($row, 'routing.responsible_office'));
+        $targetOffice = $this->organization->normalizeOffice(data_get($row, 'target_office'));
+        return $responsibleOffice === $actorOffice || ($targetOffice !== null && $targetOffice === $actorOffice);
     }
     private function pambCurrentStageKey(array $record): ?string    {
         $current = collect($record['routing_timeline'] ?? [])->firstWhere('status', 'current');
@@ -616,7 +634,7 @@ final class SubmissionTrackingService
         return $this->genericRouting->actionKeys($record, $sourceKey, auth()->user());
     }
 
-    public function transition(string $sourceKey, int $id, string $stage, ?string $date, ?int $userId, ?string $remarks = null): DocumentRoutingEvent|PambRoutingEvent|null
+    public function transition(string $sourceKey, int $id, string $stage, ?string $date, ?int $userId, ?string $remarks = null, ?string $correctionReasonKey = null, ?string $correctionDetail = null): DocumentRoutingEvent|PambRoutingEvent|null
     {
         $source = $this->source($sourceKey);
         abort_unless($source, 404);
@@ -627,7 +645,7 @@ final class SubmissionTrackingService
             abort_unless($this->organization->canViewDevelopmentRecord($user, $record), 403);
         }
         if ($this->usesGenericRecord($sourceKey, $record)) {
-            return $this->genericRouting->transition($record, $sourceKey, $stage, $userId, $remarks);
+            return $this->genericRouting->transition($record, $sourceKey, $stage, $userId, $remarks, $correctionReasonKey, $correctionDetail);
         }
         if ($record instanceof ConservationReportSubmission && ($user = auth()->user())) {
             abort_unless($this->pambAccess->canView($user, $record), 403);
@@ -657,9 +675,23 @@ final class SubmissionTrackingService
         }
         $canonicalEvent = DB::transaction(function () use ($record, $changes, $stage, $value, $userId): ?PambRoutingEvent {
             $record->update($changes);
-            return $record instanceof ConservationReportSubmission && $this->pambRouting->applies($record)
-                ? $this->pambRouting->recordCanonical($record, $stage, $value, $userId)
-                : null;
+            if (! $record instanceof ConservationReportSubmission || ! $this->pambRouting->applies($record)) return null;
+
+            $canonicalEvent = $this->pambRouting->recordCanonical($record, $stage, $value, $userId);
+            if ($stage === self::PENRO_RECEIPT) {
+                // Ordinary PENRO Records receipt is an acknowledgement plus an
+                // immediate handoff to the Office of the PENRO. Keep both
+                // immutable events in the same transaction so ownership cannot
+                // be left between the two stages.
+                $this->pambRouting->record(
+                    $record->fresh(),
+                    PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+                    $value.' 00:00:00',
+                    $userId,
+                );
+            }
+
+            return $canonicalEvent;
         });
         try {
             $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);
@@ -732,6 +764,11 @@ final class SubmissionTrackingService
             $query->where(fn ($candidate) => $candidate
                 ->where(fn ($meeting) => $meeting->whereIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)->whereNotNull('date_conducted'))
                 ->orWhere(fn ($other) => $other->whereNotNull('date_accomplished')->where(fn ($workflow) => $workflow->whereNotIn('workflow_key', PambComplianceCalculator::MEETING_WORKFLOWS)->orWhereNull('workflow_key'))));
+        }
+        // AWS observations are a separate analytics domain. Only report rows
+        // in the canonical aws table participate in document routing.
+        if ($key === 'aws') {
+            $query->whereNull($table.'.timestamps');
         }
         if ($user = auth()->user()) {
             if ($key === 'conservation') $query = $this->pambAccess->scopeQuery($query, $user);
@@ -918,6 +955,150 @@ final class SubmissionTrackingService
         $data['routing'] = $sourceKey === 'conservation' && $pambRouting['applicable']
             ? app(DocumentRoutingPresenter::class)->presentPamb($record, $pambRouting)
             : app(DocumentRoutingPresenter::class)->present($record, $sourceKey, $routingAudits, $routingEvents);
+        $latestPambOccurredAt = $pambRouting['applicable']
+            ? collect($pambRouting['timeline'] ?? [])
+                ->filter(fn (mixed $stage): bool => is_array($stage) && filled($stage['occurred_at'] ?? null))
+                ->max(fn (array $stage): string => (string) ($stage['occurred_at'] ?? ''))
+            : null;
+        if ($sourceKey === 'conservation' && $pambRouting['applicable'] && $routingEvents->isNotEmpty()) {
+            $latest = $routingEvents->sortBy('id')->last();
+            $genericIsAuthoritative = $latestPambOccurredAt === null
+                || $latest->occurred_at === null
+                || $latest->occurred_at->toIso8601String() >= (string) $latestPambOccurredAt;
+            if ($genericIsAuthoritative
+                && $latest instanceof \App\Models\DocumentRoutingEvent
+                && in_array($latest->event_key, ['returned_for_correction', 'correction_received', 'forwarded'], true)) {
+                $targetStage = (string) $latest->to_stage;
+                $targetCategory = $this->organization->normalizeCategory($targetStage);
+                $targetOffice = $latest->to_office;
+                if ($latest->event_key === 'returned_for_correction' && $targetCategory === OrganizationalAccessService::CENRO_RECORDS && (blank($targetOffice) || strcasecmp((string) $targetOffice, 'previous accountable sender') === 0)) {
+                    $targetOffice = $record->getAttribute('target_office');
+                }
+                $data['routing']['current_stage'] = $targetStage;
+                $data['routing']['current_location'] = $targetOffice ?: $data['routing']['current_location'];
+                $data['routing']['current_status'] = in_array($latest->event_key, ['returned_for_correction', 'correction_received'], true) ? 'Needs Correction' : $data['routing']['current_status'];
+                $data['routing']['next_expected_action'] = match ($latest->event_key) {
+                    'returned_for_correction' => 'Receive Correction',
+                    'correction_received' => 'Resubmit Corrected Copy',
+                    default => 'Record PENRO Receipt',
+                };
+                $data['routing']['responsible_user_category'] = $targetCategory ?: $data['routing']['responsible_user_category'];
+                $data['routing']['responsible_office'] = $targetOffice ?: $data['routing']['responsible_office'];
+                $data['routing']['correction'] = in_array($latest->event_key, ['returned_for_correction', 'correction_received'], true);
+                $correctionEvent = $latest->event_key === 'returned_for_correction'
+                    ? $latest
+                    : $routingEvents->reverse()->first(fn (mixed $event): bool => $event instanceof \App\Models\DocumentRoutingEvent && $event->event_key === 'returned_for_correction');
+                $data['routing']['correction_reason_key'] = data_get($correctionEvent?->metadata, 'correction_reason_key');
+                $data['routing']['correction_reason'] = data_get($correctionEvent?->metadata, 'correction_reason');
+                $data['routing']['correction_detail'] = data_get($correctionEvent?->metadata, 'correction_detail');
+                $data['routing']['last_action'] = [
+                    'label' => $latest->event_key === 'returned_for_correction' ? 'Returned for Correction' : ($latest->event_key === 'correction_received' ? 'Correction Received' : 'Forwarded to PENRO Records'),
+                    'occurred_at' => $latest->occurred_at?->toIso8601String(),
+                    'recorded_by' => $latest->recordedBy?->name,
+                    'remarks' => $latest->remarks,
+                    'attachment' => $this->routingAttachments->forDocumentEvents([$latest->id])[$latest->id] ?? null,
+                ];
+                if ($data['routing']['last_action']['attachment'] instanceof \App\Models\SubmissionRoutingAttachment) {
+                    $data['routing']['last_action']['attachment'] = $this->routingAttachments->descriptor($data['routing']['last_action']['attachment']);
+                }
+                $data['routing']['last_action_actor_category'] = $latest->recordedBy ? $this->organization->effectiveCategory($latest->recordedBy) : null;
+                $data['routing']['last_action_actor_office'] = $latest->recordedBy ? $this->organization->normalizeOffice($latest->recordedBy->office_designated) : null;
+                if (in_array($latest->event_key, ['returned_for_correction', 'correction_received'], true)) {
+                    $data['routing_summary']['current_status'] = $latest->event_key === 'returned_for_correction' ? 'Needs Correction' : 'Correction In Progress';
+                    $data['routing_summary']['current_location'] = $targetOffice ?: $data['routing_summary']['current_location'];
+                    $data['routing_summary']['next_expected_action'] = $latest->event_key === 'returned_for_correction' ? 'Receive Correction' : 'Resubmit Corrected Copy';
+                    $data['routing_summary']['last_action'] = $data['routing']['last_action'];
+                    $data['routing_timeline'] = array_map(function (array $stage) use ($latest): array {
+                        if (($stage['status'] ?? null) !== 'current') return $stage;
+                        return [
+                            ...$stage,
+                            'stage_key' => 'correction_assignment',
+                            'key' => 'correction_assignment',
+                            'label' => $latest->event_key === 'returned_for_correction' ? 'Returned for Correction' : 'Correction In Progress',
+                            'action_label' => null,
+                            'held_at' => $latest->to_office,
+                        ];
+                    }, $data['routing_timeline']);
+                }
+                if ($latest->event_key === 'returned_for_correction') {
+                    $data['routing']['actions'] = [[
+                        'key' => 'receive_correction',
+                        'label' => 'Correction received',
+                        'action_label' => 'Receive Correction',
+                        'to' => $targetStage,
+                        'to_office' => $targetOffice,
+                        'correction' => false,
+                        'correction_cycle' => true,
+                        'attachment_allowed' => false,
+                    ]];
+                } elseif ($latest->event_key === 'correction_received') {
+                    $data['routing']['actions'] = [[
+                        'key' => 'forward_to_penro_records',
+                        'label' => 'Corrected copy resubmitted to PENRO Records',
+                        'action_label' => 'Resubmit Corrected Copy',
+                        'to' => $targetStage,
+                        'to_office' => $targetOffice,
+                        'correction' => false,
+                        'correction_cycle' => true,
+                        'attachment_allowed' => true,
+                    ]];
+                } else {
+                    $data['routing']['actions'] = [[
+                        'key' => 'receive_at_penro_records',
+                        'label' => 'Received by PENRO Records Unit',
+                        'action_label' => 'Receive',
+                        'to' => $targetStage,
+                        'to_office' => $targetOffice,
+                        'correction' => false,
+                        'attachment_allowed' => true,
+                    ], [
+                        'key' => 'return_for_correction_penro_records',
+                        'label' => 'Returned by PENRO Records for Correction',
+                        'action_label' => 'Return for Correction',
+                        'to' => $targetStage,
+                        'to_office' => $targetOffice,
+                        'correction' => true,
+                        'correction_reference_allowed' => true,
+                        'receipt_correction_context' => 'penro_records',
+                        'attachment_allowed' => false,
+                    ]];
+                }
+                if ($actor = auth()->user()) {
+                    $genericPresentation = $this->genericRouting->presentation($record, $sourceKey, $routingEvents, $actor);
+                    $data['can_transition'] = $this->organization->canUseSubmissionTrackingSource($actor, $sourceKey, $source['ability'])
+                        && collect($genericPresentation['allowed_actions'] ?? [])->isNotEmpty();
+                }
+            }
+        }
+        if ($sourceKey === 'conservation' && $pambRouting['applicable']) {
+            // A correction recipient is never allowed to initiate a second
+            // correction cycle before acknowledging the returned assignment.
+            if ((bool) data_get($data, 'routing.correction', false)
+                && $this->organization->normalizeCategory(data_get($data, 'routing.responsible_user_category')) === OrganizationalAccessService::CENRO_RECORDS
+                && collect(data_get($data, 'routing.actions', []))->pluck('key')->contains('return_for_correction_penro_records')) {
+                $data['routing']['actions'] = [[
+                    'key' => 'receive_correction',
+                    'label' => 'Correction received',
+                    'action_label' => 'Receive Correction',
+                    'correction' => false,
+                    'correction_cycle' => true,
+                    'attachment_allowed' => false,
+                ]];
+                $data['routing']['next_expected_action'] = 'Receive Correction';
+            }
+            $actor = auth()->user();
+            $actorOwnsCurrentStage = $actor
+                && ! $this->organization->isGlobal($actor)
+                && $this->isCurrentOperationalOwner($data, $actor);
+            if (! $actorOwnsCurrentStage || ! $data['can_transition']) {
+                $data['routing']['actions'] = [];
+            }
+        }
+        // Executable actions are actor-scoped for every source.  Outgoing and
+        // observer rows remain viewable, but never expose mutation controls.
+        if (! auth()->user() || $this->organization->isGlobal(auth()->user()) || ! $this->isCurrentOperationalOwner($data, auth()->user()) || ! $data['can_transition']) {
+            $data['routing']['actions'] = [];
+        }
         $data['routing']['attachment_allowed'] = $this->canAttachRoutingCopy($sourceKey, $record, (string) ($data['routing']['current_stage'] ?? $data['stage']));
         if ($this->usesGenericRecord($sourceKey, $record)) {
             $data['current_document_location'] = $data['routing']['current_location'];
@@ -988,7 +1169,7 @@ final class SubmissionTrackingService
     /** @return array<string, Collection<int,DocumentRoutingEvent>> */
     private function genericRoutingEvents(Collection $loaded): array
     {
-        $items = $loaded->filter(fn (array $item): bool => $this->usesGenericRecord($item['key'], $item['record']));
+        $items = $loaded;
         if ($items->isEmpty()) return [];
 
         $events = DocumentRoutingEvent::query()
@@ -1057,6 +1238,18 @@ final class SubmissionTrackingService
     }
 
     /**
+     * All originating report controllers use this guard before mutating the
+     * source record. Completion remains defined by the canonical routing
+     * status/completion policy above.
+     */
+    public function assertMutable(Model $record): void
+    {
+        if ($this->isRoutingComplete($record)) {
+            throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
+        }
+    }
+
+    /**
      * A routing copy belongs to a custody handoff, never to a receipt-only
      * event or a completed record. This is the server-side contract shared by
      * the routing endpoints and presentation layer.
@@ -1065,20 +1258,19 @@ final class SubmissionTrackingService
     {
         if ($this->isRoutingComplete($record)) return false;
 
+        if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $stage === 'receive_correction') return false;
+        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && ($this->pambRouting->isCorrectionStageKey($stage) || $this->pambRouting->isCorrectionActionKey($stage))) return false;
+        if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $this->genericRouting->isCorrectionAction($record, $sourceKey, $stage)) return false;
+
         if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && $this->pambRouting->applies($record)) {
             $stage = $this->pambRouting->canonicalStageKey($stage);
 
             return ! in_array($stage, [
-                self::PENRO_RECEIPT,
-                PambRoutingTimelineService::RECORDS_RECEIVED,
                 PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL,
             ], true);
         }
 
-        return ! in_array($stage, [
-            'receive_at_penro_records',
-            'receive_at_penro_records_final',
-        ], true);
+        return $stage !== 'receive_at_penro_records_final';
     }
 
     private function routingCompletedAt(Model $record): ?string

@@ -356,6 +356,24 @@ final class PambRoutingTimelineService
                 'is_internal' => in_array($key, self::INTERNAL_STAGE_KEYS, true),
                 'can_record' => $key === $nextKey && in_array($key, self::INTERNAL_STAGE_KEYS, true) && ! ($key === self::RECEIVED_BY_PENRO_FINAL && $date),
                 'action_label' => $key === self::RECEIVED_BY_PENRO_FINAL ? ($date ? 'Review and select an action' : 'Record Receipt') : ($definition['action_label'] ?? null),
+                'actions' => $key === self::RECORDS_RECEIVED && $status === 'current' ? [
+                    [
+                        'key' => 'penro_receipt',
+                        'label' => 'Receive',
+                        'action_label' => 'Receive',
+                        'correction' => false,
+                        'attachment_allowed' => true,
+                    ],
+                    [
+                        'key' => 'return_for_correction_penro_records',
+                        'label' => 'Return for Correction',
+                        'action_label' => 'Return for Correction',
+                        'correction' => true,
+                        'correction_reference_allowed' => true,
+                        'receipt_correction_context' => 'penro_records',
+                        'attachment_allowed' => false,
+                    ],
+                ] : [],
             ];
         }
 
@@ -425,6 +443,7 @@ final class PambRoutingTimelineService
             'current_processing_status' => $currentStatus,
             'routing_summary' => $routingSummary,
             'timeline' => $timeline,
+            'actions' => $currentStage['actions'] ?? [],
             'legacy_source_metadata' => $legacyRegionalDate ? ['regional_release_date' => $legacyRegionalDate->toDateString(), 'label' => 'Historical source regional release date; not a complete canonical eDATS routing chain.'] : null,
             'summary_metrics' => [
                 'cenro_to_penro' => $this->summaryMetric(
@@ -892,6 +911,19 @@ final class PambRoutingTimelineService
     {
         [$base] = $this->parseStageKeyWithoutRecursion($stageKey);
         return $base;
+    }
+
+    public function isCorrectionStageKey(string $stageKey): bool
+    {
+        return $this->canonicalStageKey($stageKey) === self::PENRO_FINAL_RETURNED_FOR_CORRECTION;
+    }
+
+    public function isCorrectionActionKey(string $actionKey): bool
+    {
+        return in_array($actionKey, [
+            'return_for_correction_cenro_records',
+            'return_for_correction_penro_records',
+        ], true);
     }
 
     private function workingDaysBetween(CarbonImmutable $start, CarbonImmutable $end, ConservationReportSubmission $report): int

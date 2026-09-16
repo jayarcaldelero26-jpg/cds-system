@@ -94,6 +94,7 @@ class HandleInertiaRequests extends Middleware
                     'is_approved' => $user->is_approved,
                 ] : null,
                 'canManageUsers' => $isAdmin,
+                'canViewSystemDiagnostics' => $isAdmin || ($user?->can('system-diagnostics.view') ?? false),
                 'canManagePasskeys' => $isAdmin,
                 'organizationalUnit' => $userUnit,
                 'unitVisibility' => [

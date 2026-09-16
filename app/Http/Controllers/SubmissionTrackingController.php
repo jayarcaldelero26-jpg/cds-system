@@ -9,6 +9,7 @@ use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\RoutingCorrectionService;
 use App\Services\SubmissionTracking\RoutingAttachmentService;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\BusinessCalendarService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,7 +20,7 @@ use Inertia\Response;
 
 class SubmissionTrackingController extends Controller
 {
-    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly RoutingCorrectionService $corrections, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly RoutingAttachmentService $routingAttachments) {}
+    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly RoutingCorrectionService $corrections, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly RoutingAttachmentService $routingAttachments, private readonly DocumentRoutingTransitionService $documentRouting) {}
 
     public function index(Request $request): Response
     {
@@ -77,15 +78,58 @@ class SubmissionTrackingController extends Controller
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         abort_unless(app(OrganizationalAccessService::class)->canUseSubmissionTrackingSource($request->user(), $source, $sourceConfig['ability']), 403);
+        // ENGP retains its existing transition contract. Phase 1 generic
+        // correction attachment handling does not apply to that source.
+        if ($source !== 'engp' && str_starts_with($stage, 'return_for_correction_')) {
+            $data = $request->validate([
+                'stage' => ['required', 'string'],
+                'remarks' => ['nullable', 'string', 'max:2000'],
+                'correction_reason_key' => ['required', 'string', Rule::in(['missing_signature', 'missing_endorsement', 'missing_attachment', 'missing_received_copy', 'incomplete_document', 'other'])],
+                'correction_detail' => [$request->input('correction_reason_key') === 'other' ? 'required' : 'nullable', 'string', 'max:2000'],
+                'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
+            ]);
+            abort_unless($data['stage'] === $stage, 422);
+            $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null, $data['correction_reason_key'], $data['correction_detail'] ?? null, 'correction_reference');
+
+            return back()->with('success', 'Document returned for correction successfully.');
+        }
+        if ($this->isGenericCorrectionAction($source, $record, $stage)) {
+            $data = $request->validate([
+                'stage' => ['required', 'string'],
+                'remarks' => ['nullable', 'string', 'max:2000'],
+                'correction_reason_key' => ['nullable', 'string', Rule::in(['missing_signature', 'missing_endorsement', 'missing_attachment', 'missing_received_copy', 'incomplete_document', 'other'])],
+                'correction_detail' => [$request->input('correction_reason_key') === 'other' ? 'required' : 'nullable', 'string', 'max:2000'],
+                'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
+            ]);
+            abort_unless($data['stage'] === $stage, 422);
+            $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null, $data['correction_reason_key'] ?? null, $data['correction_detail'] ?? null, 'correction_reference');
+
+            return back()->with('success', 'Document returned for correction successfully.');
+        }
+        if (in_array($stage, ['receive_correction', 'forward_to_penro_records'], true) && $source === 'conservation') {
+            $data = $request->validate([
+                'stage' => ['required', 'string'],
+                'remarks' => ['nullable', 'string', 'max:2000'],
+                'attachment' => [$stage === 'receive_correction' ? 'prohibited' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
+            ]);
+            abort_unless($data['stage'] === $stage, 422);
+            $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null);
+            return back()->with('success', $stage === 'receive_correction' ? 'Correction received successfully.' : 'Corrected copy resubmitted successfully.');
+        }
         if ($this->tracking->usesGenericRouting($source, $record)) {
             $data = $request->validate([
                 'stage' => ['required', 'string', Rule::in($this->tracking->genericTransitionKeys($source, $record))],
                 'remarks' => ['nullable', 'string', 'max:2000'],
+                'correction_reason_key' => ['nullable', 'string', Rule::in(['missing_signature', 'missing_endorsement', 'missing_attachment', 'missing_received_copy', 'incomplete_document', 'other'])],
+                'correction_detail' => ['nullable', 'string', 'max:2000'],
                 'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
             ]);
             abort_unless($data['stage'] === $stage, 422);
             $this->assertRoutingAttachmentAllowed($source, $record, $stage, $request->hasFile('attachment'));
-            $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null);
+            if (str_starts_with($stage, 'return_for_correction_')) {
+                validator($data, ['correction_reason_key' => ['required', 'string'], 'correction_detail' => [$data['correction_reason_key'] === 'other' ? 'required' : 'nullable', 'string', 'max:2000']])->validate();
+            }
+            $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null, $data['correction_reason_key'] ?? null, $data['correction_detail'] ?? null);
 
             return back()->with('success', $this->routingSuccessMessage($stage));
         }
@@ -134,16 +178,17 @@ class SubmissionTrackingController extends Controller
         }
 
         abort_unless($this->pambAccess->canRecordInternalRouting($request->user(), $submission, $stage), 403);
-        if ($request->hasFile('attachment') && ! $this->tracking->canAttachRoutingCopy($source, $submission, $stage)) {
+        if ($request->hasFile('attachment') && ! $timeline->isCorrectionStageKey($stage) && ! $this->tracking->canAttachRoutingCopy($source, $submission, $stage)) {
             throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => 'A routing document copy cannot be attached to this receipt-only or completed action.']);
         }
         $file = $request->file('attachment');
         $path = $file ? $this->routingAttachments->store($file) : null;
+        $attachmentPurpose = $timeline->isCorrectionStageKey($stage) ? 'correction_reference' : 'routing_copy';
         $committed = false;
         try {
-            DB::transaction(function () use ($source, $record, $stage, $data, $request, $file, $path): void {
+            DB::transaction(function () use ($source, $record, $stage, $data, $request, $file, $path, $attachmentPurpose): void {
                 $event = $this->tracking->recordInternalRouting($source, $record, $stage, now(BusinessCalendarService::TIMEZONE)->toDateTimeString(), $request->user()?->id, $data['remarks'] ?? null);
-                if ($file && $path) $this->routingAttachments->create($source, $record, $file, $path, $request->user(), $stage, $stage, $data['remarks'] ?? null, null, $event);
+                if ($file && $path) $this->routingAttachments->create($source, $record, $file, $path, $request->user(), $stage, $stage, $data['remarks'] ?? null, null, $event, $attachmentPurpose);
             });
             $committed = true;
         } catch (\Throwable $exception) { if ($path && ! $committed) $this->routingAttachments->discard($path); throw $exception; }
@@ -229,15 +274,25 @@ class SubmissionTrackingController extends Controller
         return back()->with('success', 'Routing record corrected successfully.');
     }
 
-    private function transitionWithAttachment(Request $request, string $source, int $record, string $stage, ?string $date, ?string $remarks): void
+    private function transitionWithAttachment(Request $request, string $source, int $record, string $stage, ?string $date, ?string $remarks, ?string $correctionReasonKey = null, ?string $correctionDetail = null, string $attachmentPurpose = 'routing_copy'): void
     {
         $file = $request->file('attachment');
         $path = $file ? $this->routingAttachments->store($file) : null;
         $committed = false;
         try {
-            DB::transaction(function () use ($request, $source, $record, $stage, $date, $remarks, $file, $path): void {
-                $event = $this->tracking->transition($source, $record, $stage, $date, $request->user()?->id, $remarks);
-                if ($file && $path) $this->routingAttachments->create($source, $record, $file, $path, $request->user(), $stage, $stage, $remarks, $event instanceof \App\Models\DocumentRoutingEvent ? $event : null, $event instanceof \App\Models\PambRoutingEvent ? $event : null);
+            DB::transaction(function () use ($request, $source, $record, $stage, $date, $remarks, $file, $path, $correctionReasonKey, $correctionDetail, $attachmentPurpose): void {
+                $event = (in_array($stage, ['receive_correction', 'forward_to_penro_records'], true) || str_starts_with($stage, 'return_for_correction_')) && $source === 'conservation'
+                    ? $this->documentRouting->transition(
+                        $this->tracking->source($source)['model']::query()->findOrFail($record),
+                        $source,
+                        $stage,
+                        $request->user()?->id,
+                        $remarks,
+                        $correctionReasonKey,
+                        $correctionDetail,
+                    )
+                    : $this->tracking->transition($source, $record, $stage, $date, $request->user()?->id, $remarks, $correctionReasonKey, $correctionDetail);
+                if ($file && $path) $this->routingAttachments->create($source, $record, $file, $path, $request->user(), $stage, $stage, $remarks, $event instanceof \App\Models\DocumentRoutingEvent ? $event : null, $event instanceof \App\Models\PambRoutingEvent ? $event : null, $attachmentPurpose);
             });
             $committed = true;
         } catch (\Throwable $exception) { if ($path && ! $committed) $this->routingAttachments->discard($path); throw $exception; }
@@ -253,5 +308,16 @@ class SubmissionTrackingController extends Controller
         if (! $this->tracking->canAttachRoutingCopy($source, $submission, $stage)) {
             throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => 'A routing document copy cannot be attached to this receipt-only or completed action.']);
         }
+    }
+
+    private function isGenericCorrectionAction(string $source, int $record, string $stage): bool
+    {
+        if ($source === 'engp') return false;
+        $sourceConfig = $this->tracking->source($source);
+        if (! $sourceConfig || ! $this->tracking->usesGenericRouting($source, $record)) return false;
+
+        $submission = $sourceConfig['model']::query()->findOrFail($record);
+
+        return $this->documentRouting->isCorrectionAction($submission, $source, $stage);
     }
 }

@@ -37,6 +37,7 @@ class BmsReportSubmissionController extends Controller
     public function update(Request $request, BmsReportSubmission $bmsReportSubmission)
     {
         $this->organization->assertCanAccessProtectedArea($request->user(), $bmsReportSubmission->protected_area_id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($bmsReportSubmission);
         $validated = $request->validate($this->rules($bmsReportSubmission->document_type), [
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
@@ -67,6 +68,7 @@ class BmsReportSubmissionController extends Controller
     public function destroy(BmsReportSubmission $bmsReportSubmission)
     {
         $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsReportSubmission->protected_area_id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($bmsReportSubmission);
         $this->deleteMov($bmsReportSubmission);
         $bmsReportSubmission->delete();
 

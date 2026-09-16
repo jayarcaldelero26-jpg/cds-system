@@ -181,7 +181,10 @@ class IpafController extends Controller
         $protectedAreaId = $record->exists ? $record->protected_area_id : ($data['protected_area_id'] ?? null);
         $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
         $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id'] ?? $protectedAreaId);
-        if ($record->exists) $record = $this->organization->scopeProtectedAreaQuery($record::query(), $request->user())->findOrFail($record->id);
+        if ($record->exists) {
+            $record = $this->organization->scopeProtectedAreaQuery($record::query(), $request->user())->findOrFail($record->id);
+            app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($record);
+        }
         $exists = $record->exists; $old = $record->mov_file_path; $new = null; $replace = $request->hasFile('mov');
         try {
             if ($request->hasFile('mov')) { $file = $request->file('mov'); $new = $this->attachments->store($file, $this->attachmentSource($record)); if (! is_string($new)) throw new RuntimeException('The MOV could not be stored.'); $data = [...$data, 'mov_file_name' => $file->getClientOriginalName(), 'mov_file_path' => $new, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()]; }
@@ -191,7 +194,7 @@ class IpafController extends Controller
         if ($replace && $old) $this->attachments->delete($old);
         return back()->with('success', $message);
     }
-    private function destroyRecord(Model $record, string $message): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); $path = $record->mov_file_path; DB::transaction(fn () => $record->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', $message); }
+    private function destroyRecord(Model $record, string $message): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($record); $path = $record->mov_file_path; DB::transaction(fn () => $record->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', $message); }
     private function mov(Model $record): BinaryFileResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); return $this->attachments->response($this->attachmentSource($record), $record, 'mov'); }
     private function search($query, string $search): void { $search = trim($search); $query->where(fn ($q) => $q->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($q) => $q->where('name', 'like', "%{$search}%"))); }
     private function commonRules(bool $requireMov): array { return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'document_type' => ['required', Rule::in(['Final Report', 'Progress Report'])], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'remarks' => ['nullable', 'string']]; }

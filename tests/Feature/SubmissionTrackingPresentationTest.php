@@ -32,3 +32,20 @@ test('Submission Tracking labels Super Admin queues as global monitoring without
         ->and($tracking)->toContain('receive: "Receive"')
         ->and($tracking)->toContain('release: "Release"');
 });
+
+test('PAMB MOV release presentation requires the actor-scoped release flag', function (): void {
+    $progress = file_get_contents(base_path('resources/js/Components/SubmissionTracking/PambMovProgress.jsx'));
+
+    expect($progress)
+        ->toContain('actions.can_release === true')
+        ->not->toContain('context.can_release_mov) && row.cenro_release_applicable');
+});
+
+test('PAMB receipt actions open the receipt transition instead of the regional release transition', function (): void {
+    $tracking = file_get_contents(base_path('resources/js/Pages/SubmissionTracking/Index.jsx'));
+
+    expect($tracking)
+        ->toContain('"receive_at_penro_records"')
+        ->toContain('? "penro_receipt"')
+        ->toContain('(form.data.stage === "penro_receipt" &&');
+});

@@ -15,6 +15,7 @@ use App\Models\IssueMonitoring;
 use App\Models\LawinMonitoring;
 use App\Models\CdsLawinMonitoring;
 use App\Models\Aws;
+use App\Models\AwsObservation;
 use App\Services\Dashboard\DashboardMonitoringService;
 use App\Services\Dashboard\EngpDashboardMonitoringService;
 use Carbon\Carbon;
@@ -257,11 +258,14 @@ class DashboardController extends Controller
         |
         */
 
-        $awsRawQuery = Aws::whereNotNull('timestamps')
+        $awsLegacyRawQuery = Aws::whereNotNull('timestamps')
             ->whereNotNull('start_date');
+        $awsObservationQuery = AwsObservation::query()->whereNotNull('start_date');
 
-        $awsLatestDate =
-            (clone $awsRawQuery)->max('start_date');
+        $awsLatestDate = collect([
+            (clone $awsLegacyRawQuery)->max('start_date'),
+            (clone $awsObservationQuery)->max('start_date'),
+        ])->filter()->max();
 
         $awsChartData = collect();
 
@@ -276,7 +280,7 @@ class DashboardController extends Controller
                     ->copy()
                     ->subDays(29);
 
-            $awsRawData = $awsRawQuery
+            $awsRawData = $awsLegacyRawQuery
                 ->whereBetween('start_date', [
                     $awsGraphStartDate->toDateString(),
                     $awsGraphEndDate->toDateString(),
@@ -291,7 +295,13 @@ class DashboardController extends Controller
                     'wind_speed',
                     'wind_direction',
                     'protected_area_id',
-                ]);
+                ])
+                ->concat($awsObservationQuery
+                    ->whereBetween('start_date', [$awsGraphStartDate->toDateString(), $awsGraphEndDate->toDateString()])
+                    ->orderBy('start_date')
+                    ->get(['start_date', 'precipitation', 'air_temperature', 'relative_humidity', 'atmospheric_pressure', 'wind_speed', 'wind_direction', 'protected_area_id']))
+                ->sortBy('start_date')
+                ->values();
 
             /*
             |--------------------------------------------------------------------------

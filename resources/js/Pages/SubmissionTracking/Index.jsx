@@ -41,6 +41,7 @@ const incomingActionLabels = {
     forward: "Forward",
     release: "Release",
     decision: "Review / Decision",
+    correction: "For Correction",
 };
 const monitoringViewDescriptions = {
     incoming:
@@ -170,7 +171,12 @@ const compactProgressFor = (row) => {
 
 const currentActionFor = (row) =>
     routingFor(row).actions?.[0]?.action_label || nextActionFor(row);
-const requiredActionFor = (row) => standardActionLabel(currentActionFor(row));
+const availableActionsFor = (row) =>
+    (routingFor(row).actions || [])
+        .map((action) => standardActionLabel(action.action_label || action.label))
+        .filter((label, index, labels) => label && labels.indexOf(label) === index);
+const requiredActionFor = (row) =>
+    availableActionsFor(row).join(" / ") || standardActionLabel(currentActionFor(row));
 const compactStatusFor = (row) => {
     if (row?.routing_complete) return "Completed";
     const actionStatus = compactStatusForAction(currentActionFor(row));
@@ -198,7 +204,7 @@ const formatActionDate = (value) =>
         : String(value).length <= 10
           ? plainDate(value)
           : formatReportDateTime(value, FALLBACK);
-const SubmissionDetailsPanel = ({ row, onViewFullDetails }) => {
+const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
     if (!row)
         return (
             <aside className="rounded-xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
@@ -280,6 +286,29 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails }) => {
                         {routingStatusFor(row)}
                     </p>
                 </div>
+                {row.can_transition && availableActionsFor(row).length > 0 && (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Available Actions
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                            {(routing.actions || []).map((action) => (
+                                <button
+                                    key={action.key}
+                                    type="button"
+                                    onClick={() => onAction?.(action)}
+                                    className={
+                                        action.correction
+                                            ? "rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800"
+                                            : "rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800"
+                                    }
+                                >
+                                    {standardActionLabel(action.action_label || action.label)}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-1">
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
@@ -425,6 +454,8 @@ export default function Index({
         date: localDateInputValue(),
         stage: "",
         remarks: "",
+        correction_reason_key: "",
+        correction_detail: "",
         attachment: null,
     });
     const internalForm = useForm({ remarks: "", stage: "", attachment: null });
@@ -558,7 +589,10 @@ export default function Index({
         "Save Action",
     ];
     const genericAction = selected?.routing?.actions?.find(
-        (item) => item.key === form.data.stage,
+        (item) =>
+            item.key === form.data.stage ||
+            (form.data.stage === "penro_receipt" &&
+                item.key === "receive_at_penro_records"),
     );
     const selectedActionLabel = standardActionLabel(
         genericAction?.action_label || form.data.stage || action[0],
@@ -1028,6 +1062,11 @@ export default function Index({
         const continuationTarget = selected
             ? { source: selected.source, source_id: selected.source_id }
             : null;
+        form.transform((data) => {
+            const next = { ...data };
+            if (!(typeof File !== "undefined" && next.attachment instanceof File)) delete next.attachment;
+            return next;
+        });
         form.post(
             route("submission-tracking.transition", [
                 selected.source,
@@ -1390,6 +1429,18 @@ export default function Index({
                         <div className="xl:sticky xl:top-4">
                             <SubmissionDetailsPanel
                                 row={visibleDetails}
+                                onAction={(nextAction) => {
+                                    form.setData({
+                                        date: "",
+                                        stage: nextAction.key,
+                                        remarks: "",
+                                        correction_reason_key: "",
+                                        correction_detail: "",
+                                        attachment: null,
+                                    });
+                                    form.clearErrors();
+                                    setSelected(visibleDetails);
+                                }}
                                 onViewFullDetails={() => {
                                     setDetails(visibleDetails);
                                     setShowFullDetails(true);
@@ -1516,6 +1567,7 @@ export default function Index({
                 {details?.pamb_routing_applicable ? (
                     <PambRoutingTimeline
                         row={details}
+                        actions={details.routing?.actions || []}
                         onRecord={(stage) => {
                             internalForm.setData({
                                 remarks: "",
@@ -1526,13 +1578,25 @@ export default function Index({
                             setRoutingStage(stage);
                         }}
                         onCanonicalAction={(stage) => {
+                            const actionKey = stage.key || stage.stage_key;
+                            const correction = String(actionKey).startsWith("return_for_correction_");
+                            const correctionCycleAction = ["receive_correction", "forward_to_penro_records"].includes(actionKey);
                             form.setData({
-                                date: localDateInputValue(),
-                                stage:
-                                    stage.key === "penro_records_received"
-                                        ? "penro_receipt"
-                                        : "regional_endorsement",
+                                date: correction || correctionCycleAction ? "" : localDateInputValue(),
+                                stage: correction
+                                    ? actionKey
+                                    : correctionCycleAction
+                                      ? actionKey
+                                    : [
+                                            "penro_records_received",
+                                            "penro_receipt",
+                                            "receive_at_penro_records",
+                                        ].includes(actionKey)
+                                      ? "penro_receipt"
+                                      : "regional_endorsement",
                                 remarks: "",
+                                correction_reason_key: "",
+                                correction_detail: "",
                                 attachment: null,
                             });
                             form.clearErrors();
@@ -1547,6 +1611,8 @@ export default function Index({
                                 date: "",
                                 stage: nextAction.key,
                                 remarks: "",
+                                correction_reason_key: "",
+                                correction_detail: "",
                                 attachment: null,
                             });
                             form.clearErrors();
@@ -1573,15 +1639,16 @@ export default function Index({
             >
                 {" "}
                 <CrudSection title="Document copy">
-                    <RoutingAttachmentField
-                        currentDocument={selected?.current_document}
-                        file={form.data.attachment}
-                        onChange={form.setData.bind(null, "attachment")}
+                        <RoutingAttachmentField
+                            currentDocument={selected?.current_document}
+                            file={form.data.attachment}
+                            onChange={(value) => form.setData("attachment", value instanceof File ? value : null)}
                         error={form.errors.attachment}
                         disabled={form.processing}
                         processing={form.processing}
                         uploadProgress={form.progress}
-                        attachmentAllowed={genericAction?.attachment_allowed !== false && selected?.routing?.attachment_allowed !== false}
+                            attachmentAllowed={genericAction?.correction_reference_allowed || String(form.data.stage || '').startsWith('return_for_correction_') ? true : genericAction?.attachment_allowed !== false && selected?.routing?.attachment_allowed !== false}
+                            correctionAttachment={Boolean(genericAction?.correction_reference_allowed || String(form.data.stage || '').startsWith('return_for_correction_'))}
                     />
                 </CrudSection>
                 <CrudSection
@@ -1601,7 +1668,18 @@ export default function Index({
                         </button>
                     )}
                     {genericAction ? (
-                        <FloatingTextarea
+                        <>
+                        {genericAction.receipt_correction_context && <>
+                            <FloatingSelect id="submission-tracking-correction-reason" label="Correction reason" required value={form.data.correction_reason_key} onChange={(event) => form.setData("correction_reason_key", event.target.value)} error={form.errors.correction_reason_key}>
+                                <option value="">Select a reason</option>
+                                {(genericAction.receipt_correction_context === "cenro_records"
+                                    ? [["missing_signature", "Missing Signature"], ["missing_attachment", "Incomplete Attachment"], ["incomplete_document", "Incomplete / Incorrect Document"], ["other", "Other"]]
+                                    : [["missing_endorsement", "Missing Endorsement"], ["missing_attachment", "Missing Attachment"], ["missing_received_copy", "Missing Received Copy"], ["incomplete_document", "Incomplete / Incorrect Document"], ["other", "Other"]]
+                                ).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                            </FloatingSelect>
+                            <FloatingTextarea id="submission-tracking-correction-detail" label={form.data.correction_reason_key === "other" ? "Explain the correction reason" : "Remarks / details (optional)"} required={form.data.correction_reason_key === "other"} rows={3} value={form.data.correction_detail} onChange={(event) => form.setData("correction_detail", event.target.value)} error={form.errors.correction_detail} />
+                        </>}
+                        {!genericAction.receipt_correction_context && <FloatingTextarea
                             id="submission-tracking-remarks"
                             label={
                                 genericAction?.remarks_required
@@ -1615,7 +1693,8 @@ export default function Index({
                                 form.setData("remarks", event.target.value)
                             }
                             error={form.errors.remarks}
-                        />
+                        />}
+                        </>
                     ) : (
                         <>
                             <p className="mb-3 text-xs text-gray-600 dark:text-gray-300">

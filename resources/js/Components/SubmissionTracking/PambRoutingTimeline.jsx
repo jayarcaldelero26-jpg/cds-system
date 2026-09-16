@@ -81,6 +81,7 @@ export default function PambRoutingTimeline({
     row,
     onRecord,
     onCanonicalAction,
+    actions = null,
 }) {
     if (!row?.pamb_routing_applicable) return null;
     const metrics = row.routing_summary_metrics || {};
@@ -175,6 +176,7 @@ export default function PambRoutingTimeline({
                                 Remarks: {lastAction.remarks}
                             </p>
                         )}
+                        <RoutingAttachmentLink attachment={lastAction.attachment} />
                     </div>
                 )}
                 {review?.applicable && (
@@ -289,6 +291,16 @@ export default function PambRoutingTimeline({
                                 stage.action_label &&
                                 row.can_transition &&
                                 onCanonicalAction;
+                            const currentActions = current
+                                ? (actions !== null ? actions : (stage.actions || [])).filter(
+                                      (action, index, list) =>
+                                          action?.key &&
+                                          list.findIndex(
+                                              (candidate) =>
+                                                  candidate?.key === action.key,
+                                          ) === index,
+                                  )
+                                : [];
                             const verdictCycle =
                                 String(stage.key || "").match(
                                     /(__cycle_\d+)$/,
@@ -341,10 +353,12 @@ export default function PambRoutingTimeline({
                                             </p>
                                             {(stage.can_record ||
                                                 canonicalAction ||
+                                                currentActions.length > 0 ||
                                                 verdictActions.length > 0) && (
                                                 <div className="flex flex-wrap gap-2">
                                                     {(stage.can_record ||
-                                                        canonicalAction) && (
+                                                        canonicalAction) &&
+                                                        currentActions.length === 0 && (
                                                         <button
                                                             type="button"
                                                             onClick={() =>
@@ -363,6 +377,30 @@ export default function PambRoutingTimeline({
                                                                     stage.key,
                                                             )}
                                                         </button>
+                                                    )}
+                                                    {currentActions.map(
+                                                        (action) => (
+                                                            <button
+                                                                key={action.key}
+                                                                type="button"
+                                                                onClick={() =>
+                                                                    onCanonicalAction?.(
+                                                                        action,
+                                                                    )
+                                                                }
+                                                                className={
+                                                                    action.correction
+                                                                        ? "rounded-lg bg-amber-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800"
+                                                                        : "rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800"
+                                                                }
+                                                            >
+                                                                {standardActionLabel(
+                                                                    action.action_label ||
+                                                                        action.label ||
+                                                                        action.key,
+                                                                )}
+                                                            </button>
+                                                        ),
                                                     )}
                                                     {verdictActions.map(
                                                         (action) => (

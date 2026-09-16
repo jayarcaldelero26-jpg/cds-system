@@ -15,12 +15,17 @@ class Aws extends Model
 
     protected $fillable = [
         'protected_area_id',
+        'target_office',
         'station_name',
         'location',
         'report_period_type',
         'activity_name',
         'document_type',
         'semester',
+        'reporting_year',
+        'quarter',
+        'monitoring_period_start',
+        'monitoring_period_end',
         'date_conducted',
         'date_accomplished',
         'date_report_released_cenro',
@@ -47,6 +52,10 @@ class Aws extends Model
         return [
             'start_date' => 'date:Y-m-d',
             'end_date' => 'date:Y-m-d',
+            'monitoring_period_start' => 'date:Y-m-d',
+            'monitoring_period_end' => 'date:Y-m-d',
+            'reporting_year' => 'integer',
+            'quarter' => 'integer',
             'date_accomplished' => 'date:Y-m-d',
             'date_report_released_cenro' => 'date:Y-m-d',
             'date_received_penro' => 'date:Y-m-d',

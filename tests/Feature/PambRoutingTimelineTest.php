@@ -71,6 +71,25 @@ test('canonical receipt appears once and internal forward does not auto-create r
         ->and(collect($after['timeline'])->firstWhere('key', PambRoutingTimelineService::RECEIVED_BY_PENRO)['status'])->toBe('current');
 });
 
+test('PENRO Records receipt exposes receive and correction actions only while current', function (): void {
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
+    $receipt = timelineService()->present($report);
+
+    expect(collect($receipt['actions'])->pluck('key')->all())
+        ->toContain('penro_receipt', 'return_for_correction_penro_records')
+        ->and(collect($receipt['actions'])->firstWhere('key', 'return_for_correction_penro_records')['attachment_allowed'])->toBeFalse();
+
+    $forwarded = timelineService()->present($report->forceFill(['date_received_penro' => '2026-08-05']));
+    expect($forwarded['actions'])->toBeEmpty();
+
+    $complete = timelinePambReport($this, [
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+        'date_endorsed_regional' => '2026-08-06',
+    ]);
+    expect(timelineService()->present($complete)['actions'])->toBeEmpty();
+});
+
 test('receipt is required before the next forward and same-day receipt is accepted', function () {
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
     routeEvent($report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, '2026-08-05');

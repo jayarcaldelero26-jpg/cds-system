@@ -68,6 +68,20 @@ it('keeps Submission Tracking tables navigation-only and preserves Full Details 
         ->toContain('<PambRoutingTimeline');
 });
 
+it('renders every supplied current PAMB routing action, including Records correction actions', function () {
+    $timeline = File::get(resource_path('js/Components/SubmissionTracking/PambRoutingTimeline.jsx'));
+    $tracking = File::get(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
+
+    expect($timeline)
+        ->toContain('const currentActions = current')
+        ->toContain('currentActions.map')
+        ->toContain('action.correction')
+        ->toContain('currentActions.length === 0');
+    expect($tracking)
+        ->toContain('actions={details.routing?.actions || []}')
+        ->toContain('return_for_correction_');
+});
+
 it('uses a safe UTF-8 fallback throughout Submission Tracking', function () {
     $tracking = File::get(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
 

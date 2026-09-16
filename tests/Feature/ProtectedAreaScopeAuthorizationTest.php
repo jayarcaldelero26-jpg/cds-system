@@ -134,6 +134,7 @@ test('CENRO AWS scope filters the index and rejects wrong-area direct and mutati
         ->and($this->actingAs($user)->put(route('aws.update', $hidden), [])->status())->toBe(403)
         ->and($this->actingAs($user)->post(route('aws.store'), [
         'protected_area_id' => $mati->id, 'station_name' => 'Spoofed station', 'location' => 'Field',
+        'target_office' => 'CENRO Mati', 'reporting_year' => 2026, 'quarter' => 1, 'monitoring_period_start' => '2026-01-01', 'monitoring_period_end' => '2026-01-15',
         'report_period_type' => 'Monthly', 'document_type' => 'Final Report', 'semester' => '1st Semester',
         'status' => 'Active', 'report_file' => UploadedFile::fake()->create('spoof.pdf', 10, 'application/pdf'),
     ])->status())->toBe(403);

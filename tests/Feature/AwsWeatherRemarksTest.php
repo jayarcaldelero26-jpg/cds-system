@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Aws;
+use App\Models\AwsObservation;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\AwsMonthlySummaryService;
@@ -173,7 +174,7 @@ test('import preserves the first row, date coverage, zero precipitation, and mis
         'file' => UploadedFile::fake()->createWithContent('weather.csv', $csv),
     ])->assertRedirect();
 
-    $rows = Aws::query()->where('protected_area_id', $area->id)->orderBy('start_date')->get();
+    $rows = AwsObservation::query()->where('protected_area_id', $area->id)->orderBy('start_date')->get();
     expect($rows)->toHaveCount(2)
         ->and($rows[0]->start_date->toDateString())->toBe('2026-04-01')
         ->and((float) $rows[0]->precipitation)->toBe(0.0)

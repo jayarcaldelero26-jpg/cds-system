@@ -1805,6 +1805,7 @@ test('report workflows require an attachment at report data entry while routing 
     $common = [
         'protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'MOV test activity',
         'document_type' => 'Final Report', 'semester' => '1st Semester', 'date_accomplished' => '2026-08-01',
+        'reporting_year' => 2026, 'quarter' => 3, 'monitoring_period_start' => '2026-07-01', 'monitoring_period_end' => '2026-07-15',
     ];
     $cases = [
         ['route' => 'bms.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],

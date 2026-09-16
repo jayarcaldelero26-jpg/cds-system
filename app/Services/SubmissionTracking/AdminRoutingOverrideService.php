@@ -29,7 +29,7 @@ final class AdminRoutingOverrideService
         $record = $config['model']::query()->with($source === 'conservation' ? 'protectedArea' : [])->findOrFail($recordId); abort_unless($this->organization->canAccessProtectedAreaRecord($admin, $record), 403);
         if ($record instanceof ConservationReportSubmission && $this->pamb->applies($record)) return $this->pambOptions($record);
         $state = $this->generic->state($record, $source, null, null); $current = (string) $state['stage'];
-        $actions = collect($state['actions'])->filter(fn (array $action): bool => $action['from'] === $current)->map(fn (array $action): array => $this->action($action['key'], $action['label'], $action['action_label'], $action['correction'] ?? false, $action['categories'][0] ?? null, $action['from_office'] ?? null))->values()->all();
+        $actions = collect($state['actions'])->filter(fn (array $action): bool => $action['from'] === $current && ! ($action['receipt_correction_context'] ?? false))->map(fn (array $action): array => $this->action($action['key'], $action['label'], $action['action_label'], $action['correction'] ?? false, $action['categories'][0] ?? null, $action['from_office'] ?? null))->values()->all();
         return ['available' => $actions !== [], 'engine' => 'generic', 'source' => $source, 'source_id' => $record->getKey(), 'current_stage' => $current, 'current_location' => str_starts_with($current, 'transit_') ? 'In transit' : $record->getAttribute('target_office'), 'accountable_category' => $actions[0]['accountable_category'] ?? null, 'accountable_office' => $actions[0]['accountable_office'] ?? null, 'actions' => $actions, 'protected_area_id' => $record->getAttribute('protected_area_id')];
     }
 

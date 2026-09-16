@@ -39,7 +39,13 @@ final class DocumentRoutingPresenter
         $timeline = collect($pamb['timeline'] ?? [])->values()->all();
         $current = collect($timeline)->firstWhere('status', 'current');
         $isForwarded = str_starts_with((string) ($current['stage_key'] ?? $current['key'] ?? ''), 'forwarded_');
-        $responsibleActor = $isForwarded ? ($current['destination'] ?? null) : ($current['held_at'] ?? null);
+        // A pending forwarded stage still belongs to its sender. The
+        // destination becomes accountable only after the forwarding event is
+        // recorded and the next receipt stage is current.
+        $pendingForward = $isForwarded && blank($current['occurred_at'] ?? null);
+        $responsibleActor = $pendingForward
+            ? ($current['held_at'] ?? null)
+            : ($isForwarded ? ($current['destination'] ?? null) : ($current['held_at'] ?? null));
         $responsibleCategory = $this->organization->normalizeCategory($responsibleActor);
         $preReleaseMovOwner = $this->preReleasePambMovOwner($record);
         if ($preReleaseMovOwner !== null) {
@@ -71,6 +77,7 @@ final class DocumentRoutingPresenter
             'next_expected_action' => $this->preReleasePambMovAction($record) ?? ($summary['next_expected_action'] ?? null),
             'deadline' => $record->getAttribute('deadline_submission'),
             'compliance_status' => $record->getAttribute('timeliness'),
+            'actions' => $pamb['actions'] ?? [],
             'timeline' => array_map(function (array $event) use ($overrides, $record): array {
                 $override = $overrides->get($event['stage_key'] ?? $event['key']);
                 return [
@@ -178,10 +185,13 @@ final class DocumentRoutingPresenter
         $current = collect($timeline)->firstWhere('status', 'current');
         $last = collect($timeline)->filter(fn (array $item): bool => filled($item['occurred_at']))->last();
         $nextAction = $state['allowed_actions'][0] ?? null;
-        $informationalAction = $actions->firstWhere('from', $currentStage);
+        $informationalAction = $actions->first(fn (array $action): bool => $action['from'] === $currentStage && ! ($action['internal_only'] ?? false));
         $allowed = collect($state['allowed_actions'])->map(fn (array $action): array => [
-            'key' => $action['key'], 'label' => $action['label'], 'action_label' => $action['action_label'], 'to' => $action['to'], 'to_office' => $action['to_office'], 'correction' => (bool) ($action['correction'] ?? false), 'remarks_required' => (bool) ($action['correction'] ?? false),
-            'attachment_allowed' => ! in_array($action['key'], ['receive_at_penro_records', 'receive_at_penro_records_final'], true),
+            'key' => $action['key'], 'label' => $action['label'], 'action_label' => $action['action_label'], 'to' => $action['to'], 'to_office' => $action['to_office'], 'correction' => (bool) ($action['correction'] ?? false), 'correction_reference_allowed' => (bool) ($action['correction_reference_allowed'] ?? ($sourceKey !== 'engp' && ($action['correction'] ?? false))), 'remarks_required' => (bool) (($action['correction'] ?? false) && ! isset($action['receipt_correction_context'])), 'receipt_correction_context' => $action['receipt_correction_context'] ?? null,
+            'attachment_allowed' => (bool) ($action['attachment_allowed'] ?? (
+                ! ($action['correction'] ?? false)
+                && $action['key'] !== 'receive_at_penro_records_final'
+            )),
         ])->values()->all();
 
         $attachments = $this->routingAttachments->forDocumentEvents($state['events']->pluck('id'));
@@ -194,7 +204,7 @@ final class DocumentRoutingPresenter
                 'event_type' => $event->event_key, 'from' => $event->from_office, 'to' => $event->to_office,
                 'occurred_at' => $event->occurred_at?->toIso8601String(), 'recorded_at' => $event->created_at?->toIso8601String(),
                 'recorded_by' => $event->recordedBy?->name, 'actor_category' => $event->recordedBy ? $this->organization->effectiveCategory($event->recordedBy) : null, 'actor_office' => $event->recordedBy ? $this->organization->normalizeOffice($event->recordedBy->office_designated) : null,
-                'remarks' => $event->remarks, 'attachment' => isset($attachments[$event->id]) ? $this->routingAttachments->descriptor($attachments[$event->id]) : null, 'correction' => $correction, 'administrative_override' => (bool) data_get($event->metadata, 'administrative_override', false), 'override_for_category' => data_get($event->metadata, 'override_for_category'), 'override_for_office' => data_get($event->metadata, 'override_for_office'),
+                'remarks' => $event->remarks, 'correction_reason_key' => data_get($event->metadata, 'correction_reason_key'), 'correction_reason' => data_get($event->metadata, 'correction_reason'), 'correction_detail' => data_get($event->metadata, 'correction_detail'), 'attachment' => isset($attachments[$event->id]) ? $this->routingAttachments->descriptor($attachments[$event->id]) : null, 'correction' => $correction, 'administrative_override' => (bool) data_get($event->metadata, 'administrative_override', false), 'override_for_category' => data_get($event->metadata, 'override_for_category'), 'override_for_office' => data_get($event->metadata, 'override_for_office'),
             ];
         })->values()->all();
 
@@ -213,7 +223,9 @@ final class DocumentRoutingPresenter
             'next_expected_action' => data_get($informationalAction, 'action_label') ?? ($current ? 'No further routing action' : null),
             'deadline' => $record->getAttribute('deadline_submission'), 'compliance_status' => $record->getAttribute('timeliness'),
             'correction' => (bool) ($state['correction'] ?? false),
-            'correction_reason' => data_get($state, 'correction_event.remarks'),
+            'correction_reason_key' => data_get($state, 'correction_event.metadata.correction_reason_key'),
+            'correction_reason' => data_get($state, 'correction_event.metadata.correction_reason') ?? data_get($state, 'correction_event.remarks'),
+            'correction_detail' => data_get($state, 'correction_event.metadata.correction_detail') ?? data_get($state, 'correction_event.remarks'),
             'actions' => $allowed, 'capabilities' => $state['capabilities'], 'timeline' => $timeline, 'routing_history' => $history,
         ];
     }
