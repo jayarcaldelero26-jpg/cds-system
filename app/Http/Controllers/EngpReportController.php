@@ -7,6 +7,7 @@ use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Engp\EngpMonitoringStatusResolver;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -21,7 +22,7 @@ use Throwable;
 
 class EngpReportController extends Controller
 {
-    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses) {}
+    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses, private readonly SubmissionTrackingService $tracking) {}
 
     public function index(Request $request, ?string $workflow = null): Response
     {
@@ -89,6 +90,7 @@ class EngpReportController extends Controller
         $config = $this->workflows->find($workflow);
         abort_unless($config && $engpReportSubmission->workflow_key === $workflow, 404);
         $this->rejectRoutingFields($request);
+        $this->tracking->assertMutable($engpReportSubmission);
         $validated = $this->validateData($request, $workflow, $config, true);
         return $this->persist($request, $engpReportSubmission, $validated, $workflow, $config, 'ENGP report updated.');
     }
@@ -97,6 +99,7 @@ class EngpReportController extends Controller
     {
         abort_unless($this->organization->canViewDevelopmentRecord(request()->user(), $engpReportSubmission), 403);
         abort_unless($this->workflows->find($workflow) && $engpReportSubmission->workflow_key === $workflow, 404);
+        $this->tracking->assertMutable($engpReportSubmission);
         $path = $engpReportSubmission->mov_file_path;
         $engpReportSubmission->delete();
         if ($path) $this->attachments->delete($path);

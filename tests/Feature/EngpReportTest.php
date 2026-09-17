@@ -3,6 +3,7 @@
 use App\Models\EngpReportSubmission;
 use App\Models\User;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
@@ -166,6 +167,58 @@ test('authorized ENGP users can advance a report to CENRO Chief through Submissi
         ->and(app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id)['routing']['current_stage'])->toBe('transit_to_cenro_chief');
 });
 
+
+test('ENGP PENRO receipt completes routing and makes the report immutable', function () {
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Baganga']);
+    $records = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'office_designated' => 'CENRO Baganga']);
+    $penro = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'office_designated' => 'PENRO Davao Oriental']);
+    foreach ([$chief, $records, $penro] as $actor) {
+        $actor->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+    }
+
+    $report = EngpReportSubmission::create(engpPayload(['created_by' => $this->user->id, 'updated_by' => $this->user->id]));
+    $tracking = app(SubmissionTrackingService::class);
+    foreach ([
+        [$this->user, 'forward_to_cenro_chief'],
+        [$chief, 'receive_at_cenro_chief'],
+        [$chief, 'forward_to_cenro_records'],
+        [$records, 'receive_at_cenro_records'],
+        [$records, 'forward_to_penro_records'],
+        [$penro, 'receive_at_penro_records'],
+    ] as [$actor, $action]) {
+        $tracking->transition('engp', $report->id, $action, null, $actor->id);
+    }
+
+    $report->refresh();
+    $row = $tracking->records()->firstWhere('source_id', $report->id);
+    expect($report->date_received_penro)->not->toBeNull()
+        ->and($row['routing_complete'])->toBeTrue();
+
+    $this->actingAs($this->user)
+        ->from(route('engp-reports.index', 'cbep'))
+        ->put(route('engp-reports.update', ['cbep', $report->id]), [
+            'office' => 'CENRO Baganga', 'section_name' => 'Should remain unchanged',
+            'reporting_year' => 2026, 'period_key' => '2026-01', 'remarks' => 'immutable check',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasErrors('submission');
+});
+
+test('ENGP administrative override records the generic routing event', function () {
+    $report = EngpReportSubmission::create(engpPayload(['created_by' => $this->user->id, 'updated_by' => $this->user->id]));
+    $event = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->transitionAsOverride(
+        $report,
+        'engp',
+        'forward_to_cenro_chief',
+        $this->user,
+        ['override_for_category' => OrganizationalAccessService::CENRO_CHIEF, 'override_for_office' => 'CENRO Baganga'],
+        'Controlled override test',
+    );
+
+    expect($event->source_type)->toBe('engp')
+        ->and($event->metadata['administrative_override'])->toBeTrue()
+        ->and($report->fresh()->date_received_penro)->toBeNull();
+});
 test('unauthorized users cannot perform an ENGP tracking transition', function () {
     $report = EngpReportSubmission::create(engpPayload([
         'workflow_key' => 'site_visit',
@@ -248,10 +301,11 @@ test('ENGP ordinary updates reject routing fields and preserve existing routing 
             'period_key' => 'Q1',
             'remarks' => 'Ordinary edit',
         ])
-        ->assertRedirect();
+        ->assertRedirect()
+        ->assertSessionHasErrors('submission');
 
     expect($report->fresh()->date_received_penro?->toDateString())->toBe('2026-03-11')
-        ->and($report->fresh()->section_name)->toBe('Updated Section');
+        ->and($report->fresh()->section_name)->toBe('NGP');
 });
 
 test('ENGP summary excludes the weekly accomplishment workflow', function () {

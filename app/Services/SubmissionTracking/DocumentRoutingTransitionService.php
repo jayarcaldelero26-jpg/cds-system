@@ -271,7 +271,7 @@ final class DocumentRoutingTransitionService
                 'remarks' => $remarks,
                 'metadata' => ['state_source' => 'routing_events', 'action_key' => $action['key'], 'correction' => (bool) ($action['correction'] ?? false), 'administrative_override' => true, ...$override],
             ]);
-            $this->syncCompatibilityMilestone($locked, $action['key']);
+            $this->syncCompatibilityMilestone($locked, $sourceKey, $action['key']);
             return $event->load('recordedBy:id,name,section');
         });
         $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
@@ -313,7 +313,6 @@ final class DocumentRoutingTransitionService
 
     private function syncCompatibilityMilestone(EloquentModel $record, string $sourceKey, string $actionKey): void
     {
-        if ($sourceKey === 'engp') return;
         $changes = match ($actionKey) {
             'forward_to_penro_records' => ['date_report_released_cenro' => now(BusinessCalendarService::TIMEZONE)->toDateString()],
             'receive_at_penro_records' => ['date_received_penro' => now(BusinessCalendarService::TIMEZONE)->toDateString()],

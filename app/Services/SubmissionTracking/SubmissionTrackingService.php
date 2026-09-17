@@ -1106,7 +1106,7 @@ final class SubmissionTrackingService
         if ($this->usesGenericRecord($sourceKey, $record)) {
             $data['current_document_location'] = $data['routing']['current_location'];
             $data['stage'] = $data['routing']['current_stage'] ?? $data['stage'];
-            $data['routing_complete'] = ($data['stage'] ?? null) === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
+            $data['routing_complete'] = $sourceKey === 'engp' ? $this->isRoutingComplete($record) : ($data['stage'] ?? null) === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
             $data['completed_at'] = $data['routing_complete'] ? data_get($data['routing'], 'last_action.occurred_at') : null;
         }
         $data['current_document'] = $this->routingAttachments->currentDescriptor(
@@ -1236,6 +1236,10 @@ final class SubmissionTrackingService
      */
     public function isRoutingComplete(Model $record): bool
     {
+        if ($record instanceof EngpReportSubmission) {
+            return $this->routingCompletedAt($record) !== null;
+        }
+
         return $this->stage($record) === 'endorsed'
             && $this->routingCompletedAt($record) !== null;
     }
