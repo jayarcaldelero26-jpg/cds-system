@@ -20,7 +20,7 @@
     $isCanonicalOverdue = $template === 'protected_area_overdue';
     $groupHeadingStyle = $isEngp ? 'color:#14532d;text-align:left;' : 'color:#155e9b;';
     $memoParagraphStyle = 'margin:0 0 16px;text-align:justify;font-size:14px;line-height:1.15;';
-    $footerText = $isCanonicalOverdue ? 'This is a system-generated notification sent automatically by the Enhanced Digital Alert and Tracking System (eDATS). Notifications for a report will cease once the submission is recorded as compliant in eDATS.' : ($settings['system_generated_footer_text'] ?? '');
+    $footerText = $isCanonicalOverdue ? 'This is a system-generated notification sent automatically by CDS-SMART. Notifications for a report will cease once the submission is recorded as compliant in CDS-SMART.' : ($settings['system_generated_footer_text'] ?? '');
     $richText = app(\App\Services\Compliance\ComplianceRichTextSanitizer::class);
 @endphp
 <body style="margin:0;padding:0;background:#ffffff;color:#1f2937;font-family:Arial,Helvetica,sans-serif;">

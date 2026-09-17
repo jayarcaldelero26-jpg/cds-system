@@ -1083,11 +1083,11 @@ test('boss defaults include exact CC and signatory settings', function () {
         ])
         ->and($settings['signatory_name'])->toBe('PABLITO M. OFRECIA')
         ->and($settings['signatory_position'])->toBe('PENR Officer')
-        ->and($settings['office_name'])->toBe('PENRO Mati, Davao Oriental')
-        ->and($settings['office_address'])->toBe('PENRO Mati, Davao Oriental')
+        ->and($settings['office_name'])->toBe('PENRO Davao Oriental')
+        ->and($settings['office_address'])->toBe('PENRO Davao Oriental')
         ->and($settings['focal_person_name'])->toBe('Richelle A. Benemerito')
         ->and($settings['focal_person_position'])->toBe('EMS I')
-        ->and($settings['focal_person_contact'])->toBe('Provincial Protected Area Focal Person of PENRO Mati');
+        ->and($settings['focal_person_contact'])->toBe('Provincial Protected Area Focal Person of PENRO Davao Oriental');
 });
 
 test('reapplying boss defaults preserves customized mappings and settings', function () {
@@ -1717,7 +1717,7 @@ test('dormant fallback settings remain stored but never resolve a delivery', fun
 test('the default memorandum footer matches receipt closure and separates Records verification', function () {
     $footer = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective()['system_generated_footer_text'];
 
-    expect($footer)->toBe('This is a system-generated notification sent automatically by the Enhanced Digital Alert and Tracking System (eDATS). Notifications for a report will cease once the submission is recorded as compliant in eDATS.');
+    expect($footer)->toBe('This is a system-generated notification sent automatically by CDS-SMART. Notifications for a report will cease once the submission is recorded as compliant in CDS-SMART.');
 });
 
 test('all monitored sources expose the universal MOV contract and distinguish submitted MOV not yet submitted', function () {
@@ -2090,7 +2090,7 @@ test('PA and ENGP compliance mailables use the configured Laravel From identity 
         $from = $mail->envelope()->from;
         return $mail->presentation['template'] === 'protected_area_overdue'
             && $from->address === 'configured-sender@example.test'
-            && $from->name === 'Enhanced Digital Alert and Tracking System (eDATS)'
+            && $from->name === 'CDS-SMART – PENRO Davao Oriental'
             && $mail->hasTo('pa-from@example.test')
             && $mail->hasCc('pa-cc@example.test');
     });
@@ -2098,7 +2098,7 @@ test('PA and ENGP compliance mailables use the configured Laravel From identity 
         $from = $mail->envelope()->from;
         return $mail->presentation['template'] === 'engp_overdue'
             && $from->address === 'configured-sender@example.test'
-            && $from->name === 'Enhanced Digital Alert and Tracking System (eDATS)'
+            && $from->name === 'CDS-SMART – PENRO Davao Oriental'
             && $mail->hasTo('engp-from@example.test')
             && $mail->hasCc('engp-cc@example.test');
     });

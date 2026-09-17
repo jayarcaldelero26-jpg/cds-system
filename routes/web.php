@@ -41,6 +41,7 @@ Route::get('/', function (DashboardMonitoringService $monitoring) {
     // Public visits must not allocate tracking references as a side effect.
     $dashboard = $monitoring->overview([], false);
     $summary = $dashboard['summary'];
+    $publicSummary = $monitoring->publicSummary();
 
     return Inertia::render('Welcome', [
         'overview' => [
@@ -49,12 +50,9 @@ Route::get('/', function (DashboardMonitoringService $monitoring) {
             'overdue' => $summary['overdue'],
             'reports_due' => $summary['reports_due'],
             'compliant' => $summary['compliant'],
-            'monitoring_sources' => collect($dashboard['rows'])
-                ->pluck('source')
-                ->filter()
-                ->unique()
-                ->count(),
+            'monitoring_sources' => collect($dashboard['rows'])->pluck('source')->filter()->unique()->count(),
         ],
+        'publicSummary' => $publicSummary,
         'reportTrend' => $monitoring->publicSubmissionTrend(),
     ]);
 })->name('welcome');
@@ -193,6 +191,7 @@ Route::middleware('auth')->group(function () {
 
     // AUTOMATED WEATHER STATION (AWS) ROUTES
     Route::get('aws', [AwsController::class, 'index'])->middleware('can:aws.view')->name('aws.index');
+    Route::get('aws-data', [AwsController::class, 'dataIndex'])->middleware('can:aws.view')->name('aws.data');
     Route::post('aws', [AwsController::class, 'store'])->middleware(['can:aws.create', 'pa-preparation:aws'])->name('aws.store');
     Route::put('aws/{aws}', [AwsController::class, 'update'])->middleware(['can:aws.update', 'pa-preparation:aws'])->name('aws.update');
     Route::delete('aws/{aws}', [AwsController::class, 'destroy'])->middleware('can:aws.delete')->name('aws.destroy');

@@ -19,7 +19,7 @@ export default function Edit({ user, passkeys = [], canManagePasskeys = false })
     const [passkeyError, setPasskeyError] = useState('');
     const [passkeyProcessing, setPasskeyProcessing] = useState(false);
     const passkeySupportMessage = () => {
-        if (typeof window !== 'undefined' && window.isSecureContext === false) return 'Passkeys require a secure HTTPS connection. Open eDATS-CDS using HTTPS to register or use a passkey.';
+        if (typeof window !== 'undefined' && window.isSecureContext === false) return 'Passkeys require a secure HTTPS connection. Open CDS-SMART using HTTPS to register or use a passkey.';
         if (typeof window === 'undefined' || typeof window.PublicKeyCredential === 'undefined' || typeof navigator === 'undefined' || typeof navigator.credentials?.create !== 'function') return 'Passkeys are not supported in this browser or device.';
         return null;
     };    const revokePasskey = async id => { if (!window.confirm('Revoke this passkey?')) return; setPasskeyProcessing(true); setPasskeyError(''); try { const response = await fetch(`/user/passkeys/${id}`, { method: 'DELETE', headers: { Accept: 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' }, credentials: 'same-origin' }); if (!response.ok) throw new Error('Passkey revocation failed.'); window.location.reload(); } catch (error) { setPasskeyError(error.message); } finally { setPasskeyProcessing(false); } };

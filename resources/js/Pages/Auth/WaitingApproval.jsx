@@ -20,7 +20,7 @@ export default function WaitingApproval() {
                     </div>
                     <h2 className="mt-4 text-xl font-bold text-gray-900 dark:text-white">Account Pending Approval</h2>
                     <p className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">
-                        Your account has been created successfully and is awaiting administrator approval. You will be able to access eDATS once your account has been approved and assigned the appropriate access level.
+                        Your account has been created successfully and is awaiting administrator approval. You will be able to access CDS-SMART once your account has been approved and assigned the appropriate access level.
                     </p>
                     <button
                         onClick={handleLogout}

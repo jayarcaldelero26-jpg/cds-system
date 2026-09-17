@@ -548,7 +548,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
           <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-6">
             <div>
               <h1 id="create-protected-area-title" className="text-base font-bold text-gray-900 dark:text-white sm:text-lg">Add Protected Area</h1>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a protected area to the PENRO Mati master database.</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a protected area to the PENRO Davao Oriental master database.</p>
             </div>
             <button type="button" onClick={onClose} className="rounded-lg p-1 text-2xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="Close create form">×</button>
           </div>
@@ -610,7 +610,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
     <AuthenticatedLayout title={title}>
             <PageHeader
         title={title}
-        description="Add a protected area to the PENRO Mati master database."
+        description="Add a protected area to the PENRO Davao Oriental master database."
         actions={
         <Link href="/protected-areas" className="text-sm font-semibold text-white hover:text-green-200 transition">
                         ← Back to protected areas

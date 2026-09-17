@@ -13,7 +13,7 @@ class OverdueComplianceMemorandum extends Mailable
 {
     use Queueable, SerializesModels;
 
-    public const SENDER_DISPLAY_NAME = 'Enhanced Digital Alert and Tracking System (eDATS)';
+    public const SENDER_DISPLAY_NAME = 'CDS-SMART – PENRO Davao Oriental';
     public const PROTECTED_AREA_OVERDUE_SUBJECT = '⚠ PRIORITY ACTION REQUIRED: Overdue Submission of PA-related Reports';
 
     /** @param array<int, array<string, mixed>> $groups @param array<string, mixed> $recipient */

@@ -139,3 +139,27 @@ test('filter options clear inherited source ordering before distinct extraction'
         ->and($distinctQueries->isNotEmpty())->toBeTrue()
         ->and($distinctQueries->every(fn (string $sql): bool => ! str_contains($sql, 'order by date_accomplished') && ! str_contains($sql, 'order by created_at')))->toBeTrue();
 });
+
+test('dashboard source metadata is inspected once per registered source table', function (): void {
+    $tracking = app(SubmissionTrackingService::class);
+    $sourcesMethod = new ReflectionMethod($tracking, 'sources');
+    $sources = $sourcesMethod->invoke($tracking);
+    $sourceTables = collect($sources)
+        ->map(fn (array $source): string => (new $source['model'])->getTable())
+        ->unique()
+        ->count();
+
+    $queries = [];
+    DB::listen(function ($query) use (&$queries): void {
+        $queries[] = strtolower($query->sql);
+    });
+
+    $tracking->records(['reporting_year' => 2026], null, false);
+    $tracking->filterOptions();
+
+    $metadataQueries = collect($queries)
+        ->filter(fn (string $sql): bool => str_contains($sql, 'information_schema'))
+        ->count();
+
+    expect($metadataQueries)->toBeLessThanOrEqual($sourceTables);
+});

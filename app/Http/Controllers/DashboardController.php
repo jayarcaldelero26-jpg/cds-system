@@ -44,9 +44,9 @@ class DashboardController extends Controller
             return redirect()->route('dashboard', ['view' => 'pa']);
         }
 
-        $view = in_array($request->string('view')->toString(), ['pa', 'engp'], true)
+        $view = in_array($request->string('view')->toString(), ['all', 'pa', 'engp'], true)
             ? $request->string('view')->toString()
-            : 'pa';
+            : 'all';
         $organization = app(OrganizationalAccessService::class);
         $protectedAreasCount = match ($organization->unitFor($user)) {
             OrganizationalAccessService::DEVELOPMENT => 0,
@@ -55,12 +55,25 @@ class DashboardController extends Controller
                 : $organization->scopeProtectedAreaQuery(ProtectedArea::query(), $user, 'id')->count(),
         };
         $filters = $request->only(['year', 'program', 'office', 'protected_area_id', 'report_type', 'period', 'frequency', 'search', 'page']);
+        $tab = in_array($request->string('tab')->toString(), ['conservation', 'development'], true)
+            ? $request->string('tab')->toString()
+            : ($view === 'engp' ? 'development' : 'conservation');
+
+        // The authenticated overview consumes the same normalized tracking
+        // projection as Submission Tracking.  Legacy view links still receive
+        // their previous payload below, while /dashboard now opens the unified
+        // report-submission overview.
+        $overview = fn (string $program = 'all'): array => $this->monitoring->submissionOverview([
+            ...$filters,
+            'program' => $program,
+        ]) + ['tab' => $tab];
 
         if ($view === 'pa') {
             return Inertia::render('Dashboard', [
                 // Force the operational dashboard to the PA tracking domain
                 // before the dashboard service aggregates or paginates rows.
                 ...$this->monitoring->overview([...$filters, 'program' => 'conservation']),
+                'dashboard' => $overview('pa'),
                 'view' => $view,
                 'protectedAreasCount' => $protectedAreasCount,
                 'actionQueue' => $this->tracking->dashboardActionQueue($user),
@@ -72,9 +85,16 @@ class DashboardController extends Controller
             return Inertia::render('Dashboard', [
                 'view' => $view,
                 'engp' => $engp,
+                'dashboard' => $overview('engp'),
                 'protectedAreasCount' => $protectedAreasCount,
             ]);
         }
+
+        return Inertia::render('Dashboard', [
+            'view' => 'all',
+            'dashboard' => $overview($tab === 'development' ? 'engp' : 'pa'),
+            'protectedAreasCount' => $protectedAreasCount,
+        ]);
 
         // ============================================================
         // CDS DASHBOARD

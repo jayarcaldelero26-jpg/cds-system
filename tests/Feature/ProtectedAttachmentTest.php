@@ -62,6 +62,12 @@ test('the protected attachment registry contains only active attachment sources'
     expect($sources)->not->toContain('lawin-monitoring');
 });
 
+test('the private disk does not register a public framework storage route', function () {
+    expect(config('filesystems.disks.local.serve'))->toBeFalse()
+        ->and(app('router')->getRoutes()->getByName('storage.local'))->toBeNull()
+        ->and(app('router')->getRoutes()->getByName('storage.local.upload'))->toBeNull();
+});
+
 test('protected attachments require source permission and serve only the resolved record file', function () {
     Storage::fake('local');
     Storage::fake('public');
@@ -141,7 +147,7 @@ test('legacy public attachment routes and preview URLs are blocked', function ()
     Storage::fake('public');
     Storage::disk('public')->put('bms-attachments/protected.pdf', 'secret');
 
-    $this->get('/storage/bms-attachments/protected.pdf')->assertStatus(403);
+    $this->get('/storage/bms-attachments/protected.pdf')->assertNotFound();
     $this->actingAs(protectedAttachmentUser())
         ->get('/view-file/bms-attachments/protected.pdf')
         ->assertNotFound();

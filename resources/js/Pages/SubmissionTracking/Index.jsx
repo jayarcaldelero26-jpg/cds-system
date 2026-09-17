@@ -1628,7 +1628,7 @@ export default function Index({
                 subtitle={
                     genericAction
                         ? "The event timestamp is recorded by the server."
-                        : "Record the real-world routing event only. eDATS does not electronically transmit the official document."
+                        : "Record the real-world routing event only. CDS-SMART does not electronically transmit the official document."
                 }
                 onClose={closeSelectedAction}
                 onSubmit={submit}
@@ -1792,7 +1792,7 @@ export default function Index({
                         routingStage?.label ||
                         "Routing Event",
                 )}
-                subtitle="Record the real-world event only; eDATS does not transmit the document."
+                subtitle="Record the real-world event only; CDS-SMART does not transmit the document."
                 onClose={() =>
                     !internalForm.processing && closeInternalRouting()
                 }

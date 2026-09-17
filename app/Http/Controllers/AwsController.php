@@ -39,6 +39,13 @@ class AwsController extends Controller
         private readonly AwsWeatherConditionService $weather,
         private readonly AwsImportRowReader $importRows,
     ) {}
+
+    public function dataIndex(Request $request)
+    {
+        $request->merge(['aws_data' => true, 'tab' => 'analytics']);
+        return $this->index($request);
+    }
+
     public function index(Request $request)
     {
         [$summaryMode, $summaryPeriod, $summaryProtectedAreaId, $summaryPeriodLabel, $summaryCaption] = $this->summarySelection($request);
@@ -62,10 +69,19 @@ class AwsController extends Controller
                 });
             })
             ->when($request->filled('report_semester'), fn ($query) => $query->where('semester', $request->input('report_semester')))
-            ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')));
+            ->when($request->filled('reporting_period'), fn ($query) => $query->where('document_type', $request->input('reporting_period')))
+            ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', (int) $request->input('quarter')))
+            ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')))
+            ->when($request->filled('report_year'), fn ($query) => $query->where('reporting_year', (int) $request->input('report_year')))
+            ->when($request->filled('report_quarter'), fn ($query) => $query->where('quarter', (int) $request->input('report_quarter')))
+            ->when($request->filled('report_office'), fn ($query) => $query->where('target_office', $request->input('report_office')))
+            ->when($request->filled('report_status'), function ($query) use ($request): void {
+                $status = (string) $request->input('report_status');
+                $query->whereIn('id', Aws::query()->get()->filter(fn (Aws $report) => $report->submission_status === $status)->pluck('id'));
+            });
 
         // 2. RAW DATA QUERY: Kuhaon lang kadtong mga naay timestamps (mga imported CSV data)
-        $legacyRawQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->latest();
+        $legacyRawQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->whereNotExists(fn ($query) => $query->select(DB::raw(1))->from('aws_observations')->whereColumn('aws_observations.legacy_aws_id', 'aws.id'))->latest();
         $observationQuery = $this->awsScope->query(AwsObservation::with('protectedArea'), $request->user())->latest('start_date');
 
         if ($summaryProtectedAreaId !== null) {
@@ -76,10 +92,10 @@ class AwsController extends Controller
         $observationQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
 
         // 3. CHART DATA QUERY: analytics keeps its own quick/custom range controls.
-        $legacyChartQuery = $this->awsScope->query(Aws::query(), $request->user())->whereNotNull('timestamps');
+        $legacyChartQuery = $this->awsScope->query(Aws::query(), $request->user())->whereNotNull('timestamps')->whereNotExists(fn ($query) => $query->select(DB::raw(1))->from('aws_observations')->whereColumn('aws_observations.legacy_aws_id', 'aws.id'));
         $observationChartQuery = $this->awsScope->query(AwsObservation::query(), $request->user());
 
-        if ($request->input('tab') === 'analytics') {
+        if ($request->input('tab') === 'analytics' || $request->input('view') === 'analytics') {
             if ($request->filled('protected_area_id')) {
                 $legacyChartQuery->where('protected_area_id', (int) $request->input('protected_area_id'));
                 $observationChartQuery->where('protected_area_id', (int) $request->input('protected_area_id'));
@@ -163,8 +179,10 @@ class AwsController extends Controller
             'rawRecords'     => $rawPaginator->through(fn ($record) => $this->rawData($record)),
             'chartRecords'   => $chartData,
             'protectedAreas' => $this->awsScope->options($request->user()),
+            'organizationalOffices' => $this->organization->officeOptions(),
+            'dataOnly' => $request->boolean('aws_data'),
             'allProtectedAreasMode' => $summaryProtectedAreaId === null,
-            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range']),
+            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'reporting_period', 'quarter', 'report_document_type', 'report_year', 'report_quarter', 'report_office', 'report_status', 'graph_start_date', 'graph_end_date', 'graph_range']),
             'monthlySummary' => $summaryRows->values()->all(),
             'monthlyFilters' => [
                 'mode' => $summaryMode,
@@ -339,10 +357,16 @@ class AwsController extends Controller
     }
     public function store(Request $request)
     {
+        $this->normalizeReportInput($request);
+        if (! $request->filled('document_type') && $request->filled('reporting_period')) {
+            $request->merge(['document_type' => $request->input('reporting_period')]);
+        }
         $validated = $request->validate($this->validationRules(fileRequired: true), [
             'report_file.required' => 'A report attachment / MOV is required.',
         ]);
+        $validated = $this->deriveCanonicalPeriod($validated);
         $this->validateMonitoringPeriod($validated);
+        $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
         $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id']);
         $storedPath = null;
 
@@ -369,8 +393,14 @@ class AwsController extends Controller
         $aws = $this->authorizedRecord($request, $aws->id);
         abort_unless($aws->timestamps === null, 404);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($aws);
+        $this->normalizeReportInput($request);
+        if (! $request->filled('document_type') && $request->filled('reporting_period')) {
+            $request->merge(['document_type' => $request->input('reporting_period')]);
+        }
         $validated = $request->validate($this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type));
+        $validated = $this->deriveCanonicalPeriod($validated, $aws);
         $this->validateMonitoringPeriod($validated);
+        $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
         $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
         if (! $request->hasFile('report_file') && ! app(ComplianceMovService::class)->hasValidSingleFile($aws, 'report_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['report_file' => ComplianceMovService::MESSAGE]);
@@ -857,25 +887,72 @@ class AwsController extends Controller
 
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'station_name' => ['required', 'string', 'max:255'],
-            'location' => ['required', 'string', 'max:255'],
+            'station_name' => ['nullable', 'string', 'max:255'],
+            'location' => ['nullable', 'string', 'max:255'],
             'target_office' => ['required', 'string', 'max:255'],
-            'reporting_year' => ['required', 'integer', 'between:2000,2100'],
-            'quarter' => ['required', 'integer', 'between:1,4'],
-            'monitoring_period_start' => ['required', 'date'],
-            'monitoring_period_end' => ['required', 'date', 'after_or_equal:monitoring_period_start'],
-            'report_period_type' => ['required', 'string', 'in:Monthly,Quarterly,Semestral'],
+            'reporting_year' => ['nullable', 'integer', 'between:2000,2100'],
+            'quarter' => ['nullable', 'integer', 'between:1,4'],
+            'monitoring_period_start' => ['nullable', 'date'],
+            'monitoring_period_end' => ['nullable', 'date', 'after_or_equal:monitoring_period_start'],
+            'reporting_period' => ['nullable', 'string', 'max:255'],
+            'report_period_type' => ['nullable', 'string', 'in:Monthly,Quarterly,Semestral'],
             'activity_name' => ['nullable', 'string', 'max:255'],
-            'document_type' => ['required', 'string', Rule::in($documentTypes)],
-            'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
+            'document_type' => ['required', 'string', Rule::in([...$documentTypes, 'Final Report (1-15)', 'Final Report (16-30)', 'Final Report (16-28)', 'First-half month report', 'Second-half month report'])],
+            'semester' => ['nullable', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
-            'status' => ['required', 'string', 'in:Active,Maintenance,Inactive,Approve,Pending,Under Maintenance'],
+            'status' => ['nullable', 'string', 'in:Active,Maintenance,Inactive,Approve,Pending,Under Maintenance'],
             'recommendation_remarks' => ['nullable', 'string'],
             'report_file' => [$fileRequired ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx', 'max:10240'],
         ];
+    }
+
+    private function normalizeReportInput(Request $request): void
+    {
+        if ($request->has('remarks') && ! $request->has('recommendation_remarks')) {
+            $request->merge(['recommendation_remarks' => $request->input('remarks')]);
+        }
+
+        $request->merge([
+            'activity_name' => $request->input('activity_name') ?: 'Monitoring and Maintenance of AWS',
+            'station_name' => $request->input('station_name') ?: 'Automated Weather Station',
+            'location' => $request->input('location') ?: ($request->input('target_office') ?: 'Protected Area'),
+            'report_period_type' => $request->input('report_period_type') ?: 'Monthly',
+            'status' => $request->input('status') ?: 'Approve',
+        ]);
+    }
+
+    /** @param array<string, mixed> $validated */
+    private function deriveCanonicalPeriod(array $validated, ?Aws $existing = null): array
+    {
+        $start = $validated['monitoring_period_start'] ?? $existing?->monitoring_period_start;
+        $end = $validated['monitoring_period_end'] ?? $existing?->monitoring_period_end;
+        $sourceDate = $validated['date_conducted'] ?? $existing?->date_conducted;
+
+        if ((! $start || ! $end) && is_string($sourceDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($sourceDate))) {
+            $start = $end = trim($sourceDate);
+        }
+
+        if (! $start && $existing?->monitoring_period_start) $start = $existing->monitoring_period_start;
+        if (! $end && $start) $end = $start;
+        if ($start && $end) {
+            $startDate = CarbonImmutable::parse($start);
+            $endDate = CarbonImmutable::parse($end);
+            $validated['monitoring_period_start'] = $startDate->toDateString();
+            $validated['monitoring_period_end'] = $endDate->toDateString();
+            $validated['reporting_year'] = $startDate->year;
+            $validated['quarter'] = (int) ceil($startDate->month / 3);
+        }
+
+        if (empty($validated['monitoring_period_start']) || empty($validated['monitoring_period_end'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'date_conducted' => 'Date Conducted is required to establish the AWS reporting period.',
+            ]);
+        }
+
+        return $validated;
     }
 
     private function validateMonitoringPeriod(array $validated): void
@@ -894,6 +971,8 @@ class AwsController extends Controller
         return [
             ...collect($report->toArray())->except(['report_file_path', 'report_file_name'])->all(),
             'protected_area_name' => $report->protectedArea?->name,
+            'period_label' => $this->reportingPeriodLabel($report),
+            'reporting_period' => $report->document_type ?: $report->report_period_type,
             'document_type' => $report->document_type ?: $report->report_period_type,
             'date_accomplished' => $report->date_accomplished?->toDateString(),
             'date_report_released_cenro' => $report->date_report_released_cenro?->toDateString(),
@@ -903,6 +982,16 @@ class AwsController extends Controller
             'cenro_release_applicable' => ! $directPenro,
             'report_file' => $this->attachments->descriptor('aws', $report, 'report_file'),
         ];
+    }
+
+    private function reportingPeriodLabel(Aws $report): string
+    {
+        if (! $report->monitoring_period_start || ! $report->monitoring_period_end) return $report->quarter ? 'Q'.$report->quarter.' · '.($report->reporting_year ?: '—') : '—';
+        $start = CarbonImmutable::parse($report->monitoring_period_start);
+        $end = CarbonImmutable::parse($report->monitoring_period_end);
+        $dash = "\u{2013}";
+        $range = $start->format('F j').($start->toDateString() === $end->toDateString() ? '' : $dash.$end->format('F j')).', '.$end->year;
+        return 'Q'.($report->quarter ?: '—').' · '.$range;
     }
 
     private function rawData(Aws $record): array

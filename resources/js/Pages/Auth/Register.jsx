@@ -55,7 +55,7 @@ export default function Register({ registrationOptions = {} }) {
         <AuthLayout title="Create an account" contentClassName="max-w-[34rem]">
             <div className="mt-5">
                 <div className="border-b border-slate-200/80 pb-4 dark:border-emerald-100/15">
-                    <h2 className="text-[1.45rem] font-semibold leading-[1.3] tracking-tight text-slate-900 dark:text-white">Create an eDATS account</h2>
+                    <h2 className="text-[1.45rem] font-semibold leading-[1.3] tracking-tight text-slate-900 dark:text-white">Create a CDS-SMART account</h2>
                     <p className="mt-1.5 text-sm leading-5 text-slate-500 dark:text-slate-400">Submit your details for administrator review.</p>
                 </div>
 

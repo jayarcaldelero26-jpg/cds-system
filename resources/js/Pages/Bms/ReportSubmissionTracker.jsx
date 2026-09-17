@@ -10,11 +10,12 @@ import FileAttachmentPanel from '@/Components/Crud/FileAttachmentPanel';
 import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import { useReportDetails } from '@/Components/Crud/ReportDetailsContext';
 import ConfirmDialog from '@/Components/ConfirmDialog';
-import { formatReportValue } from '@/Utils/dateFormatters';
+import { formatReportDate, formatReportValue } from '@/Utils/dateFormatters';
 import Tooltip from '@/Components/Tooltip';
 import TimelinessBadge from '@/Components/TimelinessBadge';
+import DateRangePicker from '@/Components/DateRangePicker';
 
-const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
+const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', quarter: '', monitoring_period_start: '', monitoring_period_end: '', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
 const badgeClass = (value) => ({ 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
 const dateValue = (value) => value ? String(value).slice(0, 10) : '';
 const display = (value) => formatReportValue(value);
@@ -40,7 +41,7 @@ const Detail = ({ label, children }) => {
   return <div><span className="block text-xs text-gray-500">{label}:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{normalizedChildren}</span></div>;
 };
 
-export default function ReportSubmissionTracker({ submissions, protectedAreas, filters, moduleLabel = 'BMS', submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [] }) {
+export default function ReportSubmissionTracker({ submissions, protectedAreas, filters, moduleLabel = 'BMS', submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov' }) {
   if (!submissionRoutes || typeof submissionRoutes.store !== 'string' || typeof submissionRoutes.index !== 'string' || typeof submissionRoutes.update !== 'function' || typeof submissionRoutes.destroy !== 'function' || typeof submissionRoutes.mov !== 'function') {
     throw new Error(`${moduleLabel} ReportSubmissionTracker requires store, index, update, destroy, and MOV routes.`);
   }
@@ -52,10 +53,14 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   const periodField = workflowConfig?.period_field || 'semester';
   const periodLabel = workflowConfig?.period_label || 'Semester';
   const periods = workflowConfig?.periods || ['1st Semester', '2nd Semester'];
+  const periodOptions = workflowConfig?.period_options || periods.map((period) => ({ value: period, label: period }));
   const activityOptions = workflowConfig?.activities || [];
   const documentTypes = workflowConfig?.documents || ['Final Report', 'Progress Report'];
   const isMeetingPamb = meetingPambWorkflows.includes(workflowConfig?.key);
   const activityDocuments = workflowConfig?.activity_documents || {};
+  const periodRepresentsDocument = Boolean(workflowConfig?.period_represents_document);
+  const hasCoveragePeriod = Boolean(workflowConfig?.coverage_period);
+  const targetOfficeSelect = Boolean(workflowConfig?.target_office_select);
   const allowsCustomActivity = Boolean(workflowConfig?.allow_custom_activity);
   const daysCompliedField = workflowConfig?.days_complied_field || 'number_days_complied';
   const penroDelayField = workflowConfig?.penro_delay_field || 'total_days_delayed_penro';
@@ -85,7 +90,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   const [preview, setPreview] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteProcessing, setDeleteProcessing] = useState(false);
-  const form = useForm(emptyReport);
+  const form = useForm({ ...emptyReport, [attachmentField]: null });
 
   useEffect(() => () => {if (preview?.temporary) URL.revokeObjectURL(preview.url);}, [preview]);
 
@@ -103,18 +108,18 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   const closeAll = () => {setModal(null);setSelectedReport(null);resetFormState();};
   const openDetails = (report) => {setSelectedReport(report);setModal('details');};
   const documentsForActivity = (activity) => activityDocuments[activity] || documentTypes;
-  const openCreate = () => {setSelectedReport(null);resetFormState();form.setData({ ...emptyReport, activity_name: workflowConfig?.default_activity || '', [periodField]: filters?.[semesterFilter] || periods[0] || '' });setModal('create');};
+  const openCreate = () => {setSelectedReport(null);resetFormState();form.setData({ ...emptyReport, activity_name: workflowConfig?.default_activity || '', [periodField]: filters?.[semesterFilter] || periodOptions[0]?.value || '', ...(periodRepresentsDocument ? { document_type: filters?.[semesterFilter] || periodOptions[0]?.value || '' } : {}) });setModal('create');};
   const openEdit = (report) => {
     setSelectedReport(report);
     form.clearErrors();
-    form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', [periodField]: report[periodField] || '', date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), mov: null, remarks: report.remarks || '' });
+    form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', [periodField]: report[periodField] || (periodRepresentsDocument ? report.document_type || '' : ''), monitoring_period_start: dateValue(report.monitoring_period_start), monitoring_period_end: dateValue(report.monitoring_period_end), date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), [attachmentField]: null, remarks: report.remarks || '' });
     setPreview(sourceMov(report));
     setModal('edit');
   };
   const openMov = (report) => {
     setSelectedReport(report);
     form.clearErrors();
-    form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', [periodField]: report[periodField] || '', date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), mov: null, remarks: report.remarks || '' });
+    form.setData({ protected_area_id: report.protected_area_id || '', target_office: report.target_office || '', activity_name: report.activity_name || '', document_type: report.document_type || '', [periodField]: report[periodField] || (periodRepresentsDocument ? report.document_type || '' : ''), monitoring_period_start: dateValue(report.monitoring_period_start), monitoring_period_end: dateValue(report.monitoring_period_end), date_conducted: report.date_conducted || '', date_accomplished: dateValue(report.date_accomplished), [attachmentField]: null, remarks: report.remarks || '' });
     setPreview(sourceMov(report));
     setModal('mov');
   };
@@ -123,20 +128,23 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
     setModal(selectedReport ? 'details' : null);
   };
   const selectMov = (file) => {
-    form.setData({ ...form.data, mov: file });
+    form.setData({ ...form.data, [attachmentField]: file });
     setPreview(file ? { url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true } : sourceMov(selectedReport));
   };
   const submit = (event) => {
     event.preventDefault();
     if (form.processing) return;
     const options = { forceFormData: true, preserveScroll: true, onSuccess: closeAll };
+    const payload = (data) => periodRepresentsDocument
+      ? { ...data, document_type: data[periodField] || data.document_type, [periodField]: undefined }
+      : data;
     if (modal === 'edit' || modal === 'mov') {
-      form.transform((data) => ({ ...data, _method: 'put' }));
+      form.transform((data) => ({ ...payload(data), _method: 'put' }));
       form.post(submissionRoutes.update(selectedReport.id), options);
       return;
     }
 
-    form.transform((data) => data);
+    form.transform(payload);
     form.post(submissionRoutes.store, options);
   };
   const applyFilters = (changes) => {
@@ -169,6 +177,10 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   const change = (name) => (event) => form.setData(name, event.target.value);
   const calculated = selectedReport ? [['Deadline for Submission to PENRO', selectedReport.deadline_submission], ['Number of Days Complied', selectedReport[daysCompliedField]], ['Timeliness', selectedReport.timeliness], ['Status of Submission', selectedReport.submission_status], ['Total Number of Days Delayed at PENRO', selectedReport[penroDelayField]]].filter(([, value]) => value !== null && value !== undefined && value !== '') : [];
 
+  const periodDisplay = (row) => periodField === 'quarter' && row[periodField] ? `Quarter ${row[periodField]}` : display(row[periodField]);
+  const coverageDisplay = (row) => row.monitoring_period_start && row.monitoring_period_end
+    ? `${formatReportDate(row.monitoring_period_start)} – ${formatReportDate(row.monitoring_period_end)}`
+    : display(row.period_label);
   const columns = [
   {
     key: 'protected_area',
@@ -180,8 +192,9 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
   },
   { key: 'activity_name', label: 'Name of Activity', render: (row) => <span className="block min-w-40 max-w-72 whitespace-normal leading-5">{display(row.activity_name)}</span> },
   { key: 'date_conducted', label: 'Date Conducted', render: (row) => <span className="block min-w-32 max-w-56 whitespace-normal leading-5">{display(row.date_conducted)}</span> },
-  { key: 'document_type', label: 'Type of Report', render: (row) => display(row.document_type) },
-  { key: periodField, label: periodLabel, render: (row) => display(row[periodField]) },
+  ...(!periodRepresentsDocument ? [{ key: 'document_type', label: 'Type of Report', render: (row) => display(row.document_type) }] : []),
+  { key: periodField, label: periodLabel, render: periodDisplay },
+  ...(hasCoveragePeriod ? [{ key: 'coverage_period', label: 'Coverage Period', render: coverageDisplay }] : []),
   { key: 'date_accomplished', label: 'Date Accomplished', render: (row) => display(dateValue(row.date_accomplished)) },
   { key: 'timeliness', label: 'Timeliness', render: (row) => <TimelinessBadge value={row.timeliness} /> },
   { key: 'submission_status', label: 'Status of Submission', render: (row) => <span className="block max-w-52 whitespace-normal leading-5"><Badge value={row.submission_status} /></span> }];
@@ -203,33 +216,34 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, f
         <CrudTable compactEmpty={true} title={rows.length > 0 ? `${moduleLabel} Report` : undefined} subtitle={rows.length > 0 ? `${submissions?.total ?? rows.length} report submission${(submissions?.total ?? rows.length) === 1 ? '' : 's'}` : undefined} helperText={rows.length > 0 ? 'Click any row to view full details' : undefined} caption={`${moduleLabel} report submission tracker`} columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} emptyTitle="No report submissions found" emptyDescription={`No ${moduleLabel} report submissions match the selected filters.`} pagination={rows.length > 0 ? pagination : null} />
 
         <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canUpdate && !completedSubmission} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
-    { label: 'Reporting Period', value: selectedReport[periodField] || '-' },
+    { label: 'Reporting Period', value: periodDisplay(selectedReport) },
     { label: 'Report Status', render: () => <Badge value={selectedReport.submission_status} /> },
     { label: 'Deadline', value: display(selectedReport.deadline_submission) },
     { label: 'Timeliness Rating', render: () => <TimelinessBadge value={selectedReport.timeliness} /> }]
     } />} attachments={selectedReport && (detailsMov ? <CrudSection title={reportAttachmentLabel}><div className="space-y-3"><div className="flex flex-wrap justify-end gap-2">{completedSubmission && (detailsMov.download_url || detailsMov.url) && <a href={detailsMov.download_url || detailsMov.url} download={detailsMov.name || undefined} className="rounded-xl bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800">Download Current Copy</a>}{canUpdate && !completedSubmission && <button type="button" onClick={() => openMov(selectedReport)} className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100">Replace Attachment</button>}</div><FilePreviewPanel file={detailsMov} title={reportAttachmentLabel} heightClass="h-[480px]" /></div></CrudSection> : <CrudSection title={reportAttachmentLabel}><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canUpdate && !completedSubmission && <button type="button" onClick={() => openMov(selectedReport)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800">Attach Report</button>}</CrudSection>)}>
             {selectedReport && <div className="space-y-6">
-                <CrudSection title="Report Information"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Target Office">{display(selectedReport.target_office)}</Detail><Detail label="Protected Area">{display(selectedReport.protected_area?.name)}</Detail><Detail label="Name of Activity">{display(selectedReport.activity_name)}</Detail><Detail label="Type of Document">{display(selectedReport.document_type)}</Detail><Detail label="Date Conducted">{display(selectedReport.date_conducted)}</Detail><Detail label="Date Accomplished">{display(dateValue(selectedReport.date_accomplished))}</Detail><Detail label="Days Complied">{display(selectedReport[daysCompliedField])}</Detail></div></CrudSection>
+                <CrudSection title="Report Information"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Target Office">{display(selectedReport.target_office)}</Detail><Detail label="Protected Area">{display(selectedReport.protected_area?.name)}</Detail><Detail label="Name of Activity">{display(selectedReport.activity_name)}</Detail>{!periodRepresentsDocument && <Detail label="Type of Document">{display(selectedReport.document_type)}</Detail>}{!periodRepresentsDocument && <Detail label={periodLabel}>{periodDisplay(selectedReport)}</Detail>}{hasCoveragePeriod && <Detail label="Coverage Period">{coverageDisplay(selectedReport)}</Detail>}<Detail label="Date Conducted">{display(selectedReport.date_conducted)}</Detail><Detail label="Date Accomplished">{display(dateValue(selectedReport.date_accomplished))}</Detail><Detail label="Days Complied">{display(selectedReport[daysCompliedField])}</Detail></div></CrudSection>
                 <CrudSection title="Submission Timeline"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Date Report Released by CENRO Records">{cenroReleaseApplicable ? display(dateValue(selectedReport.date_report_released_cenro)) : <Badge value="Not Applicable \u2014 PENRO-managed Protected Area" />}</Detail><Detail label="Date Received by PENRO Records">{display(dateValue(selectedReport.date_received_penro))}</Detail><Detail label="Regional Endorsement">{!cenroReleaseApplicable ? (!selectedReport.date_received_penro ? <Badge value="Not Yet Available" /> : !selectedReport.date_endorsed_regional ? <Badge value="For Endorsement" /> : display(dateValue(selectedReport.date_endorsed_regional))) : (!selectedReport.date_report_released_cenro ? <Badge value="Not Yet Available" /> : selectedReport.date_received_penro && !selectedReport.date_endorsed_regional ? <Badge value="For Endorsement" /> : display(dateValue(selectedReport.date_endorsed_regional)))}</Detail><Detail label="Total Number of Days Delayed at PENRO">{display(selectedReport[penroDelayField])}</Detail></div></CrudSection>
                 <CrudSection title="Remarks"><p className="whitespace-pre-wrap text-xs text-gray-800 dark:text-gray-200">{selectedReport.remarks || 'None.'}</p></CrudSection>
             </div>}
         </CrudDetailsModal>
 
         <CrudFormModal open={modal === 'mov'} mode="edit" title={originalMov ? 'Replace Report Attachment' : 'Attach Report'} subtitle="Attach or replace the primary report document." onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} saveLabel={originalMov ? 'Replace Attachment' : 'Attach Report'} maxWidth="max-w-xl">
-            <CrudSection title={reportAttachmentLabel}><FileAttachmentPanel id="reportsubmissiontracker-mov" label={reportAttachmentLabel} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={originalMov ? [originalMov] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /></CrudSection>
+            <CrudSection title={reportAttachmentLabel}><FileAttachmentPanel id="reportsubmissiontracker-mov" label={reportAttachmentLabel} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={originalMov ? [originalMov] : []} selectedFiles={form.data[attachmentField] ? [form.data[attachmentField]] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors[attachmentField]} disabled={form.processing} canManage /></CrudSection>
         </CrudFormModal>
 
         <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} icon={workflowConfig ? undefined : '\uD83D\uDCCB'} title={modal === 'edit' ? `Edit ${moduleLabel} Report Submission` : `Add ${moduleLabel} Report Submission`} subtitle={modal === 'edit' ? 'Update report details and review the MOV side-by-side.' : 'Report compliance details and supporting MOV.'} onClose={backFromForm} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} canDelete={modal === 'edit' && canDelete} onDelete={() => requestDelete(selectedReport)} saveLabel={modal === 'edit' ? 'Save Changes' : 'Save Report'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}>
             <CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className={label}><FloatingInput id="reportsubmissiontracker-target-office" label="Target Office" value={form.data.target_office} onChange={change('target_office')} />{error('target_office')}</div>
+                <div className={label}>{targetOfficeSelect ? <FloatingSelect id="reportsubmissiontracker-target-office" label="Target Office" required value={form.data.target_office} onChange={change('target_office')}><option value="">Select Target Office</option>{targetOffices.map((office) => <option key={office.id || office.name || office} value={office.name || office}>{office.label || office.name || office}</option>)}</FloatingSelect> : <FloatingInput id="reportsubmissiontracker-target-office" label="Target Office" value={form.data.target_office} onChange={change('target_office')} />}{error('target_office')}</div>
                 <div className={label}><FloatingSelect id="reportsubmissiontracker-name-of-pa" label="Name of PA" value={form.data.protected_area_id} onChange={change('protected_area_id')}><option value="">Select Protected Area</option>{protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</FloatingSelect>{error('protected_area_id')}</div>
                 <div className={label}><FloatingInput id="reportsubmissiontracker-name-of-activity" label="Name of Activity" required value={form.data.activity_name} onChange={change('activity_name')} />{error('activity_name')}</div>
-                <div className={label}><FloatingSelect id="reportsubmissiontracker-type-of-document" label="Type of Document" value={form.data.document_type} onChange={change('document_type')}><option value="">Select Type of Document</option>{form.data.document_type && !documentsForActivity(form.data.activity_name).includes(form.data.document_type) && <option value={form.data.document_type}>{documentLabel(form.data.document_type)} (Legacy)</option>}{documentsForActivity(form.data.activity_name).map((document) => <option key={document} value={document}>{documentLabel(document)}</option>)}</FloatingSelect>{error('document_type')}</div>
-                <div className={label}><FloatingSelect id="reportsubmissiontracker-semester" label={periodLabel} required value={form.data[periodField] || ''} onChange={change(periodField)}><option value="">Select {periodLabel}</option>{periods.map((period) => <option key={period}>{period}</option>)}</FloatingSelect>{error(periodField)}</div>
-                <div className={label}><FloatingInput id="reportsubmissiontracker-date-conducted" label="Date Conducted" type={isMeetingPamb ? 'date' : 'text'} required={isMeetingPamb} value={form.data.date_conducted} onChange={change('date_conducted')} placeholder={isMeetingPamb ? undefined : 'Enter date or coverage period'} />{error('date_conducted')}</div>
+                {!periodRepresentsDocument && <div className={label}><FloatingSelect id="reportsubmissiontracker-type-of-document" label="Type of Document" value={form.data.document_type} onChange={change('document_type')}><option value="">Select Type of Document</option>{form.data.document_type && !documentsForActivity(form.data.activity_name).includes(form.data.document_type) && <option value={form.data.document_type}>{documentLabel(form.data.document_type)} (Legacy)</option>}{documentsForActivity(form.data.activity_name).map((document) => <option key={document} value={document}>{documentLabel(document)}</option>)}</FloatingSelect>{error('document_type')}</div>}
+                <div className={label}><FloatingSelect id="reportsubmissiontracker-semester" label={periodLabel} required value={form.data[periodField] || ''} onChange={change(periodField)}><option value="">Select {periodLabel}</option>{periodOptions.map((period) => <option key={period.value} value={period.value}>{period.label}</option>)}</FloatingSelect>{error(periodField)}</div>
+                <div className={label}>{workflowConfig?.date_conducted_type === 'date' || isMeetingPamb ? <DatePicker id="reportsubmissiontracker-date-conducted" label="Date Conducted" value={form.data.date_conducted || ''} onChange={(value) => form.setData('date_conducted', value)} required={Boolean(workflowConfig?.date_conducted_required) || isMeetingPamb} error={form.errors.date_conducted} /> : <FloatingInput id="reportsubmissiontracker-date-conducted" label="Date Conducted" type="text" required={Boolean(workflowConfig?.date_conducted_required)} value={form.data.date_conducted} onChange={change('date_conducted')} placeholder="Enter date or coverage period" />}{error('date_conducted')}</div>
+                {hasCoveragePeriod && <div className={label}><DateRangePicker id="reportsubmissiontracker-coverage-period" label="Coverage Period" value={{ from: form.data.monitoring_period_start || '', to: form.data.monitoring_period_end || '' }} onChange={({ from, to }) => form.setData({ ...form.data, monitoring_period_start: from, monitoring_period_end: to })} error={form.errors.monitoring_period_start || form.errors.monitoring_period_end} />{error('monitoring_period_start')}{error('monitoring_period_end')}</div>}
             </div></CrudSection>
             <CrudSection title="Compliance Basis"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2"><div className={label}><DatePicker id="bms-report-date-accomplished" label="Date Accomplished" value={form.data.date_accomplished} onChange={(value) => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />{error('date_accomplished')}</div></div></CrudSection>
-        <CrudSection title="Report Attachment & Remarks"><div className="space-y-5"><FileAttachmentPanel id="reportsubmissiontracker-form-mov" label={reportAttachmentLabel} required={modal === 'create'} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={currentMov(selectedReport) ? [currentMov(selectedReport)] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /><div className={label}><FloatingTextarea id="reportsubmissiontracker-remarks" label="Remarks" rows="4" value={form.data.remarks} onChange={change('remarks')} />{error('remarks')}</div></div></CrudSection>
+        <CrudSection title="Report Attachment & Remarks"><div className="space-y-5"><FileAttachmentPanel id="reportsubmissiontracker-form-mov" label={reportAttachmentLabel} required={modal === 'create'} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} sizeErrorLabel={`${documentLabel(form.data.document_type)} attachment`} requiredMessage={`${documentLabel(form.data.document_type)} attachment is required.`} existingFiles={currentMov(selectedReport) ? [currentMov(selectedReport)] : []} selectedFiles={form.data[attachmentField] ? [form.data[attachmentField]] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors[attachmentField]} disabled={form.processing} canManage /><div className={label}><FloatingTextarea id="reportsubmissiontracker-remarks" label="Remarks" rows="4" value={form.data.remarks} onChange={change('remarks')} />{error('remarks')}</div></div></CrudSection>
         </CrudFormModal>
 
         <ConfirmDialog open={Boolean(deleteTarget) && canDelete} variant="danger" title="Delete Report Submission?" message={`Delete the report submission for "${deleteTarget?.activity_name || 'this activity'}"? This cannot be undone.`} confirmLabel="Delete Record" onConfirm={confirmDelete} onCancel={() => setDeleteTarget(null)} processing={deleteProcessing} />

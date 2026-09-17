@@ -5,7 +5,7 @@ test('profile passkey enrollment distinguishes insecure origins from unsupported
 
     expect($profile)
         ->toContain('window.isSecureContext === false')
-        ->toContain('Passkeys require a secure HTTPS connection. Open eDATS-CDS using HTTPS to register or use a passkey.')
+        ->toContain('Passkeys require a secure HTTPS connection. Open CDS-SMART using HTTPS to register or use a passkey.')
         ->toContain('Passkeys are not supported in this browser or device.')
         ->toContain('window.PublicKeyCredential')
         ->toContain('navigator.credentials?.create')

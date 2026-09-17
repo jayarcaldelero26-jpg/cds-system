@@ -267,7 +267,7 @@ export default function PambRoutingTimeline({
                     </h3>
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                         Detailed internal routing records real-world events;
-                        eDATS does not transmit documents.
+                        CDS-SMART does not transmit documents.
                     </p>
                 </div>
                 {row.cenro_release_applicable === false && (

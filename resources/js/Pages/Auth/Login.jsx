@@ -39,7 +39,7 @@ export default function Login() {
             <div className="mt-5">
                 <div className="border-b border-slate-200/80 pb-4 dark:border-emerald-100/15">
                     <h2 className="text-[1.45rem] font-semibold leading-[1.3] tracking-tight text-slate-900 dark:text-white">Sign in to continue</h2>
-                    <p className="mt-1.5 text-sm leading-5 text-slate-500 dark:text-slate-400">Use your authorized eDATS account to continue.</p>
+                    <p className="mt-1.5 text-sm leading-5 text-slate-500 dark:text-slate-400">Use your authorized CDS-SMART account to continue.</p>
                 </div>
 
                 <form onSubmit={submit} className="mt-5 space-y-4">

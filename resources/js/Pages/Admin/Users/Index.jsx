@@ -107,7 +107,7 @@ export default function Index({ users, status }) {
         <AuthenticatedLayout title="User Management">
             <PageHeader
                 title="User Management"
-                description="Manage authorized eDATS users, their office, section, and access roles. Click a user row to view details and administrative actions."
+                description="Manage authorized CDS-SMART users, their office, section, and access roles. Click a user row to view details and administrative actions."
                 actions={<Link href="/admin/users/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-700 focus:ring-offset-2">Add user</Link>}
             />
 

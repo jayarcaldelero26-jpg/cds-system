@@ -1,148 +1,60 @@
 import { Head, Link } from '@inertiajs/react';
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
-import heroBackground from '../../images/homepage/homepage-environmental-hero.png';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 
-const features = [
-    { title: 'Integrated Monitoring', description: 'Consolidated monitoring across Conservation and Development activities.', icon: 'layers' },
-    { title: 'Submission & Timeliness Tracking', description: 'Track report deadlines, routing, receipt, delays, and timeliness.', icon: 'calendar' },
-    { title: 'Program & Activity Monitoring', description: 'Monitor PA and ENGP program implementation from one system.', icon: 'chart' },
-    { title: 'MOV & Document Management', description: 'Organize supporting documents and Means of Verification.', icon: 'folder' },
-    { title: 'Automated Alerts', description: 'Surface due, overdue, and submission-compliance requirements.', icon: 'bell' },
-    { title: 'Performance Dashboard', description: 'Visualize current monitoring status, compliance, and upcoming deadlines.', icon: 'dashboard' },
-];
-
-const values = [
-    ['Integrated', 'One monitoring environment for Conservation and Development.'],
-    ['Timely', 'Submission tracking and alerts support timely compliance.'],
-    ['Transparent', 'Clear routing, status, and audit visibility.'],
-    ['Data-Driven', 'Monitoring information supports better management decisions.'],
-];
+const number = value => Number(value || 0).toLocaleString();
+const percent = value => `${Number(value || 0).toFixed(1).replace(/\.0$/, '')}%`;
 
 function Icon({ name, className = 'h-5 w-5' }) {
-    const paths = {
-        shield: <path d="M12 3 19 6v5.2c0 4.4-2.8 7.7-7 9.8-4.2-2.1-7-5.4-7-9.8V6l7-3Zm-3.2 9 2.1 2.1 4.4-4.4" />,
-        lock: <><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v2" /></>,
-        check: <><circle cx="12" cy="12" r="8.5" /><path d="m8.5 12 2.2 2.2 4.8-4.8" /></>,
-        layers: <><path d="m12 3 8 4.3-8 4.3-8-4.3L12 3Z" /><path d="m4 12 8 4.3 8-4.3M4 16.7l8 4.3 8-4.3" /></>,
-        calendar: <><rect x="4" y="5" width="16" height="15" rx="2" /><path d="M8 3v4M16 3v4M4 10h16M8 14h3M8 17h6" /></>,
-        chart: <><path d="M4 19V5M4 19h16" /><path d="m7 15 3-3 3 2 4-5" /></>,
-        folder: <><path d="M3.5 7.5A2.5 2.5 0 0 1 6 5h4l2 2h6A2.5 2.5 0 0 1 20.5 9.5v7A2.5 2.5 0 0 1 18 19H6a2.5 2.5 0 0 1-2.5-2.5v-9Z" /><path d="M3.5 10h17" /></>,
-        bell: <><path d="M18 10a6 6 0 0 0-12 0c0 7-3 7-3 8.5h18C21 17 18 17 18 10ZM10 21h4" /></>,
-        dashboard: <><rect x="4" y="4" width="6" height="6" rx="1" /><rect x="14" y="4" width="6" height="6" rx="1" /><rect x="4" y="14" width="6" height="6" rx="1" /><rect x="14" y="14" width="6" height="6" rx="1" /></>,
-        arrow: <path d="M5 12h13m-5-5 5 5-5 5" />,
-    };
-
-    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">{paths[name]}</svg>;
+    const paths = { arrow: <path d="M5 12h13m-5-5 5 5-5 5" /> };
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">{paths[name]}</svg>;
 }
 
-function OverviewTrend({ points = [] }) {
-    return (
-        <div className="mt-4" aria-label="Overall report trend chart">
-            <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="text-[10px] font-extrabold uppercase tracking-[0.12em] text-emerald-900/70">Overall Report Trend</p>
-                {points.length > 0 && <span className="text-[10px] font-semibold text-slate-500">Submitted reports</span>}
-            </div>
-            {points.length ? <div className="h-32 w-full min-w-0">
-                <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={points} margin={{ top: 4, right: 4, left: -22, bottom: 0 }}>
-                        <CartesianGrid stroke="#d1fae5" strokeDasharray="3 4" vertical={false} />
-                        <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-                        <YAxis allowDecimals={false} tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }} tickLine={false} axisLine={false} width={32} />
-                        <Tooltip cursor={{ stroke: '#86efac', strokeDasharray: '3 3' }} contentStyle={{ border: '1px solid #d1fae5', borderRadius: 10, boxShadow: '0 8px 20px rgb(15 118 110 / 0.12)', fontSize: 11 }} formatter={(value) => [value, 'Submitted']} />
-                        <Line type="monotone" dataKey="count" stroke="#15803d" strokeWidth={2.5} dot={{ r: 2.5, fill: '#15803d', strokeWidth: 0 }} activeDot={{ r: 4, fill: '#166534', stroke: '#dcfce7', strokeWidth: 2 }} />
-                    </LineChart>
-                </ResponsiveContainer>
-            </div> : <div className="edats-trend-empty">No report trend data available yet.</div>}
-        </div>
-    );
+function StatBox({ label, value, tone = 'green' }) {
+    const tones = { green: 'border-emerald-900/10 bg-[#f1f8f3] text-emerald-800', amber: 'border-amber-900/10 bg-[#fbf7ed] text-amber-700', red: 'border-red-900/10 bg-[#fdf3f1] text-[#b94a42]' };
+    return <div className={`rounded-lg border px-3 py-2.5 ${tones[tone] || tones.green}`}><p className="text-[10px] font-medium uppercase tracking-[0.07em] text-slate-500">{label}</p><p className="mt-1 text-[1.55rem] font-semibold leading-none tabular-nums">{number(value)}</p></div>;
 }
-export default function Welcome({ overview = {}, reportTrend = [] }) {
-    const metrics = [
-        { label: 'Tracked Reports', value: overview.tracked_reports, icon: 'layers', helper: 'Active monitoring records' },
-        { label: 'Submitted', value: overview.submitted, icon: 'check', helper: 'Reports received by PENRO' },
-        { label: 'Overdue', value: overview.overdue, icon: 'bell', helper: 'Past the authoritative deadline' },
-        { label: 'Due / In Progress', value: overview.reports_due, icon: 'calendar', helper: 'Open deadline items' },
-        { label: 'Compliant', value: overview.compliant, icon: 'shield', helper: 'Submitted on time' },
-        { label: 'Monitoring Sources', value: overview.monitoring_sources, icon: 'dashboard', helper: 'Connected report sources' },
-    ];
 
-    return (
-        <>
-            <Head title="eDATS | PENRO Mati" />
-            <main className="edats-homepage min-h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-                <header className="border-b border-emerald-950/10 bg-white/95 shadow-sm backdrop-blur dark:border-white/10 dark:bg-slate-950/95">
-                    <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-5 px-5 py-4 sm:px-6 lg:px-8">
-                        <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-                            <div className="flex shrink-0 items-center gap-2" aria-label="Department and section logos">
-                                <img src="/images/DENR%20LOGO.png" alt="Department of Environment and Natural Resources logo" className="h-11 w-11 object-contain sm:h-12 sm:w-12" />
-                                <img src="/images/CDS%20Logo.png" alt="Conservation and Development Section logo" className="h-10 w-10 object-contain sm:h-11 sm:w-11" />
-                            </div>
-                            <div className="min-w-0 border-l border-emerald-900/15 pl-3 sm:pl-4">
-                                <p className="text-xl font-extrabold tracking-tight text-emerald-900 dark:text-emerald-300">eDATS</p>
-                                <p className="text-xs font-semibold text-slate-700 dark:text-slate-200 sm:text-sm">Enhanced Digital Alert and Tracking System</p>
-                                <p className="mt-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-800 dark:text-emerald-400">PENRO Mati – Conservation and Development Section</p>
-                            </div>
-                        </div>
-                    </div>
-                </header>
+function HeroProgram({ program }) {
+    const total = Math.max((program.on_time || 0) + (program.late || 0) + (program.overdue || 0), 1);
+    const width = value => `${((Number(value || 0) / total) * 100).toFixed(2)}%`;
+    return <div className="mt-4 first:mt-0">
+        <div className="flex items-center justify-between gap-4"><h3 className="text-sm font-semibold uppercase tracking-wide text-emerald-950">{program.key === 'engp' ? 'ENGP' : 'PA'} <span className="mx-1 text-emerald-700">|</span> {program.office_label}</h3><span className="text-xs font-medium text-slate-500">{number(program.due)} due</span></div>
+        <div className="mt-2 flex h-3 overflow-hidden rounded-sm bg-slate-100"><span className="bg-[#18835b]" style={{ width: width(program.on_time) }} /><span className="bg-[#d89a2f]" style={{ width: width(program.late) }} /><span className="bg-[#bf4c45]" style={{ width: width(program.overdue) }} /></div>
+        <div className="mt-1.5 grid grid-cols-3 text-[11px] font-medium"><span className="text-[#18835b]">{number(program.on_time)} on time</span><span className="text-center text-[#a46d16]">{number(program.late)} late</span><span className="text-right text-[#b94a42]">{number(program.overdue)} overdue</span></div>
+    </div>;
+}
 
-                <section className="relative isolate overflow-hidden bg-emerald-950">
-                    <div className="absolute inset-0 -z-10 bg-cover bg-center" style={{ backgroundImage: `url(${heroBackground})` }} aria-hidden="true" />
-                    <div className="absolute inset-0 -z-10 bg-gradient-to-br from-emerald-950/95 via-emerald-950/80 to-teal-900/75" aria-hidden="true" />
-                    <div className="pointer-events-none absolute inset-0 -z-10 opacity-30" aria-hidden="true">
-                        <svg className="absolute inset-0 h-full w-full text-emerald-100/80" viewBox="0 0 1440 520" preserveAspectRatio="none">
-                            <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1">
-                                <path d="M-110 438C72 350 216 334 358 271s264-47 398 25 263 95 410 18 255-88 446-28" />
-                                <path d="M-110 461C75 371 218 357 361 294s261-47 395 25 264 95 412 18 255-88 446-28" />
-                                <path d="M-110 484C77 392 220 380 364 317s258-47 392 25 265 95 414 18 255-88 446-28" />
-                                <path d="M-110 507C80 413 222 403 367 340s255-47 389 25 266 95 416 18 255-88 446-28" />
-                            </g>
-                            <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth=".9" opacity=".68">
-                                <path d="M1090-18c84 47 123 89 160 160 43 82 102 118 190 126" />
-                                <path d="M1046-18c92 50 136 98 174 171 43 82 103 116 220 128" />
-                                <path d="M1002-18c100 54 148 108 188 182 43 82 104 114 250 130" />
-                                <path d="M958-18c108 58 161 117 201 193 43 82 105 112 280 132" />
-                            </g>
-                            <g fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth=".8" opacity=".55">
-                                <path d="M-24 118c128-58 238-56 337-8 106 51 193 58 288 12 110-53 204-48 312 7 118 61 235 68 405 2" />
-                                <path d="M-24 141c128-58 238-56 337-8 106 51 193 58 288 12 110-53 204-48 312 7 118 61 235 68 405 2" />
-                                <path d="M-24 164c128-58 238-56 337-8 106 51 193 58 288 12 110-53 204-48 312 7 118 61 235 68 405 2" />
-                            </g>
-                        </svg>
-                    </div>
-                    <div className="mx-auto grid max-w-7xl gap-10 px-5 py-14 sm:px-6 md:py-20 lg:grid-cols-[1.15fr_.85fr] lg:items-center lg:px-8">
-                        <div className="max-w-3xl">
-                            <span className="inline-flex rounded-full border border-emerald-100/30 bg-white/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-50">CDS Integrated Monitoring and Management System</span>
-                            <h1 className="edats-display mt-6 text-4xl font-extrabold leading-[1.04] tracking-tight text-white sm:text-5xl lg:text-6xl">Enhanced Digital<br />Alert and Tracking System<br /><span className="text-emerald-200">(eDATS)</span></h1>
-                            <p className="mt-5 text-lg font-semibold text-emerald-100 sm:text-xl">One System. All CDS Monitoring. Better Decisions.</p>
-                             <p className="mt-5 max-w-2xl text-sm leading-7 text-emerald-50/90 sm:text-base">eDATS consolidates monitoring, report submissions, deadlines, supporting documents, alerts, performance, Conservation activities, and Development/ENGP monitoring in one workspace.</p>
-                             <Link href="/login" className="mt-8 inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-emerald-900 shadow-lg shadow-emerald-950/20 transition hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white" aria-label="Access eDATS login">Access Login <Icon name="arrow" className="h-4 w-4" /></Link>
-                        </div>
+function ProgramCard({ program }) {
+    const title = program.key === 'engp' ? 'ENGP reports' : 'Protected Area reports';
+    return <article className="rounded-xl border border-[#d8e4dc] bg-white p-5 shadow-[0_4px_13px_rgba(18,73,54,0.035)] sm:p-6">
+        <h3 className="text-xl font-semibold tracking-tight text-emerald-950">{title}</h3><p className="mt-0.5 text-sm font-medium text-slate-500">{program.office_count ? `${number(program.office_count)} ${program.office_label}` : program.office_label}</p><div className="my-4 border-t border-[#dce6df]" />
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4"><StatBox label="Due" value={program.due} /><StatBox label="Received" value={program.received} /><StatBox label="Overdue" value={program.overdue} tone="red" /><StatBox label="Upcoming" value={program.upcoming} tone="amber" /></div>
+        <div className="mt-5"><p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500">On-time submission rate</p><div className="mt-2 flex flex-wrap items-end gap-x-4 gap-y-1"><p className="text-4xl font-semibold tracking-tight text-[#16825a]">{percent(program.on_time_rate)}</p><p className="pb-1 text-sm text-slate-600">{number(program.on_time)} received on time</p></div></div>
+        <p className="mt-4 text-sm text-slate-500">{number(program.upcoming)} upcoming report{Number(program.upcoming || 0) === 1 ? '' : 's'}.</p><p className="mt-2 text-sm font-medium text-[#b94a42]">{number(program.late)} received late <span className="mx-1.5 text-slate-400">•</span> {number(program.overdue)} overdue and still unreceived</p>
+    </article>;
+}
 
-                        <section className="rounded-2xl border border-white/60 bg-white/[0.94] p-5 shadow-2xl shadow-emerald-950/25 backdrop-blur sm:p-6" aria-labelledby="overview-title">
-                            <div className="flex items-start justify-between gap-3">
-                                <div><h2 id="overview-title" className="text-sm font-extrabold tracking-wide text-emerald-950">eDATS OVERVIEW SUMMARY</h2><p className="mt-1 text-xs text-slate-600">Current safe monitoring aggregates</p></div>
-                                <Icon name="dashboard" className="h-6 w-6 text-emerald-700" />
-                            </div>
-                            <OverviewTrend points={reportTrend} />
-                            <dl className="mt-4 divide-y divide-emerald-900/10 border-y border-emerald-900/10">
-                                {metrics.map(({ label, value, icon, helper }) => <div key={label} className="flex items-center gap-3 py-2.5"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-100/80 text-emerald-800"><Icon name={icon} className="h-4 w-4" /></span><dt className="min-w-0 flex-1"><span className="block edats-kpi-label text-xs font-extrabold text-slate-800">{label}</span><span className="block truncate text-[10px] text-slate-500">{helper}</span></dt><dd className="edats-display text-xl font-extrabold tabular-nums text-emerald-900">{Number(value || 0).toLocaleString()}</dd></div>)}
-                            </dl>
-                        </section>
-                    </div>
-                </section>
+function StatusLegend({ entries = [] }) {
+    const tones = ['bg-[#18835b]', 'bg-[#d89a2f]', 'bg-[#bf4c45]', 'bg-[#668895]'];
+    return <section className="rounded-xl border border-[#d8e4dc] bg-white p-5 shadow-[0_4px_13px_rgba(18,73,54,0.035)] sm:p-6"><h2 className="text-lg font-semibold uppercase tracking-wide text-emerald-950">How to read the status</h2><div className="mt-4 space-y-3">{entries.map((entry, index) => <div key={entry.label} className="grid grid-cols-[14px_9rem_minmax(0,1fr)] items-start gap-2.5"><span className={`mt-1.5 h-3 w-3 rounded-full ${tones[index] || tones[3]}`} /><p className="font-medium text-slate-800">{entry.label}</p><p className="text-sm leading-5 text-slate-500">{entry.description}</p></div>)}</div><p className="mt-5 border-t border-[#dce6df] pt-4 text-sm font-medium text-emerald-900">View office-level reports, delays, and MOVs after logging in.</p></section>;
+}
 
-                <section className="mx-auto max-w-7xl px-5 py-14 sm:px-6 lg:px-8" aria-labelledby="capabilities-title">
-                    <div className="max-w-2xl"><p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-400">System capabilities</p><h2 id="capabilities-title" className="mt-2 text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">A connected monitoring environment</h2></div>
-                    <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        {features.map((feature) => <Link key={feature.title} href="/login" className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-emerald-700" aria-label={`${feature.title}: access through login`}><span className="inline-flex rounded-xl bg-emerald-100 p-2.5 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"><Icon name={feature.icon} /></span><h3 className="mt-4 text-base font-extrabold text-slate-900 dark:text-white">{feature.title}</h3><p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">{feature.description}</p><span className="mt-4 inline-flex items-center gap-1 text-xs font-bold text-emerald-800 dark:text-emerald-400">Authorized access <Icon name="arrow" className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" /></span></Link>)}
-                    </div>
-                </section>
+export default function Welcome({ publicSummary = {} }) {
+    const totals = publicSummary.totals || {};
+    const programs = publicSummary.programs || [];
+    const engp = programs.find(program => program.key === 'engp') || { key: 'engp', office_label: 'CENROs' };
+    const pa = programs.find(program => program.key === 'conservation') || { key: 'conservation', office_label: 'PAMOs / PA offices' };
+    const comparison = (publicSummary.comparison || programs).map(program => ({ name: program.key === 'engp' ? 'ENGP' : 'PA', rate: Number(program.on_time_rate || 0) }));
+    const asOf = publicSummary.as_of ? new Intl.DateTimeFormat('en-PH', { dateStyle: 'long', timeStyle: 'short' }).format(new Date(publicSummary.as_of)) : null;
 
-                <section className="border-y border-emerald-900/10 bg-emerald-50 dark:border-emerald-300/10 dark:bg-emerald-950/25" aria-label="eDATS values"><div className="mx-auto grid max-w-7xl gap-6 px-5 py-8 sm:grid-cols-2 sm:px-6 lg:grid-cols-4 lg:px-8">{values.map(([title, description]) => <div key={title}><h2 className="text-sm font-extrabold text-emerald-900 dark:text-emerald-300">{title}</h2><p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">{description}</p></div>)}</div></section>
+    return <><Head title="CDS-SMART | PENRO Davao Oriental" /><main className="min-h-screen bg-[#f7faf8] font-sans text-slate-800">
+        <header className="bg-white"><div className="mx-auto flex min-h-[94px] max-w-[1440px] items-center px-5 sm:px-8 lg:px-14"><div className="flex min-w-0 items-center gap-4"><div className="flex shrink-0 items-center gap-2"><img src="/images/DENR%20LOGO.png" alt="Department of Environment and Natural Resources logo" className="h-11 w-11 object-contain" /><img src="/images/CDS%20Logo.png" alt="Conservation and Development Section logo" className="h-11 w-11 object-contain" /></div><div className="hidden h-16 w-px bg-emerald-950/15 sm:block" /><div className="min-w-0"><p className="text-2xl font-semibold tracking-tight text-emerald-950">CDS-SMART</p><p className="mt-0.5 truncate text-sm font-medium text-slate-500">Submission Monitoring and Reminder Tool <span className="mx-1">|</span> PENRO Davao Oriental</p></div></div></div></header>
 
-                <footer className="bg-slate-950 px-5 py-8 text-center text-xs leading-6 text-slate-300 sm:px-6 lg:px-8"><p className="font-semibold text-white">eDATS is a system of the Conservation and Development Section, PENRO Mati.</p><p className="mt-1">Department of Environment and Natural Resources</p><p className="mt-1">For authorized users only. System activities may be monitored and logged.</p><p className="mt-3 text-slate-400">© 2026 Provincial Environment and Natural Resources Office. All rights reserved.</p></footer>
-            </main>
-        </>
-    );
+        <section className="relative isolate overflow-hidden bg-[#084c3c] bg-cover bg-center bg-no-repeat" style={{ backgroundImage: "url('/images/cds-smart-background.png')" }}><div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-950/55 via-emerald-950/45 to-slate-950/55" aria-hidden="true" /><div className="relative mx-auto grid min-h-[505px] max-w-[1440px] gap-10 px-5 py-12 sm:px-8 lg:grid-cols-[1.08fr_.92fr] lg:items-center lg:px-14 lg:py-11"><div className="max-w-[42rem]"><p className="inline-flex rounded-full border border-emerald-100/35 bg-white/10 px-5 py-2 text-xs font-medium uppercase tracking-[0.09em] text-white">Provincial report monitoring</p><h1 className="mt-8 text-[2.65rem] font-semibold leading-[1.13] tracking-tight text-white sm:text-6xl">Know the status of<br className="hidden lg:block" /> every submission.</h1><p className="mt-6 max-w-xl text-lg leading-7 text-emerald-50/90">ENGP reports from CENROs and Protected Area reports from PAMOs across Davao Oriental.</p><Link href="/login" className="mt-9 inline-flex items-center gap-2 rounded-lg bg-white px-6 py-3.5 text-base font-semibold text-emerald-950 shadow-sm transition hover:bg-emerald-50">Access Login <Icon name="arrow" className="h-4 w-4" /></Link><p className="mt-4 text-sm text-emerald-50/75">Office-level records, MOVs, and follow-up require authorized access.</p></div>
+            <section id="report-status" className="rounded-2xl border border-white/50 bg-white p-5 shadow-[0_12px_26px_rgba(3,41,32,0.16)] sm:p-7" aria-labelledby="report-status-title"><h2 id="report-status-title" className="text-xl font-semibold uppercase tracking-wide text-emerald-950">PENRO Report Submission Status</h2><p className="mt-1 text-base text-slate-500">Province-wide summary <span className="mx-2">•</span> ENGP and PA</p><div className="mt-4 border-t border-[#dce6df]" /><div className="mt-4 grid grid-cols-3 gap-3"><StatBox label="Reports due" value={totals.due} /><StatBox label="Received" value={totals.received} /><StatBox label="Overdue" value={totals.overdue} tone="red" /></div><div className="mt-5"><HeroProgram program={engp} /><HeroProgram program={pa} /></div></section>
+        </div></section>
+
+        <section className="mx-auto max-w-[1440px] px-5 py-10 sm:px-8 lg:px-14"><p className="text-xs font-medium text-slate-500">{asOf ? `Data as of ${asOf}` : 'Current approved report-deadline and receipt information.'}</p><h2 className="mt-4 text-3xl font-semibold tracking-tight text-emerald-950">Submission status by program</h2><p className="mt-1 text-lg text-slate-500">A quick view of what has been received, what is still upcoming, and what needs immediate action.</p><div className="mt-5 grid gap-6 lg:grid-cols-2"><ProgramCard program={engp} /><ProgramCard program={pa} /></div><div className="mt-5 grid gap-6 lg:grid-cols-2"><section className="rounded-xl border border-[#d8e4dc] bg-white p-5 shadow-[0_4px_13px_rgba(18,73,54,0.035)] sm:p-6"><h2 className="text-lg font-semibold uppercase tracking-wide text-emerald-950">On-time rate <span className="mx-1 text-emerald-700">|</span> Program comparison</h2><p className="mt-1 text-sm text-slate-500">Share of officially received reports that were on time</p><div className="mt-4 h-56"><ResponsiveContainer width="100%" height="100%"><BarChart data={comparison} margin={{ top: 20, right: 16, left: -20, bottom: 0 }}><CartesianGrid vertical={false} stroke="#dce6df" /><XAxis dataKey="name" tick={{ fill: '#36534b', fontSize: 12, fontWeight: 600 }} tickLine={false} axisLine={false} /><YAxis domain={[0, 100]} tick={{ fill: '#718078', fontSize: 11 }} tickLine={false} axisLine={false} /><Tooltip formatter={value => [`${value}%`, 'On-time rate']} contentStyle={{ border: '1px solid #d8e4dc', borderRadius: 8, fontSize: 12 }} /><Bar dataKey="rate" radius={[5, 5, 0, 0]} fill="#18835b" barSize={68} label={{ position: 'top', fill: '#14533f', fontSize: 15, fontWeight: 600, formatter: value => `${value}%` }} /></BarChart></ResponsiveContainer></div></section><StatusLegend entries={publicSummary.legend || []} /></div></section>
+        <footer className="bg-[#102630] px-5 py-5 text-center text-sm text-slate-300"><span>CDS-SMART</span><span className="mx-3">•</span><span>Conservation and Development Section</span><span className="mx-3">•</span><span>PENRO Davao Oriental</span></footer>
+    </main></>;
 }

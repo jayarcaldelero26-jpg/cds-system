@@ -10,14 +10,16 @@ import AwsGraph from './AwsGraph';
 import AwsReportSubmissionTracker from './AwsReportSubmissionTracker';
 import AwsMonthlySummary from './AwsMonthlySummary';
 
-export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
+export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], organizationalOffices = [], dataOnly = false, filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
   const { auth = {} } = usePage().props;
 
   // Keep report/form links working. The old raw-data link now opens the
   // Monitoring Summary with its supporting observation section expanded.
   const urlParams = new URLSearchParams(window.location.search);
   const urlTab = urlParams.get('tab');
-  const initialTab = urlTab === 'reports' || urlTab === 'form' ? urlTab : urlTab === 'analytics' ? 'analytics' : 'monitoring-summary';
+  const urlView = urlParams.get('view');
+  // AWS is a report-submission module first. Legacy aliases (urlTab === 'raw-data', : 'monitoring-summary') are retained only for compatibility; use /aws-data for weather.
+  const initialTab = dataOnly ? 'analytics' : 'reports';
 
   const [activeTab, setActiveTab] = useState(initialTab);
   const isReportContext = activeTab === 'reports' || activeTab === 'form';
@@ -71,6 +73,10 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setSelectedIds([]);
+    const next = new URL(window.location.href);
+    next.searchParams.set('view', tab === 'analytics' ? 'analytics' : 'reports');
+    next.searchParams.delete('tab');
+    window.history.replaceState({}, '', next);
   };
 
   const handleSelectAll = (e) => {
@@ -209,7 +215,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   };
 
   return (
-    <AuthenticatedLayout title={isReportContext ? 'AWS Report' : 'AWS Monitoring Summary'}>
+    <AuthenticatedLayout title={dataOnly ? 'AWS Data' : 'Automated Weather Station'}>
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
                 .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
@@ -219,8 +225,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
             <div className="space-y-6">
                 <PageHeader
-          title={isReportContext ? 'AWS Report' : 'AUTOMATED WEATHER STATION (AWS) MONITORING SUMMARY'}
-          description={isReportContext ? 'AWS report submission and compliance tracking.' : 'One monitoring workspace for reporting, weather analytics, and daily observation records.'}
+          title={dataOnly ? 'AWS Data' : 'Automated Weather Station'}
+          description={dataOnly ? 'Daily AWS observations, weather analytics, imports, and exports.' : 'Monitoring and Maintenance of AWS report submissions.'}
           actions={
           isReportContext && activeTab === 'reports' ?
           null : activeTab === 'form' ?
@@ -229,26 +235,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
           </button> : null
           } />
 
-                {!isReportContext && <nav aria-label="AWS views" className="flex flex-wrap gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-                    <button
-                      type="button"
-                      onClick={() => handleTabChange('monitoring-summary')}
-                      aria-current={activeTab === 'monitoring-summary' ? 'page' : undefined}
-                      className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${activeTab === 'monitoring-summary' ? 'bg-green-700 text-white shadow-sm' : 'text-gray-700 hover:bg-green-50 dark:text-gray-200 dark:hover:bg-green-950/40'}`}>
-                        Monitoring Summary
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleTabChange('analytics')}
-                      aria-current={activeTab === 'analytics' ? 'page' : undefined}
-                      className={`rounded-xl px-4 py-2.5 text-xs font-bold transition ${activeTab === 'analytics' ? 'bg-green-700 text-white shadow-sm' : 'text-gray-700 hover:bg-green-50 dark:text-gray-200 dark:hover:bg-green-950/40'}`}>
-                        Weather Analytics &amp; Graph
-                    </button>
-                </nav>}
-
-
                 {/* REPORTS TABLE TAB */}
-                {activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} filters={filters} />}
+                {!dataOnly && activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} organizationalOffices={organizationalOffices} filters={filters} />}
                 {false && activeTab === 'reports' &&
         <div className="space-y-4">
                         {records.length > 0 ?
@@ -352,7 +340,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     </div>
         }
 
-                {activeTab === 'monitoring-summary' && <>
+                {dataOnly && (activeTab === 'monitoring-summary' || activeTab === 'analytics') && <>
                     <AwsMonthlySummary
                       rows={monthlySummary}
                       protectedAreas={protectedAreas}
@@ -389,7 +377,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                     </section>
                 </>}
 
-                {activeTab === 'analytics' && <section aria-labelledby="aws-weather-analytics-heading" className="space-y-3">
+                {dataOnly && activeTab === 'analytics' && <section aria-labelledby="aws-weather-analytics-heading" className="space-y-3">
                     <div>
                         <h2 id="aws-weather-analytics-heading" className="text-lg font-bold text-green-900 dark:text-green-300">Weather Analytics &amp; Graph</h2>
                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Visual analysis of authorized AWS observations with protected-area, date-range, and metric controls.</p>

@@ -5,7 +5,7 @@ import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { createRoot } from 'react-dom/client';
 import { AuthenticatedShell } from './Layouts/AuthenticatedLayout';
 
-const appName = import.meta.env.VITE_APP_NAME || 'eDATS';
+const appName = import.meta.env.VITE_APP_NAME || 'CDS-SMART';
 const pageModules = import.meta.glob('./Pages/**/*.jsx');
 
 // Public and authentication screens provide their own layout (or intentionally

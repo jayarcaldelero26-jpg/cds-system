@@ -28,12 +28,14 @@ it('keeps the Generic Conservation, BMS, BAMS, and IMEA shared tracker free of d
 
 it('retains source-specific report details without duplicating summary values', function () {
     $aws = File::get(resource_path('js/Pages/AWS/AwsReportSubmissionTracker.jsx'));
+    $shared = File::get(resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'));
     $engp = File::get(resource_path('js/Pages/Engp/Index.jsx'));
     $revenue = File::get(resource_path('js/Pages/Ipaf/Index.jsx'));
     $section = File::get(resource_path('js/Components/Crud/CrudSection.jsx'));
     $plans = File::get(resource_path('js/Pages/ManagementPlans/Index.jsx'));
 
-    expect($aws)->toContain('Station / Source')->toContain('Location');
+    expect($aws)->toContain("@/Pages/Bms/ReportSubmissionTracker")
+        ->and($shared)->toContain('Target Office')->toContain('Date Accomplished');
     expect($engp)->not->toContain('Date Accomplished')->not->toContain('Regional Endorsement');
     expect($revenue)->toContain('Total Collected')->toContain('IPAF RIA 75%')->toContain('SAGF 25%');
     expect($section)->toContain("'Revenue': 'Financial Details'");

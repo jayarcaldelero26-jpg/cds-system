@@ -8,7 +8,7 @@ use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Support\Facades\Gate;
 
-/** Read-only, permission-aware search across eDATS resources. */
+/** Read-only, permission-aware search across CDS-SMART resources. */
 final class GlobalSearchService
 {
     private const PER_GROUP_LIMIT = 5;
@@ -41,7 +41,7 @@ final class GlobalSearchService
     private function navigation(User $user, string $query): array
     {
         $items = [
-            ['title' => 'eDATS Monitoring Dashboard', 'subtitle' => 'Conservation and ENGP monitoring', 'url' => '/dashboard', 'icon' => 'chart'],
+            ['title' => 'CDS-SMART Monitoring Dashboard', 'subtitle' => 'Conservation and ENGP monitoring', 'url' => '/dashboard', 'icon' => 'chart'],
             ['title' => 'Protected Areas', 'subtitle' => 'Protected area profiles and baselines', 'url' => '/protected-areas', 'icon' => 'map', 'ability' => 'protected-areas.view'],
             ['title' => 'Submission Tracking', 'subtitle' => 'Report routing and receipt monitoring', 'url' => '/submission-tracking', 'icon' => 'document', 'ability' => 'reports.view'],
             ['title' => 'Alerts', 'subtitle' => 'Compliance requirements and deadlines', 'url' => '/compliance-alerts', 'icon' => 'bell', 'ability' => 'reports.view'],

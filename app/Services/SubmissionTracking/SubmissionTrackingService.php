@@ -38,6 +38,9 @@ final class SubmissionTrackingService
     public const PENRO_RECEIPT = 'penro_receipt';
     public const REGIONAL_ENDORSEMENT = 'regional_endorsement';
 
+    /** @var array<string, list<string>> */
+    private array $tableColumns = [];
+
     public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingAttachmentService $routingAttachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting, private readonly ReportTrackingNumberService $trackingNumbers) {}
 
     /** @return Collection<int, array<string, mixed>> */
@@ -138,15 +141,15 @@ final class SubmissionTrackingService
             $schema = Schema::connection($model->getConnectionName());
             $table = $model->getTable();
             $officeColumn = $key === 'engp' ? 'office' : 'target_office';
-            if ($schema->hasColumn($table, $officeColumn)) {
+            if ($this->columnExists($schema, $table, $officeColumn)) {
                 $offices = $offices->merge($query->clone()->reorder()->whereNotNull($officeColumn)->distinct()->orderBy($officeColumn)->pluck($officeColumn));
             }
-            $periodColumn = $key === 'engp' ? 'period_label' : ($schema->hasColumn($table, 'reporting_period') ? 'reporting_period' : ($schema->hasColumn($table, 'semester') ? 'semester' : null));
+            $periodColumn = $key === 'engp' ? 'period_label' : ($this->columnExists($schema, $table, 'reporting_period') ? 'reporting_period' : ($this->columnExists($schema, $table, 'semester') ? 'semester' : null));
             if ($periodColumn) {
                 $periods = $periods->merge($query->clone()->reorder()->whereNotNull($periodColumn)->distinct()->orderBy($periodColumn)->pluck($periodColumn));
             }
-            if ($schema->hasColumn($table, 'reporting_year')) $years = $years->merge($query->clone()->reorder()->whereNotNull('reporting_year')->distinct()->orderByDesc('reporting_year')->pluck('reporting_year'));
-            if ($schema->hasColumn($table, 'workflow_key')) {
+            if ($this->columnExists($schema, $table, 'reporting_year')) $years = $years->merge($query->clone()->reorder()->whereNotNull('reporting_year')->distinct()->orderByDesc('reporting_year')->pluck('reporting_year'));
+            if ($this->columnExists($schema, $table, 'workflow_key')) {
                 foreach ($query->clone()->reorder()->whereNotNull('workflow_key')->distinct()->orderBy('workflow_key')->pluck('workflow_key') as $workflowKey) {
                     $record = $model->newInstance(['workflow_key' => $workflowKey]);
                     $modules->push($source['module']($record));
@@ -670,7 +673,7 @@ final class SubmissionTrackingService
         };
 
         $changes = [$field => $value];
-        if ($userId && $record->getConnection()->getSchemaBuilder()->hasColumn($record->getTable(), 'updated_by')) {
+        if ($userId && $this->columnExists($record->getConnection()->getSchemaBuilder(), $record->getTable(), 'updated_by')) {
             $changes['updated_by'] = $userId;
         }
         $canonicalEvent = DB::transaction(function () use ($record, $changes, $stage, $value, $userId): ?PambRoutingEvent {
@@ -722,7 +725,7 @@ final class SubmissionTrackingService
                 self::PENRO_RECEIPT => 'date_received_penro',
                 self::REGIONAL_ENDORSEMENT => 'date_endorsed_regional',
             };
-            $locked->update([$field => $value, ...($locked->getConnection()->getSchemaBuilder()->hasColumn($locked->getTable(), 'updated_by') ? ['updated_by' => $userId] : [])]);
+            $locked->update([$field => $value, ...($this->columnExists($locked->getConnection()->getSchemaBuilder(), $locked->getTable(), 'updated_by') ? ['updated_by' => $userId] : [])]);
             $source = $this->source('conservation');
             try {
                 $this->auditTransition('conservation', $locked, $source, $stage, $value, $userId);
@@ -778,8 +781,8 @@ final class SubmissionTrackingService
         $this->applyDatabaseFilters($query, $key, $filters);
         if ($key !== 'conservation' && $key !== 'engp' && ($source['requires_date_accomplished'] ?? true)) $query->whereNotNull('date_accomplished');
 
-        $hasAccomplished = $schema->hasColumn($table, 'date_accomplished');
-        $hasConducted = $schema->hasColumn($table, 'date_conducted');
+        $hasAccomplished = $this->columnExists($schema, $table, 'date_accomplished');
+        $hasConducted = $this->columnExists($schema, $table, 'date_conducted');
         if ($hasAccomplished || $hasConducted) {
             $dateExpression = $hasAccomplished && $hasConducted
                 ? 'COALESCE('.$table.'.date_accomplished, '.$table.'.date_conducted)'
@@ -1362,23 +1365,23 @@ final class SubmissionTrackingService
 
         if (filled($filters['reporting_year'] ?? null)) {
             $year = (int) $filters['reporting_year'];
-            if ($schema->hasColumn($table, 'reporting_year')) {
+            if ($this->columnExists($schema, $table, 'reporting_year')) {
                 $query->where($table.'.reporting_year', $year);
-            } elseif ($schema->hasColumn($table, 'date_accomplished') || $schema->hasColumn($table, 'date_conducted')) {
+            } elseif ($this->columnExists($schema, $table, 'date_accomplished') || $this->columnExists($schema, $table, 'date_conducted')) {
                 $query->where(function ($yearQuery) use ($table, $schema, $year): void {
-                    if ($schema->hasColumn($table, 'date_accomplished')) $yearQuery->orWhereYear($table.'.date_accomplished', $year);
-                    if ($schema->hasColumn($table, 'date_conducted')) $yearQuery->orWhereYear($table.'.date_conducted', $year);
+                    if ($this->columnExists($schema, $table, 'date_accomplished')) $yearQuery->orWhereYear($table.'.date_accomplished', $year);
+                    if ($this->columnExists($schema, $table, 'date_conducted')) $yearQuery->orWhereYear($table.'.date_conducted', $year);
                 });
             }
         }
 
         if (filled($filters['reporting_period'] ?? null)) {
             $period = (string) $filters['reporting_period'];
-            $periodColumn = $sourceKey === 'engp' ? 'period_label' : ($schema->hasColumn($table, 'reporting_period') ? 'reporting_period' : ($schema->hasColumn($table, 'semester') ? 'semester' : null));
+            $periodColumn = $sourceKey === 'engp' ? 'period_label' : ($this->columnExists($schema, $table, 'reporting_period') ? 'reporting_period' : ($this->columnExists($schema, $table, 'semester') ? 'semester' : null));
             if ($periodColumn) $query->where($table.'.'.$periodColumn, $period);
         }
 
-        if (filled($filters['module'] ?? null) && $schema->hasColumn($table, 'workflow_key')) {
+        if (filled($filters['module'] ?? null) && $this->columnExists($schema, $table, 'workflow_key')) {
             $workflowKeys = collect($query->clone()->reorder()->whereNotNull('workflow_key')->distinct()->orderBy('workflow_key')->pluck('workflow_key'))
                 ->filter(fn ($workflowKey): bool => $this->sourceModuleLabel($sourceKey, $sourceKey === 'engp' ? EngpReportSubmission::class : $model::class, (string) $workflowKey) === (string) $filters['module'])
                 ->values()->all();
@@ -1388,7 +1391,7 @@ final class SubmissionTrackingService
         if (filled($filters['status'] ?? null)) $this->applyStatusFilter($query, $sourceKey, (string) $filters['status'], $table, $schema);
 
         $officeColumn = $sourceKey === 'engp' ? 'office' : 'target_office';
-        if (filled($filters['target_office'] ?? null) && $schema->hasColumn($table, $officeColumn)) {
+        if (filled($filters['target_office'] ?? null) && $this->columnExists($schema, $table, $officeColumn)) {
             $query->where($table.'.'.$officeColumn, $filters['target_office']);
         }
 
@@ -1402,15 +1405,15 @@ final class SubmissionTrackingService
         $searchColumns = array_values(array_filter([
             'activity_name', 'document_type', 'target_office', 'office',
             'station_name', 'report_period_type', 'reporting_period', 'period_label', 'semester',
-        ], fn (string $column): bool => $schema->hasColumn($table, $column)));
-        if ($searchColumns === [] && ! $schema->hasColumn($table, 'protected_area_id')) return;
+        ], fn (string $column): bool => $this->columnExists($schema, $table, $column)));
+        if ($searchColumns === [] && ! $this->columnExists($schema, $table, 'protected_area_id')) return;
 
         $modelClass = $model::class;
         $query->where(function ($searchQuery) use ($query, $search, $searchColumns, $schema, $table, $sourceKey, $modelClass): void {
             foreach ($searchColumns as $column) {
                 $searchQuery->orWhere($column, 'like', '%'.$search.'%');
             }
-            if ($schema->hasColumn($table, 'workflow_key')) {
+            if ($this->columnExists($schema, $table, 'workflow_key')) {
                 $workflowKeys = collect($query->clone()->reorder()->whereNotNull('workflow_key')->distinct()->orderBy('workflow_key')->pluck('workflow_key'))
                     ->filter(fn ($workflowKey): bool => str_contains(strtolower($this->sourceModuleLabel($sourceKey, $modelClass, (string) $workflowKey)), strtolower($search)))
                     ->values()->all();
@@ -1429,7 +1432,7 @@ final class SubmissionTrackingService
                 };
                 if ($fixedModule && str_contains(strtolower($fixedModule), strtolower($search))) $searchQuery->orWhereRaw('1 = 1');
             }
-            if ($schema->hasColumn($table, 'protected_area_id')) {
+            if ($this->columnExists($schema, $table, 'protected_area_id')) {
                 $searchQuery->orWhereHas('protectedArea', fn ($areaQuery) => $areaQuery->where('name', 'like', '%'.$search.'%'));
             }
             if (Schema::hasTable('report_tracking_references')) {
@@ -1446,6 +1449,15 @@ final class SubmissionTrackingService
     private function isTrackingNumber(string $value): bool
     {
         return preg_match('/^EDATS-(?:PA|ENGP)-\d{4}-\d+$/i', trim($value)) === 1;
+    }
+
+    /** Cache immutable schema metadata for the lifetime of this service instance. */
+    private function columnExists($schema, string $table, string $column): bool
+    {
+        $key = $schema->getConnection()->getName().':'.$table;
+        $columns = $this->tableColumns[$key] ??= $schema->getColumnListing($table);
+
+        return in_array($column, $columns, true);
     }
 
     /** @param array<string, mixed> $record */

@@ -95,6 +95,7 @@ final class AwsMonthlySummaryService
         $legacy = $this->awsScope->query(Aws::query(), $user)
             ->whereNotNull('protected_area_id')
             ->whereNotNull('timestamps')
+            ->whereNotExists(fn ($query) => $query->selectRaw('1')->from('aws_observations')->whereColumn('aws_observations.legacy_aws_id', 'aws.id'))
             ->whereBetween('start_date', [$periodStart->toDateString(), $periodEnd->toDateString()])
             ->when($protectedAreaId !== null, fn ($query) => $query->where('protected_area_id', $protectedAreaId))
             ->with('protectedArea:id,name')
