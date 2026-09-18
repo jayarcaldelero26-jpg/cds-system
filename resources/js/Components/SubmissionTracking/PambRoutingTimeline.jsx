@@ -11,6 +11,12 @@ function eventDate(value) {
         : formatReportDateTime(value, FALLBACK);
 }
 
+function actorContext(stage) {
+    return [stage?.actor_category_label, stage?.actor_office]
+        .filter(Boolean)
+        .join(" · ");
+}
+
 function delayLabel(stage) {
     const count = stage.elapsed_working_days;
     if (count === null || count === undefined) return null;
@@ -87,6 +93,10 @@ export default function PambRoutingTimeline({
     const metrics = row.routing_summary_metrics || {};
     const summary = row.routing_summary || {};
     const lastAction = summary.last_action || {};
+    const lastActionActorContext = actorContext({
+        actor_category_label: lastAction.recorded_by_role,
+        actor_office: lastAction.recorded_by_office,
+    });
     const review = row.mov_processing?.cenro_review;
     const verdictFlags = row.pamb_action_flags || {};
     const metric = (key) => {
@@ -169,6 +179,9 @@ export default function PambRoutingTimeline({
                         {lastAction.recorded_by && (
                             <p className="mt-0.5 text-gray-600 dark:text-gray-300">
                                 Recorded by: {lastAction.recorded_by}
+                                {lastActionActorContext && (
+                                    <> · {lastActionActorContext}</>
+                                )}
                             </p>
                         )}
                         {lastAction.remarks && (
@@ -426,6 +439,13 @@ export default function PambRoutingTimeline({
                                                 </div>
                                             )}
                                         </div>
+                                        {stage.business_date &&
+                                            stage.occurred_at &&
+                                            String(stage.occurred_at).length > 10 && (
+                                                <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+                                                    Business date: {eventDate(stage.business_date)}
+                                                </p>
+                                            )}
                                         <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                                             {notApplicable
                                                 ? "Not applicable"
@@ -451,6 +471,9 @@ export default function PambRoutingTimeline({
                                         {stage.recorded_by && (
                                             <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                                                 Recorded by {stage.recorded_by}
+                                                {actorContext(stage) && (
+                                                    <> · {actorContext(stage)}</>
+                                                )}
                                             </p>
                                         )}
                                         <RoutingAttachmentLink

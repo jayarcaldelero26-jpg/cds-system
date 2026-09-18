@@ -95,7 +95,18 @@ final class PambMovProcessingService
             ],
             'turnaround' => $this->turnaround($submission),
             'review_history' => $submission->relationLoaded('movReviewEvents')
-                ? $reviewEvents->map(fn (PambMovReviewEvent $event): array => ['event_key' => $event->event_key, 'event_label' => $this->label($event->event_key), 'remarks' => $event->remarks, 'recorded_at' => $event->created_at?->toIso8601String(), 'recorded_by' => $event->recordedBy?->name])->all()
+                ? $reviewEvents->map(function (PambMovReviewEvent $event) use ($submission): array {
+                    $actor = $this->reviewActorContext($event->event_key, $submission);
+                    return [
+                        'event_key' => $event->event_key,
+                        'event_label' => $this->label($event->event_key),
+                        'remarks' => $event->remarks,
+                        'recorded_at' => $event->created_at?->toIso8601String(),
+                        'recorded_by' => $event->recordedBy?->name,
+                        'recorded_role' => $actor['role'],
+                        'recorded_office' => $actor['office'],
+                    ];
+                })->all()
                 : [],
         ];
     }
@@ -123,11 +134,12 @@ final class PambMovProcessingService
             default => $status === self::SUBMITTED_FOR_REVIEW ? 'Awaiting CENRO CDS Chief Review' : 'No CENRO review verdict recorded',
         };
         $reviewer = $verdictKey && $latestDecision?->event_key === $verdictKey ? $latestDecision->recordedBy : null;
-        $category = app(OrganizationalAccessService::class);
-        $categoryLabel = fn (?User $user): ?string => $user ? $category->categoryLabel($category->effectiveCategory($user)) : null;
+
+        $reviewContext = $latestDecision ? $this->reviewActorContext($latestDecision->event_key, $submission) : ['role' => null, 'office' => null];
+        $correctionContext = $latestCorrection ? $this->reviewActorContext($latestCorrection->event_key, $submission) : ['role' => null, 'office' => null];
         $previousCorrection = $latestCorrection ? [
             'reviewed_by' => $latestCorrection->recordedBy?->name,
-            'reviewed_user_category' => $categoryLabel($latestCorrection->recordedBy),
+            'reviewed_user_category' => $correctionContext['role'],
             'reviewed_at' => $latestCorrection->created_at?->toIso8601String(),
             'reason' => $latestCorrection->remarks,
         ] : null;
@@ -137,7 +149,7 @@ final class PambMovProcessingService
             'verdict_key' => $verdictKey,
             'verdict' => $verdict,
             'reviewed_by' => $reviewer?->name,
-            'reviewed_user_category' => $categoryLabel($reviewer),
+            'reviewed_user_category' => $reviewContext['role'],
             'reviewed_at' => $reviewer ? $latestDecision?->created_at?->toIso8601String() : null,
             'originating_office' => $submission->target_office,
             'remarks' => $reviewer ? $latestDecision?->remarks : null,
@@ -146,6 +158,19 @@ final class PambMovProcessingService
             'correction_returned_at' => $verdictKey === self::NEEDS_CORRECTION ? $latestCorrection?->created_at?->toIso8601String() : null,
             'previous_correction_cycles' => $corrections->count(),
             'previous_correction' => $previousCorrection,
+        ];
+    }
+
+    /** @return array{role:string,office:?string} */
+    private function reviewActorContext(string $eventKey, ConservationReportSubmission $submission): array
+    {
+        $role = in_array($eventKey, [self::NEEDS_CORRECTION, self::READY_FOR_RELEASE], true)
+            ? OrganizationalAccessService::CENRO_CHIEF
+            : OrganizationalAccessService::CENRO_FOCAL;
+
+        return [
+            'role' => app(OrganizationalAccessService::class)->categoryLabel($role),
+            'office' => app(OrganizationalAccessService::class)->normalizeOffice($submission->target_office),
         ];
     }
 

@@ -144,7 +144,7 @@ class SubmissionTrackingController extends Controller
         $this->transitionWithAttachment($request, $source, $record, $stage, $data['date'], null);
 
         return back()->with('success', match ($stage) {
-            SubmissionTrackingService::CENRO_RELEASE => 'Document released successfully. MOV Processing: 100% complete.',
+            SubmissionTrackingService::CENRO_RELEASE => 'Document released successfully. CENRO MOV processing: 100% complete.',
             SubmissionTrackingService::PENRO_RECEIPT => 'Document received successfully.',
             default => 'Document forwarded successfully.',
         });

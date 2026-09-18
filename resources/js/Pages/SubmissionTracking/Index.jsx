@@ -1476,6 +1476,37 @@ export default function Index({
                                     label: "Reporting Period",
                                     value: details.reporting_period,
                                 },
+                                ...(details.pamb_routing_applicable
+                                    ? [
+                                          {
+                                              label: "Submission Status",
+                                              render: () => {
+                                                  const statusContext =
+                                                      details.routing_summary
+                                                          ?.status_context;
+                                                  return (
+                                                      <div>
+                                                          <Badge
+                                                              value={
+                                                                  details.submission_status
+                                                              }
+                                                          />
+                                                          {statusContext && (
+                                                              <p
+                                                                  className="mt-2 text-xs font-medium leading-4 text-indigo-700 dark:text-indigo-300"
+                                                                  aria-label="PENRO internal routing context"
+                                                              >
+                                                                  {statusContext.label}
+                                                                  <br />
+                                                                  Currently with: {statusContext.current_unit}
+                                                              </p>
+                                                          )}
+                                                      </div>
+                                                  );
+                                              },
+                                          },
+                                      ]
+                                    : []),
                                 {
                                     label: details.mov_processing?.applicable
                                         ? "Workflow Status"

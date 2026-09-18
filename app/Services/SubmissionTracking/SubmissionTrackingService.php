@@ -18,6 +18,7 @@ use App\Models\PambRoutingEvent;
 use App\Models\AuditLog;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Conservation\PambComplianceCalculator;
+use App\Services\BusinessCalendarService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Modules\ModuleMetadataResolver;
@@ -25,6 +26,7 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Support\DatePresentationNormalizer;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -676,11 +678,12 @@ final class SubmissionTrackingService
         if ($userId && $this->columnExists($record->getConnection()->getSchemaBuilder(), $record->getTable(), 'updated_by')) {
             $changes['updated_by'] = $userId;
         }
-        $canonicalEvent = DB::transaction(function () use ($record, $changes, $stage, $value, $userId): ?PambRoutingEvent {
+        $actionAt = CarbonImmutable::now(BusinessCalendarService::TIMEZONE);
+        $canonicalEvent = DB::transaction(function () use ($record, $changes, $stage, $value, $userId, $actionAt): ?PambRoutingEvent {
             $record->update($changes);
             if (! $record instanceof ConservationReportSubmission || ! $this->pambRouting->applies($record)) return null;
 
-            $canonicalEvent = $this->pambRouting->recordCanonical($record, $stage, $value, $userId);
+            $canonicalEvent = $this->pambRouting->recordCanonical($record, $stage, $value, $userId, $actionAt);
             if ($stage === self::PENRO_RECEIPT) {
                 // Ordinary PENRO Records receipt is an acknowledgement plus an
                 // immediate handoff to the Office of the PENRO. Keep both
@@ -689,7 +692,7 @@ final class SubmissionTrackingService
                 $this->pambRouting->record(
                     $record->fresh(),
                     PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-                    $value.' 00:00:00',
+                    $actionAt->toDateTimeString(),
                     $userId,
                 );
             }
@@ -1008,6 +1011,7 @@ final class SubmissionTrackingService
                 $data['routing']['last_action_actor_office'] = $latest->recordedBy ? $this->organization->normalizeOffice($latest->recordedBy->office_designated) : null;
                 if (in_array($latest->event_key, ['returned_for_correction', 'correction_received'], true)) {
                     $data['routing_summary']['current_status'] = $latest->event_key === 'returned_for_correction' ? 'Needs Correction' : 'Correction In Progress';
+                    $data['routing_summary']['status_context'] = null;
                     $data['routing_summary']['current_location'] = $targetOffice ?: $data['routing_summary']['current_location'];
                     $data['routing_summary']['next_expected_action'] = $latest->event_key === 'returned_for_correction' ? 'Receive Correction' : 'Resubmit Corrected Copy';
                     $data['routing_summary']['last_action'] = $data['routing']['last_action'];

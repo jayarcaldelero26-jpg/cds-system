@@ -265,7 +265,7 @@ final class PambRoutingTimelineService
     }
 
     /** Persist the immutable event occurrence behind a canonical PAMB date milestone. */
-    public function recordCanonical(ConservationReportSubmission $report, string $stage, string $date, ?int $userId): PambRoutingEvent
+    public function recordCanonical(ConservationReportSubmission $report, string $stage, string $date, ?int $userId, ?CarbonImmutable $occurredAt = null): PambRoutingEvent
     {
         $stageKey = match ($stage) {
             SubmissionTrackingService::CENRO_RELEASE => SubmissionTrackingService::CENRO_RELEASE,
@@ -274,10 +274,12 @@ final class PambRoutingTimelineService
             default => throw ValidationException::withMessages(['stage' => 'Unsupported canonical PAMB routing action.']),
         };
 
+        $eventTimestamp = ($occurredAt ?? $this->date($date))->setTimezone(BusinessCalendarService::TIMEZONE);
+
         return $report->routingEvents()->create([
             'workflow_key' => $report->workflow_key,
             'stage_key' => $stageKey,
-            'occurred_at' => CarbonImmutable::parse($date, BusinessCalendarService::TIMEZONE)->startOfDay()->toDateTimeString(),
+            'occurred_at' => $eventTimestamp->toDateTimeString(),
             'recorded_by' => $userId,
         ]);
     }
@@ -333,6 +335,7 @@ final class PambRoutingTimelineService
             $event = $events->get($key);
             $actorInfo = $canonicalActors[$key] ?? [];
             $actor = $event?->recordedBy?->name ?? ($actorInfo['name'] ?? null);
+            $actorContext = $this->actorContext($key, $event, $report);
 
             $timeline[] = [
                 'key' => $key,
@@ -342,14 +345,16 @@ final class PambRoutingTimelineService
                 'held_at' => $definition['held_at'],
                 'destination' => $definition['destination'] ?? null,
                 'occurred_at' => $this->presentationTimestamp($key, $date, $event),
-                'previous_occurred_at' => $previousEvent?->occurred_at?->toIso8601String() ?? $this->presentationTimestamp($previousKey, $previousDate),
+                'business_date' => $this->businessDate($key, $date),
+                'previous_occurred_at' => $this->presentationTimestamp($previousKey, $previousDate, $previousEvent),
                 'status' => $status,
                 'elapsed_working_days' => $elapsed,
                 'pending_working_days' => $pending,
                 'delay_type' => $this->delayType($key),
                 'recorded_by' => $actor,
-                'actor_category' => $event?->recordedBy ? $this->organization->effectiveCategory($event->recordedBy) : ($actorInfo['category'] ?? null),
-                'actor_office' => $event?->recordedBy ? $this->organization->normalizeOffice($event->recordedBy->office_designated) : ($actorInfo['office'] ?? null),
+                'actor_category' => $actorContext['category'] ?? ($actorInfo['category'] ?? null),
+                'actor_category_label' => $actorContext['category_label'] ?? null,
+                'actor_office' => $actorContext['office'] ?? ($actorInfo['office'] ?? null),
                 'remarks' => $event?->remarks,
                 'routing_event_id' => $event?->id,
                 'attachment' => $event && isset($attachments[$event->id]) ? $this->routingAttachments->descriptor($attachments[$event->id]) : null,
@@ -385,13 +390,17 @@ final class PambRoutingTimelineService
                 'label' => $this->stageDefinition($verdict)['label'],
                 'held_at' => 'Office of the PENRO',
                 'destination' => $verdict === self::PENRO_FINAL_RETURNED_FOR_CORRECTION ? 'PENRO CDS Focal Person' : 'PENRO Records',
-                'occurred_at' => $verdictEvent->occurred_at?->toIso8601String(),
+                'occurred_at' => $this->eventTimestamp($verdictEvent),
+                'business_date' => null,
                 'previous_occurred_at' => null,
                 'status' => 'completed',
                 'elapsed_working_days' => null,
                 'pending_working_days' => null,
                 'delay_type' => 'processing',
                 'recorded_by' => $verdictEvent->recordedBy?->name,
+                'actor_category' => $this->actorContext($verdict, $verdictEvent, $report)['category'] ?? null,
+                'actor_category_label' => $this->actorContext($verdict, $verdictEvent, $report)['category_label'] ?? null,
+                'actor_office' => $this->actorContext($verdict, $verdictEvent, $report)['office'] ?? null,
                 'remarks' => $verdictEvent->remarks,
                 'routing_event_id' => $verdictEvent->id,
                 'attachment' => isset($attachments[$verdictEvent->id]) ? $this->routingAttachments->descriptor($attachments[$verdictEvent->id]) : null,
@@ -408,21 +417,21 @@ final class PambRoutingTimelineService
             self::PENRO_FINAL_RETURNED_FOR_CORRECTION, self::PENRO_FINAL_APPROVED_FOR_REGIONAL,
             self::FORWARDED_PENRO_TO_RECORDS, self::RECEIVED_BY_RECORDS_FINAL, self::RELEASED_TO_REGIONAL,
         ]);
-        $timeline = collect($timeline)->sortBy(fn (array $item): array => [
-            $timelineOrder[$this->canonicalStageKey((string) ($item['stage_key'] ?? $item['key']))] ?? PHP_INT_MAX,
-            $item['occurred_at'] ?? '',
-        ])->values()->all();
+        $timeline = collect($timeline)->sort(
+            fn (array $left, array $right): int => $this->compareTimelineItems($left, $right, $timelineOrder),
+        )->values()->all();
         $regional = $dates[self::RELEASED_TO_REGIONAL] ?? null;
         $currentLocation = $this->currentLocation($report, $dates, $nextKey);
         $currentStatus = $this->currentStatus($definitions, $dates, $nextKey, $report, isset($dates[self::RECEIVED_BY_PENRO_FINAL]));
         $currentStage = $nextKey ? collect($timeline)->firstWhere('key', $nextKey) : null;
         $lastAction = collect($timeline)
             ->filter(fn (array $item): bool => filled($item['occurred_at']))
-            ->sortBy('occurred_at')
+            ->sort(fn (array $left, array $right): int => $this->compareTimelineItems($left, $right, $timelineOrder))
             ->last();
         $routingSummary = [
             'current_location' => $currentLocation,
             'current_status' => $currentStatus,
+            'status_context' => $this->internalPenroStatusContext($report, $nextKey, $currentStage, $hasRegionalEndorsement),
             'responsible_office' => $currentStage['held_at'] ?? ($hasRegionalEndorsement ? 'Regional Office / Completed' : null),
             'pending_since' => $currentStage['previous_occurred_at'] ?? null,
             'working_days_pending' => $currentStage['pending_working_days'] ?? null,
@@ -431,6 +440,8 @@ final class PambRoutingTimelineService
                 'label' => $lastAction['label'],
                 'occurred_at' => $lastAction['occurred_at'],
                 'recorded_by' => $lastAction['recorded_by'],
+                'recorded_by_role' => $lastAction['actor_category_label'] ?? null,
+                'recorded_by_office' => $lastAction['actor_office'] ?? null,
                 'remarks' => $lastAction['remarks'],
             ] : null,
             'last_updated' => $lastAction['occurred_at'] ?? null,
@@ -480,23 +491,28 @@ final class PambRoutingTimelineService
         $definitions = collect($this->definitions($report))->keyBy('key');
         $timeline = [];
 
-        foreach ($allEvents->sortBy('occurred_at')->sortBy('id') as $event) {
+        foreach ($allEvents->sortBy(fn (PambRoutingEvent $event): array => [$this->eventTimestamp($event) ?? '', $event->id]) as $event) {
             $base = $this->canonicalStageKey((string) $event->stage_key);
             $definition = $definitions->get($base, []);
             $metadata = $this->stageDefinition($base);
+            $actorContext = $this->actorContext($base, $event, $report);
             $timeline[] = [
                 'key' => $event->stage_key,
                 'stage_key' => $event->stage_key,
                 'label' => $metadata['label'],
                 'held_at' => $definition['held_at'] ?? null,
                 'destination' => $definition['destination'] ?? null,
-                'occurred_at' => $event->occurred_at?->toIso8601String(),
+                'occurred_at' => $this->eventTimestamp($event),
+                'business_date' => null,
                 'previous_occurred_at' => null,
                 'status' => 'completed',
                 'elapsed_working_days' => null,
                 'pending_working_days' => null,
                 'delay_type' => $this->delayType($base),
                 'recorded_by' => $event->recordedBy?->name,
+                'actor_category' => $actorContext['category'] ?? null,
+                'actor_category_label' => $actorContext['category_label'] ?? null,
+                'actor_office' => $actorContext['office'] ?? null,
                 'remarks' => $event->remarks,
                 'routing_event_id' => $event->id,
                 'attachment' => isset($attachments[$event->id]) ? $this->routingAttachments->descriptor($attachments[$event->id]) : null,
@@ -520,6 +536,7 @@ final class PambRoutingTimelineService
                 'held_at' => $office,
                 'destination' => $office,
                 'occurred_at' => $this->date($date)->toDateString(),
+                'business_date' => $this->date($date)->toDateString(),
                 'previous_occurred_at' => null,
                 'status' => 'completed',
                 'elapsed_working_days' => null,
@@ -584,6 +601,7 @@ final class PambRoutingTimelineService
             'routing_summary' => [
                 'current_location' => $currentLocation,
                 'current_status' => $currentStatus,
+                'status_context' => null,
                 'responsible_office' => $current['held_at'] ?? ($nextBase === self::RELEASED_TO_REGIONAL ? 'Regional Office / Completed' : null),
                 'pending_since' => $current['previous_occurred_at'] ?? null,
                 'working_days_pending' => null,
@@ -600,6 +618,24 @@ final class PambRoutingTimelineService
             ],
         ];
     }
+    /** @return array{label:string,current_unit:string}|null */
+    private function internalPenroStatusContext(ConservationReportSubmission $report, ?string $nextKey, ?array $currentStage, bool $complete): ?array
+    {
+        if ($complete || blank($report->date_received_penro) || filled($report->date_endorsed_regional) || blank($nextKey) || ! $this->isInternalStageKey($nextKey)) {
+            return null;
+        }
+
+        $currentUnit = $currentStage['held_at'] ?? null;
+        if (blank($currentUnit)) {
+            return null;
+        }
+
+        return [
+            'label' => 'PENRO internal routing in progress',
+            'current_unit' => $currentUnit,
+        ];
+    }
+
     /** @return array<string, CarbonImmutable> */
     private function milestoneDates(ConservationReportSubmission $report, mixed $events): array
     {
@@ -971,8 +1007,81 @@ final class PambRoutingTimelineService
 
     private function presentationTimestamp(?string $key, ?CarbonImmutable $date, ?PambRoutingEvent $event = null): ?string
     {
-        if ($event?->occurred_at) return $event->occurred_at->toIso8601String();
+        if ($event) return $this->eventTimestamp($event);
         return $date?->toDateString();
+    }
+
+    private function eventTimestamp(PambRoutingEvent $event): ?string
+    {
+        $occurred = $event->occurred_at?->setTimezone(BusinessCalendarService::TIMEZONE);
+        $created = $event->created_at?->setTimezone(BusinessCalendarService::TIMEZONE);
+
+        // Legacy canonical milestones were stored at midnight because their
+        // domain fields are date-only. Their row creation timestamp is the
+        // precise action time when it falls on that same business date.
+        if ($occurred && $created
+            && $occurred->format('H:i:s') === '00:00:00'
+            && $created->isSameDay($occurred)
+            && $created->greaterThan($occurred)) {
+            return $created->toIso8601String();
+        }
+
+        return $occurred?->toIso8601String();
+    }
+
+    private function compareTimelineItems(array $left, array $right, array $timelineOrder): int
+    {
+        $leftStamp = (string) ($left['occurred_at'] ?? '');
+        $rightStamp = (string) ($right['occurred_at'] ?? '');
+        if ($leftStamp === '' || $rightStamp === '') return $leftStamp === $rightStamp ? 0 : ($leftStamp === '' ? 1 : -1);
+
+        $leftDate = substr($leftStamp, 0, 10);
+        $rightDate = substr($rightStamp, 0, 10);
+        if ($leftDate !== $rightDate) return strcmp($leftDate, $rightDate);
+
+        $leftDateOnly = strlen($leftStamp) <= 10;
+        $rightDateOnly = strlen($rightStamp) <= 10;
+        if (!$leftDateOnly && !$rightDateOnly) {
+            $timeOrder = strcmp($leftStamp, $rightStamp);
+            if ($timeOrder !== 0) return $timeOrder;
+        }
+
+        $leftOrder = $timelineOrder[$this->canonicalStageKey((string) ($left['stage_key'] ?? $left['key']))] ?? PHP_INT_MAX;
+        $rightOrder = $timelineOrder[$this->canonicalStageKey((string) ($right['stage_key'] ?? $right['key']))] ?? PHP_INT_MAX;
+        return $leftOrder <=> $rightOrder;
+    }
+
+    private function businessDate(string $key, ?CarbonImmutable $date): ?string
+    {
+        return in_array($this->canonicalStageKey($key), [
+            SubmissionTrackingService::CENRO_RELEASE,
+            self::RECORDS_RECEIVED,
+            self::RELEASED_TO_REGIONAL,
+        ], true) ? $date?->toDateString() : null;
+    }
+
+    /** @return array{category:?string,category_label:?string,office:?string} */
+    private function actorContext(string $stageKey, ?PambRoutingEvent $event, ConservationReportSubmission $report): array
+    {
+        $stage = $this->canonicalStageKey($stageKey);
+        $category = match ($stage) {
+            SubmissionTrackingService::CENRO_RELEASE => OrganizationalAccessService::CENRO_RECORDS,
+            self::RECORDS_RECEIVED, self::FORWARDED_RECORDS_TO_PENRO, self::RECEIVED_BY_RECORDS_FINAL, self::RELEASED_TO_REGIONAL => OrganizationalAccessService::PENRO_RECORDS,
+            self::RECEIVED_BY_PENRO, self::FORWARDED_PENRO_TO_TSD, self::RECEIVED_BY_PENRO_FINAL, self::PENRO_FINAL_RETURNED_FOR_CORRECTION, self::PENRO_FINAL_APPROVED_FOR_REGIONAL, self::FORWARDED_PENRO_TO_RECORDS => OrganizationalAccessService::OFFICE_PENRO,
+            self::RECEIVED_BY_TSD, self::FORWARDED_TSD_TO_CDS => OrganizationalAccessService::PENRO_TSD_CHIEF,
+            self::RECEIVED_BY_CDS, self::FORWARDED_CDS_FOCAL_TO_CHIEF => OrganizationalAccessService::PENRO_FOCAL,
+            self::RECEIVED_BY_CDS_CHIEF, self::FORWARDED_CDS_TO_PENRO => OrganizationalAccessService::PENRO_CHIEF,
+            default => null,
+        };
+        $office = $category && in_array($category, [OrganizationalAccessService::CENRO_RECORDS, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_FOCAL], true)
+            ? $this->organization->normalizeOffice($report->target_office)
+            : ($event?->recordedBy ? $this->organization->normalizeOffice($event->recordedBy->office_designated) : null);
+
+        return [
+            'category' => $category,
+            'category_label' => $category ? $this->organization->categoryLabel($category) : null,
+            'office' => $office,
+        ];
     }
 
     private function parseDateTime(string $value): CarbonImmutable
