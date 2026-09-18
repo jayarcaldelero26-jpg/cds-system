@@ -11,4 +11,5 @@ class BamsReportSubmissionController extends StandardAReportSubmissionController
     protected string $routePrefix = 'bams.report-submissions';
     protected string $storageFolder = 'bams-report-movs';
     protected string $label = 'BAMS';
+    protected bool $dateConductedRangesEnabled = true;
 }

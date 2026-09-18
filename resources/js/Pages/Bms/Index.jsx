@@ -772,7 +772,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     </div>                    )}
 
                     {activeTab === 'report-tracker' &&
-          <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} filters={reportFilters} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} />
+          <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} filters={reportFilters} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} dateConductedRangesEnabled={true} />
           }
 
                     {/* TAB 1: SPECIES RECORDS VIEW */}

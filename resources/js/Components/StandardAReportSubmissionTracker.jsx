@@ -3,7 +3,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
 import ReportSubmissionTracker from '@/Pages/Bms/ReportSubmissionTracker';
 
-export default function StandardAReportSubmissionTracker({ submissions, protectedAreas, filters = {}, moduleLabel, routePrefix, submissionRoutes = null, workflowConfig = null, targetOffices = [], description = '15-working-day submission compliance tracking.', permissions = null }) {
+export default function StandardAReportSubmissionTracker({ submissions, protectedAreas, filters = {}, moduleLabel, routePrefix, submissionRoutes = null, workflowConfig = null, targetOffices = [], description = '15-working-day submission compliance tracking.', permissions = null, dateConductedRangesEnabled = false }) {
     const { auth = {} } = usePage().props;
     const permissionStem = moduleLabel === 'BAMS' ? 'Bams' : 'Imea';
 
@@ -27,6 +27,7 @@ export default function StandardAReportSubmissionTracker({ submissions, protecte
                     index: route(`${routePrefix}.index`),
                 }}
                 workflowConfig={workflowConfig}
+                dateConductedRangesEnabled={dateConductedRangesEnabled}
                 targetOffices={targetOffices}
                 filterPrefix=""
                 permissions={permissions || {

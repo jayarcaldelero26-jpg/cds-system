@@ -19,6 +19,7 @@ class BmsReportSubmission extends Model
         'document_type',
         'semester',
         'date_conducted',
+        'date_conducted_ranges',
         'date_accomplished',
         'date_report_released_cenro',
         'date_received_penro',
@@ -41,6 +42,7 @@ class BmsReportSubmission extends Model
     protected function casts(): array
     {
         return [
+            'date_conducted_ranges' => 'array',
             'date_accomplished' => 'date:Y-m-d',
             'date_report_released_cenro' => 'date:Y-m-d',
             'date_received_penro' => 'date:Y-m-d',

@@ -6,6 +6,7 @@ use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\DateConductedRangeService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -27,9 +28,11 @@ abstract class StandardAReportSubmissionController extends Controller
     protected string $routePrefix;
     protected string $storageFolder;
     protected string $label;
+    protected bool $dateConductedRangesEnabled = false;
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
+        private readonly DateConductedRangeService $dateConductedRanges,
     ) {}
 
     public function index(Request $request): Response
@@ -60,6 +63,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'filters' => $request->only(['protected_area_id', 'semester', 'search']),
             'moduleLabel' => $this->label,
             'routePrefix' => $this->routePrefix,
+            'dateConductedRangesEnabled' => $this->dateConductedRangesEnabled,
         ]);
     }
 
@@ -70,6 +74,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
+        $validated = $this->prepareDateConductedPayload($request, $validated);
         $newPath = null;
         try {
             if ($request->hasFile('mov')) {
@@ -103,6 +108,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
+        $validated = $this->prepareDateConductedPayload($request, $validated);
         $oldPath = $submission->mov_file_path;
         $newPath = null;
         $removeOld = $request->hasFile('mov');
@@ -156,6 +162,10 @@ abstract class StandardAReportSubmissionController extends Controller
             'document_type' => ['nullable', 'string', Rule::in($documentTypes)],
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
+            'date_conducted_ranges' => ['nullable', 'array'],
+            'date_conducted_ranges.*' => ['array'],
+            'date_conducted_ranges.*.from' => ['nullable', 'date_format:Y-m-d'],
+            'date_conducted_ranges.*.to' => ['nullable', 'date_format:Y-m-d'],
             'date_accomplished' => ['nullable', 'date'],
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
@@ -180,7 +190,16 @@ abstract class StandardAReportSubmissionController extends Controller
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
         $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
         $data['cenro_release_applicable'] = ! $directPenro;
+        if ($this->dateConductedRangesEnabled) {
+            $data['date_conducted_display'] = $this->dateConductedRanges->display($submission->date_conducted_ranges, $submission->date_conducted);
+            $data['date_conducted_ranges'] = $submission->date_conducted_ranges;
+        }
         return $data;
+    }
+
+    private function prepareDateConductedPayload(Request $request, array $validated): array
+    {
+        return $this->dateConductedRangesEnabled ? $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')) : $validated;
     }
 
     protected function attachmentSource(): string

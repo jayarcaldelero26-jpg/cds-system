@@ -6,6 +6,8 @@ import Card from '../../Components/Card';
 import FilePreviewPanel from '../../Components/Crud/FilePreviewPanel';
 import PageHeader from '../../Components/PageHeader';
 import { FloatingInput, FloatingSelect, FloatingTextarea } from '../../Components/Form';
+import DatePicker from '../../Components/DatePicker';
+import { canonicalDateConductedValue, legacyDateConductedHelper } from '../../Utils/dateConductedRanges';
 import { isTimelinessValue, timelinessClass } from '../../Components/TimelinessBadge';
 
 const empty = { protected_area_id: '', target_office: '', activity_name: '', report_type: '', semester: '1st Semester', date_conducted: '', date_accomplished: '', attachment: null, remarks: '' };
@@ -74,7 +76,7 @@ export default function Form({ technicalReport, protectedAreas, reportTypes }) {
                     {field('activity_name', 'Name of Activity')}
                     <FloatingSelect id="technical-type" label="Type of Document" required value={form.data.report_type} onChange={(event) => form.setData('report_type', event.target.value)} error={form.errors.report_type}><option value="">Select Type of Document</option>{form.data.report_type && !reportTypes.includes(form.data.report_type) && <option value={form.data.report_type}>{form.data.report_type} (Legacy)</option>}{reportTypes.map((type) => <option key={type}>{type}</option>)}</FloatingSelect>
                     <FloatingSelect id="technical-semester" label="Semester" required value={form.data.semester || ''} onChange={(event) => form.setData('semester', event.target.value)} error={form.errors.semester}><option value="">Select Semester</option><option>1st Semester</option><option>2nd Semester</option></FloatingSelect>
-                    <div className="sm:col-span-2">{field('date_conducted', 'Date Conducted / Coverage Period')}</div>
+                    <div className="sm:col-span-2"><DatePicker id="technical-date-conducted" label="Date Conducted" value={canonicalDateConductedValue(form.data.date_conducted)} onChange={(value) => form.setData('date_conducted', value)} helperText={legacyDateConductedHelper(form.data.date_conducted)} error={form.errors.date_conducted} /></div>
                 </div></Section>
                 <Section title="Submission Information"><div className="grid gap-4 sm:grid-cols-2">{field('date_accomplished', 'Date Accomplished', 'date')}</div></Section>
                 <Section title="Calculated Compliance"><div className="grid gap-3 sm:grid-cols-2">{calculations.length ? calculations.map(([label, value]) => <div key={label} className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900"><p className="text-xs font-bold uppercase tracking-wide text-gray-500">{label}</p><span className={`mt-2 inline-flex rounded-full px-3 py-1 text-xs font-bold ${badgeClass(value)}`}>{value ?? '—'}</span></div>) : <p className="text-sm text-gray-500 sm:col-span-2">Compliance values are calculated by the server after the report is saved.</p>}</div></Section>

@@ -6,6 +6,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\DateConductedRangeService;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
@@ -26,11 +27,11 @@ class ConservationReportSubmissionController extends Controller
 {
     private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments, private readonly DateConductedRangeService $dateConductedRanges) {}
 
     public function index(Request $request, string $workflow): Response
     {
-        $config = $this->workflow($workflow);
+        $config = [...$this->workflow($workflow), 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow)];
         $submissions = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
             ->where('workflow_key', $workflow)
             ->with(['protectedArea:id,name,short_name', 'movReviewEvents.recordedBy'])
@@ -66,6 +67,7 @@ class ConservationReportSubmissionController extends Controller
         $config = $this->workflow($workflow);
         $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? null);
+        if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? null);
         $validated = $this->storeMov($request, $validated);
         $submission = ConservationReportSubmission::create([...$validated, 'workflow_key' => $workflow, 'created_by' => $request->user()?->id, 'updated_by' => $request->user()?->id]);
@@ -84,6 +86,7 @@ class ConservationReportSubmissionController extends Controller
         }
         $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? $submission->target_office);
+        if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? $submission->protected_area_id);
         $oldPath = $submission->mov_file_path;
         $newPath = null;
@@ -139,6 +142,10 @@ class ConservationReportSubmissionController extends Controller
             'activity_name' => ['required', 'string', 'max:255'],
             'document_type' => ['nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
             'reporting_period' => ['nullable', 'string', Rule::in($config['periods'] ?? [])],
+            'date_conducted_ranges' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['nullable', 'array'] : [],
+            'date_conducted_ranges.*' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['array'] : [],
+            'date_conducted_ranges.*.from' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['nullable', 'date_format:Y-m-d'] : [],
+            'date_conducted_ranges.*.to' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['nullable', 'date_format:Y-m-d'] : [],
             'date_conducted' => $this->pambCompliance->isMeeting($config['key'] ?? null)
                 ? ['required', 'date']
                 : ['nullable', 'string', 'max:255'],
@@ -276,6 +283,10 @@ class ConservationReportSubmissionController extends Controller
             'current_document' => $this->routingAttachments->currentDescriptor('conservation', (int) $submission->getKey(), $original),
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
             'cenro_release_applicable' => ! $directPenro,
+            ...($this->dateConductedRanges->supportsWorkflow($submission->workflow_key) ? [
+                'date_conducted_display' => $this->dateConductedRanges->display($submission->date_conducted_ranges, $submission->date_conducted),
+                'date_conducted_ranges' => $submission->date_conducted_ranges,
+            ] : []),
             'mov_processing' => $this->pambMov->present($submission),
         ];
     }

@@ -16,7 +16,7 @@ class BamsReportSubmission extends Model
 
     protected function casts(): array
     {
-        return ['date_accomplished' => 'date:Y-m-d', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d'];
+        return ['date_conducted_ranges' => 'array', 'date_accomplished' => 'date:Y-m-d', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d'];
     }
 
     public function protectedArea(): BelongsTo { return $this->belongsTo(ProtectedArea::class); }

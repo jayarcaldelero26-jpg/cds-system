@@ -9,6 +9,7 @@ use App\Models\BmsThreat;
 use App\Models\ProtectedArea;
 use App\Services\SpatialLayerService;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\DateConductedRangeService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
@@ -23,7 +24,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class BmsController extends Controller
 {
-    public function __construct(private readonly OrganizationalAccessService $organization) {}
+    public function __construct(private readonly OrganizationalAccessService $organization, private readonly DateConductedRangeService $dateConductedRanges) {}
 
     public function formatStationRangeForAnnex($station)
     {
@@ -107,6 +108,8 @@ class BmsController extends Controller
                     $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
                     $data['mov'] = app(ProtectedAttachmentService::class)->descriptor('bms-report', $submission, 'mov');
                     $data['mov_url'] = $data['mov']['url'] ?? null;
+                    $data['date_conducted_display'] = $this->dateConductedRanges->display($submission->date_conducted_ranges, $submission->date_conducted);
+                    $data['date_conducted_ranges'] = $submission->date_conducted_ranges;
                     $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
                     $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
                     $data['cenro_release_applicable'] = ! $directPenro;

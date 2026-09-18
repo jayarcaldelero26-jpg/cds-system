@@ -17,12 +17,12 @@ class ConservationReportSubmission extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['workflow_key', 'protected_area_id', 'target_office', 'activity_name', 'document_type', 'reporting_period', 'date_conducted', 'date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional', 'mov_file_name', 'mov_file_path', 'mov_processing_status', 'mov_submitted_at', 'mov_submitted_by', 'mov_reviewed_at', 'mov_reviewed_by', 'mov_review_remarks', 'remarks', 'created_by', 'updated_by'];
+    protected $fillable = ['workflow_key', 'protected_area_id', 'target_office', 'activity_name', 'document_type', 'reporting_period', 'date_conducted', 'date_conducted_ranges', 'date_accomplished', 'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional', 'mov_file_name', 'mov_file_path', 'mov_processing_status', 'mov_submitted_at', 'mov_submitted_by', 'mov_reviewed_at', 'mov_reviewed_by', 'mov_review_remarks', 'remarks', 'created_by', 'updated_by'];
     protected $appends = ['deadline_submission', 'days_complied', 'timeliness', 'submission_status', 'penro_delay'];
 
     protected function casts(): array
     {
-        return ['date_accomplished' => 'date:Y-m-d', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d', 'mov_submitted_at' => 'datetime', 'mov_reviewed_at' => 'datetime'];
+        return ['date_conducted_ranges' => 'array', 'date_accomplished' => 'date:Y-m-d', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d', 'mov_submitted_at' => 'datetime', 'mov_reviewed_at' => 'datetime'];
     }
 
     public function protectedArea(): BelongsTo { return $this->belongsTo(ProtectedArea::class); }

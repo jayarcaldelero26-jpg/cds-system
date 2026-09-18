@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\BmsReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Compliance\ComplianceMovService;
+use App\Services\DateConductedRangeService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -17,6 +18,7 @@ class BmsReportSubmissionController extends Controller
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
+        private readonly DateConductedRangeService $dateConductedRanges,
     ) {}
     public function store(Request $request)
     {
@@ -25,6 +27,7 @@ class BmsReportSubmissionController extends Controller
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
+        $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges'));
         $validated = $this->storeMov($request, $validated);
         $validated['created_by'] = $request->user()?->id;
         $validated['updated_by'] = $request->user()?->id;
@@ -42,6 +45,7 @@ class BmsReportSubmissionController extends Controller
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
+        $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges'));
         if (! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }
@@ -92,6 +96,10 @@ class BmsReportSubmissionController extends Controller
             'document_type' => ['nullable', 'string', Rule::in($documentTypes)],
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
+            'date_conducted_ranges' => ['nullable', 'array'],
+            'date_conducted_ranges.*' => ['array'],
+            'date_conducted_ranges.*.from' => ['nullable', 'date_format:Y-m-d'],
+            'date_conducted_ranges.*.to' => ['nullable', 'date_format:Y-m-d'],
             'date_accomplished' => ['nullable', 'date'],
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
