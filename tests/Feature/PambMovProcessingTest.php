@@ -71,9 +71,15 @@ test('saving a MOV records upload without submitting it for review', function ()
     Storage::fake('local');
     $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
 
+    $area = ProtectedArea::create(['name' => 'PAMB MOV Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $focal->id, 'updated_by' => $focal->id]);
+    ProtectedAreaOfficeAssignment::create(['protected_area_id' => $area->id, 'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'), 'assignment_type' => 'supervising', 'assigned_by' => $focal->id]);
+
+    $area = ProtectedArea::create(['name' => 'PAMB MOV Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $focal->id, 'updated_by' => $focal->id]);
+    ProtectedAreaOfficeAssignment::create(['protected_area_id' => $area->id, 'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'), 'assignment_type' => 'supervising', 'assigned_by' => $focal->id]);
+
     $this->actingAs($focal)->post(route('conservation-reports.store', ['workflow' => 'regular_pamb']), [
         'target_office' => 'CENRO Mati',
-        'protected_area_id' => null,
+        'protected_area_id' => $area->id,
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 2',

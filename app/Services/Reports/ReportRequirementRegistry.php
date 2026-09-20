@@ -186,7 +186,7 @@ final class ReportRequirementRegistry
             return app(BusinessCalendarService::class)->addWorkingDays($range[1], $days, null, BusinessCalendarService::PAMB_WORKING_WEEKDAYS)->toDateString();
         }
         if ($mode === ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS) {
-            return app(BusinessCalendarService::class)->addWorkingDays($range[1], $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
+            return app(BusinessCalendarService::class)->addConservationWorkingDays($range[1], $days)->toDateString();
         }
 
         return $metadata['deadline_policy']['fixed_date'] ?? null;

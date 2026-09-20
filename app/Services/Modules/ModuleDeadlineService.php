@@ -21,7 +21,7 @@ final class ModuleDeadlineService
         $submitted = $this->date($submittedDate);
         $deadline = match ($module->deadline_mode) {
             ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => $reference && $module->default_deadline_days
-                ? $this->calendar->addWorkingDays($reference, $module->default_deadline_days, $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString()
+                ? $this->calendar->addConservationWorkingDays($reference, $module->default_deadline_days, $office)->toDateString()
                 : null,
             ModuleDefinition::DEADLINE_CALENDAR_DAYS => $reference && $module->default_deadline_days
                 ? $reference->addDays($module->default_deadline_days)->toDateString()
@@ -34,7 +34,7 @@ final class ModuleDeadlineService
         $processingDays = $reference && $submitted
             ? ($module->deadline_mode === ModuleDefinition::DEADLINE_CALENDAR_DAYS
                 ? max(0, $reference->diffInDays($submitted))
-                : $this->calendar->workingDaysBetween($reference, $submitted, 'after_through', $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS))
+                : $this->calendar->conservationWorkingDaysBetween($reference, $submitted, 'after_through', $office))
             : null;
 
         return [

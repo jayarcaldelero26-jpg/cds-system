@@ -119,6 +119,23 @@ class BamsAssessmentController extends Controller
             ->with('success', 'Spatial layer successfully uploaded and added to the map!');
     }
 
+    public function bulkDestroyFlora(Request $request)
+    {
+        $validated = $request->validate([
+            'ids' => ['required', 'array', 'min:1'],
+            'ids.*' => ['integer', 'exists:bams_flora,id'],
+        ]);
+
+        $records = $this->organization->scopeProtectedAreaQuery(BamsFlora::query(), $request->user())
+            ->whereIn('id', $validated['ids'])
+            ->get(['id', 'protected_area_id']);
+
+        abort_unless($records->count() === count($validated['ids']), 403);
+
+        DB::transaction(fn () => BamsFlora::whereKey($records->modelKeys())->delete());
+
+        return redirect()->back()->with('success', 'Selected records deleted successfully!');
+    }
     public function calculateIndices(Request $request)
     {
         return response()->json([

@@ -112,7 +112,7 @@ class ManagementPlan extends Model
             return max(0, CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->diffInDays(CarbonImmutable::parse($this->date_received_penro, BusinessCalendarService::TIMEZONE)));
         }
 
-        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null);
     }
 
     public function getTimelinessAttribute(): string
@@ -153,7 +153,7 @@ class ManagementPlan extends Model
 
     public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end, ?string $office = null): int
     {
-        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($start, $end, 'after_through', $office);
     }
 
     /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */

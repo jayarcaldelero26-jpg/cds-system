@@ -10,6 +10,7 @@ use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
 use App\Models\ModuleDefinition;
+use App\Models\NonWorkingDay;
 use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Modules\ModuleDeadlineService;
@@ -22,10 +23,30 @@ beforeEach(function (): void {
 test('standard working days are distinct from calendar days at a weekend boundary', function (): void {
     $calendar = app(BusinessCalendarService::class);
 
-    expect($calendar->addWorkingDays('2026-08-28', 7, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString())->toBe('2026-09-08')
+    expect($calendar->addWorkingDays('2026-08-28', 7, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString())->toBe('2026-09-09')
         ->and(CarbonImmutable::parse('2026-08-28')->addDays(7)->toDateString())->toBe('2026-09-04');
 });
 
+test('the Conservation working calendar excludes Friday through Sunday and holiday state', function (): void {
+    $calendar = app(BusinessCalendarService::class);
+
+    NonWorkingDay::create([
+        'date' => '2026-08-31', 'name' => 'Active Conservation Holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-09-01', 'name' => 'Inactive Conservation Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => false,
+    ]);
+    BusinessCalendarService::forgetCache();
+
+    expect($calendar->isWorkingDay('2026-08-28', null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-29', null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-30', null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-08-31', null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS))->toBeFalse()
+        ->and($calendar->isWorkingDay('2026-09-01', null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS))->toBeTrue()
+        ->and($calendar->addConservationWorkingDays('2026-08-28', 7)->toDateString())->toBe('2026-09-10');
+});
 test('the authoritative registry exposes explicit deadline modes', function (): void {
     $registry = app(ConservationReportWorkflowRegistry::class);
 
@@ -34,11 +55,11 @@ test('the authoritative registry exposes explicit deadline modes', function (): 
         'deadline_days' => 7,
     ])
         ->and($registry->deadlineRule('additional_bms_site', null, null))->toMatchArray([
-            'deadline_mode' => ModuleDefinition::DEADLINE_CALENDAR_DAYS,
+            'deadline_mode' => ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS,
             'deadline_days' => 15,
         ])
         ->and($registry->deadlineRule('ecotourism_management_plan', null, null))->toMatchArray([
-            'deadline_mode' => ModuleDefinition::DEADLINE_CALENDAR_DAYS,
+            'deadline_mode' => ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS,
             'deadline_days' => 7,
         ])
         ->and($registry->find('inland_wetland'))->toBeNull();
@@ -46,12 +67,12 @@ test('the authoritative registry exposes explicit deadline modes', function (): 
 
 test('specialized PA monitoring models use their authoritative standard working-day rules', function (): void {
     $cases = [
-        [Aws::class, 7, '2026-09-08'],
-        [BmsReportSubmission::class, 15, '2026-09-18'],
-        [BamsReportSubmission::class, 15, '2026-09-18'],
-        [ImeaReportSubmission::class, 15, '2026-09-18'],
-        [ImeaFacilityMaintenanceReport::class, 7, '2026-09-08'],
-        [IpafManagementReport::class, 7, '2026-09-08'],
+        [Aws::class, 7, '2026-09-09'],
+        [BmsReportSubmission::class, 15, '2026-09-23'],
+        [BamsReportSubmission::class, 15, '2026-09-23'],
+        [ImeaReportSubmission::class, 15, '2026-09-23'],
+        [ImeaFacilityMaintenanceReport::class, 7, '2026-09-09'],
+        [IpafManagementReport::class, 7, '2026-09-09'],
     ];
 
     foreach ($cases as [$modelClass, $days, $expected]) {
@@ -82,9 +103,9 @@ test('generic PA monitoring workflows use their authoritative calendar modes', f
         'date_accomplished' => '2026-08-28',
     ]);
 
-    expect($additional->deadline_submission)->toBe('2026-09-12')
-        ->and($eco->deadline_submission)->toBe('2026-09-04')
-        ->and($updating->deadline_submission)->toBe('2026-09-08');
+    expect($additional->deadline_submission)->toBe('2026-09-23')
+        ->and($eco->deadline_submission)->toBe('2026-09-09')
+        ->and($updating->deadline_submission)->toBe('2026-09-09');
 });
 
 test('management plan deadlines are type-specific', function (): void {
@@ -94,11 +115,11 @@ test('management plan deadlines are type-specific', function (): void {
     $restoration = new ManagementPlan(['plan_type' => '5-Year Restoration Plan', 'date_accomplished' => '2026-08-28']);
     $ecotourism = new ManagementPlan(['plan_type' => 'Ecotourism Management Plan', 'date_accomplished' => '2026-08-28']);
 
-    expect($updating->deadline_submission)->toBe('2026-09-08')
-        ->and($cepaProgress->deadline_submission)->toBe('2026-09-08')
-        ->and($cepaFinal->deadline_submission)->toBe('2026-09-18')
-        ->and($restoration->deadline_submission)->toBe('2026-09-08')
-        ->and($ecotourism->deadline_submission)->toBe('2026-09-04');
+    expect($updating->deadline_submission)->toBe('2026-09-09')
+        ->and($cepaProgress->deadline_submission)->toBe('2026-09-09')
+        ->and($cepaFinal->deadline_submission)->toBe('2026-09-23')
+        ->and($restoration->deadline_submission)->toBe('2026-09-09')
+        ->and($ecotourism->deadline_submission)->toBe('2026-09-09');
 });
 
 test('module deadline service supports standard, calendar, and stored custom modes', function (): void {
@@ -107,7 +128,7 @@ test('module deadline service supports standard, calendar, and stored custom mod
     $calendar = new ModuleDefinition(['deadline_mode' => ModuleDefinition::DEADLINE_CALENDAR_DAYS, 'default_deadline_days' => 7, 'allow_deadline_override' => false]);
     $stored = new ModuleDefinition(['deadline_mode' => ModuleDefinition::DEADLINE_CUSTOM_STORED, 'default_deadline_days' => null, 'allow_deadline_override' => true]);
 
-    expect($service->resolve($standard, '2026-08-28')['deadline_date'])->toBe('2026-09-08')
+    expect($service->resolve($standard, '2026-08-28')['deadline_date'])->toBe('2026-09-09')
         ->and($service->resolve($calendar, '2026-08-28')['deadline_date'])->toBe('2026-09-04')
         ->and($service->resolve($stored, '2026-08-28', '2026-09-18')['deadline_date'])->toBe('2026-09-18');
 });

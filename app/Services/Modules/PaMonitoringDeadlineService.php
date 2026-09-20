@@ -21,7 +21,7 @@ final class PaMonitoringDeadlineService
         ]))));
 
         if (str_contains($context, 'ecotourism') || preg_match('/\bemp\b/', $context)) {
-            return $this->rule(ModuleDefinition::DEADLINE_CALENDAR_DAYS, 7, 'B');
+            return $this->rule(ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, 7, 'B');
         }
 
         if (str_contains($context, 'cepa') && (str_contains($context, 'final') || strcasecmp(trim((string) $plan->document_type), 'Final Report') === 0)) {
@@ -39,7 +39,7 @@ final class PaMonitoringDeadlineService
     {
         return match ($rule['deadline_mode']) {
             ModuleDefinition::DEADLINE_CALENDAR_DAYS => $reference->addDays($rule['deadline_days'])->toDateString(),
-            default => app(\App\Services\BusinessCalendarService::class)->addWorkingDays($reference, $rule['deadline_days'], $office, \App\Services\BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
+            default => app(\App\Services\BusinessCalendarService::class)->addConservationWorkingDays($reference, $rule['deadline_days'], $office)->toDateString(),
         };
     }
 

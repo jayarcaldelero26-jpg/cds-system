@@ -60,7 +60,7 @@ class BmsThreatController extends Controller
     private function validationRules(): array
     {
         return [
-            'protected_area_id' => ['nullable', 'exists:protected_areas,id'],
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'date' => ['required', 'date'],
             'location' => ['nullable', 'string', 'max:255'],
             'threat_type' => ['required', 'string', 'max:255'],

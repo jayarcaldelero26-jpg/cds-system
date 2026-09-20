@@ -75,12 +75,11 @@ class ConservationReportSubmission extends Model
         if ($rule['deadline_mode'] === ModuleDefinition::DEADLINE_CALENDAR_DAYS) {
             return max(0, CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->diffInDays(CarbonImmutable::parse($this->date_received_penro, BusinessCalendarService::TIMEZONE)));
         }
-        return app(BusinessCalendarService::class)->workingDaysBetween(
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween(
             $this->date_accomplished,
             $this->date_received_penro,
             'after_through',
             $this->target_office,
-            BusinessCalendarService::STANDARD_WORKING_WEEKDAYS,
         );
     }
 

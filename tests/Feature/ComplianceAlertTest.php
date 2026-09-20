@@ -60,7 +60,7 @@ function bmsForDeadline(ProtectedArea $area, User $user, string $deadline, array
 {
     $calendar = app(BusinessCalendarService::class);
     $referenceDate = CarbonImmutable::parse($deadline, 'Asia/Manila')->subDay();
-    for ($attempt = 0; $attempt < 60 && $calendar->addWorkingDays($referenceDate, 15, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString() !== $deadline; $attempt++) {
+    for ($attempt = 0; $attempt < 60 && $calendar->addWorkingDays($referenceDate, 15, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString() !== $deadline; $attempt++) {
         $referenceDate = $referenceDate->subDay();
     }
 
@@ -146,8 +146,8 @@ test('CDS Admin can change automatic delivery only with the current password and
 /** @return array<class-string, \Illuminate\Database\Eloquent\Model> */
 function recordsForEveryComplianceSource(ProtectedArea $area, User $user, string $deadline): array
 {
-    $standardAStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -15, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
-    $standardBStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
+    $standardAStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -15, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString();
+    $standardBStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString();
     $pambStart = app(BusinessCalendarService::class)->addWorkingDays($deadline, -7, null, BusinessCalendarService::PAMB_WORKING_WEEKDAYS)->toDateString();
     $periodKey = substr($deadline, 0, 7);
     $periodLabel = CarbonImmutable::parse($deadline)->format('F Y');
@@ -196,6 +196,59 @@ test('future and today deadlines are not overdue while yesterday is one calendar
         ->and($overdue->first()->daysOverdue)->toBe(1);
 });
 
+test('alerts consume the corrected holiday-aware Conservation deadlines from each live source', function () {
+    $user = complianceUser();
+    $area = complianceArea($user);
+    \App\Models\NonWorkingDay::create([
+        'date' => '2026-08-31',
+        'name' => 'Configured holiday',
+        'type' => \App\Models\NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => \App\Models\NonWorkingDay::SCOPE_NATIONAL,
+        'is_active' => true,
+    ]);
+    BusinessCalendarService::forgetCache();
+
+    $common = [
+        'protected_area_id' => $area->id,
+        'target_office' => 'PAMO Pujada Bay',
+        'activity_name' => 'Deadline regression activity',
+        'document_type' => 'Final Report',
+        'date_accomplished' => '2026-08-28',
+        'created_by' => $user->id,
+        'updated_by' => $user->id,
+    ];
+    $records = [
+        ['record' => ConservationReportSubmission::create([...$common, 'workflow_key' => 'maintenance_monuments', 'reporting_period' => 'Quarter 3']), 'deadline' => '2026-09-10'],
+        ['record' => ConservationReportSubmission::create([...$common, 'workflow_key' => 'homestay', 'reporting_period' => 'Quarter 3']), 'deadline' => '2026-09-24'],
+        ['record' => ConservationReportSubmission::create([...$common, 'workflow_key' => 'additional_bms_site', 'reporting_period' => '1st Semester']), 'deadline' => '2026-09-24'],
+        ['record' => ConservationReportSubmission::create([...$common, 'workflow_key' => 'ecotourism_management_plan', 'reporting_period' => 'Quarter 3']), 'deadline' => '2026-09-10'],
+        ['record' => BmsReportSubmission::create([...$common, 'semester' => '1st Semester']), 'deadline' => '2026-09-24'],
+        ['record' => \App\Models\BamsReportSubmission::create([...$common, 'semester' => '1st Semester']), 'deadline' => '2026-09-24'],
+        ['record' => \App\Models\ImeaReportSubmission::create([...$common, 'semester' => '1st Semester']), 'deadline' => '2026-09-24'],
+        ['record' => \App\Models\Aws::create([...$common, 'station_name' => 'Pujada AWS', 'location' => 'Mati', 'status' => 'Active']), 'deadline' => '2026-09-10'],
+        ['record' => \App\Models\IpafManagementReport::create($common), 'deadline' => '2026-09-10'],
+    ];
+    $service = app(OverdueReportService::class);
+
+    foreach ($records as ['record' => $record, 'deadline' => $deadline]) {
+        $alert = $service->overdueReports(CarbonImmutable::parse('2026-09-25', 'Asia/Manila'))
+            ->first(fn ($candidate): bool => $candidate->sourceType === $record::class && $candidate->sourceId === $record->id);
+
+        expect($record->fresh()->deadline_submission)->toBe($deadline)
+            ->and($alert)->not->toBeNull()
+            ->and($alert->deadline)->toBe($deadline);
+    }
+
+    $sevenDayRecord = $records[0]['record'];
+    $fifteenDayRecord = $records[1]['record'];
+    $contains = fn ($reports, $record): bool => $reports->contains(fn ($candidate): bool => $candidate->sourceType === $record::class && $candidate->sourceId === $record->id);
+    expect($contains($service->dueSoonReports(3, CarbonImmutable::parse('2026-09-07', 'Asia/Manila')), $sevenDayRecord))->toBeTrue()
+        ->and($contains($service->dueTodayReports(CarbonImmutable::parse('2026-09-10', 'Asia/Manila')), $sevenDayRecord))->toBeTrue()
+        ->and($contains($service->overdueReports(CarbonImmutable::parse('2026-09-11', 'Asia/Manila')), $sevenDayRecord))->toBeTrue()
+        ->and($contains($service->dueSoonReports(3, CarbonImmutable::parse('2026-09-21', 'Asia/Manila')), $fifteenDayRecord))->toBeTrue()
+        ->and($contains($service->dueTodayReports(CarbonImmutable::parse('2026-09-24', 'Asia/Manila')), $fifteenDayRecord))->toBeTrue()
+        ->and($contains($service->overdueReports(CarbonImmutable::parse('2026-09-25', 'Asia/Manila')), $fifteenDayRecord))->toBeTrue();
+});
 test('overdue days use calendar days rather than tracker working-day formulas', function () {
     $user = complianceUser(); $area = complianceArea($user);
     $report = bmsForDeadline($area, $user, '2026-08-20');
@@ -211,7 +264,7 @@ test('multiple tracker models normalize into the same overdue DTO', function () 
     $bms = bmsForDeadline($area, $user, '2026-08-24');
     $technical = TechnicalReport::create([
         'protected_area_id' => $area->id, 'report_type' => 'Technical Assessment', 'activity_name' => 'Technical Assessment Activity',
-        'target_office' => 'PAMO Pujada Bay', 'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays('2026-08-24', -7, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
+        'target_office' => 'PAMO Pujada Bay', 'date_accomplished' => app(BusinessCalendarService::class)->addWorkingDays('2026-08-24', -7, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString(),
         'status' => 'Pending', 'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
 
@@ -618,7 +671,7 @@ test('existing Standard A and Standard B deadline calculations remain authoritat
     ]);
 
     expect($standardA->deadline_submission)->toBe('2026-08-24')
-        ->and($standardB->deadline_submission)->toBe('2026-08-25');
+        ->and($standardB->deadline_submission)->toBe('2026-08-26');
 });
 
 test('an exact Protected Area recipient mapping wins over office and fallback mappings', function () {
@@ -1804,13 +1857,13 @@ test('report workflows require an attachment at report data entry while routing 
     $type = \App\Models\ManagementPlanType::create(['name' => 'MOV Test Plan', 'slug' => 'mov-test-plan', 'created_by' => $creator->id, 'updated_by' => $creator->id]);
     $common = [
         'protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'MOV test activity',
-        'document_type' => 'Final Report', 'semester' => '1st Semester', 'date_accomplished' => '2026-08-01',
+        'document_type' => 'Final Report', 'semester' => '1st Semester', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'reporting_year' => 2026, 'quarter' => 3, 'monitoring_period_start' => '2026-07-01', 'monitoring_period_end' => '2026-07-15',
     ];
     $cases = [
-        ['route' => 'bms.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],
-        ['route' => 'bams.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],
-        ['route' => 'imea.report-submissions.store', 'field' => 'mov', 'payload' => [...$common]],
+        ['route' => 'bms.report-submissions.store', 'field' => 'mov', 'payload' => [...$common, 'date_conducted_ranges' => [['from' => '2026-08-01', 'to' => '2026-08-01']]]],
+        ['route' => 'bams.report-submissions.store', 'field' => 'mov', 'payload' => [...$common, 'date_conducted_ranges' => [['from' => '2026-08-01', 'to' => '2026-08-01']]]],
+        ['route' => 'imea.report-submissions.store', 'field' => 'mov', 'payload' => [...$common, 'date_conducted_ranges' => [['from' => '2026-08-01', 'to' => '2026-08-01']]]],
 
         ['route' => 'aws.store', 'field' => 'report_file', 'payload' => [...$common, 'station_name' => 'Baganga AWS', 'location' => 'Baganga', 'report_period_type' => 'Monthly', 'start_date' => '2026-08-01', 'end_date' => '2026-08-01', 'status' => 'Active']],
         ['route' => 'management-plans.types.reports.store', 'field' => 'attachments', 'payload' => [...$common]],

@@ -137,21 +137,21 @@ class ConservationReportSubmissionController extends Controller
         $allowedDocuments = $activityName && array_key_exists($activityName, $activityDocuments) ? $activityDocuments[$activityName] : $documents;
 
         return [
-            'protected_area_id' => ['nullable', 'exists:protected_areas,id'],
-            'target_office' => ['nullable', 'string', 'max:255'],
+            'protected_area_id' => ['required', 'exists:protected_areas,id'],
+            'target_office' => ['required', 'string', 'max:255'],
             'activity_name' => ['required', 'string', 'max:255'],
             'document_type' => ['nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
             'reporting_period' => ['nullable', 'string', Rule::in($config['periods'] ?? [])],
-            'date_conducted_ranges' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['nullable', 'array'] : [],
+            'date_conducted_ranges' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'array', 'min:1'] : [],
             'date_conducted_ranges.*' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['array'] : [],
-            'date_conducted_ranges.*.from' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['nullable', 'date_format:Y-m-d'] : [],
-            'date_conducted_ranges.*.to' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['nullable', 'date_format:Y-m-d'] : [],
+            'date_conducted_ranges.*.from' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'date_format:Y-m-d'] : [],
+            'date_conducted_ranges.*.to' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'date_format:Y-m-d'] : [],
             'date_conducted' => $this->pambCompliance->isMeeting($config['key'] ?? null)
                 ? ['required', 'date']
-                : ['nullable', 'string', 'max:255'],
+                : ['nullable', 'date'],
             'date_accomplished' => $this->pambCompliance->isMeeting($config['key'] ?? null)
                 ? ['nullable', 'date', 'after_or_equal:date_conducted']
-                : ['nullable', 'date'],
+                : ['required', 'date'],
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];

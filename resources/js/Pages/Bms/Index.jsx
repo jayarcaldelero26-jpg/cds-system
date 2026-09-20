@@ -1267,6 +1267,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 </div>
                                 <div>
 
+                                    <label className="mb-1 block text-sm font-bold text-gray-700 dark:text-gray-300">CSV / TXT Data File <span className="text-red-600">*</span></label>
                                     <FileInput id="index-csv-excel-file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} required />
                                     {importForm.errors.file && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{importForm.errors.file}</p>}
                                 </div>
@@ -1292,6 +1293,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                                 <div>
 
                                     <FloatingInput id="index-spatial-layer-name" label="Layer Name (optional)" value={geoJsonForm.data.layer_name} onChange={(e) => geoJsonForm.setData('layer_name', e.target.value)} />
+                                    <label className="mb-1 block text-sm font-bold text-gray-700 dark:text-gray-300">Spatial File <span className="text-red-600">*</span></label>
                                     <FileInput id="index-geojson-json-spatial-file" type="file" accept=".geojson, .json, .zip" onChange={(e) => geoJsonForm.setData('file', e.target.files[0])} required />
                                     {(geoJsonForm.errors.file || geoJsonForm.errors.spatial_file) && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{geoJsonForm.errors.file || geoJsonForm.errors.spatial_file}</p>}
                                 </div>

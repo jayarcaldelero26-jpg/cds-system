@@ -155,6 +155,7 @@ Route::middleware('auth')->group(function () {
     Route::get('bams', [BamsAssessmentController::class, 'index'])->middleware('can:bams.view')->name('bams.index');
     Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->middleware(['can:bams.create', 'pa-preparation:bams'])->name('bams.flora.store');
     Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->middleware(['can:bams.create', 'pa-preparation:bams'])->name('bams.fauna.store');
+    Route::post('bams/bulk-destroy', [BamsAssessmentController::class, 'bulkDestroyFlora'])->middleware('can:bams.delete')->name('bams.bulk-destroy');
     Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->middleware('can:bams.manage-spatial')->name('bams.store-spatial');
     Route::delete('bams/spatial-layers/{spatialLayer}', [SpatialLayerController::class, 'destroy'])->middleware('can:bams.manage-spatial')->name('bams.spatial-layers.destroy');
     Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->middleware('can:bams.calculate')->name('bams.calculate');

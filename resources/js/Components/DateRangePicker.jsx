@@ -4,7 +4,7 @@ import CalendarPanel from './Calendar/CalendarPanel';
 import CalendarPopover from './Calendar/CalendarPopover';
 import { formatDateKey, formatDisplayDate, monthStart, parseDateOnly, todayDate } from './Calendar/calendarUtils';
 
-export default function DateRangePicker({ value = {}, onChange, label, placeholder = 'Select date range', minDate = '', maxDate = '', disabled = false, error = '', helperText = '', id, className = '' }) {
+export default function DateRangePicker({ value = {}, onChange, label, placeholder = 'Select date range', minDate = '', maxDate = '', disabled = false, error = '', helperText = '', id, required = false, className = '' }) {
     const triggerRef = useRef(null);
     const popoverRef = useRef(null);
     const applied = { from: formatDateKey(value?.from), to: formatDateKey(value?.to) };
@@ -37,7 +37,7 @@ export default function DateRangePicker({ value = {}, onChange, label, placehold
     const describedBy = [error ? id + '-error' : '', helperText ? id + '-help' : ''].filter(Boolean).join(' ') || undefined;
 
     return <div className={`relative ${className}`}>
-        {label && <label htmlFor={id} className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300">{label}</label>}
+        {label && <label htmlFor={id} className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300">{label}{required && <span className="ml-0.5 text-red-600">*</span>}</label>}
         <button ref={triggerRef} id={id} type="button" disabled={disabled} onClick={openPicker} aria-haspopup="dialog" aria-expanded={open} aria-describedby={describedBy} className={`flex h-11 w-full items-center justify-between gap-3 rounded-lg border bg-white px-3 text-left text-sm outline-none transition focus:border-green-700 focus:ring-2 focus:ring-green-700/15 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-gray-800 dark:text-gray-100 ${error ? 'border-red-400' : 'border-gray-300 dark:border-gray-700'} ${display ? 'text-gray-800' : 'text-gray-400 dark:text-gray-500'}`}><span className="truncate">{display || placeholder}</span><Icon icon="solar:calendar-date-linear" width="18" height="18" className="shrink-0 text-gray-400" aria-hidden="true" /></button>
         {helperText && !error && <p id={`${id}-help`} className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{helperText}</p>}
         {error && <p id={`${id}-error`} className="mt-1 text-[11px] text-red-600 dark:text-red-400" role="alert">{error}</p>}

@@ -288,10 +288,10 @@ test('Alerts consumes each generic conservation workflow deadline from its live 
         ->and($alert->module)->toBe(app(ConservationReportWorkflowRegistry::class)->find($workflowKey)['label']);
 })->with([
     ['regular_pamb', 'Regular PAMB', 'Minutes', '2026-09-08'],
-    ['additional_bms_site', 'Establishment of additional BMS site (Davao de Oro)', 'Progress Report', '2026-09-10'],
-    ['cepa_plan', 'CEPA Plan preparation (Analysis/Stocktaking)', 'Progress Report', '2026-09-04'],
-    ['cepa_plan', 'Submission of Final CEPA Plan', 'Final Report', '2026-09-16'],
-    ['monitoring_mangroves_corals_seagrass', 'Monitoring of Habitat condition (Mangroves - 1st Q)', 'Report', '2026-09-16'],
+    ['additional_bms_site', 'Establishment of additional BMS site (Davao de Oro)', 'Progress Report', '2026-09-22'],
+    ['cepa_plan', 'CEPA Plan preparation (Analysis/Stocktaking)', 'Progress Report', '2026-09-08'],
+    ['cepa_plan', 'Submission of Final CEPA Plan', 'Final Report', '2026-09-22'],
+    ['monitoring_mangroves_corals_seagrass', 'Monitoring of Habitat condition (Mangroves - 1st Q)', 'Report', '2026-09-22'],
 ]);
 
 test('one live Conservation Alerts source definition covers every configured generic conservation workflow', function () {

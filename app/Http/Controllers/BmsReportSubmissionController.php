@@ -91,16 +91,16 @@ class BmsReportSubmissionController extends Controller
 
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'target_office' => ['nullable', 'string', 'max:255'],
-            'activity_name' => ['nullable', 'string', 'max:255'],
+            'target_office' => ['required', 'string', 'max:255'],
+            'activity_name' => ['required', 'string', 'max:255'],
             'document_type' => ['nullable', 'string', Rule::in($documentTypes)],
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
-            'date_conducted_ranges' => ['nullable', 'array'],
+            'date_conducted_ranges' => ['required', 'array', 'min:1'],
             'date_conducted_ranges.*' => ['array'],
-            'date_conducted_ranges.*.from' => ['nullable', 'date_format:Y-m-d'],
+            'date_conducted_ranges.*.from' => ['required', 'date_format:Y-m-d'],
             'date_conducted_ranges.*.to' => ['nullable', 'date_format:Y-m-d'],
-            'date_accomplished' => ['nullable', 'date'],
+            'date_accomplished' => ['required', 'date'],
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];

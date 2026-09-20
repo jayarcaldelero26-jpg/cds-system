@@ -34,9 +34,12 @@ function attachmentPrimaryPayload(array $overrides = []): array
     ], $overrides);
 }
 
-test('PAMB Minutes and Resolution accept primary attachments through 100 MB', function (): void {
+test('PAMB Minutes and Resolution accept primary attachments through 100 MB', function (): void {    $area = ProtectedArea::create([
+        'name' => 'Attachment PAMB Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
     foreach ([['Minutes', 'minutes.pdf'], ['Reso', 'resolution.pdf']] as [$documentType, $filename]) {
         $this->actingAs($this->user)->post(route('conservation-reports.store', 'regular_pamb'), attachmentPrimaryPayload([
+            'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati',
             'document_type' => $documentType,
             'mov' => UploadedFile::fake()->create($filename, 102400, 'application/pdf'),
         ]))->assertSessionHasNoErrors();
@@ -66,7 +69,9 @@ test('BAMS, BMS, and IMEA report submissions accept primary attachments through 
     ] as [$routeName, $filename]) {
         $this->actingAs($this->user)->post(route($routeName), attachmentPrimaryPayload([
             'protected_area_id' => $area->id,
+            'target_office' => 'CENRO Mati',
             'document_type' => 'Final Report',
+            'date_conducted_ranges' => [['from' => '2026-08-01', 'to' => '2026-08-01']],
             'mov' => UploadedFile::fake()->create($filename, 102400, 'application/pdf'),
         ]))->assertSessionHasNoErrors();
     }
@@ -94,6 +99,8 @@ test('IMEA maintenance MOV attachments use a 20 MB limit', function (): void {
         'activity_name' => 'Maintenance of Ecotourism Facilities',
         'document_type' => 'Final Report',
         'quarter' => 'Quarter 1',
+        'date_conducted' => '2026-08-01',
+        'date_accomplished' => '2026-08-01',
         'mov' => UploadedFile::fake()->create('maintenance.pdf', 20480, 'application/pdf'),
     ];
 
@@ -102,4 +109,27 @@ test('IMEA maintenance MOV attachments use a 20 MB limit', function (): void {
 
     $this->actingAs($this->user)->post(route('imea.maintenance-reports.store'), [...$payload, 'mov' => UploadedFile::fake()->create('too-large.pdf', 20481, 'application/pdf')])
         ->assertSessionHasErrors(['mov' => 'The MOV attachment must not exceed 20 MB.']);
+});
+
+test('direct report requests cannot bypass required activity-date fields or multi-range conducted dates', function (): void {
+    $area = ProtectedArea::create([
+        'name' => 'Required Fields Protected Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati',
+        'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+
+    $this->actingAs($this->user)->post(route('conservation-reports.store', 'maintenance_monuments'), [
+        'protected_area_id' => $area->id, 'activity_name' => 'Maintenance of Monuments', 'document_type' => 'Final Report',
+        'reporting_period' => 'Quarter 1', 'mov' => UploadedFile::fake()->create('monuments.pdf', 10, 'application/pdf'),
+    ])->assertSessionHasErrors('date_accomplished');
+
+    $this->actingAs($this->user)->post(route('bms.report-submissions.store'), [
+        'protected_area_id' => $area->id, 'activity_name' => 'Monitoring on the Established BMS site', 'document_type' => 'Final Report',
+        'semester' => '1st Semester', 'date_accomplished' => '2026-08-01', 'mov' => UploadedFile::fake()->create('bms.pdf', 10, 'application/pdf'),
+    ])->assertSessionHasErrors('date_conducted_ranges');
+
+    $this->actingAs($this->user)->post(route('imea.maintenance-reports.store'), [
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Maintenance of Ecotourism Facilities',
+        'document_type' => 'Final Report', 'quarter' => 'Quarter 1', 'mov' => UploadedFile::fake()->create('maintenance.pdf', 10, 'application/pdf'),
+    ])->assertSessionHasErrors(['date_conducted', 'date_accomplished']);
 });

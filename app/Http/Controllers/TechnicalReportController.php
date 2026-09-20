@@ -174,12 +174,12 @@ class TechnicalReportController extends Controller
 
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'target_office' => ['nullable', 'string', 'max:255'],
-            'activity_name' => ['nullable', 'string', 'max:255'],
+            'target_office' => ['required', 'string', 'max:255'],
+            'activity_name' => ['required', 'string', 'max:255'],
             'report_type' => ['required', 'string', Rule::in($documentTypes)],
             'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
-            'date_conducted' => ['nullable', 'string', 'max:255'],
-            'date_accomplished' => ['nullable', 'date'],
+            'date_conducted' => ['required', 'date'],
+            'date_accomplished' => ['required', 'date'],
             'attachment' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,doc,docx,xls,xlsx', 'max:20480'],
             'remarks' => ['nullable', 'string'],
         ];

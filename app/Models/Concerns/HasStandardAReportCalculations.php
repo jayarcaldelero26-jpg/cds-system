@@ -10,7 +10,7 @@ trait HasStandardAReportCalculations
     public function getDeadlineSubmissionAttribute(): ?string
     {
         return $this->date_accomplished
-            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 15, $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->format('Y-m-d')
+            ? app(BusinessCalendarService::class)->addConservationWorkingDays($this->date_accomplished, 15, $this->target_office ?? null)->format('Y-m-d')
             : null;
     }
 
@@ -23,12 +23,11 @@ trait HasStandardAReportCalculations
             return 'Pending Submission by CENRO';
         }
 
-        return app(BusinessCalendarService::class)->workingDaysBetween(
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween(
             $this->date_accomplished,
             $this->date_received_penro,
             'after_through',
             $this->target_office ?? null,
-            BusinessCalendarService::STANDARD_WORKING_WEEKDAYS,
         );
     }
 
@@ -68,6 +67,6 @@ trait HasStandardAReportCalculations
 
     public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end, ?string $office = null): int
     {
-        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($start, $end, 'after_through', $office);
     }
 }
