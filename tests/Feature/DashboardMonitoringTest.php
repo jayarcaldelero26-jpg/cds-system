@@ -2,6 +2,7 @@
 
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Dashboard\DashboardMonitoringService;
@@ -11,8 +12,8 @@ use Inertia\Testing\AssertableInertia as Assert;
 
 beforeEach(function (): void {
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 09:00:00', 'Asia/Manila'));
-    $this->user = User::factory()->create(['section' => 'CDS']);
-    $this->normalPa = protectedArea('Pujada Bay Protected Landscape', $this->user);
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
+    $this->normalPa = protectedArea('Pujada Bay Protected Landscape', $this->user, 'PBPLS');
     $this->mhrws = protectedArea('Mt. Hamiguitan Range Wildlife Sanctuary', $this->user, 'MHRWS');
 });
 
@@ -74,17 +75,13 @@ test('dashboard page exposes the unified monitoring props', function () {
     $this->actingAs($this->user)->get(route('dashboard'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->component('Dashboard')
-            // A legacy CDS user resolves to the Conservation unit; ENGP
-            // records are intentionally excluded from this operational view.
-            ->where('summary.tracked_reports', 1)
-            ->has('rows', 1)
-            ->where('pagination.total', 1)
-            ->has('filterOptions.programs', 1)
-            ->where('filters.program', 'conservation')
-            ->has('paMatrix')
-            ->has('topOverdueReports')
-            ->has('complianceSnapshot')
-            ->has('executiveInterpretation'));
+            ->where('view', 'all')
+            ->where('dashboard.tab', 'conservation')
+            ->has('dashboard.programs', 2)
+            ->has('dashboard.filterOptions.years')
+            ->missing('dashboard.filterOptions.programs')
+            ->has('dashboard.trackingRows')
+            ->where('dashboard.filters.program', 'pa'));
 });
 
 test('PA Monitoring excludes CBEP and every ENGP registry workflow before aggregation', function (): void {
@@ -156,19 +153,62 @@ test('empty PA dashboard returns compact management empty states', function (): 
             ->where('executiveInterpretation.0.text', 'No tracked PA report records match the selected filters.'));
 });
 
-test('PA dashboard presents only PA monitoring surfaces', function () {
+test('report submission overview presents the required tab and chart surfaces', function () {
     $dashboardSource = file_get_contents(resource_path('js/Pages/Dashboard.jsx'));
 
-    expect($dashboardSource)->toContain('PA Report Monitoring Matrix')
-        ->toContain('Top Overdue Reports')
-        ->not->toContain('Current Routing Bottlenecks')
-        ->not->toContain('Average Routing Time')
-        ->not->toContain('Compliance Snapshot')
-        ->toContain('Executive Interpretation')
-        ->toContain('report_type')
-        ->toContain('protected_area_id')
-        ->not->toContain('PA Submission Status Overview')
-        ->not->toContain('Total Number of Days Delayed at the PENRO');
+    expect($dashboardSource)->toContain('Report Submission Overview')
+        ->not->toContain("SUPERVISOR'S GUIDE")
+        ->toContain('Status as of {formatReportDate(dashboard.as_of)}')
+        ->not->toContain('formatReportDateTime')
+        ->toContain('Conservation submissions from PAMOs')
+        ->toContain('Development submissions from CENROs')
+        ->toContain('Reporting Year')
+        ->toContain('DEVELOPMENT REPORTS')
+        ->toContain('CONSERVATION REPORTS')
+        ->toContain('Conservation')
+        ->toContain('Development')
+        ->not->toContain("field('Program'")
+        ->toContain('Pending and Ongoing Submissions')
+        ->toContain('Overdue and Still Unreceived')
+        ->toContain('Submission Comparison')
+        ->toContain('Timeliness Summary')
+        ->toContain('All {tab === \'development\' ? \'Development\' : \'Conservation\'} Report Submissions')
+        ->toContain('How Days Are Counted')
+        ->toContain('source_url')
+        ->toContain('BarChart')
+        ->toContain('YAxis domain={[0, 100]}');
+});
+
+test('dashboard tabs map to canonical PA and ENGP projections and preserve filters', function (): void {
+    $admin = dashboardGlobalUser();
+
+    $this->actingAs($admin)->get(route('dashboard', ['tab' => 'development', 'year' => 2026, 'frequency' => 'Monthly']))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.tab', 'development')
+            ->where('dashboard.filters.program', 'engp')
+            ->where('dashboard.filters.year', 2026)
+            ->where('dashboard.filters.frequency', 'Monthly'));
+
+    $this->actingAs($admin)->get(route('dashboard', ['tab' => 'invalid', 'year' => 2026]))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.tab', 'conservation')
+            ->where('dashboard.filters.program', 'pa'));
+});
+
+test('development office options come from authorized active CENRO master data without reports', function (): void {
+    $admin = dashboardGlobalUser();
+
+    $this->actingAs($admin)->get(route('dashboard', ['tab' => 'development', 'year' => 2026]))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.filters.program', 'engp')
+            ->where('dashboard.filterOptions.offices', ['CENRO Baganga', 'CENRO Lupon', 'CENRO Manay', 'CENRO Mati'])
+            ->where('dashboard.programs.0.key', 'engp')
+            ->where('dashboard.programs.0.office_count', 4)
+            ->where('dashboard.programs.0.metrics.pending', 0)
+            ->where('dashboard.programs.0.metrics.in_progress', 0)
+            ->where('dashboard.programs.0.metrics.overdue', 0));
+
+    expect(OrganizationalOffice::query()->where('office_type', 'cenro')->where('is_active', true)->count())->toBe(4);
 });
 
 test('dashboard normalization safely excludes malformed deadlines while preserving descriptive date conducted text', function () {
@@ -224,7 +264,7 @@ function conservationReport(ProtectedArea $area, User $user, array $overrides = 
     $data = array_merge([
         'workflow_key' => 'regular_pamb',
         'protected_area_id' => $area->id,
-        'target_office' => 'PENRO Davao Oriental',
+        'target_office' => $area->short_name === 'MHRWS' ? 'PENRO Davao Oriental' : 'CENRO Mati',
         'activity_name' => 'Regular PAMB Meetings',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 3',

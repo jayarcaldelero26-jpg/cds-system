@@ -2,20 +2,26 @@
 
 use App\Models\ConservationReportSubmission;
 use App\Models\NonWorkingDay;
+use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
     BusinessCalendarService::forgetCache();
-    $this->user = User::factory()->create(['section' => 'CDS']);
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
     foreach (['technical-reports.view', 'technical-reports.create', 'technical-reports.update', 'technical-reports.delete'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }
-});
+    $this->area = ProtectedArea::create([
+        'name' => 'Conservation Batch Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $officeId = DB::table('organizational_offices')->where('code', 'cenro_mati')->value('id');
+    DB::table('protected_area_office_assignments')->insert(['protected_area_id' => $this->area->id, 'organizational_office_id' => $officeId, 'assignment_type' => 'supervising', 'assigned_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now()]);});
 
 test('the final Conservation workflow batch has its authoritative periods, documents, defaults, and deadline standards', function (string $workflow, string $defaultActivity, array $documents, int $workingDays, string $standard) {
     $registry = app(ConservationReportWorkflowRegistry::class);
@@ -36,6 +42,8 @@ test('the final Conservation workflow batch accepts custom activity text', funct
     Storage::fake('public');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', $workflow), [
+        'protected_area_id' => $this->area->id,
+        'target_office' => 'CENRO Mati',
         'activity_name' => "Custom local activity for {$workflow}",
         'document_type' => $document,
         'reporting_period' => $period,
@@ -74,10 +82,10 @@ test('the final Conservation workflow batch uses standard working days and activ
 
     expect($report->deadline_submission)->toBe($holidayDeadline);
 })->with([
-    ['maintenance_pa_information_system', 'Report', '2026-09-04', '2026-09-07'],
-    ['monitoring_mangroves_corals_seagrass', 'Final Report', '2026-09-16', '2026-09-17'],
-    ['water_quality_monitoring', 'Progress Report', '2026-09-04', '2026-09-07'],
-    ['mpan', 'Final Report', '2026-09-04', '2026-09-07'],
+    ['maintenance_pa_information_system', 'Report', '2026-09-08', '2026-09-09'],
+    ['monitoring_mangroves_corals_seagrass', 'Final Report', '2026-09-22', '2026-09-23'],
+    ['water_quality_monitoring', 'Progress Report', '2026-09-08', '2026-09-09'],
+    ['mpan', 'Final Report', '2026-09-08', '2026-09-09'],
 ]);
 
 test('Maintenance, Water Quality, and MPAN use Standard B thresholds', function (string $workflow, string $document) {
@@ -90,7 +98,7 @@ test('Maintenance, Water Quality, and MPAN use Standard B thresholds', function 
             'activity_name' => 'Custom local activity',
             'document_type' => $document,
             'date_accomplished' => '2026-01-05',
-            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
+            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString(),
         ]);
 
         expect($report->timeliness)->toBe($expected);
@@ -111,7 +119,7 @@ test('Monitoring Mangroves, Corals, Seagrass uses Standard A thresholds', functi
             'activity_name' => 'Custom local activity',
             'document_type' => 'Report',
             'date_accomplished' => '2026-01-05',
-            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString(),
+            'date_received_penro' => $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString(),
         ]);
 
         expect($report->timeliness)->toBe($expected);

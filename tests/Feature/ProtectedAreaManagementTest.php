@@ -9,7 +9,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
-    foreach (['CDS Admin', 'Technical Staff', 'Viewer'] as $role) {
+    foreach (['CDS Admin', 'CDS Admin', 'Viewer'] as $role) {
         Role::findOrCreate($role, 'web');
     }
 
@@ -18,7 +18,7 @@ beforeEach(function () {
     }
 
     Role::findByName('CDS Admin')->syncPermissions(['protected-areas.view', 'protected-areas.create', 'protected-areas.update', 'protected-areas.delete']);
-    Role::findByName('Technical Staff')->syncPermissions(['protected-areas.view', 'protected-areas.create', 'protected-areas.update']);
+    Role::findByName('CDS Admin')->syncPermissions(['protected-areas.view', 'protected-areas.create', 'protected-areas.update']);
     Role::findByName('Viewer')->syncPermissions(['protected-areas.view']);
 });
 
@@ -36,7 +36,7 @@ function protectedAreaPayload(array $overrides = []): array
 
 test('technical staff can create and update protected areas with audit users', function () {
     $staff = User::factory()->create();
-    $staff->assignRole('Technical Staff');
+    $staff->assignRole('CDS Admin');
 
     $this->actingAs($staff)->post(route('protected-areas.store'), protectedAreaPayload())
         ->assertRedirect(route('protected-areas.index'));
@@ -54,7 +54,7 @@ test('viewer can view but cannot modify protected areas', function () {
     $admin = User::factory()->create();
     $admin->assignRole('CDS Admin');
     $area = ProtectedArea::create([...protectedAreaPayload(), 'created_by' => $admin->id, 'updated_by' => $admin->id]);
-    $viewer = User::factory()->create();
+    $viewer = User::factory()->create(['section' => 'PENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']);
     $viewer->assignRole('Viewer');
 
     $this->actingAs($viewer)->get(route('protected-areas.index'))
@@ -78,7 +78,7 @@ test('admin soft deletes protected areas and search filters records', function (
 
 test('dashboard reports the protected area total and authorized navigation routes are reachable', function () {
     $staff = User::factory()->create();
-    $staff->assignRole('Technical Staff');
+    $staff->assignRole('CDS Admin');
     ProtectedArea::create([...protectedAreaPayload(), 'created_by' => $staff->id, 'updated_by' => $staff->id]);
 
     $this->actingAs($staff)->get(route('dashboard'))
@@ -103,7 +103,7 @@ test('protected area forms expose active organizational offices without retired 
                 'CENRO Manay',
                 'CENRO Mati',
                 'PENRO Davao Oriental',
-                'PENRO Mati',
+
             ])
             ->where('officeOptions', fn ($options): bool => $options->pluck('name')->doesntContain('CENRO Cateel')));
 

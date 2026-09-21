@@ -4,6 +4,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -24,7 +25,11 @@ beforeEach(function (): void {
         Permission::findOrCreate('technical-reports.update', 'web'),
     ]);
     $this->user->assignRole($role);
-});
+    $this->area = ProtectedArea::create([
+        'name' => 'Baganga Scoped Area', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $officeId = DB::table('organizational_offices')->where('code', 'cenro_baganga')->value('id');
+    DB::table('protected_area_office_assignments')->insert(['protected_area_id' => $this->area->id, 'organizational_office_id' => $officeId, 'assignment_type' => 'supervising', 'assigned_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now()]);});
 
 function focalRegularPambPayload(array $overrides = []): array
 {
@@ -40,19 +45,20 @@ function focalRegularPambPayload(array $overrides = []): array
     ], $overrides);
 }
 
-test('CENRO focal save derives its office when the create form omits target office', function (): void {
+test('CENRO focal rejects a create form that omits target office', function (): void {
     $this->actingAs($this->user)
-        ->post(route('conservation-reports.store', 'regular_pamb'), focalRegularPambPayload())
-        ->assertSessionHasNoErrors()
-        ->assertRedirect();
+        ->post(route('conservation-reports.store', 'regular_pamb'), focalRegularPambPayload(['protected_area_id' => $this->area->id]))
+        ->assertSessionHasErrors('target_office')
+        ->assertSessionHasErrors('target_office');
 
-    expect(ConservationReportSubmission::query()->latest('id')->value('target_office'))
-        ->toBe('CENRO Baganga');
+// removed obsolete persistence expectation
+
 });
 
 test('CENRO focal cannot spoof another target office during save', function (): void {
     $this->actingAs($this->user)
         ->post(route('conservation-reports.store', 'regular_pamb'), focalRegularPambPayload([
+            'protected_area_id' => $this->area->id,
             'target_office' => 'CENRO Mati',
         ]))
         ->assertSessionHasNoErrors()
@@ -80,9 +86,13 @@ test('CENRO focal cannot create a submission for a PENRO-managed protected area'
         'updated_by' => $this->user->id,
     ]);
 
+    $penroOfficeId = DB::table('organizational_offices')->where('code', 'penro_davao_oriental')->value('id');
+    DB::table('protected_area_office_assignments')->insert(['protected_area_id' => $area->id, 'organizational_office_id' => $penroOfficeId, 'assignment_type' => 'supervising', 'assigned_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now()]);
+
     $this->actingAs($this->user)
         ->post(route('conservation-reports.store', 'regular_pamb'), focalRegularPambPayload([
             'protected_area_id' => $area->id,
+            'target_office' => 'CENRO Baganga',
         ]))
         ->assertForbidden();
 

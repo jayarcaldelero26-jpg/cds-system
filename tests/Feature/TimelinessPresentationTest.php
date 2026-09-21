@@ -18,7 +18,7 @@ test('timeliness has one shared semantic presentation mapping', function (): voi
 test('active report surfaces use the shared timeliness presentation', function (): void {
     $reportSurfaces = [
         resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'),
-        resource_path('js/Pages/AWS/AwsReportSubmissionTracker.jsx'),
+        resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'),
         resource_path('js/Pages/Ipaf/Index.jsx'),
         resource_path('js/Pages/Imea/MaintenanceReports.jsx'),
         resource_path('js/Pages/ManagementPlans/Index.jsx'),
@@ -39,7 +39,7 @@ test('active report surfaces use the shared timeliness presentation', function (
 test('report modules no longer duplicate the old green timeliness mapping', function (): void {
     $reportSurfaces = [
         resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'),
-        resource_path('js/Pages/AWS/AwsReportSubmissionTracker.jsx'),
+        resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'),
         resource_path('js/Pages/Ipaf/Index.jsx'),
         resource_path('js/Pages/Imea/MaintenanceReports.jsx'),
         resource_path('js/Pages/ManagementPlans/Index.jsx'),

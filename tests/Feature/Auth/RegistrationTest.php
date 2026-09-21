@@ -18,7 +18,7 @@ test('new users register as pending and are not authenticated', function () {
     $response = $this->post('/register', [
         'name' => 'Test User',
         'email' => 'test@example.com',
-        'unit_assignment' => 'conservation',
+        'operational_group' => 'cenro',
         'office_designated' => 'CENRO Baganga',
         'section' => 'CENRO_CDS_FOCAL',
         'password' => 'password',
@@ -28,14 +28,14 @@ test('new users register as pending and are not authenticated', function () {
     $this->assertGuest();
     $response->assertRedirect(route('login'));
     $response->assertSessionHas('registration_success', 'Your account has been created successfully and is awaiting administrator approval. You may sign in once your account has been activated.');
-    $this->assertDatabaseHas('users', ['email' => 'test@example.com', 'is_active' => false]);
+    $this->assertDatabaseHas('users', ['email' => 'test@example.com', 'is_approved' => false, 'is_active' => false]);
 });
 
 test('registration success flash is available once on the login page', function () {
     $this->post('/register', [
         'name' => 'Flash Test User',
         'email' => 'flash-test@example.com',
-        'unit_assignment' => 'conservation',
+        'operational_group' => 'cenro',
         'office_designated' => 'CENRO Baganga',
         'section' => 'CENRO_CDS_FOCAL',
         'password' => 'password',
@@ -55,7 +55,7 @@ test('registration accepts the supported user category without assigning access'
     $response = $this->post('/register', [
         'name' => 'Category Test User',
         'email' => $email,
-        'unit_assignment' => $section === 'PAMO' ? 'conservation' : 'development',
+        'operational_group' => $section === 'CENRO_CDS_FOCAL' ? 'cenro' : 'penro',
         'office_designated' => $section === 'PAMO' || str_starts_with($section, 'PENRO_') ? 'PENRO Davao Oriental' : 'CENRO Baganga',
         'section' => $section,
         ...($section === 'PAMO' ? ['protected_area_id' => null] : []),
@@ -69,6 +69,7 @@ test('registration accepts the supported user category without assigning access'
     $user = User::where('email', $email)->firstOrFail();
 
     expect($user->section)->toBe($section)
+        ->and($user->is_approved)->toBeFalse()
         ->and($user->is_active)->toBeFalse()
         ->and($user->roles()->pluck('name')->all())->toBe(['no_role']);
 })->with(['CENRO_CDS_FOCAL', 'PENRO_CDS_FOCAL']);

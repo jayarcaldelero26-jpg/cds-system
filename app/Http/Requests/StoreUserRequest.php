@@ -2,10 +2,10 @@
 
 namespace App\Http\Requests;
 
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
-use App\Services\Authorization\OrganizationalAccessService;
 
 class StoreUserRequest extends FormRequest
 {
@@ -19,18 +19,18 @@ class StoreUserRequest extends FormRequest
         return $this->user()?->can('create', \App\Models\User::class) ?? false;
     }
 
-    /**
-     * @return array<string, array<int, mixed>>
-     */
     public function rules(): array
     {
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'lowercase', 'email', 'max:255', Rule::unique('users', 'email')],
-            'office_designated' => ['required', 'string', 'max:255'], // 🚀 Gidugang validation
-            'section' => ['required', 'string', 'in:CENRO_RECORDS,CENRO_CDS_CHIEF,CENRO_CDS_FOCAL,PENRO_RECORDS,PENRO_CDS_CHIEF,PENRO_CDS_FOCAL,PAMO'],
-            'unit_assignment' => ['required', 'string', 'in:conservation,development'],
-            'protected_area_id' => ['nullable', 'integer', 'exists:protected_areas,id', 'required_if:section,PAMO'],
+            'account_role' => ['sometimes', 'required', 'string', Rule::in([OrganizationalAccessService::ACCOUNT_ROLE_USER, OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN])],
+            'role' => ['sometimes', 'nullable', 'string', Rule::in(['no_role'])],
+            'operational_group' => ['required', 'string', 'in:cenro,penro'],
+            'office_designated' => ['nullable', 'string', 'max:255'],
+            'section' => ['required', 'string', 'in:CENRO_RECORDS,PENRO_RECORDS,OFFICE_OF_THE_PENRO,PENRO_TSD_CHIEF,CENRO_CDS_CHIEF,CENRO_CDS_FOCAL,PENRO_CDS_CHIEF,PENRO_CDS_FOCAL'],
+            'unit_assignment' => ['nullable', 'string', 'in:conservation,development'],
+            'protected_area_id' => ['nullable', 'integer', 'exists:protected_areas,id'],
             'password' => ['required', 'string', 'confirmed', Password::defaults()],
             'is_active' => ['sometimes', 'boolean'],
         ];
@@ -40,9 +40,19 @@ class StoreUserRequest extends FormRequest
     {
         $validator->after(function ($validator): void {
             try {
-                app(OrganizationalAccessService::class)->validateAssignment($this->input('unit_assignment'), $this->input('section'), $this->input('office_designated'), $this->input('protected_area_id'));
+                $data = app(OrganizationalAccessService::class)->normalizeAssignment($this->all());
+                app(OrganizationalAccessService::class)->validateAssignment(
+                    $data['unit_assignment'] ?? null,
+                    $data['section'] ?? null,
+                    $data['office_designated'] ?? null,
+                    $data['protected_area_id'] ?? null,
+                    null,
+                    $data['operational_group'] ?? null,
+                );
             } catch (\Illuminate\Validation\ValidationException $exception) {
-                foreach ($exception->errors() as $key => $messages) foreach ($messages as $message) $validator->errors()->add($key, $message);
+                foreach ($exception->errors() as $key => $messages) {
+                    foreach ($messages as $message) $validator->errors()->add($key, $message);
+                }
             }
         });
     }

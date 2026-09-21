@@ -200,10 +200,10 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
     }
   };
 
-  const select = (id, label, options) =>
+  const select = (id, label, options, required = false) =>
   <div className="block text-sm font-medium text-gray-700 dark:text-gray-200">
 
-    <FloatingSelect label={label} id={id} value={form.data[id]} onChange={(event) => form.setData(id, event.target.value)}>
+    <FloatingSelect label={label} id={id} value={form.data[id]} onChange={(event) => form.setData(id, event.target.value)} required={required}>
                 {options}
             </FloatingSelect>
             {form.errors[id] && <p className="mt-1.5 text-sm font-normal text-red-700 dark:text-red-300">{form.errors[id]}</p>}
@@ -239,7 +239,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                             {/* Category Dropdown */}
                             {select('category', 'Category',
         <><option value="">Select a category</option><option>Natural Park</option><option>Protected Landscape</option><option>Wildlife Sanctuary</option><option>Natural Monument</option><option>Other</option></>
-        )}
+        , true)}
 
                             {/* Geographic coverage */}
                             <div className="sm:col-span-2 lg:col-span-3">
@@ -268,7 +268,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                         {/* Provinces */}
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-                                                Provinces
+                                                Provinces <span className="text-red-600">*</span>
                                             </label>
 
                                             <div className="mt-1.5 flex gap-2">
@@ -339,7 +339,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                         {/* Municipalities / Cities */}
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
-                                                Municipalities / Cities
+                                                Municipalities / Cities <span className="text-red-600">*</span>
                                             </label>
 
                                             <div className="mt-1.5 flex gap-2">
@@ -480,14 +480,14 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                             <FormField id="pasu" label="PASu" value={form.data.pasu} onChange={(event) => form.setData('pasu', event.target.value)} error={form.errors.pasu} />
                             {select('supervising_office_id', 'Supervising Office',
                                 <><option value="">Select the authoritative office</option>{officeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}{office.office_type === 'penro' ? ' (PENRO-managed)' : ''}</option>)}</>
-                            )}
+                            , true)}
                             <FormField id="year_established" label="Year Established" type="number" min="1800" max={new Date().getFullYear() + 10} value={form.data.year_established} onChange={(event) => form.setData('year_established', event.target.value)} error={form.errors.year_established} />
                             <FormField id="legal_basis" label="Legal Basis" value={form.data.legal_basis} onChange={(event) => form.setData('legal_basis', event.target.value)} error={form.errors.legal_basis} className="sm:col-span-2" />
 
                             {/* Status Dropdown */}
                             {select('status', 'Status',
         <><option>Proposed</option><option>Active</option><option>Inactive</option></>
-        )}
+        , true)}
                         </div>
                     </FormSection>
 
@@ -548,7 +548,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
           <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-6">
             <div>
               <h1 id="create-protected-area-title" className="text-base font-bold text-gray-900 dark:text-white sm:text-lg">Add Protected Area</h1>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a protected area to the PENRO Mati master database.</p>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a protected area to the PENRO Davao Oriental master database.</p>
             </div>
             <button type="button" onClick={onClose} className="rounded-lg p-1 text-2xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="Close create form">×</button>
           </div>
@@ -610,7 +610,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
     <AuthenticatedLayout title={title}>
             <PageHeader
         title={title}
-        description="Add a protected area to the PENRO Mati master database."
+        description="Add a protected area to the PENRO Davao Oriental master database."
         actions={
         <Link href="/protected-areas" className="text-sm font-semibold text-white hover:text-green-200 transition">
                         ← Back to protected areas

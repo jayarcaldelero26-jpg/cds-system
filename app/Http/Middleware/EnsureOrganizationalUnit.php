@@ -20,7 +20,8 @@ final class EnsureOrganizationalUnit
         }
 
         if (! $unit || ! $request->user()) return $next($request);
-        abort_unless(app(OrganizationalAccessService::class)->canAccessUnit($request->user(), $unit), 403);
+        $organization = app(OrganizationalAccessService::class);
+        abort_unless($organization->canBrowseModuleUnit($request->user(), $unit), 403);
         return $next($request);
     }
 }

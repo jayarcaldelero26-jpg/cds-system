@@ -33,7 +33,9 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Protected business documents must only be served through
+            // source-aware, authorized application controllers.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

@@ -2,7 +2,7 @@ import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect,
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
 import MapView from './Components/MapView';
-import { Head, Link, useForm } from '@inertiajs/react';
+import { Head, Link, router, useForm } from '@inertiajs/react';
 import { normalizeSpatialFile } from '@/Utils/spatialUpload';
 import DatePicker from '@/Components/DatePicker';
 
@@ -16,6 +16,7 @@ export default function BamsIndex({
   const canCreate = Boolean(auth?.canCreateBams);
   const canDelete = Boolean(auth?.canDeleteBams);
   const canManageSpatial = Boolean(auth?.canManageBamsSpatial);
+  const fieldError = (errors, field) => errors[field] ? <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{errors[field]}</p> : null;
 
   // States for delete confirmations and selection.
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -95,9 +96,15 @@ export default function BamsIndex({
   };
 
   const confirmBulkDelete = () => {
-    setShowBulkDeleteConfirm(false);
-    setSelectedIds([]);
+    if (selectedIds.length === 0) return;
 
+    router.post(route('bams.bulk-destroy'), { ids: selectedIds }, {
+      preserveScroll: true,
+      onSuccess: () => {
+        setShowBulkDeleteConfirm(false);
+        setSelectedIds([]);
+      },
+    });
   };
 
   return (
@@ -264,10 +271,12 @@ export default function BamsIndex({
 
                                 {canDelete && bamsRecords.length > 0 &&
               <button
+                type="button"
                 onClick={() => setShowBulkDeleteConfirm(true)}
-                className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-xs font-bold transition">
+                disabled={selectedIds.length === 0}
+                className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50">
 
-                                        🗑️ Delete Selected
+                                        🗑️ Delete Selected ({selectedIds.length})
                                     </button>
               }
                             </div>
@@ -277,6 +286,13 @@ export default function BamsIndex({
 
                                     <thead className="bg-green-800 text-white uppercase font-bold text-center">
                                         <tr>
+                                            {canDelete && <th className="border border-gray-300 dark:border-gray-700 p-3 w-12">
+                                                <input
+                                                  type="checkbox"
+                                                  aria-label="Select all BAMS flora records"
+                                                  checked={bamsRecords.length > 0 && selectedIds.length === bamsRecords.length}
+                                                  onChange={(event) => setSelectedIds(event.target.checked ? bamsRecords.map((record) => record.id) : [])} />
+                                            </th>}
                                             <th className="border border-gray-300 dark:border-gray-700 p-3 w-16">
                                                 NO.
                                             </th>
@@ -317,6 +333,13 @@ export default function BamsIndex({
                   bamsRecords.map((record, index) =>
                   <tr key={record.id || index}>
 
+                                                    {canDelete && <td className="border border-gray-300 p-3 text-center">
+                                                        <input
+                                                          type="checkbox"
+                                                          aria-label={`Select BAMS flora record ${record.species_code}`}
+                                                          checked={selectedIds.includes(record.id)}
+                                                          onChange={(event) => setSelectedIds((ids) => event.target.checked ? [...ids, record.id] : ids.filter((id) => id !== record.id))} />
+                                                    </td>}
                                                     <td className="border border-gray-300 p-3 text-center">
                                                         {index + 1}
                                                     </td>
@@ -417,6 +440,7 @@ export default function BamsIndex({
                                                     </option>
                       )}
                                             </FloatingSelect>
+                                            {fieldError(form.errors, 'protected_area_id')}
                                         </div>
 
                                         <div>
@@ -487,7 +511,8 @@ export default function BamsIndex({
                         'quadrat_no',
                         e.target.value
                       )
-                      } />
+                      } required />
+                      {fieldError(form.errors, 'quadrat_no')}
 
 
                                             </div>
@@ -678,7 +703,8 @@ export default function BamsIndex({
                     )
                     }
 
-                    placeholder="e.g. Anonggo" />
+                    placeholder="e.g. Anonggo" required />
+                    {fieldError(form.errors, 'species_code')}
 
                                         </div>
 
@@ -697,7 +723,8 @@ export default function BamsIndex({
                     )
                     }
 
-                    placeholder="18" />
+                    placeholder="18" required />
+                    {fieldError(form.errors, 'dbh')}
 
                                         </div>
 
@@ -962,11 +989,12 @@ export default function BamsIndex({
                                             </option>
                   )}
                                     </FloatingSelect>
+                                    {fieldError(spatialForm.errors, 'protected_area_id')}
                                 </div>
 
                                 <div>
                                     <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-1">
-                                         Spatial Layer (GeoJSON or Shapefile ZIP)
+                                         Spatial Layer (GeoJSON or Shapefile ZIP) <span className="text-red-600">*</span>
                                     </label>
 
                                     <div className="flex items-center gap-3 border border-gray-200 dark:border-gray-700 rounded-xl p-2 bg-gray-50 dark:bg-gray-900">
@@ -1000,6 +1028,7 @@ export default function BamsIndex({
                                     <p className="text-[11px] text-gray-400 mt-1.5">
                                         Supported formats: GeoJSON (.geojson, .json) so they can be read directly by the system.
                                     </p>
+                                    {fieldError(spatialForm.errors, 'spatial_file')}
                                 </div>
 
                                 <button

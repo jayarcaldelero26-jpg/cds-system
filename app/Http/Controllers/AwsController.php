@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Aws;
+use App\Models\AwsObservation;
 use App\Models\ProtectedArea;
 use Carbon\CarbonImmutable;
 use App\Services\Attachments\ProtectedAttachmentService;
@@ -16,6 +17,7 @@ use App\Services\AwsProtectedAreaScope;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Inertia\Inertia;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -37,12 +39,15 @@ class AwsController extends Controller
         private readonly AwsWeatherConditionService $weather,
         private readonly AwsImportRowReader $importRows,
     ) {}
+
+    public function dataIndex(Request $request)
+    {
+        $request->merge(['aws_data' => true, 'tab' => 'analytics']);
+        return $this->index($request);
+    }
+
     public function index(Request $request)
     {
-        if ($request->filled('protected_area_id')) {
-            $this->awsScope->assertCanAccess($request->user(), $request->input('protected_area_id'));
-        }
-
         [$summaryMode, $summaryPeriod, $summaryProtectedAreaId, $summaryPeriodLabel, $summaryCaption] = $this->summarySelection($request);
         [$summaryStart, $summaryEnd] = $this->summaryBounds($summaryMode, $summaryPeriod);
 
@@ -64,22 +69,36 @@ class AwsController extends Controller
                 });
             })
             ->when($request->filled('report_semester'), fn ($query) => $query->where('semester', $request->input('report_semester')))
-            ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')));
+            ->when($request->filled('reporting_period'), fn ($query) => $query->where('document_type', $request->input('reporting_period')))
+            ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', (int) $request->input('quarter')))
+            ->when($request->filled('report_document_type'), fn ($query) => $query->where('document_type', $request->input('report_document_type')))
+            ->when($request->filled('report_year'), fn ($query) => $query->where('reporting_year', (int) $request->input('report_year')))
+            ->when($request->filled('report_quarter'), fn ($query) => $query->where('quarter', (int) $request->input('report_quarter')))
+            ->when($request->filled('report_office'), fn ($query) => $query->where('target_office', $request->input('report_office')))
+            ->when($request->filled('report_status'), function ($query) use ($request): void {
+                $status = (string) $request->input('report_status');
+                $query->whereIn('id', Aws::query()->get()->filter(fn (Aws $report) => $report->submission_status === $status)->pluck('id'));
+            });
 
         // 2. RAW DATA QUERY: Kuhaon lang kadtong mga naay timestamps (mga imported CSV data)
-        $rawQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->latest();
+        $legacyRawQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNotNull('timestamps')->whereNotExists(fn ($query) => $query->select(DB::raw(1))->from('aws_observations')->whereColumn('aws_observations.legacy_aws_id', 'aws.id'))->latest();
+        $observationQuery = $this->awsScope->query(AwsObservation::with('protectedArea'), $request->user())->latest('start_date');
 
         if ($summaryProtectedAreaId !== null) {
-            $rawQuery->where('protected_area_id', $summaryProtectedAreaId);
+            $legacyRawQuery->where('protected_area_id', $summaryProtectedAreaId);
+            $observationQuery->where('protected_area_id', $summaryProtectedAreaId);
         }
-        $rawQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
+        $legacyRawQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
+        $observationQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
 
         // 3. CHART DATA QUERY: analytics keeps its own quick/custom range controls.
-        $chartQuery = $this->awsScope->query(Aws::query(), $request->user())->whereNotNull('timestamps');
+        $legacyChartQuery = $this->awsScope->query(Aws::query(), $request->user())->whereNotNull('timestamps')->whereNotExists(fn ($query) => $query->select(DB::raw(1))->from('aws_observations')->whereColumn('aws_observations.legacy_aws_id', 'aws.id'));
+        $observationChartQuery = $this->awsScope->query(AwsObservation::query(), $request->user());
 
-        if ($request->input('tab') === 'analytics') {
+        if ($request->input('tab') === 'analytics' || $request->input('view') === 'analytics') {
             if ($request->filled('protected_area_id')) {
-                $chartQuery->where('protected_area_id', (int) $request->input('protected_area_id'));
+                $legacyChartQuery->where('protected_area_id', (int) $request->input('protected_area_id'));
+                $observationChartQuery->where('protected_area_id', (int) $request->input('protected_area_id'));
             }
 
             $graphRange = (int) $request->input('graph_range', 30);
@@ -88,60 +107,82 @@ class AwsController extends Controller
             }
 
             if ($request->filled('graph_start_date') && $request->filled('graph_end_date')) {
-                $chartQuery->whereBetween('start_date', [
+                $legacyChartQuery->whereBetween('start_date', [
                     $request->input('graph_start_date'),
                     $request->input('graph_end_date'),
                 ]);
+                $observationChartQuery->whereBetween('start_date', [$request->input('graph_start_date'), $request->input('graph_end_date')]);
             } elseif ($request->filled('protected_area_id')) {
-                $latestDate = $this->awsScope->query(Aws::query(), $request->user())
+                $latestLegacyDate = $this->awsScope->query(Aws::query(), $request->user())
                     ->whereNotNull('timestamps')
                     ->where('protected_area_id', (int) $request->input('protected_area_id'))
                     ->max('start_date');
+                $latestObservationDate = $this->awsScope->query(AwsObservation::query(), $request->user())
+                    ->where('protected_area_id', (int) $request->input('protected_area_id'))
+                    ->max('start_date');
+                $latestDate = collect([$latestLegacyDate, $latestObservationDate])->filter()->max();
 
                 if ($latestDate) {
-                    $chartQuery->whereBetween('start_date', [
+                    $legacyChartQuery->whereBetween('start_date', [
                         CarbonImmutable::parse($latestDate)->subDays($graphRange - 1)->toDateString(),
                         CarbonImmutable::parse($latestDate)->toDateString(),
                     ]);
+                    $observationChartQuery->whereBetween('start_date', [CarbonImmutable::parse($latestDate)->subDays($graphRange - 1)->toDateString(), CarbonImmutable::parse($latestDate)->toDateString()]);
                 }
             } else {
-                $latestDates = $this->awsScope->query(Aws::query(), $request->user())
+                $latestLegacyDates = $this->awsScope->query(Aws::query(), $request->user())
                     ->whereNotNull('timestamps')
                     ->whereNotNull('protected_area_id')
                     ->selectRaw('protected_area_id, MAX(start_date) as latest_date')
                     ->groupBy('protected_area_id')
                     ->pluck('latest_date');
+                $latestObservationDates = $this->awsScope->query(AwsObservation::query(), $request->user())
+                    ->whereNotNull('protected_area_id')
+                    ->selectRaw('protected_area_id, MAX(start_date) as latest_date')
+                    ->groupBy('protected_area_id')
+                    ->pluck('latest_date');
+                $latestDates = $latestLegacyDates->merge($latestObservationDates);
 
                 if ($latestDates->isNotEmpty()) {
                     $commonEndDate = CarbonImmutable::parse($latestDates->min());
-                    $chartQuery->whereBetween('start_date', [
+                    $legacyChartQuery->whereBetween('start_date', [
                         $commonEndDate->subDays($graphRange - 1)->toDateString(),
                         $commonEndDate->toDateString(),
                     ]);
+                    $observationChartQuery->whereBetween('start_date', [$commonEndDate->subDays($graphRange - 1)->toDateString(), $commonEndDate->toDateString()]);
                 }
             }
         } else {
             if ($summaryProtectedAreaId !== null) {
-                $chartQuery->where('protected_area_id', $summaryProtectedAreaId);
+                $legacyChartQuery->where('protected_area_id', $summaryProtectedAreaId);
+                $observationChartQuery->where('protected_area_id', $summaryProtectedAreaId);
             }
-            $chartQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
+            $legacyChartQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
+            $observationChartQuery->whereBetween('start_date', [$summaryStart->toDateString(), $summaryEnd->toDateString()]);
         }
 
-        $chartData = $chartQuery
+        $chartData = $legacyChartQuery
             ->orderBy('start_date', 'asc')
             ->orderBy('protected_area_id', 'asc')
-            ->get();
+            ->get()
+            ->concat($observationChartQuery->orderBy('start_date', 'asc')->orderBy('protected_area_id', 'asc')->get())
+            ->sortBy(fn ($record) => [$record->start_date?->toDateString() ?? '', (int) $record->protected_area_id])
+            ->values();
+
+        $rawPaginator = $this->weatherPaginator($legacyRawQuery, $observationQuery, $request);
 
         $summaryRows = $this->monthlySummary->summarizePeriod($request->user(), $summaryMode, $summaryPeriod, $summaryProtectedAreaId);
 
 
         return Inertia::render('AWS/Aws', [
             'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString()->through(fn (Aws $report) => $this->reportData($report)),
-            'rawRecords'     => $rawQuery->paginate(15, ['*'], 'raw_page')->withQueryString()->through(fn (Aws $record) => $this->rawData($record)),
+            'rawRecords'     => $rawPaginator->through(fn ($record) => $this->rawData($record)),
             'chartRecords'   => $chartData,
             'protectedAreas' => $this->awsScope->options($request->user()),
+            'organizationalOffices' => $this->organization->officeOptions(),
+            'dataOnly' => $request->boolean('aws_data'),
             'allProtectedAreasMode' => $summaryProtectedAreaId === null,
-            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'report_document_type', 'graph_start_date', 'graph_end_date', 'graph_range']),
+            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'reporting_period', 'quarter', 'report_document_type', 'report_year', 'report_quarter', 'report_office', 'report_status', 'graph_start_date', 'graph_end_date', 'graph_range']),
             'monthlySummary' => $summaryRows->values()->all(),
             'monthlyFilters' => [
                 'mode' => $summaryMode,
@@ -316,9 +357,16 @@ class AwsController extends Controller
     }
     public function store(Request $request)
     {
+        $this->normalizeReportInput($request);
+        if (! $request->filled('document_type') && $request->filled('reporting_period')) {
+            $request->merge(['document_type' => $request->input('reporting_period')]);
+        }
         $validated = $request->validate($this->validationRules(fileRequired: true), [
             'report_file.required' => 'A report attachment / MOV is required.',
         ]);
+        $validated = $this->deriveCanonicalPeriod($validated);
+        $this->validateMonitoringPeriod($validated);
+        $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
         $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id']);
         $storedPath = null;
 
@@ -344,7 +392,15 @@ class AwsController extends Controller
     {
         $aws = $this->authorizedRecord($request, $aws->id);
         abort_unless($aws->timestamps === null, 404);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($aws);
+        $this->normalizeReportInput($request);
+        if (! $request->filled('document_type') && $request->filled('reporting_period')) {
+            $request->merge(['document_type' => $request->input('reporting_period')]);
+        }
         $validated = $request->validate($this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type));
+        $validated = $this->deriveCanonicalPeriod($validated, $aws);
+        $this->validateMonitoringPeriod($validated);
+        $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
         $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
         if (! $request->hasFile('report_file') && ! app(ComplianceMovService::class)->hasValidSingleFile($aws, 'report_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['report_file' => ComplianceMovService::MESSAGE]);
@@ -376,6 +432,7 @@ class AwsController extends Controller
     public function destroy(Aws $aws)
     {
         $aws = $this->authorizedRecord(request(), $aws->id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($aws);
         $path = $aws->report_file_path;
         DB::transaction(fn () => $aws->delete());
         if ($path) $this->attachments->delete($path);
@@ -399,6 +456,14 @@ class AwsController extends Controller
         $records = $this->awsScope->query(Aws::query(), $request->user())
             ->whereIn('id', $validated['ids'])->get();
         abort_unless($records->count() === count($validated['ids']), 403);
+
+        // Validate the complete selection before deleting anything. This keeps
+        // a bulk request atomic when one submitted report has reached its
+        // terminal routing state.
+        $tracking = app(\App\Services\SubmissionTracking\SubmissionTrackingService::class);
+        foreach ($records as $record) {
+            $tracking->assertMutable($record);
+        }
 
         DB::transaction(function () use ($validated, $request) {
             $this->awsScope->query(Aws::query(), $request->user())
@@ -570,7 +635,7 @@ class AwsController extends Controller
 
                 $cleanDecimal = function($val) {
                     $val = trim($val ?? '');
-                    if ($val === '' || strtoupper($val) === 'N/A' || $val === '—' || $val === '–') {
+                    if ($val === '' || strtoupper($val) === 'N/A' || $val === 'â€”' || $val === 'â€“') {
                         return null;
                     }
                     $val = str_replace([","], "", $val);
@@ -596,11 +661,11 @@ class AwsController extends Controller
                 $appendIndexed($rowsByDate[$dateKey]['relative_humidity'], $relativeHumidityIndex);
                 $appendIndexed($rowsByDate[$dateKey]['atmospheric_pressure'], $pressureIndex);
 
-                // Port 2 / ECRN-100 — hidden rainfall reference.
+                // Port 2 / ECRN-100 â€” hidden rainfall reference.
                 $appendIndexed($rowsByDate[$dateKey]['port2_precipitation'], $port2PrecipIndex);
                 $appendIndexed($rowsByDate[$dateKey]['port2_max_precipitation_rate'], $port2MaxRateIndex);
 
-                // Port 3 / TEROS 12 — hidden soil-condition context.
+                // Port 3 / TEROS 12 â€” hidden soil-condition context.
                 $appendIndexed($rowsByDate[$dateKey]['port3_water_content'], $port3WaterIndex);
                 $appendIndexed($rowsByDate[$dateKey]['port3_soil_temperature'], $port3SoilTempIndex);
                 $appendIndexed($rowsByDate[$dateKey]['port3_ec'], $port3EcIndex);
@@ -618,6 +683,11 @@ class AwsController extends Controller
                 ->whereNotNull('timestamps')
                 ->pluck('start_date')
                 ->toArray();
+            $existingDates = array_unique(array_merge($existingDates, $this->awsScope->query(AwsObservation::query(), $request->user())
+                ->where('protected_area_id', $request->protected_area_id)
+                ->whereIn('start_date', $dates)
+                ->pluck('start_date')
+                ->toArray()));
 
             if (!empty($existingDates)) {
                 $totalExisting = count($existingDates);
@@ -635,8 +705,8 @@ class AwsController extends Controller
             }
             // ------------------------------------
 
-            // Wind direction is circular data. Example: 359° and 1° average to 0° (North),
-            // not 180°. Use circular mean before converting to the compass label.
+            // Wind direction is circular data. Example: 359Â° and 1Â° average to 0Â° (North),
+            // not 180Â°. Use circular mean before converting to the compass label.
             $circularMeanDegrees = function(array $degrees): ?float {
                 if (empty($degrees)) {
                     return null;
@@ -669,7 +739,7 @@ class AwsController extends Controller
             };
 
             $degreesToCompass = function($deg) {
-                if ($deg === null) return '—';
+                if ($deg === null) return 'â€”';
                 $deg = fmod((float)$deg, 360);
                 if ($deg < 0) $deg += 360;
                 $directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW', 'N'];
@@ -756,7 +826,7 @@ class AwsController extends Controller
                     round(($observationCount / $expectedObservations) * 100, 1)
                 );
 
-                $awsRecord = Aws::create([
+                $awsRecord = AwsObservation::create([
                     'protected_area_id'    => $request->protected_area_id,
                     'station_name'         => 'AWS Weather Station (Zentra Config)',
                     'location'             => 'Protected Area Station',
@@ -817,20 +887,81 @@ class AwsController extends Controller
 
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
-            'station_name' => ['required', 'string', 'max:255'],
-            'location' => ['required', 'string', 'max:255'],
-            'report_period_type' => ['required', 'string', 'in:Monthly,Quarterly,Semestral,Daily'],
+            'station_name' => ['nullable', 'string', 'max:255'],
+            'location' => ['nullable', 'string', 'max:255'],
+            'target_office' => ['required', 'string', 'max:255'],
+            'reporting_year' => ['nullable', 'integer', 'between:2000,2100'],
+            'quarter' => ['nullable', 'integer', 'between:1,4'],
+            'monitoring_period_start' => ['nullable', 'date'],
+            'monitoring_period_end' => ['nullable', 'date', 'after_or_equal:monitoring_period_start'],
+            'reporting_period' => ['nullable', 'string', 'max:255'],
+            'report_period_type' => ['nullable', 'string', 'in:Monthly,Quarterly,Semestral'],
             'activity_name' => ['nullable', 'string', 'max:255'],
-            'document_type' => ['required', 'string', Rule::in($documentTypes)],
-            'semester' => ['required', Rule::in(['1st Semester', '2nd Semester'])],
+            'document_type' => ['required', 'string', Rule::in([...$documentTypes, 'Final Report (1-15)', 'Final Report (16-30)', 'Final Report (16-28)', 'First-half month report', 'Second-half month report'])],
+            'semester' => ['nullable', Rule::in(['1st Semester', '2nd Semester'])],
             'date_conducted' => ['nullable', 'string', 'max:255'],
             'date_accomplished' => ['nullable', 'date'],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],
-            'status' => ['required', 'string', 'in:Active,Maintenance,Inactive,Approve,Pending,Under Maintenance'],
+            'status' => ['nullable', 'string', 'in:Active,Maintenance,Inactive,Approve,Pending,Under Maintenance'],
             'recommendation_remarks' => ['nullable', 'string'],
             'report_file' => [$fileRequired ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx', 'max:10240'],
         ];
+    }
+
+    private function normalizeReportInput(Request $request): void
+    {
+        if ($request->has('remarks') && ! $request->has('recommendation_remarks')) {
+            $request->merge(['recommendation_remarks' => $request->input('remarks')]);
+        }
+
+        $request->merge([
+            'activity_name' => $request->input('activity_name') ?: 'Monitoring and Maintenance of AWS',
+            'station_name' => $request->input('station_name') ?: 'Automated Weather Station',
+            'location' => $request->input('location') ?: ($request->input('target_office') ?: 'Protected Area'),
+            'report_period_type' => $request->input('report_period_type') ?: 'Monthly',
+            'status' => $request->input('status') ?: 'Approve',
+        ]);
+    }
+
+    /** @param array<string, mixed> $validated */
+    private function deriveCanonicalPeriod(array $validated, ?Aws $existing = null): array
+    {
+        $start = $validated['monitoring_period_start'] ?? $existing?->monitoring_period_start;
+        $end = $validated['monitoring_period_end'] ?? $existing?->monitoring_period_end;
+        $sourceDate = $validated['date_conducted'] ?? $existing?->date_conducted;
+
+        if ((! $start || ! $end) && is_string($sourceDate) && preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($sourceDate))) {
+            $start = $end = trim($sourceDate);
+        }
+
+        if (! $start && $existing?->monitoring_period_start) $start = $existing->monitoring_period_start;
+        if (! $end && $start) $end = $start;
+        if ($start && $end) {
+            $startDate = CarbonImmutable::parse($start);
+            $endDate = CarbonImmutable::parse($end);
+            $validated['monitoring_period_start'] = $startDate->toDateString();
+            $validated['monitoring_period_end'] = $endDate->toDateString();
+            $validated['reporting_year'] = $startDate->year;
+            $validated['quarter'] = (int) ceil($startDate->month / 3);
+        }
+
+        if (empty($validated['monitoring_period_start']) || empty($validated['monitoring_period_end'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'date_conducted' => 'Date Conducted is required to establish the AWS reporting period.',
+            ]);
+        }
+
+        return $validated;
+    }
+
+    private function validateMonitoringPeriod(array $validated): void
+    {
+        $start = CarbonImmutable::parse($validated['monitoring_period_start']);
+        $end = CarbonImmutable::parse($validated['monitoring_period_end']);
+        abort_unless($start->year === (int) $validated['reporting_year'] && $end->year === (int) $validated['reporting_year'], 422, 'The monitoring period must belong to the reporting year.');
+        $quarter = (int) $validated['quarter'];
+        abort_unless((int) ceil($start->month / 3) === $quarter && (int) ceil($end->month / 3) === $quarter, 422, 'The monitoring period must fall within the selected quarter.');
     }
 
     private function reportData(Aws $report): array
@@ -840,6 +971,8 @@ class AwsController extends Controller
         return [
             ...collect($report->toArray())->except(['report_file_path', 'report_file_name'])->all(),
             'protected_area_name' => $report->protectedArea?->name,
+            'period_label' => $this->reportingPeriodLabel($report),
+            'reporting_period' => $report->document_type ?: $report->report_period_type,
             'document_type' => $report->document_type ?: $report->report_period_type,
             'date_accomplished' => $report->date_accomplished?->toDateString(),
             'date_report_released_cenro' => $report->date_report_released_cenro?->toDateString(),
@@ -851,11 +984,38 @@ class AwsController extends Controller
         ];
     }
 
+    private function reportingPeriodLabel(Aws $report): string
+    {
+        if (! $report->monitoring_period_start || ! $report->monitoring_period_end) return $report->quarter ? 'Q'.$report->quarter.' · '.($report->reporting_year ?: '—') : '—';
+        $start = CarbonImmutable::parse($report->monitoring_period_start);
+        $end = CarbonImmutable::parse($report->monitoring_period_end);
+        $dash = "\u{2013}";
+        $range = $start->format('F j').($start->toDateString() === $end->toDateString() ? '' : $dash.$end->format('F j')).', '.$end->year;
+        return 'Q'.($report->quarter ?: '—').' · '.$range;
+    }
+
     private function rawData(Aws $record): array
     {
         return collect($record->toArray())
             ->except(['report_file_path', 'report_file_name'])
             ->put('report_file', $this->attachments->descriptor('aws', $record, 'report_file'))
             ->all();
+    }
+
+    private function weatherPaginator($legacyQuery, $observationQuery, Request $request): LengthAwarePaginator
+    {
+        $page = max(1, (int) $request->input('raw_page', 1));
+        $perPage = 15;
+        $rows = $legacyQuery->get()->concat($observationQuery->get())
+            ->sortByDesc(fn ($record) => $record->start_date?->toDateString() ?? '')
+            ->values();
+
+        return new LengthAwarePaginator(
+            $rows->forPage($page, $perPage)->values(),
+            $rows->count(),
+            $perPage,
+            $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        );
     }
 }

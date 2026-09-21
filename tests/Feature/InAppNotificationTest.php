@@ -4,13 +4,13 @@ use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ProtectedArea;
-use App\Models\OrganizationalOffice;
-use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use App\Notifications\EdatsInAppNotification;
 use App\Services\Notifications\EdatsInAppNotificationService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Carbon\CarbonImmutable;
 use Spatie\Permission\Models\Permission;
 
@@ -88,17 +88,17 @@ test('submission tracking records routing dates without creating bell notificati
 });
 
 test('MHRWS bypasses CENRO routing and ENGP never generates regional endorsement routing', function () {
+    $engpActor = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
     $mhrws = notificationConservationReport(notificationProtectedArea('Mt. Hamiguitan Range Wildlife Sanctuary', $this->user, 'MHRWS'), $this->user);
     $engp = notificationEngpReport($this->user, ['workflow_key' => 'cbep']);
     $tracking = app(SubmissionTrackingService::class);
 
     $tracking->transition('conservation', $mhrws->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-10', $this->user->id);
-    $tracking->transition('engp', $engp->id, SubmissionTrackingService::CENRO_RELEASE, '2026-08-10', $this->user->id);
-    $tracking->transition('engp', $engp->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-11', $this->user->id);
+    $tracking->transition('engp', $engp->id, 'forward_to_cenro_chief', '2026-08-10', $engpActor->id);
 
     expect($this->user->notifications()->count())->toBe(0)
         ->and($tracking->queues()[SubmissionTrackingService::CENRO_RELEASE]->where('source_id', $mhrws->id))->toBeEmpty()
-        ->and($engp->fresh()->date_received_penro?->toDateString())->toBe('2026-08-11');
+        ->and($engp->fresh()->date_received_penro)->toBeNull();
 });
 
 test('notification routes do not allow a user to read another users notification', function () {
@@ -178,58 +178,34 @@ test('ENGP overdue reports use the same live Alerts source and active IMEA Maint
         ->and($engp->date_received_penro)->toBeNull();
 });
 
-test('overdue notifications open the authorized focused Submission Tracking record for a CDS Chief', function () {
-    $chief = User::factory()->create([
-        'section' => 'CENRO_CDS_CHIEF',
-        'unit_assignment' => 'conservation',
-        'office_designated' => 'CENRO Mati',
-    ]);
-    foreach (['reports.view', 'technical-reports.view', 'technical-reports.update'] as $permission) {
-        $chief->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+test('workflow handoffs notify only the next accountable office and receipt returns information to the sender', function (): void {
+    $focal = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
+    $chief = User::factory()->create(['section' => 'CENRO_CDS_CHIEF', 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
+    foreach ([$focal, $chief] as $actor) {
+        foreach (['reports.view', 'technical-reports.update'] as $permission) {
+            $actor->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+        }
     }
+    $report = notificationEngpReport($focal, ['office' => 'CENRO Mati']);
+    $routing = app(DocumentRoutingTransitionService::class);
 
-    $area = notificationProtectedArea('Notification Scope Protected Area', $this->user);
-    ProtectedAreaOfficeAssignment::create([
-        'protected_area_id' => $area->id,
-        'organizational_office_id' => OrganizationalOffice::query()->where('name', 'CENRO Mati')->value('id'),
-        'assignment_type' => 'supervising',
-    ]);
-    $report = notificationConservationReport($area, $this->user, [
-        'target_office' => 'CENRO Mati',
-        'date_accomplished' => '2026-08-03',
-    ]);
+    expect(app(OrganizationalAccessService::class)->effectiveCategory($chief))->toBe(OrganizationalAccessService::CENRO_CHIEF);
+    $event = $routing->transition($report, 'engp', 'forward_to_cenro_chief', $focal->id);
+    app(EdatsInAppNotificationService::class)->notifyGenericTransition($report, 'engp', $event, ['to_office' => 'CENRO CDS Chief']);
 
-    app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
+    expect($chief->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toBe(['Submission Forwarded'])
+        ->and($this->user->fresh()->notifications()->count())->toBe(0);
 
-    $notification = $chief->notifications()->latest()->firstOrFail();
-    $url = (string) $notification->data['url'];
-    expect($url)->toContain('/submission-tracking')
-        ->toContain('focus_source=conservation')
-        ->toContain('focus_id='.$report->id);
+    $handoff = $chief->fresh()->notifications()->first();
+    expect($handoff->data['url'])->toContain('view=incoming')
+        ->and($handoff->data['source_type'])->toBe('engp')
+        ->and((int) $handoff->data['source_id'])->toBe($report->id);
 
-    $this->actingAs($chief)->get($url)
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->where('focus.source', 'conservation')
-            ->where('focus.id', $report->id));
+    $routing->transition($report, 'engp', 'receive_at_cenro_chief', $chief->id);
 
-    $chief->notify(new EdatsInAppNotification([
-        'type' => EdatsInAppNotificationService::OVERDUE,
-        'category' => 'overdue',
-        'title' => 'Legacy overdue notification',
-        'message' => 'Legacy action URL must be repaired at presentation time.',
-        'source_type' => ConservationReportSubmission::class,
-        'source_id' => $report->id,
-        'url' => route('reports.index'),
-    ]));
-    $this->actingAs($chief)->getJson(route('notifications.recent'))
-        ->assertOk()
-        ->assertJsonPath('notifications.0.url', $url);
-
-    $unauthorized = User::factory()->create(['section' => 'CDS']);
-    $this->actingAs($unauthorized)->get(route('reports.index'))->assertForbidden();
+    expect($focal->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toContain('Submission Received')
+        ->and($focal->fresh()->notifications()->where('data->title', 'Submission Received')->first()->data['url'])->toContain('view=outgoing');
 });
-
 function notificationPayload(string $key): array
 {
     return ['type' => EdatsInAppNotificationService::DUE_SOON, 'dedup_key' => $key, 'title' => 'Test notification', 'message' => 'Test message', 'severity' => 'warning', 'category' => 'due_soon', 'source_label' => 'Test Report', 'url' => route('dashboard')];

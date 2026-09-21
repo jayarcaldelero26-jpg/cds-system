@@ -1,14 +1,16 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
-function searchUser(array $abilities = []): User
+function searchUser(array $abilities = [], array $attributes = []): User
 {
-    $user = User::factory()->create(['section' => 'CDS']);
+    $user = User::factory()->create(array_merge(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Baganga'], $attributes));
     foreach ($abilities as $ability) {
         $user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }
@@ -33,7 +35,7 @@ test('an authenticated user can search modules they are authorized to access', f
 });
 
 test('unauthorized modules are excluded by the server', function () {
-    $user = searchUser(['bms.view']);
+    $user = searchUser(['bms.view'], ['section' => 'CDS']);
     $payload = globalSearch($user, 'BAMS');
 
     expect($payload['total'])->toBe(0)
@@ -66,8 +68,8 @@ test('protected area search returns authorized protected area results', function
 });
 
 test('report search returns only matching records available through an authorized workflow', function () {
-    $user = searchUser(['technical-reports.view']);
-    $area = ProtectedArea::create(['name' => 'Pujada Bay Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
+    $user = searchUser(['technical-reports.view'], ['section' => 'PENRO_CDS_CHIEF', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']);
+    $area = ProtectedArea::create(['name' => 'Pujada Bay Protected Landscape', 'short_name' => 'PBPLS', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
     ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'PENRO Mati', 'activity_name' => 'Regular PAMB Meetings', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-01-10', 'date_accomplished' => '2026-01-10', 'created_by' => $user->id, 'updated_by' => $user->id]);
 
     $results = searchGroup(globalSearch($user, 'Regular PAMB'), 'reports');
@@ -96,7 +98,8 @@ test('short queries return an empty lightweight payload', function () {
 test('search results are capped at five per category and omit sensitive fields', function () {
     $user = searchUser(['protected-areas.view']);
     foreach (range(1, 6) as $number) {
-        ProtectedArea::create(['name' => "Search Reserve {$number}", 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
+        $area = ProtectedArea::create(['name' => "Search Reserve {$number}", 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
+        ProtectedAreaOfficeAssignment::create(['protected_area_id' => $area->id, 'organizational_office_id' => OrganizationalOffice::where('code', 'cenro_baganga')->value('id'), 'assignment_type' => 'supervising']);
     }
 
     $payload = globalSearch($user, 'Search Reserve');
@@ -108,4 +111,17 @@ test('search results are capped at five per category and omit sensitive fields',
         ->and($serialized)->not->toContain('mov_file_path')
         ->and($serialized)->not->toContain('password')
         ->and($serialized)->not->toContain('remember_token');
+});
+
+test('routing-only Records users do not receive forbidden module search destinations', function () {
+    $records = searchUser(['bms.view', 'technical-reports.view', 'reports.view'], [
+        'section' => 'CENRO_RECORDS',
+        'unit_assignment' => null,
+        'office_designated' => 'CENRO Baganga',
+    ]);
+
+    $payload = globalSearch($records, 'BMS');
+
+    expect($payload['total'])->toBe(0)
+        ->and(json_encode($payload))->not->toContain('/bms');
 });

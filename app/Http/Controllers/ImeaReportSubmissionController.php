@@ -11,4 +11,5 @@ class ImeaReportSubmissionController extends StandardAReportSubmissionController
     protected string $routePrefix = 'imea.report-submissions';
     protected string $storageFolder = 'imea-report-movs';
     protected string $label = 'IMEA';
+    protected bool $dateConductedRangesEnabled = true;
 }

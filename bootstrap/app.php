@@ -24,6 +24,7 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         $middleware->web(append: [
+            \App\Http\Middleware\ResolveLoginDestination::class,
             \App\Http\Middleware\HandleInertiaRequests::class,
             \App\Http\Middleware\EnsureOrganizationalUnit::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
@@ -33,6 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureUserIsCdsAdmin::class,
             'unit' => \App\Http\Middleware\EnsureOrganizationalUnit::class,
+            'pa-preparation' => \App\Http\Middleware\EnsurePaPreparationAuthority::class,
         ]);
 
     })

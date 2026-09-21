@@ -300,7 +300,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
 
             <PageHeader
         title="Protected Area Management"
-        description="Master database of protected areas managed by DENR PENRO Mati."
+        description="Master database of protected areas managed by DENR PENRO Davao Oriental."
         actions={
         auth.canCreateProtectedAreas &&
         <button

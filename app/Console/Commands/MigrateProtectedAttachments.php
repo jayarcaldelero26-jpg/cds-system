@@ -15,7 +15,7 @@ class MigrateProtectedAttachments extends Command
                             {--dry-run : Inventory active historical attachments without changing files or database records}
                             {--execute : Copy verified historical files to private storage; never deletes public sources}';
 
-    protected $description = 'Copy referenced active eDATS attachments from public to private storage.';
+    protected $description = 'Copy referenced active CDS-SMART attachments from public to private storage.';
 
     public function handle(ProtectedAttachmentService $attachments): int
     {

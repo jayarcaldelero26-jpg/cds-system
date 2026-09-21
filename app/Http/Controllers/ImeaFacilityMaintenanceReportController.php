@@ -41,8 +41,8 @@ class ImeaFacilityMaintenanceReportController extends Controller
     }
 
     public function store(Request $request): RedirectResponse { return $this->persist($request, new ImeaFacilityMaintenanceReport); }
-    public function update(Request $request, ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea($request->user(), $maintenanceReport->protected_area_id); return $this->persist($request, $maintenanceReport); }
-    public function destroy(ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); $path = $maintenanceReport->mov_file_path; DB::transaction(fn () => $maintenanceReport->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', 'Maintenance report deleted successfully.'); }
+    public function update(Request $request, ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea($request->user(), $maintenanceReport->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($maintenanceReport); return $this->persist($request, $maintenanceReport); }
+    public function destroy(ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($maintenanceReport); $path = $maintenanceReport->mov_file_path; DB::transaction(fn () => $maintenanceReport->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', 'Maintenance report deleted successfully.'); }
     public function showMov(ImeaFacilityMaintenanceReport $maintenanceReport): BinaryFileResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); return $this->attachments->response('imea-maintenance', $maintenanceReport, 'mov'); }
 
     private function persist(Request $request, ImeaFacilityMaintenanceReport $report): RedirectResponse
@@ -80,7 +80,7 @@ class ImeaFacilityMaintenanceReportController extends Controller
 
     private function rules(bool $requireMov = false): array
     {
-        return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['nullable', 'string', 'max:255'], 'date_accomplished' => ['nullable', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:20480'], 'remarks' => ['nullable', 'string']];
+        return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['required', 'date'], 'date_accomplished' => ['required', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:20480'], 'remarks' => ['nullable', 'string']];
     }
     private function data(ImeaFacilityMaintenanceReport $report): array { return [...collect($report->toArray())->except(['mov_file_path', 'mov_file_name', 'mov_mime_type', 'mov_size'])->all(), 'protected_area_name' => $report->protectedArea?->name, 'mov' => $report->mov_file_path ? $this->attachments->descriptor('imea-maintenance', $report, 'mov') : null]; }
 }

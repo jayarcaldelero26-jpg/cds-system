@@ -57,3 +57,30 @@ test('shared Inertia technical report authorization follows named abilities inst
             ->where('auth.canUpdateTechnicalReports', false)
             ->where('auth.canDeleteTechnicalReports', false));
 });
+
+test('routing-only Records users do not receive module presentation access', function () {
+    $records = User::factory()->create([
+        'section' => 'CENRO_RECORDS',
+        'unit_assignment' => null,
+        'office_designated' => 'CENRO Baganga',
+        'protected_area_id' => null,
+    ]);
+    $records->givePermissionTo(collect([
+        'technical-reports.view', 'bms.view', 'bams.view', 'imea.view', 'aws.view', 'reports.view', 'protected-areas.view',
+    ])->map(fn (string $permission) => Permission::findOrCreate($permission, 'web'))->all());
+
+    $this->actingAs($records)->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('auth.canViewTechnicalReports', false)
+            ->where('auth.canViewBms', false)
+            ->where('auth.canViewBams', false)
+            ->where('auth.canViewImea', false)
+            ->where('auth.canViewAws', false)
+            ->where('auth.canViewReports', false)
+            ->where('auth.canViewProtectedAreas', false)
+            ->where('auth.canBrowseConservationModules', false)
+            ->where('auth.canBrowseDevelopmentModules', false));
+
+    $this->actingAs($records)->get(route('conservation-reports.index', 'regular_pamb'))->assertForbidden();
+});

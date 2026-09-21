@@ -38,6 +38,27 @@ class UserPolicy
         return $this->isAdministrator($user);
     }
 
+    public function deactivate(User $user, User $managedUser): bool
+    {
+        if (! $this->isAdministrator($user) || $user->is($managedUser)) {
+            return false;
+        }
+
+        if ($managedUser->hasAnyRole(['CDS Admin', 'Super Admin'])) {
+            $activeAdministrators = User::query()
+                ->where('is_active', true)
+                ->whereHas('roles', fn ($query) => $query->whereIn('name', ['CDS Admin', 'Super Admin']))
+                ->distinct('users.id')
+                ->count('users.id');
+
+            if ($activeAdministrators <= 1) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     public function delete(User $user, User $managedUser): bool
     {
         if (! $this->isAdministrator($user) || $user->is($managedUser)) {

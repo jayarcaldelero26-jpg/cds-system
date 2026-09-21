@@ -19,6 +19,7 @@ class BmsReportSubmission extends Model
         'document_type',
         'semester',
         'date_conducted',
+        'date_conducted_ranges',
         'date_accomplished',
         'date_report_released_cenro',
         'date_received_penro',
@@ -41,6 +42,7 @@ class BmsReportSubmission extends Model
     protected function casts(): array
     {
         return [
+            'date_conducted_ranges' => 'array',
             'date_accomplished' => 'date:Y-m-d',
             'date_report_released_cenro' => 'date:Y-m-d',
             'date_received_penro' => 'date:Y-m-d',
@@ -68,7 +70,7 @@ class BmsReportSubmission extends Model
         // BMS, BAMS, and IMEA use the 15-working-day submission standard.
         // The 7-working-day standard applies only to General/Other Reports.
         return $this->date_accomplished
-            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 15, $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->format('Y-m-d')
+            ? app(BusinessCalendarService::class)->addConservationWorkingDays($this->date_accomplished, 15, $this->target_office ?? null)->format('Y-m-d')
             : null;
     }
 
@@ -82,7 +84,7 @@ class BmsReportSubmission extends Model
             return 'Pending Submission by CENRO';
         }
 
-        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null);
     }
 
     public function getTimelinessAttribute(): string
@@ -123,6 +125,6 @@ class BmsReportSubmission extends Model
 
     public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end, ?string $office = null): int
     {
-        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($start, $end, 'after_through', $office);
     }
 }

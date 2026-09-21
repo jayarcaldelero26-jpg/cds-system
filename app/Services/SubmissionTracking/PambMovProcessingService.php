@@ -73,7 +73,9 @@ final class PambMovProcessingService
             'applicable' => true,
             'percent' => $percent,
             'status_key' => $status,
-            'status_label' => $status === self::ACTIVITY_CONDUCTED && $hasMov ? 'MOV Uploaded / Ready for Submission' : $this->label($status),
+            'status_label' => $this->routingPolicy->isDirectPenro($submission) && in_array($status, [self::SUBMITTED_FOR_REVIEW, self::RESUBMITTED_FOR_REVIEW], true)
+                ? 'Submitted directly to PENRO Records'
+                : ($status === self::ACTIVITY_CONDUCTED && $hasMov ? 'MOV Uploaded / Ready for Submission' : $this->label($status)),
             'workflow_status' => $this->workflowStatus($status, $submission),
             'queue' => $this->queue($status),
             'review_remarks' => $submission->mov_review_remarks,
@@ -93,7 +95,18 @@ final class PambMovProcessingService
             ],
             'turnaround' => $this->turnaround($submission),
             'review_history' => $submission->relationLoaded('movReviewEvents')
-                ? $reviewEvents->map(fn (PambMovReviewEvent $event): array => ['event_key' => $event->event_key, 'event_label' => $this->label($event->event_key), 'remarks' => $event->remarks, 'recorded_at' => $event->created_at?->toIso8601String(), 'recorded_by' => $event->recordedBy?->name])->all()
+                ? $reviewEvents->map(function (PambMovReviewEvent $event) use ($submission): array {
+                    $actor = $this->reviewActorContext($event->event_key, $submission);
+                    return [
+                        'event_key' => $event->event_key,
+                        'event_label' => $this->label($event->event_key),
+                        'remarks' => $event->remarks,
+                        'recorded_at' => $event->created_at?->toIso8601String(),
+                        'recorded_by' => $event->recordedBy?->name,
+                        'recorded_role' => $actor['role'],
+                        'recorded_office' => $actor['office'],
+                    ];
+                })->all()
                 : [],
         ];
     }
@@ -121,11 +134,12 @@ final class PambMovProcessingService
             default => $status === self::SUBMITTED_FOR_REVIEW ? 'Awaiting CENRO CDS Chief Review' : 'No CENRO review verdict recorded',
         };
         $reviewer = $verdictKey && $latestDecision?->event_key === $verdictKey ? $latestDecision->recordedBy : null;
-        $category = app(OrganizationalAccessService::class);
-        $categoryLabel = fn (?User $user): ?string => $user ? $category->categoryLabel($category->effectiveCategory($user)) : null;
+
+        $reviewContext = $latestDecision ? $this->reviewActorContext($latestDecision->event_key, $submission) : ['role' => null, 'office' => null];
+        $correctionContext = $latestCorrection ? $this->reviewActorContext($latestCorrection->event_key, $submission) : ['role' => null, 'office' => null];
         $previousCorrection = $latestCorrection ? [
             'reviewed_by' => $latestCorrection->recordedBy?->name,
-            'reviewed_user_category' => $categoryLabel($latestCorrection->recordedBy),
+            'reviewed_user_category' => $correctionContext['role'],
             'reviewed_at' => $latestCorrection->created_at?->toIso8601String(),
             'reason' => $latestCorrection->remarks,
         ] : null;
@@ -135,7 +149,7 @@ final class PambMovProcessingService
             'verdict_key' => $verdictKey,
             'verdict' => $verdict,
             'reviewed_by' => $reviewer?->name,
-            'reviewed_user_category' => $categoryLabel($reviewer),
+            'reviewed_user_category' => $reviewContext['role'],
             'reviewed_at' => $reviewer ? $latestDecision?->created_at?->toIso8601String() : null,
             'originating_office' => $submission->target_office,
             'remarks' => $reviewer ? $latestDecision?->remarks : null,
@@ -144,6 +158,19 @@ final class PambMovProcessingService
             'correction_returned_at' => $verdictKey === self::NEEDS_CORRECTION ? $latestCorrection?->created_at?->toIso8601String() : null,
             'previous_correction_cycles' => $corrections->count(),
             'previous_correction' => $previousCorrection,
+        ];
+    }
+
+    /** @return array{role:string,office:?string} */
+    private function reviewActorContext(string $eventKey, ConservationReportSubmission $submission): array
+    {
+        $role = in_array($eventKey, [self::NEEDS_CORRECTION, self::READY_FOR_RELEASE], true)
+            ? OrganizationalAccessService::CENRO_CHIEF
+            : OrganizationalAccessService::CENRO_FOCAL;
+
+        return [
+            'role' => app(OrganizationalAccessService::class)->categoryLabel($role),
+            'office' => app(OrganizationalAccessService::class)->normalizeOffice($submission->target_office),
         ];
     }
 
@@ -185,14 +212,24 @@ final class PambMovProcessingService
             $eventKey = $isResubmission ? self::RESUBMITTED_FOR_REVIEW : self::SUBMITTED_FOR_REVIEW;
             $locked->update(['mov_processing_status' => self::SUBMITTED_FOR_REVIEW, 'mov_submitted_at' => now(), 'mov_submitted_by' => $actor->id, 'mov_reviewed_at' => null, 'mov_reviewed_by' => null, 'mov_review_remarks' => null, 'updated_by' => $actor->id]);
             $locked->movReviewEvents()->create(['event_key' => $eventKey, 'recorded_by' => $actor->id]);
-            $this->auditLogs->record('submission_tracking', $isResubmission ? 'PAMB MOV Resubmitted for Review' : 'PAMB MOV Submitted for Review', ConservationReportSubmission::class, $locked->id, 'PAMB', 'MOV/report submitted for CENRO CDS Chief review.', ['event_key' => $eventKey], $actor->id);
+            $direct = $this->routingPolicy->isDirectPenro($locked);
+            $this->auditLogs->record(
+                'submission_tracking',
+                $isResubmission ? 'PAMB MOV Resubmitted for Review' : 'PAMB MOV Submitted for Review',
+                ConservationReportSubmission::class,
+                $locked->id,
+                'PAMB',
+                $direct ? 'MOV/report submitted directly to PENRO Records.' : 'MOV/report submitted for CENRO CDS Chief review.',
+                ['event_key' => $eventKey, 'direct_penro' => $direct],
+                $actor->id,
+            );
         });
     }
 
     public function review(ConservationReportSubmission $submission, User $actor, string $decision, ?string $remarks = null): void
     {
         $this->assertScoped($submission, $actor);
-        abort_unless($this->access->canPerform($actor, 'review'), 403);
+        abort_unless($this->access->canPerformForSubmission($actor, 'review', $submission), 403);
         if (! in_array($decision, [self::READY_FOR_RELEASE, self::NEEDS_CORRECTION], true)) throw ValidationException::withMessages(['decision' => 'Choose Ready for Release or Needs Correction.']);
         if ($decision === self::NEEDS_CORRECTION && blank(trim((string) $remarks))) throw ValidationException::withMessages(['remarks' => 'Remarks are required when correction is needed.']);
 
@@ -249,7 +286,7 @@ final class PambMovProcessingService
     private function workflowStatus(string $status, ConservationReportSubmission $submission): string
     {
         return match ($status) {
-            self::SUBMITTED_FOR_REVIEW => 'Awaiting Review by CENRO CDS Chief',
+            self::SUBMITTED_FOR_REVIEW => $this->routingPolicy->isDirectPenro($submission) ? 'Awaiting PENRO Records Receipt' : 'Awaiting Review by CENRO CDS Chief',
             self::NEEDS_CORRECTION => 'Needs Correction',
             self::READY_FOR_RELEASE => $this->routingPolicy->isDirectPenro($submission) ? 'Ready for PENRO Receipt' : 'Ready for CENRO Records Release',
             self::RELEASED_BY_CENRO => 'Released by CENRO to PENRO',

@@ -7,8 +7,8 @@ test('CrudTable keeps its existing default and supports an opt-in compact report
 
     expect($table)->toContain('compactEmpty = false')
         ->and($table)->toContain('compactEmpty ? <CompactReportEmptyState')
-        ->and($table)->toContain('const showHeader = !compactEmpty || !empty;')
-        ->and($table)->toContain('const showPagination = pagination && (!compactEmpty || !empty);')
+        ->and($table)->toContain('const showHeader = !compactEmpty || !empty || preserveFrameWhenEmpty;')
+        ->and($table)->toContain('const showPagination = pagination && (!compactEmpty || !empty || preserveFrameWhenEmpty);')
         ->and($table)->toContain('No records found');
 });
 
@@ -34,7 +34,8 @@ test('specialized report trackers opt in without changing raw and monitoring tab
         resource_path('js/Pages/ManagementPlans/Index.jsx'),
     ];
 
-    foreach ($specialized as $file) {
+    expect(File::get($specialized[0]))->toContain('ReportSubmissionTracker');
+    foreach (array_slice($specialized, 1) as $file) {
         expect(File::get($file))->toContain('compactEmpty={true}');
     }
 

@@ -30,11 +30,12 @@ function standardizedReportSummary(summary, reportData = null) {
     ]} />;
 }
 
-export default function CrudDetailsModal({ open, icon, title, subtitle, onClose, children, summary, attachments, report = false, canEdit = false, canDelete = false, onEdit, onDelete, editLabel = 'Edit Details', deleteLabel = 'Delete Record', closeLabel = 'Close Details', maxWidth = 'max-w-4xl' }) {
+export default function CrudDetailsModal({ open, icon, title, subtitle, onClose, children, summary, attachments, report = false, canEdit = false, canDelete = false, onEdit, onDelete, editLabel = 'Edit Details', deleteLabel = 'Delete Record', closeLabel = 'Close Details', maxWidth = 'max-w-4xl', compact = false }) {
     useEffect(() => { if (!open) return; const onKey = event => event.key === 'Escape' && onClose?.(); document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }, [open, onClose]);
     if (!open) return null;
     const isReport = report || (/\breport\b/i.test(title || '') && !/^Overdue Report\b/i.test(title || '')) || title === 'Management of IPAF Details' || title === 'Revenue Collection Details';
     const reportData = children?.props?.report || children?.props?.record || null;
+    const terminalReport = isReport && String(reportData?.submission_status || '').toLowerCase() === 'completed';
     const displaySummary = isReport ? standardizedReportSummary(summary, reportData) : summary;
     const attachmentContent = attachments || (isReport && <p className="text-xs text-gray-500 dark:text-gray-400">No MOV / attachment has been submitted.</p>);
     const displayAttachments = isReport && attachmentContent
@@ -43,8 +44,8 @@ export default function CrudDetailsModal({ open, icon, title, subtitle, onClose,
     return <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose?.()}>
         <div role="dialog" aria-modal="true" aria-label={title} className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 ${maxWidth}`}>
             <CrudModalHeader icon={icon} report={isReport} title={title} subtitle={subtitle} onClose={onClose} />
-            <ReportDetailsContext.Provider value={isReport ? (reportData || {}) : null}><div className="custom-table-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto p-6 text-sm">{displaySummary}{children}{displayAttachments}</div></ReportDetailsContext.Provider>
-            <CrudModalFooter left={<>{canEdit && onEdit && <button type="button" onClick={onEdit} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300">✏️ {editLabel}</button>}{canDelete && onDelete && <button type="button" onClick={onDelete} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">{deleteLabel}</button>}</>}>
+            <ReportDetailsContext.Provider value={isReport ? (reportData || {}) : null}><div className={`custom-table-scrollbar min-h-0 flex-1 overflow-y-auto text-sm ${compact ? 'space-y-4 p-4' : 'space-y-6 p-6'}`}>{displaySummary}{children}{displayAttachments}</div></ReportDetailsContext.Provider>
+            <CrudModalFooter left={<>{canEdit && !terminalReport && onEdit && <button type="button" onClick={onEdit} className="rounded-xl border border-green-200 bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 transition hover:bg-green-100 dark:border-green-900 dark:bg-green-950/50 dark:text-green-300">✏️ {editLabel}</button>}{canDelete && !terminalReport && onDelete && <button type="button" onClick={onDelete} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">{deleteLabel}</button>}</>}>
                 <button type="button" onClick={onClose} className="rounded-xl bg-green-700 px-5 py-2 text-xs font-bold text-white shadow-md transition hover:bg-green-800">{closeLabel}</button>
             </CrudModalFooter>
         </div>

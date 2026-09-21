@@ -19,7 +19,7 @@
     </style>
 </head>
 <body>
-    <h1>ENHANCED DIGITAL ALERT AND TRACKING SYSTEM (eDATS-CDS)</h1>
+    <h1>CDS-SMART</h1>
     <h1>EXECUTIVE REPORT MONITORING SUMMARY</h1>
     <p class="meta">Reporting Year: {{ $report['filters']['year'] ?? '—' }}<br>{{ $report['filters']['scope_label'] ?? 'All authorized reports' }}<br><span class="muted">Generated: {{ $report['generated_at'] ?? '—' }}</span></p>
 

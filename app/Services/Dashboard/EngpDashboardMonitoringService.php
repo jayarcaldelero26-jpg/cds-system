@@ -333,7 +333,7 @@ final class EngpDashboardMonitoringService
 
         return $user !== null
             && $this->organization->canAccessUnit($user, OrganizationalAccessService::DEVELOPMENT)
-            && $user->can('technical-reports.view');
+            && ($this->organization->isGlobal($user) || $user->getAllPermissions()->contains(fn ($permission): bool => $permission->name === 'technical-reports.view'));
     }
 
     private function year(mixed $value): int

@@ -12,8 +12,8 @@ use Illuminate\Support\Collection;
  * The single source of truth for report-submission business dates.
  *
  * Existing callers retain the Monday-Thursday legacy default. Ordinary
- * workbook WORKDAY calculations explicitly use STANDARD_WORKING_WEEKDAYS;
- * PAMB calculations explicitly use the Monday-Thursday profile.
+ * workbook/ENGP WORKDAY calculations explicitly use STANDARD_WORKING_WEEKDAYS;
+ * Conservation and PAMB calculations use the Monday-Thursday profile.
  */
 class BusinessCalendarService
 {
@@ -22,6 +22,7 @@ class BusinessCalendarService
     /** @var list<int> */
     public const PAMB_WORKING_WEEKDAYS = [1, 2, 3, 4];
     public const STANDARD_WORKING_WEEKDAYS = [1, 2, 3, 4, 5];
+    public const CONSERVATION_WORKING_WEEKDAYS = [1, 2, 3, 4];
 
     public const SCOPE_NATIONAL = 'NATIONAL';
     public const SCOPE_DAVAO_ORIENTAL = 'DAVAO_ORIENTAL';
@@ -59,6 +60,11 @@ class BusinessCalendarService
         return $cursor;
     }
 
+    public function addConservationWorkingDays(CarbonInterface|string $startDate, int $numberOfDays, ?string $office = null): CarbonImmutable
+    {
+        return $this->addWorkingDays($startDate, $numberOfDays, $office, self::CONSERVATION_WORKING_WEEKDAYS);
+    }
+
     /**
      * Counts eligible dates strictly after startDate and through endDate.
      * This matches the existing report tracker semantics: the accomplishment
@@ -89,6 +95,15 @@ class BusinessCalendarService
         }
 
         return $days;
+    }
+
+    public function conservationWorkingDaysBetween(
+        CarbonInterface|string $startDate,
+        CarbonInterface|string $endDate,
+        string $countingSemantics = 'after_through',
+        ?string $office = null,
+    ): int {
+        return $this->workingDaysBetween($startDate, $endDate, $countingSemantics, $office, self::CONSERVATION_WORKING_WEEKDAYS);
     }
 
     public function signedWorkingDayDifference(

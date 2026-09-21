@@ -518,7 +518,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 <form onSubmit={handleUpdate} id="edit-imea-form" className="space-y-4">
                                     <div>
 
-                                        <FloatingSelect id="index-protected-area" label="Protected Area" value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
+                                        <FloatingSelect id="index-protected-area" label="Protected Area" required value={data.protected_area_id} onChange={(e) => setData('protected_area_id', e.target.value)}>
                                             <option value="">Select Protected Area</option>
                                             {protectedAreas?.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                         </FloatingSelect>
@@ -730,7 +730,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="sm:col-span-2">
 
-                                        <FloatingSelect id="index-protected-area" label="Protected Area" value={facilityForm.data.protected_area_id} onChange={(e) => facilityForm.setData('protected_area_id', e.target.value)}>
+                                        <FloatingSelect id="index-protected-area" label="Protected Area" required value={facilityForm.data.protected_area_id} onChange={(e) => facilityForm.setData('protected_area_id', e.target.value)}>
                                             <option value="">Select Protected Area</option>
                                             {protectedAreas?.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                         </FloatingSelect>

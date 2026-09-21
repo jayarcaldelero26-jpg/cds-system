@@ -211,9 +211,7 @@ final class ConservationReportWorkflowRegistry
         $rule = $this->submissionRule($workflowKey, $activityName, $documentType);
         $mode = in_array($workflowKey, [...PambComplianceCalculator::MEETING_WORKFLOWS, PambComplianceCalculator::MANUAL_WORKFLOW], true)
             ? ModuleDefinition::DEADLINE_PAMB_WORKING_DAYS
-            : (in_array($workflowKey, ['additional_bms_site', 'ecotourism_management_plan'], true)
-                ? ModuleDefinition::DEADLINE_CALENDAR_DAYS
-                : ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS);
+            : ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS;
 
         $days = match ($workflowKey) {
             'homestay', 'maintenance_buoy' => 15,

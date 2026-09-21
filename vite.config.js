@@ -18,10 +18,10 @@ export default defineConfig({
         cors: true,
 
         hmr: {
-            host: 'edats-cds',
+            host: 'cds-smart',
             port: 5173,
         },
 
-        origin: 'http://edats-cds:5173',
+        origin: 'http://cds-smart:5173',
     },
 });

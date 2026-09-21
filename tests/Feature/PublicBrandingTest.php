@@ -10,17 +10,20 @@ test('the welcome page is public and exposes only safe overview aggregates', fun
         ->assertInertia(fn (Assert $page) => $page
             ->component('Welcome')
             ->has('overview', 6)
+            ->has('publicSummary.totals', 5)
+            ->has('publicSummary.programs', 2)
+            ->has('publicSummary.as_of')
             ->missing('overview.rows')
             ->missing('overview.users')
             ->missing('overview.attachments'));
 });
 
-test('welcome page source uses eDATS branding and the existing login route', function () {
+test('welcome page source uses CDS-SMART branding and the existing login route', function () {
     $welcome = File::get(resource_path('js/Pages/Welcome.jsx'));
 
     expect($welcome)
-        ->toContain('Enhanced Digital Alert and Tracking System')
-        ->toContain('PENRO Mati – Conservation and Development Section')
+        ->toContain('CDS-SMART')
+        ->toContain('PENRO Davao Oriental')
         ->toContain('Access Login')
         ->toContain('href="/login"')
         ->not->toContain('Secure')
@@ -31,19 +34,37 @@ test('welcome page source uses eDATS branding and the existing login route', fun
     expect(route('login', absolute: false))->toBe('/login');
 });
 
-test('login and authenticated layouts follow the eDATS and DENR branding rules', function () {
+test('welcome page follows the public report-status composition and excludes the retired capability layout', function () {
+    $welcome = File::get(resource_path('js/Pages/Welcome.jsx'));
+
+    expect($welcome)
+        ->toContain('PENRO Report Submission Status')
+        ->toContain('Submission status by program')
+        ->toContain('On-time rate')
+        ->toContain('How to read the status')
+        ->toContain('>Access Login <Icon')
+        ->toContain('publicSummary')
+        ->not->toContain('Report status')
+        ->not->toContain('Access login')
+        ->not->toContain('<nav')
+        ->not->toContain('System capabilities')
+        ->not->toContain('Overall Report Trend')
+        ->not->toContain('function OverviewTrend');
+});
+
+test('login and authenticated layouts follow the CDS-SMART and DENR branding rules', function () {
     $login = File::get(resource_path('js/Layouts/AuthLayout.jsx'));
     $authenticated = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
 
     expect($login)
-        ->toContain('eDATS')
-        ->toContain('Enhanced Digital Alert and Tracking System')
-        ->toContain('PENRO Mati – Conservation and Development Section');
+        ->toContain('CDS-SMART')
+        ->toContain('Submission Monitoring and Reminder Tool')
+        ->toContain('PENRO Davao Oriental');
 
     expect($authenticated)
         ->toContain('const logoSrc = "/images/DENR LOGO.png"')
-        ->toContain('eDATS-CDS')
-        ->toContain('Enhanced Digital Alert and Tracking System')
+        ->toContain('CDS-SMART')
+        ->toContain('Submission Monitoring and Reminder Tool')
         ->toContain('Conservation and Development Section')
         ->not->toContain('eDATS-ENGP')
         ->not->toContain('CDS Logo.png')
@@ -58,8 +79,12 @@ test('login presentation keeps accessible icon input and theme controls', functi
 
     expect($layout)
         ->toContain('ThemeIcon')
-        ->toContain('dark:from-[#10231f]')
+        ->toContain("/images/cds-smart-background.png")
+        ->toContain('from-emerald-950/55')
         ->toContain('BrandDivider');
+
+    expect(File::get(resource_path('js/Pages/Welcome.jsx')))
+        ->toContain("/images/cds-smart-background.png");
 
     expect($login)
         ->toContain('autoComplete="email"')
@@ -85,7 +110,7 @@ test('login presentation keeps accessible icon input and theme controls', functi
         ->toContain('registration_success');
 });
 
-test('ENGP remains a program within the authenticated eDATS navigation', function () {
+test('ENGP remains a program within the authenticated CDS-SMART navigation', function () {
     $authenticated = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
 
     expect($authenticated)

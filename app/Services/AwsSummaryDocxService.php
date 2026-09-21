@@ -132,11 +132,11 @@ final class AwsSummaryDocxService
 
     private function coreProperties(string $periodLabel): string
     {
-        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>AWS Monitoring Summary - '.$this->xml($periodLabel).'</dc:title><dc:creator>eDATS CDS</dc:creator></cp:coreProperties>';
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>AWS Monitoring Summary - '.$this->xml($periodLabel).'</dc:title><dc:creator>CDS-SMART</dc:creator></cp:coreProperties>';
     }
 
     private function appProperties(): string
     {
-        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>eDATS CDS</Application></Properties>';
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>CDS-SMART</Application></Properties>';
     }
 }

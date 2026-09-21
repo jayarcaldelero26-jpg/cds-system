@@ -161,6 +161,14 @@ final class CalendarMovEventService
             return $query;
         }
 
+        $category = $this->organization->effectiveCategory($user) ?: $this->organization->normalizeCategory($user->section);
+        if ($category === null) {
+            return $query;
+        }
+        if ($category === OrganizationalAccessService::PAMO) {
+            return $query->where($source['protected_area'], $user->protected_area_id);
+        }
+
         if ($key === 'conservation-reports') {
             return $this->pambAccess->scopeQuery($query, $user);
         }

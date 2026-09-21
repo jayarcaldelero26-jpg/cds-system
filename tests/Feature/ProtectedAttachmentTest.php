@@ -10,7 +10,7 @@ use Spatie\Permission\Models\Permission;
 
 function protectedAttachmentUser(bool $authorized = true): User
 {
-    $user = User::factory()->create(['section' => 'CDS']);
+    $user = User::factory()->create(['section' => $authorized ? 'CENRO_CDS_FOCAL' : 'UNKNOWN', 'unit_assignment' => null, 'office_designated' => 'CENRO Baganga']);
     if ($authorized) {
         $user->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
     }
@@ -22,7 +22,7 @@ function protectedAttachmentRecord(string $path = 'bms-attachments/record.pdf'):
 {
     $owner = User::factory()->create();
     $area = ProtectedArea::create([
-        'name' => 'Protected Attachment Test PA',
+        'name' => 'Protected Attachment Test PA', 'short_name' => 'BPL',
         'category' => 'Protected Landscape',
         'municipality' => 'Baganga',
         'province' => 'Davao Oriental',
@@ -60,6 +60,12 @@ test('the protected attachment registry contains only active attachment sources'
         'ipaf-revenue',
     ]);
     expect($sources)->not->toContain('lawin-monitoring');
+});
+
+test('the private disk does not register a public framework storage route', function () {
+    expect(config('filesystems.disks.local.serve'))->toBeFalse()
+        ->and(app('router')->getRoutes()->getByName('storage.local'))->toBeNull()
+        ->and(app('router')->getRoutes()->getByName('storage.local.upload'))->toBeNull();
 });
 
 test('protected attachments require source permission and serve only the resolved record file', function () {
@@ -141,7 +147,7 @@ test('legacy public attachment routes and preview URLs are blocked', function ()
     Storage::fake('public');
     Storage::disk('public')->put('bms-attachments/protected.pdf', 'secret');
 
-    $this->get('/storage/bms-attachments/protected.pdf')->assertStatus(403);
+    $this->get('/storage/bms-attachments/protected.pdf')->assertNotFound();
     $this->actingAs(protectedAttachmentUser())
         ->get('/view-file/bms-attachments/protected.pdf')
         ->assertNotFound();

@@ -1,3 +1,4 @@
+        'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati',
 <?php
 
 use App\Models\ConservationReportSubmission;
@@ -9,6 +10,7 @@ use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
@@ -16,10 +18,14 @@ use Spatie\Permission\Models\Permission;
 beforeEach(function (): void {
     BusinessCalendarService::forgetCache();
     Storage::fake('local');
-    $this->user = User::factory()->create(['section' => 'CDS']);
+    $this->user = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
     foreach (['technical-reports.view', 'technical-reports.create', 'technical-reports.update', 'technical-reports.delete'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
-    }
+    $this->area = ProtectedArea::create([
+        'name' => 'Conservation Workflow Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $officeId = DB::table('organizational_offices')->where('code', 'cenro_mati')->value('id');
+    DB::table('protected_area_office_assignments')->insert(['protected_area_id' => $this->area->id, 'organizational_office_id' => $officeId, 'assignment_type' => 'supervising', 'assigned_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now()]);    }
 });
 
 test('only the 22 approved conservation workflow keys are registered', function () {
@@ -69,7 +75,7 @@ test('Regular PAMB retains its workbook configuration', function () {
 test('Regular PAMB returns its selected reporting period and protected area filters', function () {
     $area = ProtectedArea::create([
         'name' => 'Pujada Bay Protected Landscape',
-        'short_name' => 'Pujada Bay',
+        'short_name' => 'PBPLS',
         'category' => 'Protected Landscape',
         'municipality' => 'Mati',
         'province' => 'Davao Oriental',
@@ -77,10 +83,13 @@ test('Regular PAMB returns its selected reporting period and protected area filt
         'created_by' => $this->user->id,
         'updated_by' => $this->user->id,
     ]);
+    $officeId = DB::table('organizational_offices')->where('code', 'cenro_mati')->value('id');
+    DB::table('protected_area_office_assignments')->insert(['protected_area_id' => $area->id, 'organizational_office_id' => $officeId, 'assignment_type' => 'supervising', 'assigned_by' => $this->user->id, 'created_at' => now(), 'updated_at' => now()]);
     ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb',
         'protected_area_id' => $area->id,
-        'target_office' => 'PENRO Mati',
+
+        'target_office' => 'CENRO Mati',
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
         'reporting_period' => 'Quarter 1',
@@ -171,6 +180,8 @@ test('unapproved workflow keys are rejected', function () {
 test('a report persists its route workflow key and cannot appear in another workflow', function () {
     Storage::fake('public');
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'homestay'), [
+
+        'protected_area_id' => $this->area->id,
         'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-20', 'date_accomplished' => '2026-08-24',
         'mov' => UploadedFile::fake()->create('homestay.pdf', 100, 'application/pdf'),
@@ -184,6 +195,7 @@ test('a report persists its route workflow key and cannot appear in another work
 test('meeting PAMB stores independent dates and uses Date Accomplished when present', function () {
     Storage::fake('public');
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'regular_pamb'), [
+        'protected_area_id' => $this->area->id,
         'target_office' => 'CENRO Mati',
         'activity_name' => 'Regular PAMB',
         'document_type' => 'Minutes',
@@ -194,7 +206,7 @@ test('meeting PAMB stores independent dates and uses Date Accomplished when pres
     ])->assertSessionHasNoErrors();
 
     $report = ConservationReportSubmission::query()->latest('id')->firstOrFail();
-    $cenroQueue = app(SubmissionTrackingService::class)->queues()[SubmissionTrackingService::CENRO_RELEASE];
+    $cenroQueue = app(SubmissionTrackingService::class)->queues()['for_submission'];
 
     expect($report->date_conducted)->toBe('2026-08-26')
         ->and($report->date_accomplished->toDateString())->toBe('2026-09-30')
@@ -216,6 +228,7 @@ test('all meeting PAMB workflows reject Date Accomplished earlier than Date Cond
     Storage::fake('public');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', $workflow), [
+        'protected_area_id' => $this->area->id,
         'target_office' => 'CENRO Mati',
         'activity_name' => $workflow === 'twc_meetings' ? 'TWC Meeting' : ucfirst(str_replace('_', ' ', $workflow)),
         'document_type' => 'Minutes',
@@ -261,17 +274,17 @@ test('Regular PAMB August 19 deadline skips Friday through Sunday and configured
 
 test('conservation reports use the standard seven-working-day deadline and exclude weekends', function () {
     $report = new ConservationReportSubmission(['date_accomplished' => '2026-08-24', 'target_office' => 'CENRO Mati']);
-    expect($report->deadline_submission)->toBe('2026-09-02');
+    expect($report->deadline_submission)->toBe('2026-09-03');
 
     NonWorkingDay::create(['date' => '2026-08-25', 'name' => 'Holiday', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
-    expect($report->deadline_submission)->toBe('2026-09-03');
+    expect($report->deadline_submission)->toBe('2026-09-07');
 });
 
 test('Homestay deadline uses fifteen standard working days', function () {
     $report = new ConservationReportSubmission(['workflow_key' => 'homestay', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-16');
+    expect($report->deadline_submission)->toBe('2026-09-22');
 });
 
 test('Homestay deadline skips an active weekday holiday', function () {
@@ -279,7 +292,7 @@ test('Homestay deadline skips an active weekday holiday', function () {
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => 'homestay', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-17');
+    expect($report->deadline_submission)->toBe('2026-09-23');
 });
 test('Regular PAMB deadline counts seven valid days after Date Conducted', function () {
     $report = new ConservationReportSubmission(['workflow_key' => 'regular_pamb', 'date_conducted' => '2026-08-26']);
@@ -310,7 +323,7 @@ test('Special PAMB deadline excludes an active configured weekday holiday', func
 test('Maintenance of Monuments deadline uses the standard seven-working-day rule', function () {
     $report = new ConservationReportSubmission(['workflow_key' => 'maintenance_monuments', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-04');
+    expect($report->deadline_submission)->toBe('2026-09-08');
 });
 
 test('Maintenance of Monuments deadline excludes an active configured weekday holiday', function () {
@@ -318,12 +331,12 @@ test('Maintenance of Monuments deadline excludes an active configured weekday ho
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => 'maintenance_monuments', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-07');
+    expect($report->deadline_submission)->toBe('2026-09-09');
 });
 test('non-meeting conservation workflows retain their standard seven-working-day deadline', function (string $workflow) {
     $report = new ConservationReportSubmission(['workflow_key' => $workflow, 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe($workflow === 'maintenance_buoy' ? '2026-09-16' : '2026-09-04');
+    expect($report->deadline_submission)->toBe($workflow === 'maintenance_buoy' ? '2026-09-22' : '2026-09-08');
 })->with(['maintenance_buoy', 'updating_pamp', 'restoration_plan_5_year']);
 
 test('non-meeting conservation workflows exclude an active configured weekday holiday', function (string $workflow) {
@@ -331,7 +344,7 @@ test('non-meeting conservation workflows exclude an active configured weekday ho
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => $workflow, 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe($workflow === 'maintenance_buoy' ? '2026-09-17' : '2026-09-07');
+    expect($report->deadline_submission)->toBe($workflow === 'maintenance_buoy' ? '2026-09-23' : '2026-09-09');
 })->with(['maintenance_buoy', 'updating_pamp', 'restoration_plan_5_year']);
 
 test('TWC meetings use the same effective-date fallback and seven-working-day deadline', function () {
@@ -401,26 +414,26 @@ test('final PAMB manual timeliness uses the full Standard A Poor range', functio
 
     expect($report->timeliness)->toBe($timeliness);
 })->with([[11, 'Outstanding'], [13, 'Very Satisfactory'], [15, 'Satisfactory'], [29, 'Unsatisfactory'], [90, 'Poor'], [91, 'Poor']]);
-test('Additional BMS Site retains semester-only reporting and uses fifteen calendar days', function () {
+test('Additional BMS Site retains semester-only reporting and uses fifteen working days', function () {
     $config = app(ConservationReportWorkflowRegistry::class)->find('additional_bms_site');
     $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);
 
     expect($config['period_label'])->toBe('Semester')
         ->and($config['periods'])->toBe(['1st Semester', '2nd Semester'])
-        ->and($report->deadline_submission)->toBe('2026-09-10');
+        ->and($report->deadline_submission)->toBe('2026-09-22');
 });
 
-test('Additional BMS Site counts weekends and ignores working-day holidays', function () {
+test('Additional BMS Site skips weekends and active working-day holidays', function () {
     NonWorkingDay::create(['date' => '2026-08-31', 'name' => 'Configured Holiday', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true]);
     BusinessCalendarService::forgetCache();
     $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Final Report', 'date_accomplished' => '2026-08-26']);
 
-    expect($report->deadline_submission)->toBe('2026-09-10');
+    expect($report->deadline_submission)->toBe('2026-09-23');
 });
 
 test('Standard A days complied and timeliness thresholds are calculated by the centralized calendar', function (int $days, string $timeliness) {
     $calendar = app(BusinessCalendarService::class);
-    $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => CarbonImmutable::parse('2026-01-05')->addDays($days)->toDateString()]);
+    $report = new ConservationReportSubmission(['workflow_key' => 'additional_bms_site', 'activity_name' => 'Establishment of additional BMS site (Davao de Oro)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => $calendar->addConservationWorkingDays('2026-01-05', $days)->toDateString()]);
     expect($report->days_complied)->toBe($days)->and($report->timeliness)->toBe($timeliness);
 })->with([[0, 'Outstanding'], [11, 'Outstanding'], [12, 'Very Satisfactory'], [13, 'Very Satisfactory'], [14, 'Satisfactory'], [15, 'Satisfactory'], [16, 'Unsatisfactory'], [29, 'Unsatisfactory'], [30, 'Poor'], [90, 'Poor'], [91, 'No Rating']]);
 
@@ -428,8 +441,8 @@ test('CEPA preparation and final submission resolve different backend rules', fu
     $preparation = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'CEPA Plan preparation (Analysis/Stocktaking)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);
     $final = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'Submission of Final CEPA Plan', 'document_type' => 'Final Report', 'date_accomplished' => '2026-08-26']);
 
-    expect($preparation->deadline_submission)->toBe('2026-09-04')
-        ->and($final->deadline_submission)->toBe('2026-09-16');
+    expect($preparation->deadline_submission)->toBe('2026-09-08')
+        ->and($final->deadline_submission)->toBe('2026-09-22');
 });
 
 test('CEPA preparation and final submission both skip configured holidays', function () {
@@ -438,13 +451,13 @@ test('CEPA preparation and final submission both skip configured holidays', func
     $preparation = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'CEPA Plan preparation (Branding)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-26']);
     $final = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'Submission of Final CEPA Plan', 'document_type' => 'Final Report', 'date_accomplished' => '2026-08-26']);
 
-    expect($preparation->deadline_submission)->toBe('2026-09-07')
-        ->and($final->deadline_submission)->toBe('2026-09-17');
+    expect($preparation->deadline_submission)->toBe('2026-09-09')
+        ->and($final->deadline_submission)->toBe('2026-09-23');
 });
 
 test('CEPA preparation uses Standard B and its final submission uses Standard A', function (int $days, string $preparationTimeliness, string $finalTimeliness) {
     $calendar = app(BusinessCalendarService::class);
-    $received = $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
+    $received = $calendar->addWorkingDays('2026-01-05', $days, null, BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS)->toDateString();
     $preparation = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'CEPA Plan preparation (Action Planning)', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => $received]);
     $final = new ConservationReportSubmission(['workflow_key' => 'cepa_plan', 'activity_name' => 'Submission of Final CEPA Plan', 'document_type' => 'Final Report', 'date_accomplished' => '2026-01-05', 'date_received_penro' => $received]);
 
@@ -458,7 +471,7 @@ test('VTOL, BDFE, and BDFAP retain quarterly reporting and Standard B seven-day 
 
     expect($config['period_label'])->toBe('Reporting Period')
         ->and($config['periods'])->toBe(['Quarter 1', 'Quarter 2', 'Quarter 3', 'Quarter 4'])
-        ->and($report->deadline_submission)->toBe('2026-09-04');
+        ->and($report->deadline_submission)->toBe('2026-09-08');
 })->with([
     ['vtol_operations', 'Comprehensive Insurance (Medium multi rotor)', 'Final Report'],
     ['bdfe_terrestrial', 'Development of BDFE for Terrestrial PA', 'Progress Report'],
@@ -477,6 +490,8 @@ test('the standard report form requires an attachment and leaves routing dates f
     Storage::fake('public');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'homestay'), [
+        'protected_area_id' => $this->area->id,
+        'target_office' => 'CENRO Mati',
         'activity_name' => 'Training on Homestay Program',
         'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1',
@@ -484,6 +499,8 @@ test('the standard report form requires an attachment and leaves routing dates f
     ])->assertSessionHasErrors(['mov' => 'A report attachment / MOV is required.']);
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'homestay'), [
+        'protected_area_id' => $this->area->id,
+        'target_office' => 'CENRO Mati',
         'activity_name' => 'Training on Homestay Program',
         'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1',
@@ -499,16 +516,15 @@ test('the standard report form requires an attachment and leaves routing dates f
         ->and($report->mov_file_path)->not->toBeNull();
     Storage::disk('local')->assertExists($report->mov_file_path);
 });
-
 test('editing a conservation report preserves its attachment unless an explicit replacement is uploaded', function () {
     Storage::fake('local');
     Storage::fake('public');
     Storage::disk('public')->put('conservation-report-movs/original.pdf', 'original');
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'homestay', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
+        'workflow_key' => 'homestay', 'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
         'date_accomplished' => '2026-08-24', 'mov_file_name' => 'original.pdf', 'mov_file_path' => 'conservation-report-movs/original.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
-    $payload = ['activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1', 'date_accomplished' => '2026-08-24'];
+    $payload = ['protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1', 'date_accomplished' => '2026-08-24'];
 
     $this->actingAs($this->user)->put(route('conservation-reports.update', ['homestay', $report]), $payload)->assertSessionHasNoErrors();
     expect($report->fresh()->mov_file_path)->toBe('conservation-report-movs/original.pdf');
@@ -525,11 +541,12 @@ test('a crafted hidden attachment removal flag cannot erase an existing conserva
     Storage::fake('public');
     Storage::disk('public')->put('conservation-report-movs/protected.pdf', 'protected');
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'homestay', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
+        'workflow_key' => 'homestay', 'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
         'date_accomplished' => '2026-08-24', 'mov_file_name' => 'protected.pdf', 'mov_file_path' => 'conservation-report-movs/protected.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
     $this->actingAs($this->user)->put(route('conservation-reports.update', ['homestay', $report]), [
+        'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati',
         'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
         'date_accomplished' => '2026-08-24', 'delete_mov' => true,
     ])->assertSessionHasNoErrors();

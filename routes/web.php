@@ -22,10 +22,13 @@ use App\Http\Controllers\SpatialLayerController;
 use App\Http\Controllers\ComplianceAlertController;
 use App\Http\Controllers\ConservationReportSubmissionController;
 use App\Http\Controllers\SubmissionTrackingController;
+use App\Http\Controllers\AdminRoutingOverrideController;
 use App\Http\Controllers\EngpReportController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\ProtectedAttachmentController;
+use App\Http\Controllers\SubmissionRoutingAttachmentController;
 use App\Http\Controllers\ModuleDefinitionController;
+use App\Http\Controllers\SystemDiagnosticsController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Services\Dashboard\DashboardMonitoringService;
 
@@ -38,6 +41,7 @@ Route::get('/', function (DashboardMonitoringService $monitoring) {
     // Public visits must not allocate tracking references as a side effect.
     $dashboard = $monitoring->overview([], false);
     $summary = $dashboard['summary'];
+    $publicSummary = $monitoring->publicSummary();
 
     return Inertia::render('Welcome', [
         'overview' => [
@@ -46,12 +50,10 @@ Route::get('/', function (DashboardMonitoringService $monitoring) {
             'overdue' => $summary['overdue'],
             'reports_due' => $summary['reports_due'],
             'compliant' => $summary['compliant'],
-            'monitoring_sources' => collect($dashboard['rows'])
-                ->pluck('source')
-                ->filter()
-                ->unique()
-                ->count(),
+            'monitoring_sources' => collect($dashboard['rows'])->pluck('source')->filter()->unique()->count(),
         ],
+        'publicSummary' => $publicSummary,
+        'reportTrend' => $monitoring->publicSubmissionTrend(),
     ]);
 })->name('welcome');
 
@@ -93,17 +95,21 @@ Route::middleware('auth')->group(function () {
         ->where('source', '[a-z0-9-]+')
         ->where('attachment', '[A-Za-z0-9_-]+')
         ->name('attachments.show');
-    Route::get('submission-tracking', [SubmissionTrackingController::class, 'index'])->middleware('can:reports.view')->name('submission-tracking.index');
-    Route::post('submission-tracking/{source}/{record}/{stage}', [SubmissionTrackingController::class, 'transition'])->middleware('can:reports.view')->name('submission-tracking.transition');
-    Route::post('submission-tracking/{source}/{record}/internal-routing/{stage}', [SubmissionTrackingController::class, 'internalRouting'])->middleware('can:reports.view')->name('submission-tracking.internal-routing');
-    Route::post('submission-tracking/{source}/{record}/mov/submit-review', [SubmissionTrackingController::class, 'submitMovForReview'])->middleware('can:technical-reports.update')->name('submission-tracking.mov.submit-review');
-    Route::post('submission-tracking/{source}/{record}/mov/review', [SubmissionTrackingController::class, 'reviewMov'])->middleware('can:technical-reports.update')->name('submission-tracking.mov.review');
+    Route::get('submission-tracking', [SubmissionTrackingController::class, 'index'])->middleware('can:submission-tracking.view')->name('submission-tracking.index');
+    Route::get('submission-tracking/{source}/{record}/routing-attachments/{attachment}', [SubmissionRoutingAttachmentController::class, 'show'])->middleware('can:submission-tracking.view')->name('submission-tracking.routing-attachments.show');
+    Route::get('submission-tracking/{source}/{record}/admin-override/options', [AdminRoutingOverrideController::class, 'options'])->middleware(['admin', 'can:submission-tracking.admin-override'])->name('submission-tracking.admin-override.options');
+    Route::post('submission-tracking/{source}/{record}/admin-override', [AdminRoutingOverrideController::class, 'execute'])->middleware(['admin', 'can:submission-tracking.admin-override'])->name('submission-tracking.admin-override.execute');
+    Route::post('submission-tracking/{source}/{record}/{stage}', [SubmissionTrackingController::class, 'transition'])->middleware('can:submission-tracking.view')->name('submission-tracking.transition');
+    Route::post('submission-tracking/{source}/{record}/internal-routing/{stage}', [SubmissionTrackingController::class, 'internalRouting'])->middleware('can:submission-tracking.view')->name('submission-tracking.internal-routing');
+    Route::post('submission-tracking/{source}/{record}/mov/submit-review', [SubmissionTrackingController::class, 'submitMovForReview'])->middleware('can:submission-tracking.view')->name('submission-tracking.mov.submit-review');
+    Route::post('submission-tracking/{source}/{record}/mov/review', [SubmissionTrackingController::class, 'reviewMov'])->middleware('can:submission-tracking.view')->name('submission-tracking.mov.review');
     Route::patch('submission-tracking/{source}/{record}/correction', [SubmissionTrackingController::class, 'correctRouting'])->middleware(['admin', 'can:submission-tracking.correct-routing'])->name('submission-tracking.correct-routing');
     Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.index');
     Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
     Route::get('admin/audit-logs', [AuditLogController::class, 'index'])->middleware('can:audit-logs.view')->name('audit-logs.index');
     Route::get('admin/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->middleware('can:audit-logs.view')->name('audit-logs.show');
     Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');
+    Route::get('settings/system-diagnostics', [SystemDiagnosticsController::class, 'index'])->middleware('can:system-diagnostics.view')->name('settings.system-diagnostics.index');
     Route::get('settings/module-management', [ModuleDefinitionController::class, 'index'])->middleware('can:module-definitions.view')->name('module-definitions.index');
     Route::post('settings/module-management', [ModuleDefinitionController::class, 'store'])->middleware('can:module-definitions.create')->name('module-definitions.store');
     Route::put('settings/module-management/{moduleDefinition}', [ModuleDefinitionController::class, 'update'])->middleware('can:module-definitions.update')->name('module-definitions.update');
@@ -126,70 +132,72 @@ Route::middleware('auth')->group(function () {
 
     // BIODIVERSITY MONITORING SYSTEM (BMS) ROUTES
     Route::get('bms', [BmsController::class, 'index'])->middleware('can:bms.view')->name('bms.index');
-    Route::post('bms', [BmsController::class, 'store'])->middleware('can:bms.create')->name('bms.store');
-    Route::post('bms/import', [BmsController::class, 'importExcel'])->middleware('can:bms.create')->name('bms.import');
-    Route::put('bms/{bmsRecord}', [BmsController::class, 'update'])->middleware('can:bms.update')->name('bms.update');
+    Route::post('bms', [BmsController::class, 'store'])->middleware(['can:bms.create', 'pa-preparation:bms'])->name('bms.store');
+    Route::post('bms/import', [BmsController::class, 'importExcel'])->middleware(['can:bms.create', 'pa-preparation:bms'])->name('bms.import');
+    Route::put('bms/{bmsRecord}', [BmsController::class, 'update'])->middleware(['can:bms.update', 'pa-preparation:bms'])->name('bms.update');
     Route::delete('bms/{bmsRecord}', [BmsController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.destroy');
     Route::get('bms/{bmsRecord}/attachment', [BmsController::class, 'showAttachment'])->middleware('can:bms.view')->name('bms.attachment.show');
     Route::post('/bms/bulk-destroy', [BmsController::class, 'bulkDestroy'])->middleware('can:bms.delete')->name('bms.bulk-destroy');
-    Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->middleware('can:bms.update')->name('bms.bulk-update-header');
+    Route::post('/bms/bulk-update-header', [BmsController::class, 'bulkUpdateHeader'])->middleware(['can:bms.update', 'pa-preparation:bms'])->name('bms.bulk-update-header');
     Route::get('/bms/semestral-report', [BmsController::class, 'semestralReport'])->middleware('can:bms.view')->name('bms.semestral-report');
     Route::get('/bms/export-pdf', [BmsController::class, 'exportPdf'])->middleware(['can:bms.view', 'can:reports.export'])->name('bms.export-pdf');
     Route::post('/bms/import-geojson', [BmsController::class, 'importGeoJson'])->middleware(['can:bms.view', 'can:gis.manage'])->name('bms.import-geojson');
     Route::delete('/bms/spatial-layers/{spatialLayer}', [SpatialLayerController::class, 'destroy'])->middleware(['can:bms.view', 'can:gis.manage'])->name('bms.spatial-layers.destroy');
-    Route::post('/bms/threats', [BmsThreatController::class, 'store'])->middleware('can:bms.create')->name('bms.threats.store');
-    Route::put('/bms/threats/{bmsThreat}', [BmsThreatController::class, 'update'])->middleware('can:bms.update')->name('bms.threats.update');
+    Route::post('/bms/threats', [BmsThreatController::class, 'store'])->middleware(['can:bms.create', 'pa-preparation:bms'])->name('bms.threats.store');
+    Route::put('/bms/threats/{bmsThreat}', [BmsThreatController::class, 'update'])->middleware(['can:bms.update', 'pa-preparation:bms'])->name('bms.threats.update');
     Route::delete('/bms/threats/{bmsThreat}', [BmsThreatController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.threats.destroy');
-    Route::post('/bms/report-submissions', [BmsReportSubmissionController::class, 'store'])->middleware('can:bms.create')->name('bms.report-submissions.store');
-    Route::put('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'update'])->middleware('can:bms.update')->name('bms.report-submissions.update');
+    Route::post('/bms/report-submissions', [BmsReportSubmissionController::class, 'store'])->middleware(['can:bms.create', 'pa-preparation:bms'])->name('bms.report-submissions.store');
+    Route::put('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'update'])->middleware(['can:bms.update', 'pa-preparation:bms'])->name('bms.report-submissions.update');
     Route::delete('/bms/report-submissions/{bmsReportSubmission}', [BmsReportSubmissionController::class, 'destroy'])->middleware('can:bms.delete')->name('bms.report-submissions.destroy');
-    Route::delete('/bms/report-submissions/{bmsReportSubmission}/mov', [BmsReportSubmissionController::class, 'destroyMov'])->middleware('can:bms.update')->name('bms.report-submissions.mov.destroy');
+    Route::delete('/bms/report-submissions/{bmsReportSubmission}/mov', [BmsReportSubmissionController::class, 'destroyMov'])->middleware(['can:bms.update', 'pa-preparation:bms'])->name('bms.report-submissions.mov.destroy');
 
     // BAMS ROUTES
     Route::get('bams', [BamsAssessmentController::class, 'index'])->middleware('can:bams.view')->name('bams.index');
-    Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->middleware('can:bams.create')->name('bams.flora.store');
-    Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->middleware('can:bams.create')->name('bams.fauna.store');
+    Route::post('bams/flora', [BamsAssessmentController::class, 'storeFlora'])->middleware(['can:bams.create', 'pa-preparation:bams'])->name('bams.flora.store');
+    Route::post('bams/fauna', [BamsAssessmentController::class, 'storeFauna'])->middleware(['can:bams.create', 'pa-preparation:bams'])->name('bams.fauna.store');
+    Route::post('bams/bulk-destroy', [BamsAssessmentController::class, 'bulkDestroyFlora'])->middleware('can:bams.delete')->name('bams.bulk-destroy');
     Route::post('bams/spatial', [BamsAssessmentController::class, 'storeSpatial'])->middleware('can:bams.manage-spatial')->name('bams.store-spatial');
     Route::delete('bams/spatial-layers/{spatialLayer}', [SpatialLayerController::class, 'destroy'])->middleware('can:bams.manage-spatial')->name('bams.spatial-layers.destroy');
     Route::post('bams/calculate', [BamsAssessmentController::class, 'calculateIndices'])->middleware('can:bams.calculate')->name('bams.calculate');
     Route::get('bams/report-submissions', [BamsReportSubmissionController::class, 'index'])->middleware('can:bams.view')->name('bams.report-submissions.index');
-    Route::post('bams/report-submissions', [BamsReportSubmissionController::class, 'store'])->middleware('can:bams.create')->name('bams.report-submissions.store');
-    Route::put('bams/report-submissions/{reportSubmission}', [BamsReportSubmissionController::class, 'update'])->middleware('can:bams.update')->name('bams.report-submissions.update');
+    Route::post('bams/report-submissions', [BamsReportSubmissionController::class, 'store'])->middleware(['can:bams.create', 'pa-preparation:bams'])->name('bams.report-submissions.store');
+    Route::put('bams/report-submissions/{reportSubmission}', [BamsReportSubmissionController::class, 'update'])->middleware(['can:bams.update', 'pa-preparation:bams'])->name('bams.report-submissions.update');
     Route::delete('bams/report-submissions/{reportSubmission}', [BamsReportSubmissionController::class, 'destroy'])->middleware('can:bams.delete')->name('bams.report-submissions.destroy');
     Route::get('bams/report-submissions/{reportSubmission}/mov', [BamsReportSubmissionController::class, 'showMov'])->middleware('can:bams.view')->name('bams.report-submissions.mov');
 
     // IMEA ROUTES
     Route::get('imea', [ImeaAssessmentController::class, 'index'])->middleware('can:imea.view')->name('imea.index');
-    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])->middleware('can:imea.create')->name('imea.create');
-    Route::post('imea', [ImeaAssessmentController::class, 'store'])->middleware('can:imea.create')->name('imea.store');
-    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])->middleware('can:imea.update')->name('imea.update');
+    Route::get('imea/create', [ImeaAssessmentController::class, 'create'])->middleware(['can:imea.create', 'pa-preparation:imea'])->name('imea.create');
+    Route::post('imea', [ImeaAssessmentController::class, 'store'])->middleware(['can:imea.create', 'pa-preparation:imea'])->name('imea.store');
+    Route::put('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'update'])->middleware(['can:imea.update', 'pa-preparation:imea'])->name('imea.update');
     Route::delete('imea/{imeaAssessment}', [ImeaAssessmentController::class, 'destroy'])->middleware('can:imea.delete')->name('imea.destroy');
     Route::get('/imea/report', [ImeaAssessmentController::class, 'report'])->middleware('can:imea.view')->name('imea.report');
-    Route::post('/imea/facilities', [ImeaAssessmentController::class, 'storeFacility'])->middleware('can:imea.create')->name('imea.facilities.store');
-    Route::put('/imea/facilities/{id}', [ImeaAssessmentController::class, 'updateFacility'])->middleware('can:imea.update')->name('imea.facilities.update');
+    Route::post('/imea/facilities', [ImeaAssessmentController::class, 'storeFacility'])->middleware(['can:imea.create', 'pa-preparation:imea'])->name('imea.facilities.store');
+    Route::put('/imea/facilities/{id}', [ImeaAssessmentController::class, 'updateFacility'])->middleware(['can:imea.update', 'pa-preparation:imea'])->name('imea.facilities.update');
     Route::delete('/imea/facilities/{id}', [ImeaAssessmentController::class, 'destroyFacility'])->middleware('can:imea.delete')->name('imea.facilities.destroy');
     Route::get('/imea/facilities-report', [ImeaAssessmentController::class, 'facilitiesReport'])->middleware('can:imea.view')->name('imea.facilities.report');
     Route::get('/imea/facilities-export', [ImeaAssessmentController::class, 'exportFacilitiesExcel'])->middleware('can:imea.export')->name('imea.facilities.export');
     Route::post('/imea/facilities-import', [ImeaAssessmentController::class, 'importFacilitiesExcel'])->middleware('can:imea.import')->name('imea.facilities.import');
     Route::post('/imea/facilities-bulk-delete', [ImeaAssessmentController::class, 'bulkDeleteFacilities'])->middleware('can:imea.delete')->name('imea.facilities.bulk-delete');
     Route::get('imea/report-submissions', [ImeaReportSubmissionController::class, 'index'])->middleware('can:imea.view')->name('imea.report-submissions.index');
-    Route::post('imea/report-submissions', [ImeaReportSubmissionController::class, 'store'])->middleware('can:imea.create')->name('imea.report-submissions.store');
-    Route::put('imea/report-submissions/{reportSubmission}', [ImeaReportSubmissionController::class, 'update'])->middleware('can:imea.update')->name('imea.report-submissions.update');
+    Route::post('imea/report-submissions', [ImeaReportSubmissionController::class, 'store'])->middleware(['can:imea.create', 'pa-preparation:imea'])->name('imea.report-submissions.store');
+    Route::put('imea/report-submissions/{reportSubmission}', [ImeaReportSubmissionController::class, 'update'])->middleware(['can:imea.update', 'pa-preparation:imea'])->name('imea.report-submissions.update');
     Route::delete('imea/report-submissions/{reportSubmission}', [ImeaReportSubmissionController::class, 'destroy'])->middleware('can:imea.delete')->name('imea.report-submissions.destroy');
     Route::get('imea/report-submissions/{reportSubmission}/mov', [ImeaReportSubmissionController::class, 'showMov'])->middleware('can:imea.view')->name('imea.report-submissions.mov');
     Route::get('imea/maintenance-reports', [ImeaFacilityMaintenanceReportController::class, 'index'])->middleware('can:imea.view')->name('imea.maintenance-reports.index');
-    Route::post('imea/maintenance-reports', [ImeaFacilityMaintenanceReportController::class, 'store'])->middleware('can:imea.create')->name('imea.maintenance-reports.store');
-    Route::put('imea/maintenance-reports/{maintenanceReport}', [ImeaFacilityMaintenanceReportController::class, 'update'])->middleware('can:imea.update')->name('imea.maintenance-reports.update');
+    Route::post('imea/maintenance-reports', [ImeaFacilityMaintenanceReportController::class, 'store'])->middleware(['can:imea.create', 'pa-preparation:imea'])->name('imea.maintenance-reports.store');
+    Route::put('imea/maintenance-reports/{maintenanceReport}', [ImeaFacilityMaintenanceReportController::class, 'update'])->middleware(['can:imea.update', 'pa-preparation:imea'])->name('imea.maintenance-reports.update');
     Route::delete('imea/maintenance-reports/{maintenanceReport}', [ImeaFacilityMaintenanceReportController::class, 'destroy'])->middleware('can:imea.delete')->name('imea.maintenance-reports.destroy');
     Route::get('imea/maintenance-reports/{maintenanceReport}/mov', [ImeaFacilityMaintenanceReportController::class, 'showMov'])->middleware('can:imea.view')->name('imea.maintenance-reports.mov');
 
     // AUTOMATED WEATHER STATION (AWS) ROUTES
     Route::get('aws', [AwsController::class, 'index'])->middleware('can:aws.view')->name('aws.index');
-    Route::post('aws', [AwsController::class, 'store'])->middleware('can:aws.create')->name('aws.store');
-    Route::put('aws/{aws}', [AwsController::class, 'update'])->middleware('can:aws.update')->name('aws.update');
+    Route::get('aws-data', [AwsController::class, 'dataIndex'])->middleware('can:aws.view')->name('aws.data');
+    Route::post('aws', [AwsController::class, 'store'])->middleware(['can:aws.create', 'pa-preparation:aws'])->name('aws.store');
+    Route::put('aws/{aws}', [AwsController::class, 'update'])->middleware(['can:aws.update', 'pa-preparation:aws'])->name('aws.update');
     Route::delete('aws/{aws}', [AwsController::class, 'destroy'])->middleware('can:aws.delete')->name('aws.destroy');
     Route::post('aws/bulk-destroy', [AwsController::class, 'bulkDestroy'])->middleware('can:aws.delete')->name('aws.bulk-destroy');
-    Route::post('aws/import', [AwsController::class, 'import'])->middleware('can:aws.create')->name('aws.import');
+    Route::post('aws/import', [AwsController::class, 'import'])->middleware(['can:aws.create', 'pa-preparation:aws'])->name('aws.import');
     Route::get('aws/summary/export', [AwsController::class, 'monthlySummaryExport'])->middleware('can:aws.view')->name('aws.summary.export');
     Route::get('aws/monthly-summary/pdf', [AwsController::class, 'monthlySummaryPdf'])->middleware('can:aws.view')->name('aws.monthly-summary.pdf');
     Route::get('aws/monthly-summary/xlsx', [AwsController::class, 'monthlySummaryXlsx'])->middleware('can:aws.view')->name('aws.monthly-summary.xlsx');
@@ -199,38 +207,38 @@ Route::middleware('auth')->group(function () {
     // MANAGEMENT PLANS ROUTES
     Route::get('management-plans', [ManagementPlanController::class, 'index'])->middleware('can:management-plans.view')->name('management-plans.index');
     Route::get('management-plans/summary', [ManagementPlanController::class, 'summary'])->middleware('can:management-plans.view')->name('management-plans.summary');
-    Route::post('management-plans/types', [ManagementPlanController::class, 'storeType'])->middleware('can:management-plans.create')->name('management-plans.types.store');
+    Route::post('management-plans/types', [ManagementPlanController::class, 'storeType'])->middleware(['can:management-plans.create', 'pa-preparation:management-plans'])->name('management-plans.types.store');
     Route::get('management-plans/types/{managementPlanType:slug}', [ManagementPlanController::class, 'tracker'])->middleware('can:management-plans.view')->name('management-plans.types.show');
-    Route::post('management-plans/types/{managementPlanType:slug}/plans', [ManagementPlanProfileController::class, 'store'])->middleware('can:management-plans.create')->name('management-plans.types.profiles.store');
-    Route::patch('management-plans/types/{managementPlanType:slug}/plans/{profile}', [ManagementPlanProfileController::class, 'update'])->middleware('can:management-plans.update')->name('management-plans.types.profiles.update');
+    Route::post('management-plans/types/{managementPlanType:slug}/plans', [ManagementPlanProfileController::class, 'store'])->middleware(['can:management-plans.create', 'pa-preparation:management-plans'])->name('management-plans.types.profiles.store');
+    Route::patch('management-plans/types/{managementPlanType:slug}/plans/{profile}', [ManagementPlanProfileController::class, 'update'])->middleware(['can:management-plans.update', 'pa-preparation:management-plans'])->name('management-plans.types.profiles.update');
     Route::get('management-plans/types/{managementPlanType:slug}/plans/{profile}/documents/{document}', [ManagementPlanProfileController::class, 'viewDocument'])->middleware('can:management-plans.view')->whereNumber('document')->name('management-plans.types.profiles.documents.view');
-    Route::get('management-plans/types/{managementPlanType:slug}/reports/create', [ManagementPlanController::class, 'createReport'])->middleware('can:management-plans.create')->name('management-plans.types.reports.create');
-    Route::post('management-plans/types/{managementPlanType:slug}/reports', [ManagementPlanController::class, 'storeReport'])->middleware('can:management-plans.create')->name('management-plans.types.reports.store');
-    Route::get('management-plans/types/{managementPlanType:slug}/reports/{managementPlan}/edit', [ManagementPlanController::class, 'editReport'])->middleware('can:management-plans.update')->name('management-plans.types.reports.edit');
-    Route::patch('management-plans/types/{managementPlanType:slug}/reports/{managementPlan}', [ManagementPlanController::class, 'updateReport'])->middleware('can:management-plans.update')->name('management-plans.types.reports.update');
+    Route::get('management-plans/types/{managementPlanType:slug}/reports/create', [ManagementPlanController::class, 'createReport'])->middleware(['can:management-plans.create', 'pa-preparation:management-plans'])->name('management-plans.types.reports.create');
+    Route::post('management-plans/types/{managementPlanType:slug}/reports', [ManagementPlanController::class, 'storeReport'])->middleware(['can:management-plans.create', 'pa-preparation:management-plans'])->name('management-plans.types.reports.store');
+    Route::get('management-plans/types/{managementPlanType:slug}/reports/{managementPlan}/edit', [ManagementPlanController::class, 'editReport'])->middleware(['can:management-plans.update', 'pa-preparation:management-plans'])->name('management-plans.types.reports.edit');
+    Route::patch('management-plans/types/{managementPlanType:slug}/reports/{managementPlan}', [ManagementPlanController::class, 'updateReport'])->middleware(['can:management-plans.update', 'pa-preparation:management-plans'])->name('management-plans.types.reports.update');
     Route::delete('management-plans/types/{managementPlanType:slug}/reports/{managementPlan}', [ManagementPlanController::class, 'destroyReport'])->middleware('can:management-plans.delete')->name('management-plans.types.reports.destroy');
     Route::get('management-plans/types/{managementPlanType:slug}/reports/{managementPlan}/attachments/{attachment}', [ManagementPlanController::class, 'viewScopedAttachment'])->middleware('can:management-plans.view')->whereNumber('attachment')->name('management-plans.types.reports.attachments.view');
-    Route::get('management-plans/{managementPlan}/edit', [ManagementPlanController::class, 'legacyEdit'])->middleware('can:management-plans.update')->name('management-plans.edit');
+    Route::get('management-plans/{managementPlan}/edit', [ManagementPlanController::class, 'legacyEdit'])->middleware(['can:management-plans.update', 'pa-preparation:management-plans'])->name('management-plans.edit');
     Route::get('management-plans/{managementPlan}/attachments/{attachment}', [ManagementPlanController::class, 'viewAttachment'])->middleware('can:management-plans.view')->whereNumber('attachment')->name('management-plans.attachments.view');
 
     // CONSERVATION UNIT REPORT WORKFLOWS
     Route::get('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'index'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.index');
-    Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware(['unit:conservation', 'can:technical-reports.create'])->name('conservation-reports.store');
-    Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.update'])->name('conservation-reports.update');
+    Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware(['unit:conservation', 'can:technical-reports.create', 'pa-preparation:technical-reports'])->name('conservation-reports.store');
+    Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.update', 'pa-preparation:technical-reports'])->name('conservation-reports.update');
     Route::delete('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'destroy'])->middleware(['unit:conservation', 'can:technical-reports.delete'])->name('conservation-reports.destroy');
     Route::get('conservation-reports/{workflow}/{submission}/mov', [ConservationReportSubmissionController::class, 'showMov'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.mov');
     // IPAF ROUTES
     Route::get('ipaf', [IpafController::class, 'index'])->middleware('can:technical-reports.view')->name('ipaf.index');
     Route::redirect('ipaf-collection', '/ipaf')->middleware('can:technical-reports.view')->name('ipaf-collection.index');
-    Route::post('ipaf/revenue-collections', [IpafController::class, 'storeRevenue'])->middleware('can:technical-reports.create')->name('ipaf.revenue.store');
-    Route::put('ipaf/revenue-collections/{revenueCollection}', [IpafController::class, 'updateRevenue'])->middleware('can:technical-reports.update')->name('ipaf.revenue.update');
+    Route::post('ipaf/revenue-collections', [IpafController::class, 'storeRevenue'])->middleware(['can:technical-reports.create', 'pa-preparation:technical-reports'])->name('ipaf.revenue.store');
+    Route::put('ipaf/revenue-collections/{revenueCollection}', [IpafController::class, 'updateRevenue'])->middleware(['can:technical-reports.update', 'pa-preparation:technical-reports'])->name('ipaf.revenue.update');
     Route::delete('ipaf/revenue-collections/{revenueCollection}', [IpafController::class, 'destroyRevenue'])->middleware('can:technical-reports.delete')->name('ipaf.revenue.destroy');
     Route::get('ipaf/revenue-collections/{revenueCollection}/mov', [IpafController::class, 'revenueMov'])->middleware('can:technical-reports.view')->name('ipaf.revenue.mov');
-    Route::put('ipaf/revenue-targets', [IpafController::class, 'updateRevenueTargets'])->middleware('can:technical-reports.update')->name('ipaf.revenue-targets.update');
-    Route::put('ipaf/accounting-status', [IpafController::class, 'updateAccountingStatus'])->middleware('can:technical-reports.update')->name('ipaf.accounting-status.update');
-    Route::post('ipaf/accounting/sync-bank-balances', [IpafController::class, 'syncAccountingBankBalances'])->middleware('can:technical-reports.update')->name('ipaf.accounting.bank-balances.sync');
-    Route::post('ipaf/management-reports', [IpafController::class, 'storeManagement'])->middleware('can:technical-reports.create')->name('ipaf.management.store');
-    Route::put('ipaf/management-reports/{managementReport}', [IpafController::class, 'updateManagement'])->middleware('can:technical-reports.update')->name('ipaf.management.update');
+    Route::put('ipaf/revenue-targets', [IpafController::class, 'updateRevenueTargets'])->middleware(['can:technical-reports.update', 'pa-preparation:technical-reports'])->name('ipaf.revenue-targets.update');
+    Route::put('ipaf/accounting-status', [IpafController::class, 'updateAccountingStatus'])->middleware(['can:technical-reports.update', 'pa-preparation:technical-reports'])->name('ipaf.accounting-status.update');
+    Route::post('ipaf/accounting/sync-bank-balances', [IpafController::class, 'syncAccountingBankBalances'])->middleware(['can:technical-reports.update', 'pa-preparation:technical-reports'])->name('ipaf.accounting.bank-balances.sync');
+    Route::post('ipaf/management-reports', [IpafController::class, 'storeManagement'])->middleware(['can:technical-reports.create', 'pa-preparation:technical-reports'])->name('ipaf.management.store');
+    Route::put('ipaf/management-reports/{managementReport}', [IpafController::class, 'updateManagement'])->middleware(['can:technical-reports.update', 'pa-preparation:technical-reports'])->name('ipaf.management.update');
     Route::delete('ipaf/management-reports/{managementReport}', [IpafController::class, 'destroyManagement'])->middleware('can:technical-reports.delete')->name('ipaf.management.destroy');
     Route::get('ipaf/management-reports/{managementReport}/mov', [IpafController::class, 'managementMov'])->middleware('can:technical-reports.view')->name('ipaf.management.mov');
 
@@ -241,6 +249,10 @@ Route::middleware(['auth', 'admin'])
     ->prefix('admin')
     ->as('admin.')
     ->group(function (): void {
+        Route::patch('users/{user}/approve', [UserController::class, 'approve'])
+            ->name('users.approve');
+        Route::patch('users/{user}/deactivate', [UserController::class, 'deactivate'])
+            ->name('users.deactivate');
         Route::patch('users/{user}/activate', [UserController::class, 'activate'])
             ->name('users.activate');
         Route::resource('users', UserController::class)->except('show');

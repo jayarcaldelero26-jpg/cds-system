@@ -369,8 +369,8 @@ class ComplianceAlertDeliveryService
         $presentation = $memorandum['presentation'];
         $first = $reports->first();
         $subject = ($presentation['subject'] ?: match ($alertType) {
-            ComplianceNotificationRun::ALERT_DUE_SOON => 'eDATS Reminder: '.($first?->module ?? 'Report').' Due on '.CarbonImmutable::parse($first?->deadline ?? $today)->format('F j, Y'),
-            ComplianceNotificationRun::ALERT_DUE_TODAY => 'eDATS Due Today: '.($first?->module ?? 'Report').' — '.CarbonImmutable::parse($first?->deadline ?? $today)->format('F j, Y'),
+            ComplianceNotificationRun::ALERT_DUE_SOON => 'CDS-SMART Reminder: '.($first?->module ?? 'Report').' Due on '.CarbonImmutable::parse($first?->deadline ?? $today)->format('F j, Y'),
+            ComplianceNotificationRun::ALERT_DUE_TODAY => 'CDS-SMART Due Today: '.($first?->module ?? 'Report').' — '.CarbonImmutable::parse($first?->deadline ?? $today)->format('F j, Y'),
             default => $settings['email_subject'],
         });
         $run = ComplianceNotificationRun::create([

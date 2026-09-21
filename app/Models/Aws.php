@@ -15,12 +15,17 @@ class Aws extends Model
 
     protected $fillable = [
         'protected_area_id',
+        'target_office',
         'station_name',
         'location',
         'report_period_type',
         'activity_name',
         'document_type',
         'semester',
+        'reporting_year',
+        'quarter',
+        'monitoring_period_start',
+        'monitoring_period_end',
         'date_conducted',
         'date_accomplished',
         'date_report_released_cenro',
@@ -47,6 +52,10 @@ class Aws extends Model
         return [
             'start_date' => 'date:Y-m-d',
             'end_date' => 'date:Y-m-d',
+            'monitoring_period_start' => 'date:Y-m-d',
+            'monitoring_period_end' => 'date:Y-m-d',
+            'reporting_year' => 'integer',
+            'quarter' => 'integer',
             'date_accomplished' => 'date:Y-m-d',
             'date_report_released_cenro' => 'date:Y-m-d',
             'date_received_penro' => 'date:Y-m-d',
@@ -64,7 +73,7 @@ class Aws extends Model
     public function getDeadlineSubmissionAttribute(): ?string
     {
         return $this->date_accomplished
-            ? app(BusinessCalendarService::class)->addWorkingDays($this->date_accomplished, 7, $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->format('Y-m-d')
+            ? app(BusinessCalendarService::class)->addConservationWorkingDays($this->date_accomplished, 7, $this->target_office ?? null)->format('Y-m-d')
             : null;
     }
 
@@ -73,7 +82,7 @@ class Aws extends Model
         if (! $this->date_accomplished) return null;
         if (! $this->date_received_penro) return 'Pending Submission by CENRO';
 
-        return app(BusinessCalendarService::class)->workingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($this->date_accomplished, $this->date_received_penro, 'after_through', $this->target_office ?? null);
     }
 
     public function getTimelinessAttribute(): string
@@ -106,6 +115,6 @@ class Aws extends Model
 
     public static function workingDaysAfterThrough(CarbonInterface $start, CarbonInterface $end, ?string $office = null): int
     {
-        return app(BusinessCalendarService::class)->workingDaysBetween($start, $end, 'after_through', $office);
+        return app(BusinessCalendarService::class)->conservationWorkingDaysBetween($start, $end, 'after_through', $office);
     }
 }

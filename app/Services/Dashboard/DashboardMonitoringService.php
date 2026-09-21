@@ -4,17 +4,19 @@ namespace App\Services\Dashboard;
 
 use App\Support\OfficeProtectedAreaPresenter;
 use App\Support\DatePresentationNormalizer;
+use App\Models\OrganizationalOffice;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Throwable;
 
-/** Read-only presentation aggregation for the main eDATS monitoring dashboard. */
+/** Read-only presentation aggregation for the main CDS-SMART monitoring dashboard. */
 final class DashboardMonitoringService
 {
     private const TIMEZONE = 'Asia/Manila';
 
-    public function __construct(private readonly SubmissionTrackingService $tracking) {}
+    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly OrganizationalAccessService $organization) {}
 
     /** @return array<string, mixed> */
     public function overview(array $filters = [], bool $assignTrackingNumbers = true): array
@@ -120,6 +122,282 @@ final class DashboardMonitoringService
                 'compliance_rate' => 'Submitted tracked PA records / tracked PA records * 100.',
             ],
             'filters' => ['year' => $year, 'program' => $program, 'office' => $office, 'protected_area_id' => $protectedAreaId, 'report_type' => $reportType, 'period' => $period, 'page' => $page],
+        ];
+    }
+
+    /**
+     * Return a public-safe monthly submission trend. Only month labels and
+     * aggregate counts leave the service; report rows remain internal.
+     *
+     * @return list<array{label:string,count:int}>
+     */
+    public function publicSubmissionTrend(int $months = 12): array
+    {
+        $months = max(1, min(24, $months));
+        $submittedDates = $this->tracking->records()
+            ->map(fn (array $row): ?CarbonImmutable => $this->date($row['date_received_penro'] ?? null))
+            ->filter()
+            ->values();
+
+        if ($submittedDates->isEmpty()) {
+            return [];
+        }
+
+        $latestMonth = $submittedDates->max()->startOfMonth();
+        $firstMonth = $latestMonth->subMonths($months - 1);
+
+        return collect(range(0, $months - 1))
+            ->map(function (int $offset) use ($firstMonth, $submittedDates): array {
+                $month = $firstMonth->addMonths($offset);
+
+                return [
+                    'label' => $month->format('M y'),
+                    'count' => $submittedDates->filter(fn (CarbonImmutable $date): bool => $date->year === $month->year && $date->month === $month->month)->count(),
+                ];
+            })
+            ->all();
+    }
+
+    /**
+     * Public-safe province-wide aggregates. This intentionally returns no
+     * normalized rows, identities, routing metadata, documents, or remarks.
+     * The classifications are derived from the same presented tracking rows
+     * used by the authenticated dashboard.
+     *
+     * @return array<string, mixed>
+     */
+    public function publicSummary(): array
+    {
+        $today = CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $rows = $this->tracking->records(['reporting_year' => $today->year], null, false)
+            ->map(fn (array $row): array => $this->present($row, $today));
+        $programs = collect(['engp' => 'ENGP reports', 'conservation' => 'Protected Area reports'])
+            ->map(function (string $label, string $key) use ($rows): array {
+                $items = $rows->where('program_key', $key);
+                $received = $items->where('submitted', true);
+                $overdue = $items->where('is_overdue', true);
+                $upcoming = $items->where('submitted', false)->filter(fn (array $row): bool => ! $row['is_overdue'] && filled($row['deadline_submission']));
+                $due = $upcoming->count() + $overdue->count();
+                return [
+                    'key' => $key,
+                    'label' => $label,
+                    'office_label' => $key === 'engp' ? 'CENROs' : 'PAMOs / PA offices',
+                    'office_count' => $items->pluck('target_office')->filter()->unique()->count(),
+                    'due' => $due,
+                    'received' => $received->count(),
+                    'overdue' => $overdue->count(),
+                    'upcoming' => $upcoming->count(),
+                    'on_time' => $received->where('is_on_time', true)->count(),
+                    'late' => $received->where('is_on_time', false)->count(),
+                    'on_time_rate' => $this->rate($received->where('is_on_time', true)->count(), $received->count()),
+                ];
+            })->values()->all();
+        $received = $rows->where('submitted', true);
+        return [
+            'as_of' => $today->toIso8601String(),
+            'year' => $today->year,
+            'totals' => [
+                'due' => $rows->where('is_overdue', true)->count() + $rows->where('submitted', false)->filter(fn (array $row): bool => ! $row['is_overdue'] && filled($row['deadline_submission']))->count(),
+                'received' => $received->count(),
+                'overdue' => $rows->where('is_overdue', true)->count(),
+                'on_time' => $received->where('is_on_time', true)->count(),
+                'late' => $received->where('is_on_time', false)->count(),
+            ],
+            'programs' => $programs,
+            'comparison' => $programs,
+            'legend' => [
+                ['label' => 'On time', 'description' => 'Officially received on or before the authoritative deadline.'],
+                ['label' => 'Submitted late', 'description' => 'Officially received after the authoritative deadline.'],
+                ['label' => 'Overdue', 'description' => 'Deadline passed without an official receipt.'],
+                ['label' => 'Upcoming', 'description' => 'Deadline has not yet arrived.'],
+            ],
+        ];
+    }
+
+    /**
+     * Read-only projection for the authenticated report-submission overview.
+     * It deliberately starts with SubmissionTrackingService::records(), so
+     * authorization, source registration, routing state, and AWS's report-only
+     * scope remain the same as Submission Tracking.
+     *
+     * @return array<string, mixed>
+     */
+    public function submissionOverview(array $filters = [], bool $assignTrackingNumbers = false): array
+    {
+        $today = CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $year = (int) ($filters['year'] ?? $today->year);
+        $program = in_array($filters['program'] ?? 'all', ['all', 'engp', 'pa'], true) ? ($filters['program'] ?? 'all') : 'all';
+        $office = trim((string) ($filters['office'] ?? ''));
+        $frequency = trim((string) ($filters['frequency'] ?? ''));
+
+        $rows = $this->tracking->records(['reporting_year' => $year], null, $assignTrackingNumbers)
+            ->map(fn (array $row): array => $this->overviewRow($this->present($row, $today), $today))
+            ->when($program !== 'all', fn (Collection $items) => $items->where('program_key', $program === 'pa' ? 'conservation' : $program))
+            ->when($office !== '', fn (Collection $items) => $items->where('office_or_pa', $office))
+            ->when($frequency !== '', fn (Collection $items) => $items->where('frequency', $frequency))
+            ->sortBy([['priority_rank', 'asc'], ['deadline_sort', 'asc'], ['source_label', 'asc']])
+            ->values();
+
+        $developmentOffices = $program === 'engp' ? $this->authorizedDevelopmentOffices() : [];
+        $programs = collect([
+            'engp' => ['title' => 'ENGP REPORTS', 'office_label' => 'CENROs'],
+            'conservation' => ['title' => 'PA REPORTS', 'office_label' => 'PAMOs'],
+        ])->map(function (array $definition, string $key) use ($rows, $today, $developmentOffices): array {
+            $items = $rows->where('program_key', $key)->values();
+            $received = $items->where('submitted', true);
+            $eligibleReceived = $received->filter(fn (array $row): bool => $row['deadline_submission'] !== null);
+            $early = $eligibleReceived->filter(fn (array $row): bool => ($row['day_delta'] ?? 0) > 0);
+            $late = $eligibleReceived->filter(fn (array $row): bool => ($row['day_delta'] ?? 0) < 0);
+            $pending = $items->where('dashboard_state', 'pending');
+            $inProgress = $items->where('dashboard_state', 'in_progress');
+            $overdue = $items->where('is_overdue', true);
+
+            return [
+                ...$definition,
+                'key' => $key === 'conservation' ? 'pa' : $key,
+                'office_count' => $key === 'engp' ? count($developmentOffices) : $items->pluck('office_or_pa')->filter()->unique()->count(),
+                'metrics' => [
+                    'pending' => $pending->count(),
+                    'in_progress' => $inProgress->count(),
+                    'overdue' => $overdue->count(),
+                    'on_time_rate' => $this->rate($eligibleReceived->where('is_on_time', true)->count(), $eligibleReceived->count()),
+                    'average_early' => $early->isEmpty() ? null : round($early->avg('day_delta'), 1),
+                    'average_late' => $late->isEmpty() ? null : round($late->avg(fn (array $row): int => abs((int) $row['day_delta'])), 1),
+                    'received' => $received->count(),
+                    'on_time' => $eligibleReceived->where('is_on_time', true)->count(),
+                    'late' => $late->count(),
+                ],
+                'pending_ongoing' => $items->whereIn('dashboard_state', ['pending', 'in_progress'])->take(5)->map(fn (array $row): array => $this->workRow($row))->values()->all(),
+                'overdue_unreceived' => $overdue->sortByDesc('days_overdue')->take(5)->map(fn (array $row): array => $this->workRow($row))->values()->all(),
+                'comparison' => $this->officeComparison($items),
+                'timeliness_summary' => $this->timelinessSummary($items),
+            ];
+        })->values()->all();
+
+        $offices = $program === 'engp'
+            ? $developmentOffices
+            : $rows->pluck('office_or_pa')->filter()->unique()->sort()->values()->all();
+        $frequencies = $rows->pluck('frequency')->filter(fn (string $value): bool => $value !== 'Unclassified')->unique()->sort()->values()->all();
+        $years = $this->tracking->filterOptions()['years'] ?? [$year];
+
+        return [
+            'as_of' => $today->toIso8601String(),
+            'filters' => ['year' => $year, 'program' => $program, 'office' => $office, 'frequency' => $frequency],
+            'filterOptions' => [
+                'years' => $years,
+                'offices' => $offices,
+                'frequencies' => $frequencies,
+            ],
+            'programs' => $programs,
+            'trackingRows' => $rows->take(50)->map(fn (array $row): array => $this->trackingRow($row))->values()->all(),
+            'trackingTotal' => $rows->count(),
+            'formulas' => [
+                'pending' => 'Unreceived, not overdue, and still at the initial report-preparation stage.',
+                'in_progress' => 'Unreceived, not overdue, and in a canonical active routing or correction stage.',
+                'overdue' => 'Authoritative deadline is before the as-of date and the official PENRO receipt is absent.',
+                'on_time' => 'Official PENRO receipt is on or before the authoritative deadline.',
+                'days' => 'Days early and late use the authoritative deadline and official PENRO receipt; overdue days use the as-of date while unreceived.',
+            ],
+        ];
+    }
+
+    /** @return list<string> */
+    private function authorizedDevelopmentOffices(): array
+    {
+        $user = auth()->user();
+        if (! $user || ! $this->organization->canAccessUnit($user, OrganizationalAccessService::DEVELOPMENT)) return [];
+
+        return OrganizationalOffice::query()
+            ->where('is_active', true)
+            ->where('office_type', OrganizationalAccessService::OPERATIONAL_GROUP_CENRO)
+            ->whereIn('name', $this->organization->cenroOffices())
+            ->orderBy('name')
+            ->pluck('name')
+            ->filter(fn (string $office): bool => $this->organization->canUseDevelopmentOffice($user, $office))
+            ->values()
+            ->all();
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function overviewRow(array $row, CarbonImmutable $today): array
+    {
+        $deadline = $this->date($row['deadline_submission'] ?? null);
+        $received = $this->date($row['date_received_penro'] ?? null);
+        $dayDelta = $deadline && $received ? $received->diffInDays($deadline, false) : null;
+        $routing = $row['routing'] ?? [];
+        $stage = (string) ($routing['current_stage'] ?? $row['stage'] ?? '');
+        $activeRouting = ! ($row['routing_complete'] ?? false)
+            && ($stage !== '' && $stage !== SubmissionTrackingService::CENRO_RELEASE || (bool) ($routing['correction'] ?? false) || filled($routing['last_action'] ?? null));
+        $state = $row['submitted'] ? 'received' : ($row['is_overdue'] ? 'overdue' : ($activeRouting ? 'in_progress' : 'pending'));
+        $status = $row['is_overdue'] ? 'Overdue' : ($row['submitted'] ? ($row['is_on_time'] ? 'On time' : 'Late') : ($state === 'in_progress' ? (string) ($routing['current_status'] ?? 'In progress') : 'Pending'));
+
+        return [...$row,
+            'frequency' => $this->frequency($row),
+            'day_delta' => $dayDelta,
+            'days_overdue' => $row['is_overdue'] && $deadline ? $deadline->diffInDays($today) : null,
+            'dashboard_state' => $state,
+            'dashboard_status' => $status,
+            'next_action' => $routing['next_expected_action'] ?? null,
+        ];
+    }
+
+    /** @param array<string,mixed> $row */
+    private function frequency(array $row): string
+    {
+        $periodKey = strtolower((string) ($row['period_key'] ?? ''));
+        $period = strtolower((string) ($row['reporting_period'] ?? ''));
+        if (preg_match('/^\d{4}-\d{2}$/', $periodKey)) return 'Monthly';
+        if (preg_match('/^(q[1-4]|quarter\s*[1-4])/', $periodKey) || preg_match('/^(q[1-4]|quarter\s*[1-4])/', $period)) return 'Quarterly';
+        if (str_contains($period, 'annual') || str_contains($periodKey, 'annual')) return 'Annual';
+        if (str_contains($period, 'semester') || str_contains($period, 'semestral')) return 'Semestral';
+        return 'Unclassified';
+    }
+
+    /** @param Collection<int,array<string,mixed>> $items @return list<array<string,mixed>> */
+    private function officeComparison(Collection $items): array
+    {
+        return $items->filter(fn (array $row): bool => $row['frequency'] !== 'Unclassified')
+            ->groupBy('office_or_pa')->map(function (Collection $officeRows, string $office): array {
+                $series = $officeRows->groupBy('frequency')->map(function (Collection $frequencyRows): array {
+                    $eligible = $frequencyRows->where('submitted', true)->filter(fn (array $row): bool => $row['deadline_submission'] !== null);
+                    return ['rate' => $this->rate($eligible->where('is_on_time', true)->count(), $eligible->count()), 'eligible' => $eligible->count()];
+                });
+                return ['office' => $office, 'series' => $series->all()];
+            })->sortBy('office')->values()->all();
+    }
+
+    /** @param Collection<int,array<string,mixed>> $items @return list<array<string,mixed>> */
+    private function timelinessSummary(Collection $items): array
+    {
+        return $items->filter(fn (array $row): bool => $row['frequency'] !== 'Unclassified')
+            ->groupBy('frequency')->map(function (Collection $frequencyRows, string $frequency): array {
+                $ranked = $frequencyRows->groupBy('office_or_pa')->map(function (Collection $officeRows, string $office): array {
+                    $eligible = $officeRows->where('submitted', true)->filter(fn (array $row): bool => $row['deadline_submission'] !== null);
+                    return ['office' => $office, 'rate' => $this->rate($eligible->where('is_on_time', true)->count(), $eligible->count()), 'eligible' => $eligible->count()];
+                })->filter(fn (array $item): bool => $item['eligible'] > 0)->sortByDesc('rate')->values();
+                return ['frequency' => $frequency, 'most_timely' => $ranked->first(), 'needs_follow_up' => $ranked->count() > 1 ? $ranked->sortBy('rate')->first() : null];
+            })->sortBy('frequency')->values()->all();
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function workRow(array $row): array
+    {
+        return [
+            'id' => $row['id'], 'office' => $row['office_or_pa'] ?: '—', 'report' => $row['source_label'],
+            'period' => $row['reporting_period'] ?: '—', 'due' => $row['deadline_submission'],
+            'status' => $row['dashboard_status'], 'context' => $row['next_action'] ?: ($row['routing']['current_location'] ?? 'Awaiting report preparation'),
+            'days_overdue' => $row['days_overdue'], 'timeliness' => $row['timeliness'] ?? null,
+            'source_url' => route('submission-tracking.index', ['source' => $row['source'], 'source_id' => $row['source_id']]),
+        ];
+    }
+
+    /** @param array<string,mixed> $row @return array<string,mixed> */
+    private function trackingRow(array $row): array
+    {
+        return [...$this->workRow($row),
+            'program' => $row['program_key'] === 'engp' ? 'ENGP' : 'PA', 'received' => $row['date_received_penro'],
+            'days' => $row['days_overdue'] !== null ? $row['days_overdue'].' overdue' : ($row['day_delta'] === null ? '—' : ($row['day_delta'] > 0 ? $row['day_delta'].' early' : ($row['day_delta'] < 0 ? abs($row['day_delta']).' late' : '0 early'))),
+            'next_action' => $row['next_action'] ?: ($row['routing']['current_location'] ?? '—'),
         ];
     }
 

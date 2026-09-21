@@ -62,14 +62,14 @@ export default function NotificationBell({ initial = { unread_count: 0, notifica
     const badge = unread > 9 ? '9+' : unread;
 
     return <div ref={root} className="relative">
-        <button type="button" onClick={() => { setOpen(value => !value); refresh(); }} className="relative rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800" aria-label="Compliance alerts" aria-expanded={open}>
+        <button type="button" onClick={() => { setOpen(value => !value); refresh(); }} className="relative rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800" aria-label="Notifications" aria-expanded={open}>
             <Icon icon="solar:bell-linear" width="22" height="22" />
             {unread > 0 && <span className="absolute -right-0.5 -top-0.5 flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-5 text-white">{badge}</span>}
         </button>
         {open && <div className="absolute right-0 z-50 mt-2 w-[22rem] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Notifications</p>
-                <p className="text-xs text-gray-500">{unread ? unread + ' compliance alert' + (unread === 1 ? '' : 's') : 'No new compliance alerts.'}</p>
+                <p className="text-xs text-gray-500">{unread ? unread + ' notification' + (unread === 1 ? '' : 's') : 'No new notifications.'}</p>
             </div>
             <div className="max-h-[26rem] overflow-y-auto">
                 {state.notifications?.length ? state.notifications.map(notification => <button type="button" key={notification.id} onClick={() => openNotification(notification)} className="flex w-full gap-3 border-b border-gray-100 px-4 py-3 text-left transition hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/70">
@@ -79,7 +79,7 @@ export default function NotificationBell({ initial = { unread_count: 0, notifica
                         <span className="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{notification.message}</span>
                         <span className="mt-1 block text-[11px] text-gray-400">{relativeTime(notification.created_at)}</span>
                     </span>
-                </button>) : <div className="px-4 py-8 text-center text-sm text-gray-500">No new compliance alerts.</div>}
+                </button>) : <div className="px-4 py-8 text-center text-sm text-gray-500">No new notifications.</div>}
             </div>
             <div className="border-t border-gray-100 p-2 dark:border-gray-800">
                 <button type="button" onClick={() => request('/notifications/clear', 'POST')} className="block w-full rounded-lg px-3 py-2 text-center text-sm font-semibold text-green-700 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-950/40">Clear Notifications</button>

@@ -54,6 +54,13 @@ expect()->extend('toBeOne', function () {
 |
 */
 
+function dashboardGlobalUser(): \App\Models\User
+{
+    $role = \Spatie\Permission\Models\Role::findOrCreate('Super Admin', 'web');
+    $user = \App\Models\User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $user->assignRole($role);
+    return $user;
+}
 function something()
 {
     // ..

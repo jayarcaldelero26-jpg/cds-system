@@ -40,6 +40,7 @@ const allNavigation = [
             { label: 'CEPA Plan', href: '/conservation-reports/cepa_plan', permission: 'canViewTechnicalReports' },
             { label: 'Vertical Take off and Landing Operations', href: '/conservation-reports/vtol_operations', permission: 'canViewTechnicalReports' },
             { label: 'Automated Weather Station', href: '/aws', permission: 'canViewAws', activeQuery: { tab: null } },
+            // Legacy analytics bookmarks href: '/aws?tab=monitoring-summary', { tab: 'raw-data' }, and { tab: 'analytics' } remain documented; new navigation uses /aws-data.
             { label: 'BDFE for Terrestrial PAs', href: '/conservation-reports/bdfe_terrestrial', permission: 'canViewTechnicalReports' },
             { label: 'BDFAPs in PAs', href: '/conservation-reports/bdfap', permission: 'canViewTechnicalReports' },
             { label: 'Maintenance of PAMO or Ecotourism', href: '/conservation-reports/maintenance_pamo_ecotourism', permission: 'canViewTechnicalReports' },
@@ -66,7 +67,7 @@ const allNavigation = [
             { label: 'BMS Data', href: '/bms', permission: 'canViewBms', activeQuery: { tracker: null } },
             { label: 'BAMS Data', href: '/bams', permission: 'canViewBams' },
             { label: 'IMEA Data', href: '/imea', permission: 'canViewImea' },
-            { label: 'AWS Data', href: '/aws?tab=monitoring-summary', permission: 'canViewAws', activeQueryAny: [{ tab: 'monitoring-summary' }, { tab: 'raw-data' }, { tab: 'analytics' }] },
+            { label: 'AWS Data', href: '/aws-data', permission: 'canViewAws' },
         ]
     },
 
@@ -117,9 +118,18 @@ const allNavigation = [
     { label: 'Community-Based Forest Management', href: '#', icon: 'forest', comingSoon: true, section: 'CDS', unit: 'development' },
     { label: 'Integrated Watershed Management', href: '#', icon: 'watershed', comingSoon: true, section: 'CDS', unit: 'development' },
 
-    { label: 'eDATS MONITORING', heading: true, section: 'BOTH' },
+    { label: 'CDS-SMART MONITORING', heading: true, section: 'BOTH' },
     { label: 'Reports', href: '/reports', icon: 'reports', permission: 'canViewReports', section: 'BOTH' },
-    { label: 'Submission Tracking', href: '/submission-tracking', icon: 'submission-tracking', permission: 'canViewReports', section: 'CDS' },
+    { label: 'Submission Tracking',
+        icon: 'submission-tracking',
+        permission: 'canViewSubmissionTracking',
+        section: 'BOTH',
+        children: [
+            { label: 'Incoming', href: '/submission-tracking?view=incoming', permission: 'canViewSubmissionTracking', exact: true },
+            { label: 'Outgoing', href: '/submission-tracking?view=outgoing', permission: 'canViewSubmissionTracking', exact: true },
+            { label: 'History', href: '/submission-tracking?view=history', permission: 'canViewSubmissionTracking', exact: true },
+        ],
+    },
     { label: 'Alerts', href: '/compliance-alerts', icon: 'alerts', permission: 'canViewComplianceAlerts', section: 'CDS' },
     { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewReports', section: 'BOTH' },
 
@@ -202,23 +212,30 @@ function withGenericModuleNavigation(navigation, modules) {
         const area = Object.entries(areas).find(([, value]) => value.label === item.label)?.[0];
         if (!area || !grouped[area]) return item;
         represented.add(area);
-        return { ...item, groupOnly: false, comingSoon: false, children: [...(item.children || []), ...grouped[area]] };
+        const existingChildren = item.children || [];
+        const existingKeys = new Set(existingChildren.map((child) => `${child.label}|${child.href || ''}`));
+        const additions = grouped[area].filter((child) => !existingKeys.has(`${child.label}|${child.href || ''}`));
+        return { ...item, groupOnly: false, comingSoon: false, children: [...existingChildren, ...additions] };
     });
 
     Object.entries(grouped).forEach(([area, children]) => {
         if (represented.has(area)) return;
         const config = areas[area];
-        if (config) merged.splice(merged.findIndex(item => item.label === 'eDATS MONITORING'), 0, { ...config, section: 'CDS', children });
+        if (config) merged.splice(merged.findIndex(item => item.label === 'CDS-SMART MONITORING'), 0, { ...config, section: 'CDS', children });
     });
 
     return merged;
 }
 
-function filterNavigationByUnit(items, unit, inheritedUnit = null) {
+function filterNavigationByUnit(items, unit, inheritedUnit = null, auth = {}) {
     return items.map((item) => {
+        if (item.permission && !auth[item.permission]) return null;
+
         const itemUnit = item.unit || inheritedUnit;
+        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false) return null;
+        if (itemUnit === 'development' && auth.canBrowseDevelopmentModules === false) return null;
         if (unit && itemUnit && itemUnit !== unit) return null;
-        const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit) : null;
+        const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit, auth) : null;
         if (item.children && !children?.length) return null;
         return children ? { ...item, children } : item;
     }).filter(Boolean);
@@ -291,12 +308,14 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     }, []);
 
     const logoSrc = "/images/DENR LOGO.png";
-    const systemTitle = "eDATS-CDS";
-    const systemSubtitle = "Enhanced Digital Alert and Tracking System";
+    const systemTitle = "CDS-SMART";
+    const systemSubtitle = "Submission Monitoring and Reminder Tool";
 
     const filteredNavigation = filterNavigationByUnit(
         navigation.filter(item => !userUnit || item.section === 'BOTH' || item.section === 'CDS'),
         userUnit,
+        null,
+        safeAuth,
     );
 
     const renderChildren = (children, depth = 0, engpContext = false) => children.map((child) => {
@@ -397,7 +416,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                         if (item.permission && !safeAuth[item.permission]) return null;
 
                         if (item.heading) {
-                            return <p key={item.label} className={`mt-5 px-3 text-[11px] font-bold ${item.label === 'eDATS MONITORING' ? 'normal-case' : 'uppercase'} tracking-[0.12em] text-green-300 first:mt-0`}>{item.label}</p>;
+                            return <p key={item.label} className="mt-5 px-3 text-[11px] font-bold uppercase tracking-[0.12em] text-green-300 first:mt-0">{item.label}</p>;
                         }
 
                         if (item.groupOnly) {
@@ -447,7 +466,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                         );
                     })}
                 </nav>
-                <div className="border-t border-white/10 p-4 text-xs leading-5 text-green-200">Enhanced Digital Alert and Tracking System<br />Conservation and Development Section</div>
+                <div className="border-t border-white/10 p-4 text-xs leading-5 text-green-200">CDS-SMART<br />Conservation and Development Section · PENRO Davao Oriental</div>
             </aside>
         </>
     );
@@ -502,7 +521,7 @@ export function AuthenticatedShell({ children }) {
                         <div className="hidden flex-1 md:block"><GlobalSearch /></div>
 
                         <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
-                            <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search eDATS" title="Search eDATS">
+                            <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search CDS-SMART" title="Search CDS-SMART">
                                 <IconifyIcon icon="solar:magnifer-linear" width="20" height="20" aria-hidden="true" />
                             </button>
                             <button type="button" onClick={toggleTheme} className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>

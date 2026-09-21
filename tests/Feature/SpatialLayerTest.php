@@ -17,7 +17,7 @@ function spatialFeatureCollection(float $longitude = 126.2): array
 }
 
 it('adds spatial uploads as separate layers without overwriting earlier layers', function () {
-    $user = User::factory()->create(['is_active' => true]);
+    $user = User::factory()->create(['is_active' => true, 'section' => 'PENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']);
     $role = Role::create(['name' => 'Spatial Test Manager', 'guard_name' => 'web']);
     $role->syncPermissions([
         Permission::create(['name' => 'bms.view', 'guard_name' => 'web']),

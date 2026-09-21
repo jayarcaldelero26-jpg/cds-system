@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\File;
 use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
-    $this->user = User::factory()->create();
+    $this->user = User::factory()->create(['section' => 'PENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'PENRO Davao Oriental']);
     foreach (['imea.view', 'imea.create', 'imea.update', 'imea.delete'] as $ability) {
         $this->user->givePermissionTo(Permission::findOrCreate($ability, 'web'));
     }

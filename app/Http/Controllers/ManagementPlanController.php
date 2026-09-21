@@ -165,6 +165,7 @@ class ManagementPlanController extends Controller
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
         $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($managementPlan);
         $this->rejectRoutingFields($request);
         $data = $request->validate([
             ...$this->reportRules(),
@@ -219,6 +220,7 @@ class ManagementPlanController extends Controller
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
         $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
+        app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($managementPlan);
         $managementPlan->update(['updated_by' => $request->user()->id]);
         $managementPlan->delete();
 
@@ -269,8 +271,8 @@ class ManagementPlanController extends Controller
             'activity_name' => ['required', 'string', 'max:255'],
             'document_type' => ['required', 'string', Rule::in(['Final Report', 'Progress Report'])],
             'semester' => ['required', 'string', 'in:1st Semester,2nd Semester'],
-            'date_conducted' => ['nullable', 'string', 'max:255'],
-            'date_accomplished' => ['nullable', 'date'],
+            'date_conducted' => ['required', 'date'],
+            'date_accomplished' => ['required', 'date'],
             'remarks' => ['nullable', 'string'],
             'attachments' => [$requireAttachments ? 'required' : 'nullable', 'array', ...($requireAttachments ? ['min:1'] : [])],
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],

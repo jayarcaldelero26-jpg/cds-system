@@ -8,6 +8,7 @@ use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
+use App\Services\SubmissionTracking\RoutingStatusPresenter;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Validation\ValidationException;
@@ -71,22 +72,41 @@ test('canonical receipt appears once and internal forward does not auto-create r
         ->and(collect($after['timeline'])->firstWhere('key', PambRoutingTimelineService::RECEIVED_BY_PENRO)['status'])->toBe('current');
 });
 
+test('PENRO Records receipt exposes receive and correction actions only while current', function (): void {
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
+    $receipt = timelineService()->present($report);
+
+    expect(collect($receipt['actions'])->pluck('key')->all())
+        ->toContain('penro_receipt', 'return_for_correction_penro_records')
+        ->and(collect($receipt['actions'])->firstWhere('key', 'return_for_correction_penro_records')['attachment_allowed'])->toBeFalse();
+
+    $forwarded = timelineService()->present($report->forceFill(['date_received_penro' => '2026-08-05']));
+    expect($forwarded['actions'])->toBeEmpty();
+
+    $complete = timelinePambReport($this, [
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+        'date_endorsed_regional' => '2026-08-06',
+    ]);
+    expect(timelineService()->present($complete)['actions'])->toBeEmpty();
+});
+
 test('receipt is required before the next forward and same-day receipt is accepted', function () {
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
     routeEvent($report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, '2026-08-05');
     expect(fn () => routeEvent($report, PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-05'))->toThrow(ValidationException::class);
     routeEvent($report, PambRoutingTimelineService::RECEIVED_BY_PENRO, '2026-08-05');
     routeEvent($report, PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-05');
-    expect(timelineService()->present($report->fresh())['current_document_location'])->toBe('For Receipt by TSD');
+    expect(timelineService()->present($report->fresh())['current_document_location'])->toBe('For Receipt by PENRO TSD Chief');
 });
 
 test('current location advances only when each receiving event exists', function () {
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
     completeThrough($report);
     routeEvent($report, PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-06');
-    expect(timelineService()->present($report->fresh())['current_document_location'])->toBe('For Receipt by TSD');
+    expect(timelineService()->present($report->fresh())['current_document_location'])->toBe('For Receipt by PENRO TSD Chief');
     routeEvent($report, PambRoutingTimelineService::RECEIVED_BY_TSD, '2026-08-06');
-    expect(timelineService()->present($report->fresh())['current_document_location'])->toBe('TSD');
+    expect(timelineService()->present($report->fresh())['current_document_location'])->toBe('PENRO TSD Chief');
 });
 
 test('routing summary exposes the current owner, delay, next action and last event', function () {
@@ -106,14 +126,57 @@ test('routing summary exposes the current owner, delay, next action and last eve
         ->and($summary['last_action']['recorded_by'])->toBe($this->user->name);
 });
 
+test('PENRO internal routing adds presentation context without changing the canonical status', function (): void {
+    $report = timelinePambReport($this, [
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+    ]);
+    routeEvent($report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, '2026-08-05');
+    routeEvent($report, PambRoutingTimelineService::RECEIVED_BY_PENRO, '2026-08-05');
+
+    $presented = timelineService()->present($report->fresh());
+
+    expect(app(RoutingStatusPresenter::class)->status($report->fresh(), 'conservation'))
+        ->toBe(RoutingStatusPresenter::PENDING_REGIONAL)
+        ->and($presented['routing_summary']['status_context'])
+        ->toBe([
+            'label' => 'PENRO internal routing in progress',
+            'current_unit' => 'Office of the PENRO',
+        ]);
+});
+
+test('completed and correction states do not receive internal PENRO routing context', function (): void {
+    $completed = timelinePambReport($this, [
+        'date_report_released_cenro' => '2026-08-04',
+        'date_received_penro' => '2026-08-05',
+        'date_endorsed_regional' => '2026-08-06',
+    ]);
+    PambRoutingEvent::create([
+        'conservation_report_submission_id' => $completed->id,
+        'workflow_key' => $completed->workflow_key,
+        'stage_key' => PambRoutingTimelineService::RELEASED_TO_REGIONAL,
+        'occurred_at' => '2026-08-06 09:00:00',
+        'recorded_by' => $this->user->id,
+    ]);
+
+    $correction = timelinePambReport($this, [
+        'mov_processing_status' => 'needs_correction',
+    ]);
+
+    expect(timelineService()->present($completed->fresh())['routing_summary']['status_context'])->toBeNull()
+        ->and(timelineService()->present($correction->fresh())['routing_summary']['status_context'])->toBeNull();
+});
+
 test('a complete detailed route retains the canonical regional endorsement event', function () {
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
     completeThrough($report);
     foreach ([
         [PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-06'], [PambRoutingTimelineService::RECEIVED_BY_TSD, '2026-08-06'],
         [PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, '2026-08-07'], [PambRoutingTimelineService::RECEIVED_BY_CDS, '2026-08-07'],
+        [PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF, '2026-08-07'], [PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF, '2026-08-07'],
         [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, '2026-08-07'], [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL, '2026-08-07'],
-        [PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS, '2026-08-10'], [PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL, '2026-08-10'],
+        [PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, '2026-08-07'],
+        [PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL, '2026-08-10'],
     ] as [$stage, $date]) routeEvent($report, $stage, $date);
     $report->update(['date_endorsed_regional' => '2026-08-10']);
     $timeline = timelineService()->present($report->fresh());
@@ -156,6 +219,7 @@ test('PENRO-managed PAMB skips CENRO without creating a fake event', function ()
 });
 
 test('normal routing endpoint ignores client timestamp and records actor once', function () {
+    $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-10 14:30:00', BusinessCalendarService::TIMEZONE));
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
     $this->actingAs($this->user)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, 'occurred_at' => '2020-01-01 00:00:00', 'remarks' => 'Slip 123'])->assertSessionHasNoErrors();
@@ -165,30 +229,15 @@ test('normal routing endpoint ignores client timestamp and records actor once', 
         ->and(AuditLog::query()->where('action', 'PAMB Internal Routing Event Recorded')->where('entity_id', (string) $report->id)->count())->toBe(1);
 });
 
-test('Super Admin can execute each valid PENRO stage without skipping the order', function () {
+test('Super Admin cannot execute a normal PENRO routing stage', function () {
     $admin = User::factory()->create(['section' => 'CDS']);
     $admin->assignRole(Role::findOrCreate('Super Admin', 'web'));
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
-    $this->actingAs($admin);
 
-    $this->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), ['stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-05'])->assertSessionHasNoErrors();
-    foreach ([
-        PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-        PambRoutingTimelineService::RECEIVED_BY_PENRO,
-        PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD,
-        PambRoutingTimelineService::RECEIVED_BY_TSD,
-        PambRoutingTimelineService::FORWARDED_TSD_TO_CDS,
-        PambRoutingTimelineService::RECEIVED_BY_CDS,
-        PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO,
-        PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL,
-        PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS,
-        PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL,
-    ] as $stage) {
-        $this->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $stage]), ['stage' => $stage])->assertSessionHasNoErrors();
-    }
+    $this->actingAs($admin)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), ['stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-05'])->assertForbidden();
 
-    $this->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), ['stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT, 'date' => '2026-08-10'])->assertSessionHasNoErrors();
-    expect(timelineService()->present($report->fresh())['routing_summary']['next_expected_action'])->toBe('No further routing action');
+    expect($report->fresh()->date_received_penro)->toBeNull()
+        ->and($report->fresh()->routingEvents()->count())->toBe(0);
 });
 
 test('an authorized CENRO focal can load the Regular PAMB page through the HTTP route', function () {
@@ -206,4 +255,50 @@ test('internal routing does not change compliance values or notifications', func
     $after = $report->fresh();
     expect([$after->deadline_submission, $after->days_complied, $after->timeliness, $after->submission_status])->toBe($before)
         ->and($this->user->unreadNotifications()->count())->toBe(0);
+});
+
+
+test('legacy regional release does not complete an incomplete direct PENRO chain', function () {
+    $area = ProtectedArea::create(['name' => 'Mt. Hamiguitan Range Wildlife Sanctuary', 'short_name' => 'MHRWS', 'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
+    $report = timelinePambReport($this, ['protected_area_id' => $area->id, 'target_office' => 'PENRO Davao Oriental', 'date_received_penro' => '2026-08-20', 'date_endorsed_regional' => '2026-08-30']);
+    $timeline = timelineService()->present($report->fresh());
+    $items = collect($timeline['timeline'])->keyBy('key');
+    expect($items[PambRoutingTimelineService::RECORDS_RECEIVED]['status'])->toBe('completed')
+        ->and($items[PambRoutingTimelineService::RELEASED_TO_REGIONAL]['status'])->toBe('pending')
+        ->and($timeline['legacy_source_metadata']['regional_release_date'])->toBe('2026-08-30')
+        ->and($timeline['current_processing_status'])->not->toBe('Released to Regional Office');
+});
+
+test('canonical milestone timeline uses action timestamp while preserving business date', function (): void {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-04 14:30:00', BusinessCalendarService::TIMEZONE));
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
+
+    timelineService()->recordCanonical(
+        $report,
+        SubmissionTrackingService::CENRO_RELEASE,
+        '2026-08-04',
+        $this->user->id,
+        CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
+    );
+
+    $item = collect(timelineService()->present($report->fresh())['timeline'])
+        ->firstWhere('key', SubmissionTrackingService::CENRO_RELEASE);
+
+    expect($item['occurred_at'])->toBe('2026-08-04T14:30:00+08:00')
+        ->and($item['business_date'])->toBe('2026-08-04')
+        ->and($report->fresh()->date_report_released_cenro->toDateString())->toBe('2026-08-04');
+});
+
+test('routing actor presentation uses routed role and originating office', function (): void {
+    $this->user->update(['section' => 'PENRO_TSD_CHIEF', 'office_designated' => 'PENRO Davao Oriental']);
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
+
+    timelineService()->recordCanonical($report, SubmissionTrackingService::CENRO_RELEASE, '2026-08-04', $this->user->id);
+
+    $item = collect(timelineService()->present($report->fresh())['timeline'])
+        ->firstWhere('key', SubmissionTrackingService::CENRO_RELEASE);
+
+    expect($item['recorded_by'])->toBe($this->user->name)
+        ->and($item['actor_category_label'])->toBe('CENRO Records Unit')
+        ->and($item['actor_office'])->toBe('CENRO Mati');
 });
