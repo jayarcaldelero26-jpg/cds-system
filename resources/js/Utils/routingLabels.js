@@ -1,11 +1,12 @@
 export function standardActionLabel(action = '') {
     const value = String(action || '').trim();
+    if (/receive\s+correction/i.test(value)) return 'Receive Correction';
+    if (/receive|receipt/i.test(value)) return 'Receive';
     if (/return|correction/i.test(value)) return 'Return for Correction';
     if (/approv/i.test(value)) return 'Approve';
     if (/recommend/i.test(value)) return 'Recommend';
     if (/release|endorse/i.test(value)) return 'Release';
     if (/forward|assign|transmit/i.test(value)) return 'Forward';
-    if (/receive|receipt/i.test(value)) return 'Receive';
     if (/review/i.test(value)) return 'Review';
     return value || 'Open';
 }

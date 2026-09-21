@@ -80,6 +80,53 @@ test('generic Homestay uses canonical routing actions and never exposes PAMB MOV
     assertGenericQueueContains($tracking, 'for_review', $report->id);
 });
 
+test('CENRO Records release uses a release message while correction receipt keeps its message', function (): void {
+    $focal = genericQueueUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = genericQueueUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $records = genericQueueUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    $report = genericQueueReport($focal);
+    $tracking = app(SubmissionTrackingService::class);
+
+    $tracking->transition('conservation', $report->id, 'forward_to_cenro_chief', null, $focal->id);
+    $tracking->transition('conservation', $report->id, 'receive_at_cenro_chief', null, $chief->id);
+    $tracking->transition('conservation', $report->id, 'forward_to_cenro_records', null, $chief->id);
+    $tracking->transition('conservation', $report->id, 'receive_at_cenro_records', null, $records->id);
+
+    $response = $this->actingAs($records)->post(route('submission-tracking.transition', [
+        'source' => 'conservation', 'record' => $report->id, 'stage' => 'forward_to_penro_records',
+    ]), ['stage' => 'forward_to_penro_records']);
+
+    $response->assertRedirect()->assertSessionHas('success', 'Document released to PENRO Records successfully.')
+        ->assertSessionDoesntHaveErrors();
+
+    $event = \App\Models\DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->latest('id')->firstOrFail();
+    expect($event->metadata['action_key'] ?? null)->toBe('forward_to_penro_records')
+        ->and($event->to_stage)->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS);
+});
+
+test('correction receipt retains its dedicated success message', function (): void {
+    $focal = genericQueueUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = genericQueueUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $records = genericQueueUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    $penroRecords = genericQueueUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $report = genericQueueReport($focal);
+    $tracking = app(SubmissionTrackingService::class);
+
+    $tracking->transition('conservation', $report->id, 'forward_to_cenro_chief', null, $focal->id);
+    $tracking->transition('conservation', $report->id, 'receive_at_cenro_chief', null, $chief->id);
+    $tracking->transition('conservation', $report->id, 'forward_to_cenro_records', null, $chief->id);
+    $tracking->transition('conservation', $report->id, 'receive_at_cenro_records', null, $records->id);
+    $tracking->transition('conservation', $report->id, 'forward_to_penro_records', null, $records->id);
+    $tracking->transition('conservation', $report->id, 'return_for_correction_penro_records', null, $penroRecords->id, null, 'missing_received_copy');
+
+    $response = $this->actingAs($records)->post(route('submission-tracking.transition', [
+        'source' => 'conservation', 'record' => $report->id, 'stage' => 'receive_correction',
+    ]), ['stage' => 'receive_correction']);
+
+    $response->assertRedirect()->assertSessionHas('success', 'Correction received successfully.')
+        ->assertSessionDoesntHaveErrors();
+});
+
 
 test('workspace Incoming and Outgoing preserve handoff semantics while categorizing current actions', function (): void {
     $focal = genericQueueUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');

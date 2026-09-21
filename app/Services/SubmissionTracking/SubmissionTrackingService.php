@@ -203,7 +203,8 @@ final class SubmissionTrackingService
             ];
         }
 
-        if ($category === OrganizationalAccessService::PAMO && in_array(OrganizationalAccessService::CONSERVATION, $this->organization->effectiveUnits($user), true)) {
+        if (($category === OrganizationalAccessService::PAMO || $this->pambAccess->isPamo($user))
+            && in_array(OrganizationalAccessService::CONSERVATION, $this->organization->effectiveUnits($user), true)) {
             return [
                 'for_submission' => $merge($records->filter(fn (array $record): bool => in_array(data_get($record, 'mov_processing.queue'), ['for_submission', 'for_review', 'for_release'], true)), $genericQueue('pamo_origin')),
                 'needs_correction' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
@@ -593,6 +594,12 @@ final class SubmissionTrackingService
     {
         if (! $user) return false;
 
+        if ($this->pambAccess->isPamo($user)) {
+            return ($row['pamb_routing_applicable'] ?? false)
+                && ! ($row['routing_complete'] ?? false)
+                && (bool) data_get($row, 'pamb_action_flags.can_submit');
+        }
+
         $category = $this->organization->effectiveCategory($user);
         if (! in_array($category, $this->organization->operationalCategories(), true)) return false;
         if ($this->organization->normalizeCategory(data_get($row, 'routing.responsible_user_category')) !== $category) return false;
@@ -936,12 +943,15 @@ final class SubmissionTrackingService
                 'can_return_for_penro_correction' => $this->pambAccess->canRecordInternalRouting($user, $record, PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION),
                 'can_approve_for_regional_release' => $this->pambAccess->canRecordInternalRouting($user, $record, PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL),
             ];
-            $data['can_transition'] = $data['can_transition'] && $this->pambAccess->canPerformCanonical($user, $record, $data['stage']);
             $data['routing_timeline'] = array_map(function (array $stage) use ($user, $record): array {
                 $stage['stage_key'] = $stage['stage_key'] ?? $stage['key'];
                 $stage['can_record'] = $stage['can_record'] && $this->pambAccess->canRecordInternalRouting($user, $record, $stage['stage_key']);
                 return $stage;
             }, $data['routing_timeline']);
+            $canonicalTransitionAllowed = $this->pambAccess->canPerformCanonical($user, $record, $data['stage']);
+            $internalTransitionAllowed = collect($data['routing_timeline'])
+                ->contains(fn (array $stage): bool => ($stage['status'] ?? null) === 'current' && (bool) ($stage['can_record'] ?? false));
+            $data['can_transition'] = $data['can_transition'] && ($canonicalTransitionAllowed || $internalTransitionAllowed);
         }
         if ($pambRouting['applicable']) {
             $data['routing_timeline'] = array_map(function (array $stage) use ($record, $sourceKey): array {

@@ -114,7 +114,7 @@ class SubmissionTrackingController extends Controller
             ]);
             abort_unless($data['stage'] === $stage, 422);
             $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null);
-            return back()->with('success', $stage === 'receive_correction' ? 'Correction received successfully.' : 'Corrected copy resubmitted successfully.');
+            return back()->with('success', $stage === 'receive_correction' ? 'Correction received successfully.' : 'Document released to PENRO Records successfully.');
         }
         if ($this->tracking->usesGenericRouting($source, $record)) {
             $data = $request->validate([

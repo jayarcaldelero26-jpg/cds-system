@@ -36,9 +36,13 @@ final class PambSubmissionAccessService
         return in_array(app(OrganizationalAccessService::class)->effectiveCategory($user), self::CENRO_CATEGORIES, true);
     }
 
-    public function isPamo(User $user): bool
+    public function isPamo(?User $user): bool
     {
-        return app(OrganizationalAccessService::class)->effectiveCategory($user) === OrganizationalAccessService::PAMO;
+        if (! $user) return false;
+        $organization = app(OrganizationalAccessService::class);
+
+        return $organization->normalizeCategory($user->section) === OrganizationalAccessService::PAMO
+            || $user->hasRole(OrganizationalAccessService::PAMO);
     }
 
     public function isPenro(User $user): bool
@@ -49,10 +53,14 @@ final class PambSubmissionAccessService
     public function canView(User $user, ConservationReportSubmission $submission): bool
     {
         $organization = app(OrganizationalAccessService::class);
-        if (! $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)
-            || ! $organization->canAccessProtectedAreaRecord($user, $submission)) {
+        if (! $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) {
             return false;
         }
+        if ($this->isPamo($user)) {
+            return $user->protected_area_id !== null
+                && (int) $user->protected_area_id === (int) $submission->protected_area_id;
+        }
+        if (! $organization->canAccessProtectedAreaRecord($user, $submission)) return false;
         if ($this->isGlobal($user) || $this->isPenro($user)) {
             return true;
         }
@@ -60,11 +68,6 @@ final class PambSubmissionAccessService
         if ($this->isCenro($user)) {
             return ($this->same($user->office_designated, $submission->target_office) || (blank($submission->target_office) && (int) $submission->created_by === (int) $user->getKey()))
                 && ! app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
-        }
-
-        if ($this->isPamo($user)) {
-            return $user->protected_area_id !== null
-                && (int) $user->protected_area_id === (int) $submission->protected_area_id;
         }
 
         // Preserve existing permission-based visibility for legacy categories.
@@ -86,19 +89,24 @@ final class PambSubmissionAccessService
                 });
             })->whereRaw('LOWER(target_office) = ?', [mb_strtolower($office)]);
         }
-        if ($this->isPamo($user)) return $organization->scopeProtectedAreaQuery($query, $user);
+        if ($this->isPamo($user)) {
+            return $user->protected_area_id === null
+                ? $query->whereRaw('1 = 0')
+                : $query->where($query->getModel()->getTable().'.protected_area_id', (int) $user->protected_area_id);
+        }
         return $query;
     }
 
     public function canPerform(User $user, string $action): bool
     {
         if (! app(OrganizationalAccessService::class)->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) return false;
+        $category = $this->categoryFor($user);
 
         return match ($action) {
 
-            'submit' => in_array(app(OrganizationalAccessService::class)->effectiveCategory($user), [self::CENRO_FOCAL, self::PAMO], true),
-            'review' => in_array(app(OrganizationalAccessService::class)->effectiveCategory($user), [self::CENRO_CHIEF, self::PENRO_CHIEF], true),
-            'release' => app(OrganizationalAccessService::class)->effectiveCategory($user) === self::CENRO_RECORDS,
+            'submit' => in_array($category, [self::CENRO_FOCAL, self::PAMO], true),
+            'review' => in_array($category, [self::CENRO_CHIEF, self::PENRO_CHIEF], true),
+            'release' => $category === self::CENRO_RECORDS,
             default => false,
         };
     }
@@ -111,7 +119,7 @@ final class PambSubmissionAccessService
     {
         if (! $this->canView($user, $submission)) return false;
 
-        $category = app(OrganizationalAccessService::class)->effectiveCategory($user);
+        $category = $this->categoryFor($user);
 
         return match ($action) {
             'submit' => in_array($category, [self::CENRO_FOCAL, self::PAMO], true)
@@ -139,7 +147,7 @@ final class PambSubmissionAccessService
         if (! $timeline->isInternalStageKey($stage)) return false;
 
         $baseStage = $timeline->canonicalStageKey($stage);
-        $category = app(OrganizationalAccessService::class)->effectiveCategory($user);
+        $category = $this->categoryFor($user);
 
         if ($baseStage === PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL) {
             return $category === self::OFFICE_PENRO && $timeline->isAwaitingOfficePenroFinalReceipt($submission);
@@ -239,5 +247,12 @@ final class PambSubmissionAccessService
     {
         return trim((string) $left) !== ''
             && mb_strtolower(trim((string) $left)) === mb_strtolower(trim((string) $right));
+    }
+
+    private function categoryFor(User $user): ?string
+    {
+        return $this->isPamo($user)
+            ? self::PAMO
+            : app(OrganizationalAccessService::class)->effectiveCategory($user);
     }
 }

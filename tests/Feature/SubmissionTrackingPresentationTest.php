@@ -24,6 +24,17 @@ test('canonical routing action labels distinguish CENRO release from later recei
         ->and($actions['approve_for_regional_release']['action_label'])->toBe('Approve for Regional Release');
 });
 
+test('routing action normalization preserves receive correction before broad correction matching', function (): void {
+    $labels = file_get_contents(base_path('resources/js/Utils/routingLabels.js'));
+    expect($labels)->toContain("if (/receive\\s+correction/i.test(value)) return 'Receive Correction';");
+    $receive = strpos($labels, "if (/receive|receipt/i.test(value)) return 'Receive';");
+    $return = strpos($labels, "if (/return|correction/i.test(value)) return 'Return for Correction';");
+
+    expect($receive)->not->toBeFalse()
+        ->and($return)->not->toBeFalse()
+        ->and($receive)->toBeLessThan($return);
+});
+
 test('Submission Tracking labels Super Admin queues as global monitoring without changing operational labels', function (): void {
     $tracking = file_get_contents(base_path('resources/js/Pages/SubmissionTracking/Index.jsx'));
 
