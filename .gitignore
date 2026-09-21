@@ -15,6 +15,9 @@
 /auth.json
 /node_modules
 /public/build
+/build-hostinger.zip
+/build-latest.zip
+/references/
 /public/fonts-manifest.dev.json
 /public/hot
 /public/storage
