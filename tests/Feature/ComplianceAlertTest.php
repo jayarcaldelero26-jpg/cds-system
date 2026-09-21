@@ -16,7 +16,10 @@ use App\Services\Compliance\ComplianceAlertDeliveryService;
 use App\Services\Compliance\ComplianceAlertTemplateResolver;
 use App\Services\Compliance\ComplianceConfirmationService;
 use App\Services\Compliance\ComplianceRichTextSanitizer;
+use App\Services\Compliance\ComplianceRecipientResolver;
+use App\Services\Compliance\OverdueReport;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\Compliance\TargetOfficeNormalizer;
 use App\Services\BusinessCalendarService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\QueryException;
@@ -37,6 +40,9 @@ beforeEach(function () {
     config()->set('compliance_alerts.cc_recipients', []);
     Storage::fake('local');
     Storage::fake('public');
+    ComplianceAlertRecipient::query()
+        ->whereIn('target_office_key', ['cenro_baganga', 'cenro_mati', 'hamiguitan'])
+        ->update(['is_active' => false]);
 });
 
 afterEach(function () {
@@ -111,6 +117,41 @@ function enabledComplianceSettings(array $overrides = []): ComplianceAlertSettin
         'timezone' => 'Asia/Manila',
     ], ...$overrides]);
 }
+
+test('canonical and legacy office values resolve to the same recipient key', function () {
+    $normalizer = app(TargetOfficeNormalizer::class);
+
+    expect($normalizer->normalize('CENRO Baganga'))->toBe(['key' => 'cenro_baganga', 'label' => 'CENRO Baganga'])
+        ->and($normalizer->normalize('Baganga'))->toBe(['key' => 'cenro_baganga', 'label' => 'Baganga'])
+        ->and($normalizer->normalize(' CENRO   Mati '))->toBe(['key' => 'cenro_mati', 'label' => 'CENRO Mati'])
+        ->and($normalizer->normalize('Mati'))->toBe(['key' => 'cenro_mati', 'label' => 'Mati'])
+        ->and($normalizer->normalize('MHRWS'))->toBe(['key' => 'hamiguitan', 'label' => 'MHRWS'])
+        ->and($normalizer->normalize('Hamiguitan'))->toBe(['key' => 'hamiguitan', 'label' => 'Hamiguitan']);
+});
+
+test('canonical report offices resolve legacy recipient mappings without crossing office scope', function () {
+    ComplianceAlertRecipient::query()->update(['is_active' => false]);
+    ComplianceAlertRecipient::create(['target_office' => 'Baganga', 'target_office_key' => 'baganga', 'recipient_email' => 'baganga@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'Mati', 'target_office_key' => 'mati', 'recipient_email' => 'mati@example.test', 'is_active' => true]);
+    ComplianceAlertRecipient::create(['target_office' => 'Hamiguitan', 'target_office_key' => 'hamiguitan', 'recipient_email' => 'hamiguitan@example.test', 'is_active' => true]);
+
+    $report = fn (string $office): OverdueReport => new OverdueReport('test', 1, 'BMS', null, 'No PA', $office, 'Activity', 'Final Report', '2026-09-01', false, false, 1);
+    $resolver = app(ComplianceRecipientResolver::class);
+
+    expect($resolver->resolve($report('CENRO Baganga'))->email)->toBe('baganga@example.test')
+        ->and($resolver->resolve($report('CENRO Mati'))->email)->toBe('mati@example.test')
+        ->and($resolver->resolve($report('Hamiguitan'))->email)->toBe('hamiguitan@example.test')
+        ->and($resolver->resolve($report('CENRO Unknown')))->toBeNull();
+});
+
+test('inactive office mappings are excluded from canonical recipient resolution', function () {
+    ComplianceAlertRecipient::query()->update(['is_active' => false]);
+    ComplianceAlertRecipient::create(['target_office' => 'Baganga', 'target_office_key' => 'baganga', 'recipient_email' => 'inactive@example.test', 'is_active' => false]);
+
+    $report = new OverdueReport('test', 1, 'BMS', null, 'No PA', 'CENRO Baganga', 'Activity', 'Final Report', '2026-09-01', false, false, 1);
+
+    expect(app(ComplianceRecipientResolver::class)->resolve($report))->toBeNull();
+});
 
 test('CDS Admin can change automatic delivery only with the current password and the change is audited', function () {
     config()->set('compliance_alerts.enabled', true);

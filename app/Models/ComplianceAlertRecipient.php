@@ -23,7 +23,8 @@ class ComplianceAlertRecipient extends Model
             return 'pa:'.(int) $this->protected_area_id;
         }
 
-        $office = trim((string) $this->target_office_key);
+        $office = app(\App\Services\Compliance\TargetOfficeNormalizer::class)->normalize($this->target_office)['key']
+            ?: trim((string) $this->target_office_key);
 
         return $office === '' ? null : 'office:'.$office;
     }

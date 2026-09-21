@@ -27,7 +27,7 @@ class ComplianceRecipientResolver
             return 'pa:'.(int) $mapping->protected_area_id;
         }
 
-        $key = trim((string) ($mapping->target_office_key ?: $this->offices->normalize($mapping->target_office)['key']));
+        $key = trim((string) ($this->offices->normalize($mapping->target_office)['key'] ?: $mapping->target_office_key));
 
         return $key === '' ? null : 'office:'.$key;
     }
@@ -220,7 +220,7 @@ class ComplianceRecipientResolver
     {
         return $this->mappingIndexes ??= [
             'protected_area' => $this->activeMappings()->filter(fn (ComplianceAlertRecipient $mapping): bool => $mapping->protected_area_id !== null)->keyBy(fn (ComplianceAlertRecipient $mapping): string => (string) $mapping->protected_area_id)->all(),
-            'target_office' => $this->activeMappings()->filter(fn (ComplianceAlertRecipient $mapping): bool => $mapping->protected_area_id === null)->mapWithKeys(fn (ComplianceAlertRecipient $mapping): array => [(string) ($mapping->target_office_key ?: $this->offices->normalize($mapping->target_office)['key']) => $mapping])->all(),
+            'target_office' => $this->activeMappings()->filter(fn (ComplianceAlertRecipient $mapping): bool => $mapping->protected_area_id === null)->mapWithKeys(fn (ComplianceAlertRecipient $mapping): array => [(string) ($this->offices->normalize($mapping->target_office)['key'] ?: $mapping->target_office_key) => $mapping])->all(),
         ];
     }
     private function designation(?string $value, string $fallback = 'The OIC, PASu'): string
