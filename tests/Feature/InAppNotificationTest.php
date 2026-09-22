@@ -2,7 +2,14 @@
 
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
+use App\Models\BmsReportSubmission;
+use App\Models\BamsReportSubmission;
 use App\Models\ImeaFacilityMaintenanceReport;
+use App\Models\ImeaReportSubmission;
+use App\Models\Aws;
+use App\Models\IpafManagementReport;
+use App\Models\IpafRevenueCollection;
+use App\Models\ManagementPlan;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
@@ -77,6 +84,87 @@ test('marking an owned notification read immediately updates the bell unread cou
         ->assertInertia(fn ($page) => $page->where('notifications.0.read_at', fn ($value) => $value !== null));
 
     expect($notification->fresh()->read_at)->not->toBeNull();
+});
+
+test('bell unread count is total eligible unread notifications while recent list stays capped at eight', function () {
+    foreach ([0, 1, 8, 9, 14] as $expectedCount) {
+        $user = User::factory()->create(['section' => 'CDS']);
+        $user->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+        for ($index = 0; $index < $expectedCount; $index++) {
+            $user->notify(new EdatsInAppNotification(notificationPayload("bell-{$expectedCount}-{$index}")));
+        }
+
+        $response = $this->actingAs($user)->get(route('notifications.recent'))->assertOk();
+        $response->assertJsonPath('unread_count', $expectedCount)
+            ->assertJsonCount(min($expectedCount, 8), 'notifications');
+    }
+});
+
+test('bell unread total updates from fourteen to thirteen after marking one eligible notification read', function () {
+    for ($index = 0; $index < 14; $index++) {
+        $this->user->notify(new EdatsInAppNotification(notificationPayload("fourteen-{$index}")));
+    }
+    $other = User::factory()->create(['section' => 'CDS']);
+    $other->notify(new EdatsInAppNotification(notificationPayload('another-users-unread')));
+    $notification = $this->user->notifications()->where('data->dedup_key', 'fourteen-0')->firstOrFail();
+
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertJsonPath('unread_count', 14)
+        ->assertJsonCount(8, 'notifications');
+    $this->actingAs($this->user)->withHeader('Accept', 'application/json')
+        ->patch(route('notifications.read', $notification))->assertOk();
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertJsonPath('unread_count', 13)
+        ->assertJsonCount(8, 'notifications');
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertJsonPath('unread_count', 13);
+
+    expect($other->fresh()->unreadNotifications()->count())->toBe(1);
+});
+
+test('workflow notification URLs select the exact supported source record safely', function () {
+    $sourceCases = [
+        ['conservation', 'conservation', 41],
+        ['engp', 'engp', 42],
+        [ConservationReportSubmission::class, 'conservation', 43],
+        ['bms', 'bms', 44],
+        ['bams', 'bams', 45],
+        ['imea', 'imea', 46],
+        ['imea-maintenance', 'imea-maintenance', 47],
+        ['aws', 'aws', 48],
+        ['ipaf-management', 'ipaf-management', 49],
+        ['revenue', 'revenue', 50],
+        ['management-plans', 'management-plans', 51],
+        [EngpReportSubmission::class, 'engp', 52],
+        [BmsReportSubmission::class, 'bms', 53],
+        [BamsReportSubmission::class, 'bams', 54],
+        [ImeaReportSubmission::class, 'imea', 55],
+        [ImeaFacilityMaintenanceReport::class, 'imea-maintenance', 56],
+        [Aws::class, 'aws', 57],
+        [IpafManagementReport::class, 'ipaf-management', 58],
+        [IpafRevenueCollection::class, 'revenue', 59],
+        [ManagementPlan::class, 'management-plans', 60],
+    ];
+
+    foreach ($sourceCases as [$sourceType, $expectedSource, $id]) {
+        $url = EdatsInAppNotificationService::actionUrl([
+            'source_type' => $sourceType,
+            'source_id' => $id,
+            'url' => 'https://attacker.invalid/',
+        ], $this->user);
+
+        expect($url)->toContain('source='.$expectedSource)
+            ->and($url)->toContain('source_id='.$id)
+            ->and($url)->not->toContain('attacker.invalid');
+    }
+
+    $fallback = EdatsInAppNotificationService::actionUrl([
+        'source_type' => 'unknown-family',
+        'source_id' => 44,
+        'url' => 'https://attacker.invalid/',
+    ], $this->user);
+    expect($fallback)->toBe(route('submission-tracking.index'))
+        ->and($fallback)->not->toContain('attacker.invalid');
 });
 
 test('unauthenticated users cannot mark notifications as read', function () {

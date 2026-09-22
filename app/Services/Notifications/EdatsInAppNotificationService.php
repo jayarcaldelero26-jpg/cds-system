@@ -45,7 +45,7 @@ final class EdatsInAppNotificationService
         $sourceId = filter_var($data['source_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
 
         return $source !== null && $sourceId !== false
-            ? route('submission-tracking.index', ['focus_source' => $source, 'focus_id' => $sourceId])
+            ? route('submission-tracking.index', ['source' => $source, 'source_id' => $sourceId])
             : route('submission-tracking.index');
     }
 
@@ -202,16 +202,16 @@ final class EdatsInAppNotificationService
     private static function trackingSource(string $sourceType): ?string
     {
         return match ($sourceType) {
-            \App\Models\ConservationReportSubmission::class => 'conservation',
-            \App\Models\EngpReportSubmission::class => 'engp',
-            \App\Models\BmsReportSubmission::class => 'bms',
-            \App\Models\BamsReportSubmission::class => 'bams',
-            \App\Models\ImeaReportSubmission::class => 'imea',
-            \App\Models\ImeaFacilityMaintenanceReport::class => 'imea-maintenance',
-            \App\Models\Aws::class => 'aws',
-            \App\Models\IpafManagementReport::class => 'ipaf-management',
-            \App\Models\IpafRevenueCollection::class => 'revenue',
-            \App\Models\ManagementPlan::class => 'management-plans',
+            \App\Models\ConservationReportSubmission::class, 'conservation' => 'conservation',
+            \App\Models\EngpReportSubmission::class, 'engp' => 'engp',
+            \App\Models\BmsReportSubmission::class, 'bms' => 'bms',
+            \App\Models\BamsReportSubmission::class, 'bams' => 'bams',
+            \App\Models\ImeaReportSubmission::class, 'imea' => 'imea',
+            \App\Models\ImeaFacilityMaintenanceReport::class, 'imea-maintenance' => 'imea-maintenance',
+            \App\Models\Aws::class, 'aws' => 'aws',
+            \App\Models\IpafManagementReport::class, 'ipaf-management' => 'ipaf-management',
+            \App\Models\IpafRevenueCollection::class, 'revenue' => 'revenue',
+            \App\Models\ManagementPlan::class, 'management-plans' => 'management-plans',
             default => null,
         };
     }

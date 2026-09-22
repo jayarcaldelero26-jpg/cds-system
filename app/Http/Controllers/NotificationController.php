@@ -12,6 +12,8 @@ use Inertia\Response;
 
 final class NotificationController extends Controller
 {
+    private const BELL_NOTIFICATION_TYPES = ['due_soon', 'overdue', 'workflow'];
+
     public function index(Request $request): Response
     {
         $filter = (string) $request->query('filter', 'all');
@@ -25,9 +27,16 @@ final class NotificationController extends Controller
 
     public function recent(Request $request): JsonResponse
     {
-        $items = $this->bellNotifications($request)->take(8)->map(fn (DatabaseNotification $notification) => $this->present($notification));
+        $unreadNotifications = $request->user()->unreadNotifications();
+        $unreadCount = (clone $unreadNotifications)->whereIn('data->type', self::BELL_NOTIFICATION_TYPES)->count();
+        $items = $unreadNotifications
+            ->whereIn('data->type', self::BELL_NOTIFICATION_TYPES)
+            ->latest()
+            ->limit(8)
+            ->get()
+            ->map(fn (DatabaseNotification $notification) => $this->present($notification));
 
-        return response()->json(['unread_count' => $items->count(), 'notifications' => $items->values()]);
+        return response()->json(['unread_count' => $unreadCount, 'notifications' => $items->values()]);
     }
 
     public function markRead(Request $request, DatabaseNotification $notification): JsonResponse|RedirectResponse
