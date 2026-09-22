@@ -172,7 +172,7 @@ final class DocumentRoutingPresenter
                 'recorded_at' => $event?->created_at?->toIso8601String(),
                 'status' => $isCurrent ? 'current' : ($event || ($stage === $start && $currentStage !== $start) ? 'completed' : 'pending'),
                 'pending_since' => $isCurrent ? $this->pendingSince($state, $record, $event) : null,
-                'working_days_pending' => $isCurrent ? $this->pendingDays($state, $record, $event) : null,
+                'working_days_pending' => $isCurrent ? $this->pendingDays($state, $record, $event, $sourceKey) : null,
                 'recorded_by' => $event?->recordedBy?->name,
                 'actor_category' => $event?->recordedBy?->section,
                 'remarks' => $event?->remarks,
@@ -263,12 +263,22 @@ final class DocumentRoutingPresenter
         return $this->date($record->getAttribute('date_accomplished') ?: $record->getAttribute('date_conducted'))?->toDateString();
     }
 
-    private function pendingDays(array $state, Model $record, mixed $event): ?int
+    private function pendingDays(array $state, Model $record, mixed $event, string $sourceKey): ?int
     {
+        // A valid PENRO receipt is ENGP's terminal routing point. Keep its
+        // timeline/history, but do not report further actor processing time.
+        if ($sourceKey === 'engp' && filled($record->getAttribute('date_received_penro'))) {
+            return null;
+        }
+
         $since = $this->pendingSince($state, $record, $event);
         if (! $since) return null;
         $office = $event?->to_office ?? $record->getAttribute('target_office');
-        return $this->calendar->workingDaysBetween($since, CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(), 'after_through', $office);
+        $today = CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString();
+
+        return $sourceKey === 'engp'
+            ? $this->calendar->conservationWorkingDaysBetween($since, $today, 'after_through', $office)
+            : $this->calendar->workingDaysBetween($since, $today, 'after_through', $office);
     }
 
     /** @return list<array<string,mixed>> */

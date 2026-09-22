@@ -17,6 +17,7 @@ use Carbon\CarbonImmutable;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Reports\ReportRequirementRegistry;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\SubmissionTracking\RoutingStatusPresenter;
 use App\Services\Modules\ModuleMetadataResolver;
@@ -30,6 +31,8 @@ use Illuminate\Support\Facades\Schema;
 class OverdueReportService
 {
     private const TIMEZONE = 'Asia/Manila';
+    /** @var array<string, list<array{workflow:array<string,mixed>,office:string,period:array<string,mixed>,deadline:string}>> */
+    private static array $engpScheduleCache = [];
 
     public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAttachmentService $attachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly ModuleMetadataResolver $moduleResolver, private readonly ComplianceEvaluationClock $evaluationClock, private readonly OrganizationalAccessService $organization, private readonly PambSubmissionAccessService $pambAccess) {}
 
@@ -120,6 +123,8 @@ class OverdueReportService
             }
         }
 
+        $records = $records->merge($this->scheduledEngpReports($today, 'overdue'));
+
         return $records
             ->sortBy([['targetOffice', 'asc'], ['protectedAreaName', 'asc'], ['deadline', 'asc']])
             ->values();
@@ -178,6 +183,8 @@ class OverdueReportService
                 ));
         }
 
+        $records = $records->merge($this->scheduledEngpReports($today, $days === 0 ? 'due_today' : 'due_soon', $days));
+
         return $records->sortBy([['deadline', 'asc'], ['targetOffice', 'asc']])->values();
     }
 
@@ -202,29 +209,14 @@ class OverdueReportService
         }
 
         $today = $today ? $today->setTimezone(self::TIMEZONE)->startOfDay() : $this->evaluationClock->date();
-        $through = $today->addDays(3);
-        $query = EngpReportSubmission::query()
-            ->select(['office', 'deadline_submission', 'date_received_penro'])
-            ->whereIn('office', $offices)
-            ->whereNotNull('deadline_submission')
-            ->whereNull('date_received_penro');
-        if ($user = auth()->user()) {
-            $this->organization->scopeDevelopmentQuery($query, $user);
-        }
+        $isEngpOffice = fn (OverdueReport $report): bool => $report->sourceType === EngpReportSubmission::class
+            && in_array($report->targetOffice, $offices, true);
 
-        $summary = ['due_within_3_days' => 0, 'due_today' => 0, 'overdue' => 0];
-        foreach ($query->get() as $record) {
-            $deadline = CarbonImmutable::parse($record->deadline_submission, self::TIMEZONE)->startOfDay();
-            if ($deadline->lessThan($today)) {
-                $summary['overdue']++;
-            } elseif ($deadline->isSameDay($today)) {
-                $summary['due_today']++;
-            } elseif ($deadline->lessThanOrEqualTo($through)) {
-                $summary['due_within_3_days']++;
-            }
-        }
-
-        return $summary;
+        return [
+            'due_within_3_days' => $this->dueSoonReports(3, $today)->filter($isEngpOffice)->count(),
+            'due_today' => $this->dueTodayReports($today)->filter($isEngpOffice)->count(),
+            'overdue' => $this->overdueReports($today)->filter($isEngpOffice)->count(),
+        ];
     }
 
     /** @return Collection<int, OverdueReport> */
@@ -435,7 +427,121 @@ class OverdueReportService
             moduleName: $metadata['module_name'],
             workflowKey: $metadata['workflow_key'],
             programArea: $metadata['program_area'],
+            logicalIdentity: $model instanceof EngpReportSubmission
+                ? $this->engpLogicalIdentity(
+                    (string) $model->workflow_key,
+                    (string) $model->office,
+                    (int) $model->reporting_year,
+                    (string) $model->period_key,
+                )
+                : null,
         );
+    }
+
+    /**
+     * Add virtual ENGP obligations for the current reporting year when no
+     * persisted source submission exists for the same registry identity.
+     * These projections are alert candidates only; no source row is created.
+     *
+     * @return Collection<int, OverdueReport>
+     */
+    private function scheduledEngpReports(CarbonImmutable $today, string $bucket, int $dueSoonDays = 3): Collection
+    {
+        if (! config('compliance_alerts.scheduled_engp_obligations', true)) {
+            return collect();
+        }
+
+        $year = $today->year;
+        $definitions = collect($this->engpWorkflows->all())->keyBy('key');
+        $offices = $definitions->flatMap(fn (array $definition): array => $definition['offices'] ?? [])->unique()->values();
+        if ($user = auth()->user()) {
+            $offices = $offices->filter(fn (string $office): bool => $this->organization->canUseDevelopmentOffice($user, $office));
+        }
+        if ($offices->isEmpty()) {
+            return collect();
+        }
+
+        $officeList = $offices->sort()->values()->all();
+        $cacheKey = hash('sha256', json_encode([$year, $officeList, $definitions->all()], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+        if (! array_key_exists($cacheKey, self::$engpScheduleCache)) {
+            $schedule = [];
+            foreach ($definitions as $workflow) {
+                foreach (array_intersect($workflow['offices'] ?? [], $officeList) as $office) {
+                    foreach ($this->engpWorkflows->periods($workflow['key'], $year) as $period) {
+                        $deadline = $this->engpWorkflows->deadline($workflow['key'], $year, $period['key']);
+                        if ($deadline !== null) {
+                            $schedule[] = compact('workflow', 'office', 'period', 'deadline');
+                        }
+                    }
+                }
+            }
+            self::$engpScheduleCache[$cacheKey] = $schedule;
+        }
+
+        $existingIdentities = EngpReportSubmission::query()
+            ->where('reporting_year', $year)
+            ->whereIn('office', $offices->all())
+            ->get(['workflow_key', 'office', 'reporting_year', 'period_key'])
+            ->mapWithKeys(fn (EngpReportSubmission $submission): array => [
+                $this->engpLogicalIdentity($submission->workflow_key, $submission->office, (int) $submission->reporting_year, $submission->period_key) => true,
+            ]);
+
+        $today = $today->setTimezone(self::TIMEZONE)->startOfDay();
+        $through = $today->addDays(max(0, $dueSoonDays));
+        $records = collect();
+
+        foreach (self::$engpScheduleCache[$cacheKey] as $requirement) {
+            $workflow = $requirement['workflow'];
+            $office = $requirement['office'];
+            $period = $requirement['period'];
+            $deadline = CarbonImmutable::parse($requirement['deadline'], self::TIMEZONE)->startOfDay();
+            $isEligible = match ($bucket) {
+                'overdue' => $deadline->lessThan($today),
+                'due_today' => $deadline->isSameDay($today),
+                default => $deadline->greaterThan($today) && $deadline->lessThanOrEqualTo($through),
+            };
+            if (! $isEligible) continue;
+
+            $identity = $this->engpLogicalIdentity($workflow['key'], $office, $year, $period['key']);
+            if ($existingIdentities->has($identity)) continue;
+
+            $records->push(new OverdueReport(
+                sourceType: EngpReportSubmission::class,
+                sourceId: $this->syntheticEngpSourceId($identity),
+                module: $workflow['label'],
+                protectedAreaId: null,
+                protectedAreaName: $office,
+                targetOffice: $office,
+                activity: $workflow['activity'] ?? $workflow['label'],
+                documentType: $workflow['document'] ?? 'Report',
+                deadline: $deadline->toDateString(),
+                submitted: false,
+                recordsConfirmed: false,
+                daysOverdue: $deadline->lessThan($today) ? (int) $deadline->diffInDays($today) : 0,
+                reportingPeriod: $period['label'],
+                movRequired: false,
+                movPresent: false,
+                movLabel: 'MOV',
+                complianceIssue: 'Report Not Yet Submitted',
+                submissionStatus: RoutingStatusPresenter::PENDING_CENRO,
+                moduleName: $workflow['label'],
+                workflowKey: $workflow['key'],
+                programArea: ReportRequirementRegistry::ENGP,
+                logicalIdentity: $identity,
+            ));
+        }
+
+        return $records;
+    }
+
+    private function engpLogicalIdentity(string $workflowKey, string $office, int $year, string $periodKey): string
+    {
+        return implode('|', ['engp', $workflowKey, mb_strtolower(trim($office)), $year, $periodKey]);
+    }
+
+    private function syntheticEngpSourceId(string $identity): int
+    {
+        return -max(1, (int) hexdec(substr(hash('sha256', $identity), 0, 15)));
     }
 
     /** @param array<string, mixed> $definition */

@@ -31,6 +31,7 @@ final readonly class OverdueReport
         public ?string $moduleName = null,
         public ?string $workflowKey = null,
         public ?string $programArea = null,
+        public ?string $logicalIdentity = null,
     ) {}
 
     public function toArray(): array

@@ -483,7 +483,15 @@ class ComplianceAlertDeliveryService
     private function deliveryIdentity(string $businessDate, string $type, string $alertType, ResolvedComplianceRecipient $recipient, Collection $reports, array $settings): array
     {
         $reportSnapshots = $reports
-            ->map(fn (OverdueReport $report): array => $report->toArray())
+            ->map(function (OverdueReport $report): array {
+                $snapshot = $report->toArray();
+                if ($report->logicalIdentity !== null) {
+                    $snapshot['source_type'] = 'engp_requirement';
+                    $snapshot['source_id'] = $report->logicalIdentity;
+                }
+
+                return $snapshot;
+            })
             ->sortBy(fn (array $report): string => $report['source_type'].':'.str_pad((string) $report['source_id'], 20, '0', STR_PAD_LEFT))
             ->values()
             ->all();
@@ -494,8 +502,9 @@ class ComplianceAlertDeliveryService
         ]);
         $fingerprint = hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
 
-        $keyParts = [$type, $alertType, $businessDate, $recipient->key, $reports->map(fn (OverdueReport $report): string => $report->sourceType.':'.$report->sourceId.':'.$report->deadline)->sort()->join('|')];
-        if ($type === ComplianceNotificationRun::TYPE_MANUAL) {
+        $keyParts = [$type, $alertType, $businessDate, $recipient->key, $reports->map(fn (OverdueReport $report): string => ($report->logicalIdentity ?? $report->sourceType.':'.$report->sourceId).':'.$report->deadline)->sort()->join('|')];
+        if ($type === ComplianceNotificationRun::TYPE_MANUAL
+            && $reports->contains(fn (OverdueReport $report): bool => $report->logicalIdentity === null)) {
             $keyParts[] = $fingerprint;
         }
 

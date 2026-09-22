@@ -45,6 +45,13 @@ final class RoutingStatusPresenter
         $sourceKey ??= $this->sourceKey($record);
 
         if ($record instanceof EngpReportSubmission || $sourceKey === 'engp') {
+            // ENGP's canonical route ends at PENRO Records receipt. Unlike
+            // workflows with release-component milestones, ENGP receipt is
+            // the terminal routing event and must take precedence here.
+            if ($this->date($record, 'date_received_penro')) {
+                return 'endorsed';
+            }
+
             $components = $this->engpWorkflows->releaseComponents(
                 (string) $record->getAttribute('workflow_key'),
                 (int) $record->getAttribute('reporting_year'),

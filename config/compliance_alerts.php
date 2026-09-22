@@ -2,6 +2,7 @@
 
 return [
     'enabled' => filter_var(env('COMPLIANCE_ALERTS_ENABLED', false), FILTER_VALIDATE_BOOL),
+    'scheduled_engp_obligations' => filter_var(env('COMPLIANCE_ALERTS_SCHEDULED_ENGP_OBLIGATIONS', true), FILTER_VALIDATE_BOOL),
     'send_time' => env('COMPLIANCE_ALERTS_SEND_TIME', '08:00'),
     'timezone' => 'Asia/Manila',
     'sender_display_name' => 'CDS-SMART – PENRO Davao Oriental',

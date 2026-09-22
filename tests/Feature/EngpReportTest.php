@@ -1,10 +1,15 @@
 <?php
 
+use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
+use App\Models\NonWorkingDay;
 use App\Models\User;
+use App\Services\BusinessCalendarService;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\SubmissionTracking\DocumentRoutingPresenter;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Storage;
@@ -73,6 +78,89 @@ test('ENGP tracking uses the canonical CENRO-to-PENRO route instead of release c
     expect($report->releaseEvents()->count())->toBe(0)
         ->and($row['routing']['current_stage'])->toBe('transit_to_cenro_chief')
         ->and(app(SubmissionTrackingService::class)->genericTransitionKeys('engp', $report->id))->toContain('receive_at_cenro_chief');
+});
+
+test('ENGP routing elapsed processing time uses Conservation weekdays and active calendar closures, then stops at PENRO receipt', function () {
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Baganga']);
+    $records = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'office_designated' => 'CENRO Baganga']);
+    $penro = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'office_designated' => 'PENRO Davao Oriental']);
+    foreach ([$chief, $records, $penro] as $actor) {
+        $actor->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+    }
+
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'ngp_produce', 'activity_name' => 'ENGP Produce', 'document_type' => 'Quarterly Report',
+        'period_key' => 'Q1', 'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]));
+    $tracking = app(SubmissionTrackingService::class);
+    $presenter = app(DocumentRoutingPresenter::class);
+
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-24 09:00:00', BusinessCalendarService::TIMEZONE));
+    $this->actingAs($this->user);
+    $tracking->transition('engp', $report->id, 'forward_to_cenro_chief', null, $this->user->id);
+    $events = app(DocumentRoutingTransitionService::class)->events($report->fresh(), 'engp');
+
+    // Tue-Thu plus the following Monday count; Friday through Sunday do not.
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-31 09:00:00', BusinessCalendarService::TIMEZONE));
+    $routing = $presenter->present($report->fresh(), 'engp', null, $events);
+    expect($routing['pending_since'])->toBe('2026-08-24')
+        ->and($routing['working_days_pending'])->toBe(4);
+
+    NonWorkingDay::create([
+        'date' => '2026-08-25', 'name' => 'ENGP audit active holiday',
+        'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL,
+        'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-08-26', 'name' => 'ENGP audit active non-working day',
+        'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL,
+        'is_active' => true,
+    ]);
+    BusinessCalendarService::forgetCache();
+    $routing = $presenter->present($report->fresh(), 'engp', null, $events);
+    expect($routing['working_days_pending'])->toBe(2);
+
+    // Complete the real route through its existing CENRO and PENRO receipt transitions.
+    foreach ([
+        [$chief, 'receive_at_cenro_chief'],
+        [$chief, 'forward_to_cenro_records'],
+        [$records, 'receive_at_cenro_records'],
+        [$records, 'forward_to_penro_records'],
+        [$penro, 'receive_at_penro_records'],
+    ] as [$actor, $action]) {
+        $tracking->transition('engp', $report->id, $action, null, $actor->id);
+    }
+    $report->refresh();
+    $events = app(DocumentRoutingTransitionService::class)->events($report, 'engp');
+    $routing = $presenter->present($report, 'engp', null, $events);
+    expect($routing['working_days_pending'])->toBeNull()
+        ->and($report->submission_status)->toBe('Completed')
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing_complete'])->toBeTrue()
+        ->and($events->count())->toBe(6);
+
+    CarbonImmutable::setTestNow();
+    BusinessCalendarService::forgetCache();
+});
+
+test('ENGP PENRO receipt is terminal without release components while other report routing remains unchanged', function () {
+    $report = new EngpReportSubmission(engpPayload([
+        'workflow_key' => 'ngp_produce', 'period_key' => 'Q1', 'period_label' => 'Quarter 1',
+        'deadline_submission' => '2026-03-10', 'date_received_penro' => null,
+    ]));
+
+    expect($report->submission_status)->toBe('Pending Submission by CENRO')
+        ->and($report->releaseEvents()->count())->toBe(0);
+
+    $report->setAttribute('date_received_penro', '2026-03-11');
+    expect($report->submission_status)->toBe('Completed')
+        ->and($report->releaseEvents()->count())->toBe(0);
+
+    $conservation = new ConservationReportSubmission([
+        'workflow_key' => 'regular_pamb', 'date_accomplished' => '2026-03-09',
+        'date_report_released_cenro' => '2026-03-10', 'date_received_penro' => '2026-03-11',
+    ]);
+    expect($conservation->submission_status)->toBe('Pending Regional Endorsement');
 });
 
 test('ENGP report creation is optional-MOV and its ordinary alert closes at PENRO receipt', function () {

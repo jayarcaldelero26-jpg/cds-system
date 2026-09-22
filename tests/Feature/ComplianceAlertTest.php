@@ -2029,6 +2029,87 @@ test('one canonical ENGP office mapping serves multiple office-scoped ENGP workf
         ->and($plan['deliveries']->first()['recipient']->email)->toBe('shared-engp@example.test');
 });
 
+test('ENGP scheduled obligations share one alert identity with a later submission and close at PENRO receipt', function () {
+    config()->set('compliance_alerts.scheduled_engp_obligations', true);
+    $alerts = app(OverdueReportService::class);
+    $delivery = app(ComplianceAlertDeliveryService::class);
+    $identity = 'engp|cbep|cenro baganga|2026|2026-09';
+    $dueSoonDate = CarbonImmutable::parse('2026-09-17', 'Asia/Manila');
+    $dueTodayDate = CarbonImmutable::parse('2026-09-20', 'Asia/Manila');
+    $overdueDate = CarbonImmutable::parse('2026-09-21', 'Asia/Manila');
+
+    $scheduled = $alerts->dueSoonReports(3, $dueSoonDate)->firstWhere('logicalIdentity', $identity);
+    expect($scheduled)->not->toBeNull()
+        ->and($scheduled->deadline)->toBe('2026-09-20')
+        ->and($scheduled->sourceId)->toBeLessThan(0)
+        ->and($alerts->dueTodayReports($dueTodayDate)->firstWhere('logicalIdentity', $identity))->not->toBeNull()
+        ->and($alerts->overdueReports($overdueDate)->firstWhere('logicalIdentity', $identity)->daysOverdue)->toBe(1);
+
+    $summaryBeforeSubmission = $alerts->engpDashboardAlertSummary(['CENRO Baganga'], $overdueDate);
+    $source = engpForDeadline(complianceUser(), '2026-09-20', [
+        'workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'reporting_year' => 2026,
+        'period_key' => '2026-09', 'period_label' => 'September 2026',
+        'activity_name' => 'Community-Based Employment Program (CBEP)', 'document_type' => 'Monthly Report',
+    ]);
+    $actual = $alerts->overdueReports($overdueDate)->where('logicalIdentity', $identity);
+
+    expect($actual)->toHaveCount(1)
+        ->and($actual->first()->sourceId)->toBe($source->id)
+        ->and($alerts->engpDashboardAlertSummary(['CENRO Baganga'], $overdueDate)['overdue'])->toBe($summaryBeforeSubmission['overdue']);
+
+    $recipient = ComplianceAlertRecipient::create([
+        'target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga',
+        'recipient_email' => 'baganga-alerts@invalid.test', 'is_active' => true,
+    ]);
+    $recipientPlan = $delivery->deliveryPlan($actual, ComplianceNotificationRun::ALERT_OVERDUE);
+    expect($recipientPlan['deliveries'])->toHaveCount(1)
+        ->and($recipientPlan['deliveries']->first()['recipient']->email)->toBe($recipient->recipient_email);
+
+    $identityMethod = new ReflectionMethod($delivery, 'deliveryIdentity');
+    foreach ([ComplianceNotificationRun::TYPE_AUTOMATIC, ComplianceNotificationRun::TYPE_MANUAL] as $runType) {
+        $scheduledPlan = $delivery->deliveryPlan(collect([$scheduled]), ComplianceNotificationRun::ALERT_OVERDUE);
+        $scheduledRecipient = $scheduledPlan['deliveries']->first()['recipient'];
+        $scheduledIdentity = $identityMethod->invoke($delivery, '2026-09-21', $runType, ComplianceNotificationRun::ALERT_OVERDUE, $scheduledRecipient, collect([$scheduled]), []);
+        $actualIdentity = $identityMethod->invoke($delivery, '2026-09-21', $runType, ComplianceNotificationRun::ALERT_OVERDUE, $scheduledRecipient, $actual, []);
+        expect($actualIdentity['key'])->toBe($scheduledIdentity['key']);
+    }
+
+    $source->update(['date_received_penro' => '2026-09-21']);
+    expect($alerts->dueSoonReports(3, $dueSoonDate)->where('logicalIdentity', $identity))->toHaveCount(0)
+        ->and($alerts->dueTodayReports($dueTodayDate)->where('logicalIdentity', $identity))->toHaveCount(0)
+        ->and($alerts->overdueReports($overdueDate)->where('logicalIdentity', $identity))->toHaveCount(0)
+        ->and($alerts->engpDashboardAlertSummary(['CENRO Baganga'], $overdueDate)['overdue'])->toBe($summaryBeforeSubmission['overdue'] - 1);
+});
+
+test('scheduled ENGP alerts use only active office mappings and never cross office scope', function () {
+    config()->set('compliance_alerts.scheduled_engp_obligations', true);
+    $alerts = app(OverdueReportService::class);
+    $identity = 'engp|cbep|cenro baganga|2026|2026-09';
+    $report = $alerts->overdueReports(CarbonImmutable::parse('2026-09-21', 'Asia/Manila'))->firstWhere('logicalIdentity', $identity);
+    expect($report)->not->toBeNull();
+
+    ComplianceAlertRecipient::create([
+        'target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga',
+        'recipient_email' => 'inactive-baganga@invalid.test', 'is_active' => false,
+    ]);
+    ComplianceAlertRecipient::create([
+        'target_office' => 'CENRO Mati', 'target_office_key' => 'cenro_mati',
+        'recipient_email' => 'mati-alerts@invalid.test', 'is_active' => true,
+    ]);
+    $delivery = app(ComplianceAlertDeliveryService::class);
+    $unmapped = $delivery->deliveryPlan(collect([$report]), ComplianceNotificationRun::ALERT_OVERDUE);
+    expect($unmapped['deliveries'])->toBeEmpty()
+        ->and($unmapped['unmapped'])->toHaveCount(1);
+
+    ComplianceAlertRecipient::create([
+        'target_office' => 'CENRO Baganga', 'target_office_key' => 'cenro_baganga',
+        'recipient_email' => 'baganga-active@invalid.test', 'is_active' => true,
+    ]);
+    $mapped = app(ComplianceAlertDeliveryService::class)->deliveryPlan(collect([$report]), ComplianceNotificationRun::ALERT_OVERDUE);
+    expect($mapped['deliveries'])->toHaveCount(1)
+        ->and($mapped['deliveries']->first()['recipient']->email)->toBe('baganga-active@invalid.test');
+});
+
 test('PA and ENGP due-soon memoranda use their own approved destination presentation and real candidate values', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
