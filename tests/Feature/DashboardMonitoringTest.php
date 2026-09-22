@@ -171,6 +171,25 @@ test('report submission overview presents the required tab and chart surfaces', 
         ->toContain('Reporting Year')
         ->toContain('DEVELOPMENT REPORTS')
         ->toContain('CONSERVATION REPORTS')
+        ->toContain('<Metric label="Pending"')
+        ->toContain('<Metric label="In Progress"')
+        ->toContain('<Metric label="Overdue"')
+        ->toContain('<Metric label="On Time"')
+        ->toContain('<Metric label="Average Early"')
+        ->toContain('<Metric label="Average Late"')
+        ->toContain('metrics.pending')
+        ->toContain('metrics.in_progress')
+        ->toContain('metrics.overdue')
+        ->toContain('metrics.on_time_rate')
+        ->toContain('metrics.average_early')
+        ->toContain('metrics.average_late')
+        ->toContain('<Program program={program} tab={tab} />')
+        ->toContain("view === 'engp' ? <DevelopmentDashboard data={engp} />")
+        ->toContain('Scheduled Requirements')
+        ->toContain('Pending Preparation')
+        ->toContain('Ongoing Preparation')
+        ->toContain('Compliance Rate')
+        ->toContain('All Development Requirements')
         ->toContain('Conservation')
         ->toContain('Development')
         ->not->toContain("field('Program'")
@@ -187,13 +206,21 @@ test('report submission overview presents the required tab and chart surfaces', 
 
 test('dashboard tabs map to canonical PA and ENGP projections and preserve filters', function (): void {
     $admin = dashboardGlobalUser();
+    engpReport($this->user, ['deadline_submission' => '2026-09-01']);
+    $filters = ['year' => 2026, 'program' => 'engp', 'frequency' => 'Monthly'];
+    $this->actingAs($admin);
+    $expected = app(DashboardMonitoringService::class)->submissionOverview($filters);
 
-    $this->actingAs($admin)->get(route('dashboard', ['tab' => 'development', 'year' => 2026, 'frequency' => 'Monthly']))
+    $this->get(route('dashboard', ['tab' => 'development', 'year' => 2026, 'frequency' => 'Monthly']))
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.tab', 'development')
             ->where('dashboard.filters.program', 'engp')
             ->where('dashboard.filters.year', 2026)
-            ->where('dashboard.filters.frequency', 'Monthly'));
+            ->where('dashboard.filters.frequency', 'Monthly')
+            ->where('dashboard.programs.0.key', 'engp')
+            ->where('dashboard.programs.0.metrics.pending', $expected['programs'][0]['metrics']['pending'])
+            ->where('dashboard.trackingTotal', $expected['trackingTotal'])
+            ->missing('engp'));
 
     $this->actingAs($admin)->get(route('dashboard', ['tab' => 'invalid', 'year' => 2026]))
         ->assertInertia(fn (Assert $page) => $page

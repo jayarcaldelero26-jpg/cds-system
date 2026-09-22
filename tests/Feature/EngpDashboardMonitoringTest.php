@@ -2,6 +2,7 @@
 
 use App\Models\EngpReportSubmission;
 use App\Models\User;
+use App\Services\Dashboard\DashboardMonitoringService;
 use App\Services\Dashboard\EngpDashboardMonitoringService;
 use App\Services\Engp\EngpMonitoringStatusResolver;
 use Carbon\CarbonImmutable;
@@ -166,7 +167,7 @@ test('CENRO scope cannot see another CENRO through dashboard filters', function 
     $user = dashboardDevelopmentUser(['office_designated' => 'CENRO Baganga']);
     dashboardEngpSubmission(['office' => 'CENRO Mati']);
 
-    $this->actingAs($user)->get(route('dashboard', ['tab' => 'development', 'office' => 'CENRO Mati']))
+    $this->actingAs($user)->get(route('dashboard', ['view' => 'engp', 'office' => 'CENRO Mati']))
         ->assertInertia(fn (Assert $page) => $page
             ->where('engp.summary.expected', 0)
             ->where('engp.filterOptions.offices', ['CENRO Baganga'])
@@ -181,7 +182,7 @@ test('development users without technical report permission cannot receive ENGP 
     ]);
     dashboardEngpSubmission(['date_received_penro' => '2026-08-18']);
 
-    $this->actingAs($user)->get(route('dashboard', ['tab' => 'development']))
+    $this->actingAs($user)->get(route('dashboard', ['view' => 'engp']))
         ->assertStatus(200)
         ->assertInertia(fn (Assert $page) => $page
             ->where('engp.summary.expected', 0)
@@ -190,7 +191,7 @@ test('development users without technical report permission cannot receive ENGP 
             ->where('engp.pagination.total', 0));
 });
 
-test('unified Development tab uses the scoped scheduled ENGP monitoring result', function (): void {
+test('unified Development tab uses normalized ENGP metrics while schedule detail remains separate', function (): void {
     $user = dashboardDevelopmentUser();
     dashboardEngpSubmission();
     dashboardEngpSubmission([
@@ -202,23 +203,26 @@ test('unified Development tab uses the scoped scheduled ENGP monitoring result',
 
     $this->actingAs($user);
     $authoritative = app(EngpDashboardMonitoringService::class)->overview(['year' => 2026]);
+    $normalized = app(DashboardMonitoringService::class)->submissionOverview(['year' => 2026, 'program' => 'engp']);
 
     $this->get(route('dashboard', ['tab' => 'development', 'year' => 2026]))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('dashboard.tab', 'development')
-            ->where('engp.summary.expected', $authoritative['summary']['expected'])
-            ->where('engp.summary.pending', $authoritative['summary']['pending'])
-            ->where('engp.summary.ongoing_preparation', $authoritative['summary']['ongoing_preparation'])
-            ->where('engp.summary.overdue', $authoritative['summary']['overdue'])
-            ->where('engp.summary.submitted', $authoritative['summary']['submitted'])
-            ->where('engp.filterOptions.offices', ['CENRO Baganga'])
-            ->where('engp.rows', fn ($rows): bool => count($rows) > 0
-                && collect($rows)->every(fn (array $row): bool => $row['office'] === 'CENRO Baganga')));
+            ->where('dashboard.programs.0.key', 'engp')
+            ->where('dashboard.programs.0.metrics.pending', $normalized['programs'][0]['metrics']['pending'])
+            ->where('dashboard.programs.0.metrics.in_progress', $normalized['programs'][0]['metrics']['in_progress'])
+            ->where('dashboard.programs.0.metrics.overdue', $normalized['programs'][0]['metrics']['overdue'])
+            ->where('dashboard.programs.0.metrics.on_time_rate', fn ($value): bool => $value == $normalized['programs'][0]['metrics']['on_time_rate'])
+            ->where('dashboard.programs.0.metrics.average_early', fn ($value): bool => $value == $normalized['programs'][0]['metrics']['average_early'])
+            ->where('dashboard.programs.0.metrics.average_late', fn ($value): bool => $value == $normalized['programs'][0]['metrics']['average_late'])
+            ->where('dashboard.trackingTotal', $normalized['trackingTotal'])
+            ->where('dashboard.trackingRows.0.id', $normalized['trackingRows'][0]['id'])
+            ->missing('engp'));
 
     expect($authoritative['summary']['expected'])->toBeGreaterThan(0)
         ->and(collect($authoritative['rows'])->pluck('office')->unique()->values()->all())->toBe(['CENRO Baganga'])
-        ->and(file_get_contents(resource_path('js/Pages/Dashboard.jsx')))->toContain("tab === 'development' ? <DevelopmentDashboard data={engp} />");
+        ->and(file_get_contents(resource_path('js/Pages/Dashboard.jsx')))->toContain("view === 'engp' ? <DevelopmentDashboard data={engp} />");
 });
 
 test('PENRO and Super Admin users receive aggregate ENGP visibility', function (): void {
