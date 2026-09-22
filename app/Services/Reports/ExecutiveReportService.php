@@ -34,9 +34,15 @@ final class ExecutiveReportService
         $actualFilters = $this->trackingFilters($filters);
         $actual = $this->tracking->records($actualFilters);
         $actual = $this->filterActual($actual, $filters);
+        if ($filters['status'] !== '') {
+            $actual = $actual->where('submission_status', $filters['status'])->values();
+        }
 
         $expected = $this->expected($filters, $targets);
         $entries = $this->matchExpected($expected, $actual, $filters);
+        if ($filters['status'] !== '') {
+            $entries = $entries->filter(fn (array $entry): bool => ($entry['actual']['submission_status'] ?? null) === $filters['status'])->values();
+        }
         $summary = $this->summary($entries, $actual);
         $timeliness = $this->timeliness($actual);
         $attention = $this->attention($entries);
@@ -81,6 +87,10 @@ final class ExecutiveReportService
             'status' => trim((string) ($input['status'] ?? '')),
         ];
 
+        if ($filters['status'] !== '' && ! in_array($filters['status'], $this->statusOptions(), true)) {
+            throw ValidationException::withMessages(['status' => 'Select a valid submission status.']);
+        }
+
         if ($filters['protected_area_id'] !== '') {
             $this->organization->assertCanAccessProtectedArea(auth()->user(), $filters['protected_area_id']);
         }
@@ -99,7 +109,6 @@ final class ExecutiveReportService
             'reporting_year' => $filters['year'],
             'target_office' => $filters['office'] ?: null,
             'protected_area_id' => $filters['protected_area_id'] ?: null,
-            'status' => $filters['status'] ?: null,
         ], fn ($value): bool => $value !== null && $value !== '');
     }
 
@@ -306,7 +315,13 @@ final class ExecutiveReportService
         $families = $definitions->map(fn (array $definition): array => ['value' => $definition['key'], 'label' => $definition['label'], 'domain' => $definition['domain']])->values();
         $periods = $definitions->flatMap(fn (array $definition): Collection => collect($this->requirements->periods($definition['domain'], $definition['key'], $year))->map(fn (array $period): array => ['value' => $period['key'], 'label' => $period['label']]))->unique('value')->values()->all();
         $offices = $this->developmentOffices()->merge($targets->map(fn (ProtectedArea $area) => $area->supervisingOfficeAssignment?->office?->name))->filter()->unique()->sort()->values()->all();
-        return ['years' => $years, 'offices' => $offices, 'protected_areas' => $targets->map(fn (ProtectedArea $area): array => ['id' => $area->id, 'name' => $area->name])->values()->all(), 'families' => $families->all(), 'periods' => $periods, 'statuses' => [RoutingStatusPresenter::COMPLETED, RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO, RoutingStatusPresenter::PENDING_REGIONAL, RoutingStatusPresenter::NO_ACTIVITY]];
+        return ['years' => $years, 'offices' => $offices, 'protected_areas' => $targets->map(fn (ProtectedArea $area): array => ['id' => $area->id, 'name' => $area->name])->values()->all(), 'families' => $families->all(), 'periods' => $periods, 'statuses' => $this->statusOptions()];
+    }
+
+    /** @return list<string> */
+    private function statusOptions(): array
+    {
+        return [RoutingStatusPresenter::COMPLETED, RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO, RoutingStatusPresenter::PENDING_REGIONAL, RoutingStatusPresenter::NO_ACTIVITY];
     }
 
     private function scopeLabel(array $filters, Collection $targets): string

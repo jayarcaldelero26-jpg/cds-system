@@ -68,6 +68,49 @@ test('executive report accepts dynamic filters and excludes retired definitions'
         ->and($report['filters']['year'])->toBe(2028);
 });
 
+test('executive status filters use canonical routing labels without counting unmatched obligations', function (): void {
+    $user = executiveReportGlobalUser();
+    $area = ProtectedArea::create(['name' => 'Executive Status PA', 'category' => 'National Park', 'municipality' => 'Test', 'province' => 'Davao Oriental', 'region' => 'XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
+    $rows = [
+        ['Quarter 1', '2027-01-10', '2027-01-12', '2027-01-13', '2027-01-14', 'Completed'],
+        ['Quarter 2', '2027-04-10', '2027-04-12', '2027-04-13', null, 'Pending Regional Endorsement'],
+        ['Quarter 3', '2027-07-10', '2027-07-12', null, null, 'Pending Receipt by PENRO'],
+        ['Quarter 4', '2027-10-10', null, null, null, 'Pending Submission by CENRO'],
+    ];
+
+    foreach ($rows as [$period, $activity, $released, $received, $endorsed]) {
+        ConservationReportSubmission::create([
+            'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
+            'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => $period,
+            'date_accomplished' => $activity, 'date_conducted' => $activity,
+            'date_report_released_cenro' => $released, 'date_received_penro' => $received,
+            'date_endorsed_regional' => $endorsed,
+        ]);
+    }
+
+    $this->actingAs($user);
+    $service = app(\App\Services\Reports\ExecutiveReportService::class);
+    foreach (array_column($rows, 5) as $status) {
+        $report = $service->report(['year' => 2027, 'domain' => 'pa', 'protected_area_id' => $area->id, 'workflow' => 'regular_pamb', 'status' => $status]);
+
+        expect($report['filters']['status'])->toBe($status)
+            ->and(collect($report['filter_options']['statuses'])->all())->toContain($status)
+            ->and($report['summary']['expected'])->toBe(1)
+            ->and($report['summary']['submitted'])->toBe(in_array($status, ['Completed', 'Pending Regional Endorsement'], true) ? 1 : 0)
+            ->and($report['summary']['overdue'])->toBe(0)
+            ->and($report['timeliness']['rated'])->toBe(1);
+    }
+
+    $noActivity = $service->report(['year' => 2027, 'domain' => 'pa', 'protected_area_id' => $area->id, 'workflow' => 'regular_pamb', 'status' => 'No Activity Conducted']);
+    expect($noActivity['summary']['expected'])->toBe(0)
+        ->and($noActivity['summary']['submitted'])->toBe(0)
+        ->and($noActivity['summary']['overdue'])->toBe(0)
+        ->and($noActivity['timeliness']['rated'])->toBe(0);
+
+    expect(fn () => $service->report(['year' => 2027, 'domain' => 'pa', 'status' => 'Overdue']))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+});
+
 test('executive PDF, XLSX, and DOCX exports use the report export routes', function (): void {
     $user = executiveReportGlobalUser();
     foreach (['pdf', 'xlsx', 'docx'] as $format) {
