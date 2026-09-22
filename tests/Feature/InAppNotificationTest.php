@@ -3,7 +3,9 @@
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ImeaFacilityMaintenanceReport;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use App\Notifications\EdatsInAppNotification;
 use App\Services\Notifications\EdatsInAppNotificationService;
@@ -13,6 +15,7 @@ use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Carbon\CarbonImmutable;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 09:00:00', 'Asia/Manila'));
@@ -61,7 +64,15 @@ test('unauthenticated users cannot mark notifications as read', function () {
 });
 
 test('overdue and due soon in-app notifications are derived once from the live alert source', function () {
-    notificationConservationReport(notificationProtectedArea('Pujada Bay Protected Landscape', $this->user), $this->user, ['date_accomplished' => '2026-08-03']);
+    $this->user->update(['section' => OrganizationalAccessService::CENRO_FOCAL, 'office_designated' => 'CENRO Mati']);
+    $area = notificationProtectedArea('Pujada Bay Protected Landscape', $this->user);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $this->user->id,
+    ]);
+    notificationConservationReport($area, $this->user, ['target_office' => 'CENRO Mati', 'date_accomplished' => '2026-08-03']);
     notificationEngpReport($this->user, ['deadline_submission' => '2026-09-01']);
     $service = app(EdatsInAppNotificationService::class);
     $today = CarbonImmutable::parse('2026-08-29', 'Asia/Manila');
@@ -168,6 +179,7 @@ test('a future compliance alert can appear after clear', function () {
 });
 
 test('ENGP overdue reports use the same live Alerts source and active IMEA Maintenance remains included', function () {
+    $this->user->update(['section' => OrganizationalAccessService::CENRO_FOCAL, 'office_designated' => 'CENRO Mati']);
     $engp = notificationEngpReport($this->user, ['deadline_submission' => '2026-08-20']);
     app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
 
@@ -206,6 +218,77 @@ test('workflow handoffs notify only the next accountable office and receipt retu
     expect($focal->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toContain('Submission Received')
         ->and($focal->fresh()->notifications()->where('data->title', 'Submission Received')->first()->data['url'])->toContain('view=outgoing');
 });
+
+test('deadline notifications respect ENGP office scope while retaining province-wide PENRO visibility', function (): void {
+    $mati = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $baganga = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $penro = notificationScopedUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $global = User::factory()->create();
+    $global->assignRole(Role::findOrCreate('Super Admin', 'web'));
+    $inactiveMati = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati', active: false);
+    $withoutPermission = notificationScopedUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati', permission: false);
+    notificationEngpReport($this->user, ['office' => 'CENRO Mati', 'deadline_submission' => '2026-08-20']);
+    notificationEngpReport($this->user, ['office' => 'CENRO Baganga', 'period_key' => '2026-07', 'period_label' => 'July 2026', 'deadline_submission' => '2026-08-20']);
+
+    app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
+
+    expect($mati->fresh()->notifications()->count())->toBe(1)
+        ->and($mati->fresh()->notifications()->first()->data['office'])->toBe('CENRO Mati')
+        ->and($baganga->fresh()->notifications()->count())->toBe(1)
+        ->and($baganga->fresh()->notifications()->first()->data['office'])->toBe('CENRO Baganga')
+        ->and($penro->fresh()->notifications()->count())->toBe(2)
+        ->and($global->fresh()->notifications()->count())->toBe(2)
+        ->and($inactiveMati->fresh()->notifications()->count())->toBe(0)
+        ->and($withoutPermission->fresh()->notifications()->count())->toBe(0)
+        ->and($this->user->fresh()->notifications()->count())->toBe(0)
+        ->and($mati->fresh()->notifications()->first()->data['dedup_key'])->toBe($penro->fresh()->notifications()->where('data->office', 'CENRO Mati')->first()->data['dedup_key']);
+});
+
+test('PA deadline notifications respect CENRO jurisdiction and assigned PAMO scope without duplicate recipients', function (): void {
+    $mati = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $baganga = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $penro = notificationScopedUser(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $area = notificationProtectedArea('Scoped notification PA', $this->user);
+    $pamo = notificationScopedUser(OrganizationalAccessService::PAMO, 'CENRO Mati', protectedAreaId: $area->id);
+    $otherArea = notificationProtectedArea('Other scoped notification PA', $this->user);
+    $otherPamo = notificationScopedUser(OrganizationalAccessService::PAMO, 'CENRO Mati', protectedAreaId: $otherArea->id);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $this->user->id,
+    ]);
+    notificationConservationReport($area, $this->user, [
+        'workflow_key' => 'homestay',
+        'activity_name' => 'Homestay',
+        'target_office' => 'CENRO Mati',
+        'date_accomplished' => '2026-08-01',
+    ]);
+
+    app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
+
+    expect($mati->fresh()->notifications()->count())->toBe(1)
+        ->and($penro->fresh()->notifications()->count())->toBe(1)
+        ->and($pamo->fresh()->notifications()->count())->toBe(1)
+        ->and($baganga->fresh()->notifications()->count())->toBe(0)
+        ->and($otherPamo->fresh()->notifications()->count())->toBe(0)
+        ->and($mati->fresh()->notifications()->first()->data['protected_area'])->toBe($area->name);
+});
+
+function notificationScopedUser(string $category, string $office, ?int $protectedAreaId = null, bool $active = true, bool $permission = true): User
+{
+    $user = User::factory()->create([
+        'section' => $category,
+        'unit_assignment' => $category === OrganizationalAccessService::PAMO ? OrganizationalAccessService::CONSERVATION : null,
+        'office_designated' => $office,
+        'protected_area_id' => $protectedAreaId,
+        'is_active' => $active,
+    ]);
+    if ($permission) $user->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+
+    return $user;
+}
+
 function notificationPayload(string $key): array
 {
     return ['type' => EdatsInAppNotificationService::DUE_SOON, 'dedup_key' => $key, 'title' => 'Test notification', 'message' => 'Test message', 'severity' => 'warning', 'category' => 'due_soon', 'source_label' => 'Test Report', 'url' => route('dashboard')];

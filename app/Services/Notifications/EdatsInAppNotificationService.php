@@ -4,12 +4,14 @@ namespace App\Services\Notifications;
 
 use App\Models\User;
 use App\Models\ConservationReportSubmission;
+use App\Models\EngpReportSubmission;
 use App\Models\DocumentRoutingEvent;
 use App\Models\PambRoutingEvent;
 use App\Notifications\EdatsInAppNotification;
 use App\Services\Compliance\OverdueReport;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -75,7 +77,7 @@ final class EdatsInAppNotificationService
                 : "{$report->module} for {$context['location']} is due on {$deadline}.",
             'deadline' => $report->deadline,
             'dedup_key' => "{$type}:{$report->sourceType}:{$report->sourceId}:{$report->deadline}",
-        ]);
+        ], $report);
     }
 
     /** @param array<string, mixed> $payload */
@@ -187,9 +189,9 @@ final class EdatsInAppNotificationService
             if (! $exists) $user->notify(new EdatsInAppNotification($payload));
         }
     }
-    private function deliver(array $payload): void
+    private function deliver(array $payload, OverdueReport $report): void
     {
-        foreach ($this->recipients($payload['office'] ?? null) as $user) {
+        foreach ($this->recipients($report) as $user) {
             $exists = $user->notifications()->get()->contains(fn ($notification): bool => ($notification->data['dedup_key'] ?? null) === $payload['dedup_key']);
             if (! $exists) {
                 $user->notify(new EdatsInAppNotification([...$payload, 'url' => self::actionUrl($payload, $user)]));
@@ -215,13 +217,27 @@ final class EdatsInAppNotificationService
     }
 
     /** @return Collection<int, User> */
-    private function recipients(?string $office): Collection
+    private function recipients(OverdueReport $report): Collection
     {
-        return User::query()->where('is_active', true)->get()->filter(function (User $user) use ($office): bool {
+        $organization = app(OrganizationalAccessService::class);
+
+        return User::query()->where('is_active', true)->get()->filter(function (User $user) use ($report, $organization): bool {
             if ($user->section === 'MES' || $user->hasRole('no_role')) return false;
             $canMonitor = $user->hasAnyRole(['Super Admin', 'CDS Admin', 'Admin', 'Staff', 'staff']) || $user->can('reports.view');
             if (! $canMonitor) return false;
-            return ! ($user->hasRole('ENGP Encoder') && filled($user->office_designated) && $office !== null && $user->office_designated !== $office);
+
+            if ($report->sourceType === EngpReportSubmission::class) {
+                return $organization->canUseDevelopmentOffice($user, $report->targetOffice);
+            }
+
+            if (! $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) return false;
+
+            $source = new ConservationReportSubmission([
+                'protected_area_id' => $report->protectedAreaId,
+                'target_office' => $report->targetOffice,
+            ]);
+
+            return app(PambSubmissionAccessService::class)->canView($user, $source);
         })->values();
     }
 }
