@@ -754,6 +754,7 @@ final class PambRoutingTimelineService
     private function currentStatus(array $definitions, array $dates, ?string $nextKey, ConservationReportSubmission $report): string
     {
         if (isset($dates[self::RELEASED_TO_REGIONAL])) return 'Released to Regional Office';
+        if ($nextKey === SubmissionTrackingService::CENRO_RELEASE) return RoutingStatusPresenter::PENDING_CENRO;
         if (! isset($dates[self::RECORDS_RECEIVED])) return 'Awaiting PENRO Receipt';
         if ($nextKey === null) return 'For Regional Release';
         if ($nextKey === self::RECEIVED_BY_PENRO_FINAL) return isset($dates[self::RECEIVED_BY_PENRO_FINAL]) ? 'For Final Review' : 'Awaiting Receipt by Office of the PENRO';

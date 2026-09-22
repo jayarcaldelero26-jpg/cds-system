@@ -8,6 +8,7 @@ use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
+use App\Services\SubmissionTracking\DocumentRoutingPresenter;
 use App\Services\SubmissionTracking\RoutingStatusPresenter;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
@@ -124,6 +125,68 @@ test('routing summary exposes the current owner, delay, next action and last eve
         ->and($summary['next_expected_action'])->toBe('Record Receipt by Office of the PENRO')
         ->and($summary['last_action']['label'])->toBe('Forwarded to Office of the PENRO')
         ->and($summary['last_action']['recorded_by'])->toBe($this->user->name);
+});
+
+test('TWC detail stays at the CENRO stage until the CENRO release milestone exists', function () {
+    $report = timelinePambReport($this, [
+        'workflow_key' => 'twc_meetings',
+        'mov_processing_status' => \App\Services\SubmissionTracking\PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+        'mov_submitted_at' => '2026-08-04 09:00:00',
+        'date_report_released_cenro' => null,
+        'date_received_penro' => null,
+    ]);
+    $canonical = app(RoutingStatusPresenter::class);
+    $timeline = timelineService()->present($report);
+    $detail = app(DocumentRoutingPresenter::class)->presentPamb($report, $timeline);
+
+    expect($canonical->stage($report, 'conservation'))->toBe(SubmissionTrackingService::CENRO_RELEASE)
+        ->and($canonical->status($report, 'conservation'))->toBe(RoutingStatusPresenter::PENDING_CENRO)
+        ->and($timeline['routing_summary']['current_status'])->toBe(RoutingStatusPresenter::PENDING_CENRO)
+        ->and(collect($timeline['timeline'])->firstWhere('status', 'current')['key'])->toBe(SubmissionTrackingService::CENRO_RELEASE)
+        ->and($detail['current_stage'])->toBe(SubmissionTrackingService::CENRO_RELEASE)
+        ->and($detail['current_status'])->toBe(RoutingStatusPresenter::PENDING_CENRO)
+        ->and($detail['next_expected_action'])->toBe('Review MOV/report')
+        ->and($detail['actions'])->toBeEmpty();
+});
+
+test('PAMB meeting routing presents PENRO receipt only after CENRO release', function () {
+    foreach (['regular_pamb', 'special_pamb'] as $workflow) {
+        $beforeRelease = timelinePambReport($this, [
+            'workflow_key' => $workflow,
+            'date_report_released_cenro' => null,
+            'date_received_penro' => null,
+        ]);
+        $before = timelineService()->present($beforeRelease);
+
+        expect($before['routing_summary']['current_status'])->toBe(RoutingStatusPresenter::PENDING_CENRO)
+            ->and($before['current_document_location'])->toBe('CENRO');
+
+        $afterRelease = timelinePambReport($this, [
+            'workflow_key' => $workflow,
+            'date_report_released_cenro' => '2026-08-04',
+            'date_received_penro' => null,
+        ]);
+        $after = timelineService()->present($afterRelease);
+
+        expect($after['routing_summary']['current_status'])->toBe('Awaiting PENRO Receipt')
+            ->and($after['current_document_location'])->toBe('Awaiting PENRO Receipt')
+            ->and(collect($after['timeline'])->firstWhere('status', 'current')['key'])->toBe(PambRoutingTimelineService::RECORDS_RECEIVED);
+    }
+});
+
+test('non-PAMB generic routing presentation remains on its canonical contract', function () {
+    $report = timelinePambReport($this, [
+        'workflow_key' => 'homestay',
+        'activity_name' => 'Homestay',
+        'date_report_released_cenro' => null,
+        'date_received_penro' => null,
+    ]);
+    $detail = app(DocumentRoutingPresenter::class)->present($report, 'conservation');
+
+    expect(timelineService()->present($report)['applicable'])->toBeFalse()
+        ->and(app(RoutingStatusPresenter::class)->status($report, 'conservation'))->toBe(RoutingStatusPresenter::PENDING_CENRO)
+        ->and($detail['current_status'])->toBe('Awaiting Forward to CENRO CDS Chief')
+        ->and($detail['current_stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PREPARATION);
 });
 
 test('PENRO internal routing adds presentation context without changing the canonical status', function (): void {
