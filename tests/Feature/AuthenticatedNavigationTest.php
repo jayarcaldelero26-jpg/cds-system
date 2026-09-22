@@ -19,6 +19,30 @@ test('authenticated sidebar follows the consolidated Conservation and Developmen
         ->and($sidebar)->not->toContain("label: 'OPERATIONS'");
 });
 
+test('authenticated sidebar retains each active report module exactly once', function () {
+    $sidebar = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
+    $start = strpos($sidebar, 'const allNavigation = [');
+    $end = strpos($sidebar, 'const lucideSidebarIcons', $start);
+    $navigation = substr($sidebar, $start, $end - $start);
+
+    $labels = [
+        'Homestay', 'Regular PAMB Meetings', 'Special PAMB Meetings', 'Maintenance of Monuments',
+        'Maintenance of Buoy', 'TWC Meetings', 'Updating of PAMP', 'BMS', 'BAMS',
+        '5 Year Restoration Plan Preparation', 'Additional BMS Site', 'CEPA Plan',
+        'Vertical Take off and Landing Operations', 'Automated Weather Station', 'BDFE for Terrestrial PAs',
+        'BDFAPs in PAs', 'Maintenance of PAMO or Ecotourism', 'IMEA', 'Management of IPAF',
+        'Rehabilitation of PA Office', 'Ecotourism Management Plan', 'Updating of PAMB Manual Operations',
+        'Management Effectiveness Assessment', 'Maintenance of PA Information System',
+        'Monitoring Mangroves, Corals, Seagrass', 'Revenue Collection', 'Water Quality Monitoring within PA', 'MPAN',
+    ];
+
+    foreach ($labels as $label) {
+        expect(substr_count($navigation, "label: '{$label}'"))->toBe(1, "Expected one sidebar entry for {$label}");
+    }
+
+    expect($navigation)->toContain("label: 'Conservation Database'");
+});
+
 test('NGP places the external generator before report submission monitoring', function () {
     $sidebar = File::get(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
 
