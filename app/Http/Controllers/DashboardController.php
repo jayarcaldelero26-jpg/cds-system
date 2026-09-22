@@ -92,6 +92,7 @@ class DashboardController extends Controller
 
         return Inertia::render('Dashboard', [
             'view' => 'all',
+            'engp' => $engp,
             'dashboard' => $overview($tab === 'development' ? 'engp' : 'pa'),
             'protectedAreasCount' => $protectedAreasCount,
         ]);

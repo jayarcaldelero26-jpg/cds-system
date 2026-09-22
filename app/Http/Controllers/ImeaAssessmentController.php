@@ -135,7 +135,7 @@ class ImeaAssessmentController extends Controller
         $newStructuresCount = (clone $query)->where('year_established', '>', 2022)->count();
 
         $facilitiesList = $query->orderBy('year_established', 'desc')->get();
-        $protectedAreas = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user())->get();
+        $protectedAreas = $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get();
 
         // Kuhaon ang tanang unique inventory dates para sa dropdown filter
         $inventoryDates = $this->organization->scopeProtectedAreaQuery(ProtectedAreaFacility::query(), $request->user())->whereNotNull('inventory_date')
@@ -423,7 +423,7 @@ class ImeaAssessmentController extends Controller
             // CSV Rows
             foreach ($facilities as $row) {
                 fputcsv($file, [
-                    $row->protected_area?->name ?? 'N/A',
+                    $row->protectedArea?->name ?? 'N/A',
                     $row->inventory_date ?? '—',
                     $row->facility_type,
                     $row->unit_no,

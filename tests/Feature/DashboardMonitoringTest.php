@@ -69,7 +69,7 @@ test('dashboard filters sources and combines PA and ENGP monitoring records', fu
 });
 
 test('dashboard page exposes the unified monitoring props', function () {
-    conservationReport($this->normalPa, $this->user, ['date_accomplished' => '2026-08-26']);
+    $report = conservationReport($this->normalPa, $this->user, ['date_accomplished' => '2026-08-26']);
     engpReport($this->user, ['deadline_submission' => '2026-09-01']);
 
     $this->actingAs($this->user)->get(route('dashboard'))
@@ -81,6 +81,8 @@ test('dashboard page exposes the unified monitoring props', function () {
             ->has('dashboard.filterOptions.years')
             ->missing('dashboard.filterOptions.programs')
             ->has('dashboard.trackingRows')
+            ->where('dashboard.trackingTotal', 1)
+            ->where('dashboard.trackingRows.0.id', 'conservation-'.$report->id)
             ->where('dashboard.filters.program', 'pa'));
 });
 
