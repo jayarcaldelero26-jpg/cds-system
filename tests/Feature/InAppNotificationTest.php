@@ -55,6 +55,30 @@ test('authenticated user can mark their own notification as read', function () {
     expect($notification->fresh()->read_at)->not->toBeNull();
 });
 
+test('marking an owned notification read immediately updates the bell unread count and persists on reload', function () {
+    $this->user->notify(new EdatsInAppNotification(notificationPayload('badge-first')));
+    $this->user->notify(new EdatsInAppNotification(notificationPayload('badge-second')));
+    $notification = $this->user->notifications()->where('data->dedup_key', 'badge-first')->firstOrFail();
+
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertOk()
+        ->assertJsonPath('unread_count', 2);
+
+    $this->actingAs($this->user)->withHeader('Accept', 'application/json')
+        ->patch(route('notifications.read', $notification))
+        ->assertOk()
+        ->assertJson(['ok' => true]);
+
+    $this->actingAs($this->user)->get(route('notifications.recent'))
+        ->assertOk()
+        ->assertJsonPath('unread_count', 1);
+    $this->actingAs($this->user)->get(route('notifications.index'))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->where('notifications.0.read_at', fn ($value) => $value !== null));
+
+    expect($notification->fresh()->read_at)->not->toBeNull();
+});
+
 test('unauthenticated users cannot mark notifications as read', function () {
     $this->user->notify(new EdatsInAppNotification(notificationPayload('guest-read')));
     $notification = $this->user->notifications()->first();

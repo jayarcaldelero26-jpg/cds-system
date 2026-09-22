@@ -27,9 +27,11 @@ export default function NotificationBell({ initial = { unread_count: 0, notifica
 
     useEffect(() => {
         const timer = window.setInterval(refresh, 60000);
+        const sync = () => { refresh(); };
         const close = event => { if (root.current && !root.current.contains(event.target)) setOpen(false); };
+        window.addEventListener('cds:notifications-updated', sync);
         document.addEventListener('mousedown', close);
-        return () => { window.clearInterval(timer); document.removeEventListener('mousedown', close); };
+        return () => { window.clearInterval(timer); window.removeEventListener('cds:notifications-updated', sync); document.removeEventListener('mousedown', close); };
     }, []);
 
     const csrf = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
