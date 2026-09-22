@@ -14,6 +14,8 @@ use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ImeaReportSubmission;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
+use App\Models\ManagementPlan;
+use App\Models\ManagementPlanType;
 use App\Models\NonWorkingDay;
 use App\Models\ProtectedArea;
 use App\Services\BusinessCalendarService;
@@ -304,4 +306,99 @@ test('due-soon, due-today, overdue, and completed states stay aligned across lay
     }
     expect($dashboard->get('bms-'.$completed->id)['is_overdue'])->toBeFalse()
         ->and($dashboard->get('bms-'.$completed->id)['submitted'])->toBeTrue();
+});
+
+test('Management Plans preserve one source identity across model tracking dashboard and alerts through completion', function (): void {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-08 10:00:00', 'Asia/Manila'));
+    BusinessCalendarService::forgetCache();
+
+    $user = p1GlobalUser();
+    $area = p1Area($user);
+    Storage::fake('public');
+    $type = ManagementPlanType::create([
+        'name' => 'UAT Parity Plan', 'slug' => 'uat-parity-plan',
+        'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    $plan = ManagementPlan::create([
+        ...p1Common($area, $user),
+        'management_plan_type_id' => $type->id,
+        'plan_type' => 'Ecotourism Management Plan',
+        'activity_name' => 'UAT parity fixture',
+        'document_type' => 'Final Report',
+        'date_accomplished' => '2026-08-28',
+        'status' => 'Pending',
+    ]);
+
+    $sourceDeadline = $plan->fresh()->deadline_submission;
+    expect($sourceDeadline)->toBe('2026-09-09')
+        ->and((int) $plan->protected_area_id)->toBe($area->id)
+        ->and($plan->target_office)->toBe('CENRO Baganga')
+        ->and($plan->date_received_penro)->toBeNull()
+        ->and($plan->date_endorsed_regional)->toBeNull();
+
+    $this->actingAs($user);
+    $tracking = app(SubmissionTrackingService::class)->records([
+        'focus_source' => 'management-plans', 'focus_id' => $plan->id,
+    ], null, true)->sole();
+    $dashboardRows = collect(app(DashboardMonitoringService::class)->overview([
+        'year' => 2026, 'program' => 'conservation', 'protected_area_id' => $area->id,
+    ], false)['rows']);
+    $dashboard = $dashboardRows->firstWhere('id', 'management-plans-'.$plan->id);
+    $today = CarbonImmutable::parse('2026-09-08', 'Asia/Manila');
+    $alerts = app(OverdueReportService::class);
+    $dueSoon = $alerts->dueSoonReports(3, $today)->firstWhere('sourceId', $plan->id);
+
+    expect($tracking['source'])->toBe('management-plans')
+        ->and($tracking['source_id'])->toBe($plan->id)
+        ->and($tracking['tracking_number'])->toStartWith('EDATS-PA-2026-')
+        ->and((int) $tracking['protected_area_id'])->toBe($area->id)
+        ->and($tracking['target_office'])->toBe('CENRO Baganga')
+        ->and($tracking['deadline_submission'])->toBe($sourceDeadline)
+        ->and($tracking['date_received_penro'])->toBeNull()
+        ->and($tracking['routing_complete'])->toBeFalse()
+        ->and($tracking['can_transition'])->toBeTrue()
+        ->and($dashboard)->not->toBeNull()
+        ->and($dashboard['id'])->toBe('management-plans-'.$plan->id)
+        ->and((int) $dashboard['protected_area_id'])->toBe($area->id)
+        ->and($dashboard['target_office'])->toBe('CENRO Baganga')
+        ->and($dashboard['deadline_submission'])->toBe($sourceDeadline)
+        ->and($dashboard['submitted'])->toBeFalse()
+        ->and($dashboard['is_overdue'])->toBeFalse()
+        ->and($dueSoon)->not->toBeNull()
+        ->and($dueSoon->sourceType)->toBe(ManagementPlan::class)
+        ->and($dueSoon->sourceId)->toBe($plan->id)
+        ->and($dueSoon->protectedAreaId)->toBe($area->id)
+        ->and($dueSoon->targetOffice)->toBe('CENRO Baganga')
+        ->and($dueSoon->deadline)->toBe($sourceDeadline)
+        ->and($dueSoon->submitted)->toBeFalse();
+
+    $attachmentPath = 'uat-parity/management-plan.pdf';
+    Storage::disk('public')->put($attachmentPath, 'UAT parity evidence');
+    $plan->update([
+        'date_report_released_cenro' => '2026-09-10',
+        'date_received_penro' => '2026-09-11',
+        'date_endorsed_regional' => '2026-09-12',
+        'attachments' => [['path' => $attachmentPath, 'original_name' => 'management-plan.pdf']],
+    ]);
+
+    $completedTracking = app(SubmissionTrackingService::class)->records([
+        'focus_source' => 'management-plans', 'focus_id' => $plan->id,
+    ], null, false)->sole();
+    $completedDashboard = collect(app(DashboardMonitoringService::class)->overview([
+        'year' => 2026, 'program' => 'conservation', 'protected_area_id' => $area->id,
+    ], false)['rows'])->firstWhere('id', 'management-plans-'.$plan->id);
+    $completedQueues = app(SubmissionTrackingService::class)->queues([], collect([$completedTracking]));
+
+    expect($completedTracking['routing_complete'])->toBeTrue()
+        ->and($completedTracking['routing']['actions'])->toBeEmpty()
+        ->and($completedQueues['active']->contains(fn (array $row): bool => $row['source'] === 'management-plans' && (int) $row['source_id'] === $plan->id))->toBeFalse()
+        ->and($completedDashboard['submitted'])->toBeTrue()
+        ->and($completedDashboard['is_overdue'])->toBeFalse()
+        ->and($alerts->overdueReports(CarbonImmutable::parse('2026-09-13', 'Asia/Manila'))
+            ->contains(fn ($report): bool => $report->sourceType === ManagementPlan::class && $report->sourceId === $plan->id))->toBeFalse()
+        ->and($alerts->dueSoonReports(3, CarbonImmutable::parse('2026-09-08', 'Asia/Manila'))
+            ->contains(fn ($report): bool => $report->sourceType === ManagementPlan::class && $report->sourceId === $plan->id))->toBeFalse();
+
+    expect(fn () => app(SubmissionTrackingService::class)->assertMutable($plan->fresh()))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
 });
