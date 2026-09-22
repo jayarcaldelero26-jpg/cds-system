@@ -159,6 +159,10 @@ test('report submission overview presents the required tab and chart surfaces', 
     $dashboardSource = file_get_contents(resource_path('js/Pages/Dashboard.jsx'));
 
     expect($dashboardSource)->toContain('Report Submission Overview')
+        ->toContain("import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png'")
+        ->toContain('url(${monitoringMountainForest})')
+        ->not->toContain('dashboard-terrain-sky')
+        ->not->toContain('<svg')
         ->not->toContain("SUPERVISOR'S GUIDE")
         ->toContain('Status as of {formatReportDate(dashboard.as_of)}')
         ->not->toContain('formatReportDateTime')
