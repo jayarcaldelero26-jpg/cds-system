@@ -1839,9 +1839,9 @@ test('all monitored sources expose the universal MOV contract and distinguish su
     }
 
     $overdue = $service->overdueReports();
-    expect($overdue)->toHaveCount(9)
-        ->and($overdue->every(fn ($report) => $report->sourceType !== EngpReportSubmission::class && $report->submitted && $report->complianceIssue === 'MOV Not Yet Submitted'))->toBeTrue()
-        ->and($overdue->map(fn ($report) => "{$report->sourceType}:{$report->sourceId}")->unique())->toHaveCount(9)
+    expect($overdue)->toHaveCount(8)
+        ->and($overdue->every(fn ($report) => ! in_array($report->sourceType, [EngpReportSubmission::class, ConservationReportSubmission::class], true) && $report->submitted && $report->complianceIssue === 'MOV Not Yet Submitted'))->toBeTrue()
+        ->and($overdue->map(fn ($report) => "{$report->sourceType}:{$report->sourceId}")->unique())->toHaveCount(8)
         ->and($overdue->pluck('sourceType')->all())->not->toContain(EngpReportSubmission::class);
 });
 
@@ -1867,6 +1867,60 @@ test('submitted MOV not yet submitted is pending before deadline, overdue after 
     expect($service->overdueReports())->toHaveCount(1)
         ->and($service->overdueReports()->first()->complianceIssue)->toBe('MOV Not Yet Submitted')
         ->and($service->confirmationHistory()->first()['source_id'])->toBe($report->id);
+});
+
+test('generic Conservation alerts stop at PENRO receipt while pending submissions retain deadline alerts', function () {
+    $user = complianceUser();
+    $area = complianceArea($user);
+    $makeReport = function (string $workflow, array $dates = []) use ($user, $area): ConservationReportSubmission {
+        return ConservationReportSubmission::create([
+            'workflow_key' => $workflow,
+            'protected_area_id' => $area->id,
+            'target_office' => 'CENRO Mati',
+            'activity_name' => ucfirst(str_replace('_', ' ', $workflow)).' alert eligibility',
+            'document_type' => 'Final Report',
+            'reporting_period' => 'Quarter 3',
+            'date_accomplished' => '2026-09-01',
+            'created_by' => $user->id,
+            'updated_by' => $user->id,
+            ...$dates,
+        ]);
+    };
+
+    $pendingMonument = $makeReport('maintenance_monuments');
+    $receivedMonument = $makeReport('maintenance_monuments', ['date_received_penro' => '2026-09-16']);
+    $completedHomestay = $makeReport('homestay', [
+        'date_received_penro' => '2026-09-16',
+        'date_endorsed_regional' => '2026-09-17',
+    ]);
+    $pendingHomestay = $makeReport('homestay');
+    $service = app(OverdueReportService::class);
+    $beforeDeadline = CarbonImmutable::parse('2026-09-01', 'Asia/Manila');
+    $homestayDeadline = CarbonImmutable::parse($pendingHomestay->deadline_submission, 'Asia/Manila');
+    $afterDeadline = CarbonImmutable::parse('2026-09-30', 'Asia/Manila');
+
+    expect($service->pendingMovReports($beforeDeadline)->pluck('sourceId'))
+        ->not->toContain($completedHomestay->id, $receivedMonument->id)
+        ->and($service->dueSoonReports(3, $homestayDeadline->subDays(3))->pluck('sourceId'))
+        ->toContain($pendingHomestay->id)
+        ->not->toContain($completedHomestay->id, $receivedMonument->id)
+        ->and($service->dueTodayReports($homestayDeadline)->pluck('sourceId'))
+        ->toContain($pendingHomestay->id)
+        ->and($service->overdueReports($afterDeadline)->pluck('sourceId'))
+        ->toContain($pendingMonument->id, $pendingHomestay->id)
+        ->not->toContain($receivedMonument->id, $completedHomestay->id)
+        ->and($service->overdueReports($afterDeadline)->where('sourceId', $pendingMonument->id))
+        ->toHaveCount(1)
+        ->and($service->overdueReports($afterDeadline)->firstWhere('sourceId', $pendingMonument->id)->complianceIssue)
+        ->toBe('Report Not Yet Submitted');
+
+    // A later routing milestone is not required to suppress a second alert:
+    // receipt alone fulfills the submission deadline obligation.
+    $receivedMonument->update(['date_endorsed_regional' => '2026-09-24']);
+    expect($service->overdueReports($afterDeadline)->pluck('sourceId'))
+        ->not->toContain($receivedMonument->id, $completedHomestay->id)
+        ->and($service->pendingMovReports($beforeDeadline)->pluck('sourceId'))
+        ->not->toContain($completedHomestay->id);
 });
 
 test('stale MOV database paths are normalized as MOV not yet submitted', function () {

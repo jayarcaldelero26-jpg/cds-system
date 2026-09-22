@@ -368,6 +368,15 @@ class OverdueReportService
     /** @param array<string, mixed> $definition */
     private function normalize(Model $model, array $definition, CarbonImmutable $today, bool $includePendingMov = false): ?OverdueReport
     {
+        // Generic Conservation alerts cover the submission obligation through
+        // PENRO receipt. Regional routing may continue after that point, but it
+        // must not keep the already-fulfilled submission/MOV deadline active.
+        if ($model instanceof ConservationReportSubmission
+            && ($this->dateString($model->getAttribute('date_received_penro')) !== null
+                || $this->statusPresenter->status($model) === RoutingStatusPresenter::COMPLETED)) {
+            return null;
+        }
+
         $deadlineValue = $model->getAttribute('deadline_submission');
         if (! $deadlineValue) {
             return null;
