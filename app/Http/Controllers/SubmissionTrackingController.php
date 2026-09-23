@@ -39,7 +39,10 @@ class SubmissionTrackingController extends Controller
         $snapshot = $this->tracking->snapshot($trackingFilters, $page, 25);
         $records = $snapshot['records'];
         $queues = $snapshot['queues'];
-        $workspaceQueues = $this->tracking->workspaceQueues($filters, $records);
+        // Workspace queues must span the complete authorized filtered set.
+        // The snapshot is intentionally paginated for the tracking table, so
+        // using it here can hide an actionable record that is outside page 1.
+        $workspaceQueues = $this->tracking->workspaceQueues($filters);
         $selectedRecord = null;
         $selectedSource = $request->string('source')->toString();
         $selectedId = $request->integer('source_id');
