@@ -22,11 +22,7 @@ final class ProtectedAttachmentController extends Controller
         $recordModel = $model::query()->when($model === ConservationReportSubmission::class, fn ($query) => $query->with('protectedArea'))->findOrFail($record);
         $ability = $definition['ability'] ?? null;
         $user = request()->user();
-        $explicitlyPermitted = is_string($ability)
-            && $ability !== ''
-            && ($this->organization->isGlobal($user)
-                || $user?->getAllPermissions()->contains(fn ($permission): bool => $permission->name === $ability));
-        abort_unless($explicitlyPermitted, 403);
+        abort_unless(is_string($ability) && $ability !== '' && $user?->can($ability), 403);
         abort_unless($this->organization->canViewSubmissionAttachment(request()->user(), $recordModel), 403);
 
         return $this->attachments->response($source, $recordModel, $attachment);

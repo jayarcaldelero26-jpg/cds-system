@@ -14,7 +14,7 @@ use App\Models\User;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 
-test('scoped users without the source permission cannot download protected BMS attachments', function (): void {
+test('scoped users with effective BMS authorization can download protected BMS attachments', function (): void {
     Storage::fake('local');
     $owner = User::factory()->create(['section' => 'CDS']);
     $office = OrganizationalOffice::query()->where('name', 'CENRO Baganga')->firstOrFail();
@@ -48,13 +48,16 @@ test('scoped users without the source permission cannot download protected BMS a
         'office_designated' => 'CENRO Baganga',
     ]);
 
+    expect($scopedWithoutPermission->can('bms.view'))->toBeTrue()
+        ->and($scopedWithoutPermission->getAllPermissions()->contains(fn ($permission): bool => $permission->name === 'bms.view'))->toBeFalse();
+
     $response = $this->actingAs($scopedWithoutPermission)->get(route('attachments.show', [
         'source' => 'bms-data',
         'record' => $record->id,
         'attachment' => 'attachment',
     ]));
 
-    expect($response->getStatusCode())->toBe(403);
+    expect($response->getStatusCode())->toBe(200);
 });
 
 test('the protected attachment route enforces each registry source ability before object scope', function (): void {
@@ -103,7 +106,7 @@ test('the protected attachment route enforces each registry source ability befor
         Storage::disk('local')->put($record->getAttribute(str_ends_with($key, 'file') ? 'report_file_path' : 'mov_file_path'), '%PDF-1.4 P1-B');
         $this->actingAs($authorized)->get(route('attachments.show', [$source, $record->id, $key]))->assertOk();
         $this->actingAs($user)->get(route('attachments.show', [$source, $record->id, $key]))->assertOk();
-        $withoutAbility = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Baganga']);
+        $withoutAbility = User::factory()->create(['section' => 'UNKNOWN', 'unit_assignment' => null, 'office_designated' => 'CENRO Baganga']);
         $this->actingAs($withoutAbility)->get(route('attachments.show', [$source, $record->id, $key]))->assertForbidden();
     }
 });

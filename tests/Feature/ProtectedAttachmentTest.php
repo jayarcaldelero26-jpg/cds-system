@@ -1,12 +1,17 @@
 <?php
 
 use App\Models\BmsRecord;
+use App\Models\BmsReportSubmission;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\ProtectedArea;
 use App\Models\User;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Attachments\ProtectedAttachmentService;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 function protectedAttachmentUser(bool $authorized = true): User
 {
@@ -38,6 +43,37 @@ function protectedAttachmentRecord(string $path = 'bms-attachments/record.pdf'):
         'taxonomic_group' => 'Birds',
         'species_scientific_name' => 'Testus example',
         'attachment' => $path,
+    ]);
+}
+
+function effectiveBmsAttachmentReport(User $owner, string $path = 'bms-report-movs/effective.pdf'): BmsReportSubmission
+{
+    $area = ProtectedArea::create([
+        'name' => 'Effective BMS Attachment PA', 'short_name' => 'EBMS',
+        'category' => 'Protected Landscape', 'municipality' => 'Baganga',
+        'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
+        'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('name', 'CENRO Baganga')->value('id'),
+        'assignment_type' => 'supervising',
+    ]);
+
+    return BmsReportSubmission::create([
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Effective BMS attachment report', 'document_type' => 'Report',
+        'semester' => '1st Semester', 'date_accomplished' => '2026-09-01',
+        'mov_file_name' => basename($path), 'mov_file_path' => $path,
+        'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+}
+
+function effectiveBmsAttachmentUser(string $section, string $office = 'CENRO Baganga', ?int $protectedAreaId = null): User
+{
+    return User::factory()->create([
+        'section' => $section, 'unit_assignment' => OrganizationalAccessService::CONSERVATION,
+        'office_designated' => $office, 'protected_area_id' => $protectedAreaId,
     ]);
 }
 
@@ -90,6 +126,60 @@ test('protected attachments require source permission and serve only the resolve
     $this->actingAs(protectedAttachmentUser())
         ->get(route('attachments.show', ['source' => 'bms-data', 'record' => $record->id, 'attachment' => 'not-the-registered-key']))
         ->assertNotFound();
+});
+
+test('effective Gate-authorized BMS workflow users can access protected BMS report attachments within scope', function () {
+    Storage::fake('local');
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $record = effectiveBmsAttachmentReport($owner);
+    Storage::disk('local')->put($record->mov_file_path, "%PDF-1.7\neffective bms attachment");
+
+    foreach ([OrganizationalAccessService::CENRO_FOCAL, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::PENRO_FOCAL, OrganizationalAccessService::PENRO_CHIEF] as $section) {
+        $user = effectiveBmsAttachmentUser($section, str_starts_with($section, 'CENRO_') ? 'CENRO Baganga' : 'PENRO Davao Oriental');
+        expect($user->can('bms.view'))->toBeTrue()
+            ->and($user->getAllPermissions()->contains(fn ($permission): bool => $permission->name === 'bms.view'))->toBeFalse();
+
+        $this->actingAs($user)
+            ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $record->id, 'attachment' => 'mov']))
+            ->assertOk()
+            ->assertHeader('Content-Type', 'application/pdf');
+    }
+});
+
+test('BMS protected attachment keeps scope, global, and cross-source authorization boundaries', function () {
+    Storage::fake('local');
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $record = effectiveBmsAttachmentReport($owner, 'bms-report-movs/boundary.pdf');
+    Storage::disk('local')->put($record->mov_file_path, "%PDF-1.7\nboundary attachment");
+
+    $wrongOffice = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    expect($wrongOffice->can('bms.view'))->toBeTrue();
+    $this->actingAs($wrongOffice)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $record->id, 'attachment' => 'mov']))
+        ->assertForbidden();
+
+    $pamo = User::factory()->create(['section' => 'PAMO', 'protected_area_id' => $record->protected_area_id]);
+    expect($pamo->can('bms.view'))->toBeFalse();
+    $this->actingAs($pamo)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $record->id, 'attachment' => 'mov']))
+        ->assertForbidden();
+
+    $crossSource = User::factory()->create(['section' => 'UNKNOWN']);
+    $crossSource->givePermissionTo(Permission::findOrCreate('bams.view', 'web'));
+    expect($crossSource->can('bms.view'))->toBeFalse();
+    $this->actingAs($crossSource)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $record->id, 'attachment' => 'mov']))
+        ->assertForbidden();
+
+    $admin = User::factory()->create();
+    $admin->assignRole(Role::findOrCreate('Super Admin', 'web'));
+    $this->actingAs($admin)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $record->id, 'attachment' => 'mov']))
+        ->assertOk();
+
+    $this->get('/storage/'.$record->mov_file_path)->assertNotFound();
 });
 
 test('protected attachments deny unauthenticated requests', function () {
