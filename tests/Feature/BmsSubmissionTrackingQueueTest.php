@@ -125,6 +125,9 @@ test('terminal BMS records are excluded from actionable Incoming while remaining
         [$penroRecords, 'receive_at_penro_records_final'], [$penroRecords, 'release_to_regional'],
     ] as [$actor, $action]) {
         $routing->transition($report, 'bms', $action, $actor->id);
+        if ($action === 'receive_at_penro_records_final') {
+            bmsQueueAssertIncoming($penroRecords, $report, 'release');
+        }
     }
 
     test()->actingAs($penroRecords);

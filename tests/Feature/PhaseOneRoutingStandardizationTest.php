@@ -274,3 +274,50 @@ test('each generic source atomically transfers ordinary PENRO receipt ownership 
         ->and(app(SubmissionTrackingService::class)->isRoutingComplete($report->fresh()))->toBeFalse()
         ->and(collect($routing->actionKeys($report->fresh(), $source))->contains('forward_to_office_penro'))->toBeFalse();
 })->with(['bms', 'bams', 'imea', 'aws', 'ipaf-management', 'revenue', 'imea-maintenance', 'management-plans', 'conservation']);
+
+test('generic final PENRO Records release is visible in Incoming before release for every active extended source', function (): void {
+    $focal = phaseOneActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = phaseOneActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $records = phaseOneActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    $penroRecords = phaseOneActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $office = phaseOneActor(OrganizationalAccessService::OFFICE_PENRO, 'PENRO Davao Oriental');
+    $tsd = phaseOneActor(OrganizationalAccessService::PENRO_TSD_CHIEF, 'PENRO Davao Oriental');
+    $penroFocal = phaseOneActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $penroChief = phaseOneActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
+    $routing = app(DocumentRoutingTransitionService::class);
+    $tracking = app(SubmissionTrackingService::class);
+
+    foreach (['ipaf-management', 'revenue', 'imea', 'imea-maintenance', 'management-plans'] as $source) {
+        $report = phaseOneReportForSource($source, $focal);
+        foreach ([
+            [$focal, 'forward_to_cenro_chief'], [$chief, 'receive_at_cenro_chief'],
+            [$chief, 'forward_to_cenro_records'], [$records, 'receive_at_cenro_records'],
+            [$records, 'forward_to_penro_records'], [$penroRecords, 'receive_at_penro_records'],
+            [$office, 'receive_at_office_penro'], [$office, 'assign_to_tsd_chief'],
+            [$tsd, 'receive_at_tsd_chief'], [$tsd, 'forward_to_cds_focal'],
+            [$penroFocal, 'receive_at_cds_focal'], [$penroFocal, 'forward_to_cds_chief'],
+            [$penroChief, 'receive_at_cds_chief'], [$penroChief, 'recommend_to_office_penro'],
+            [$office, 'receive_at_office_penro_final'], [$office, 'approve_for_regional_release'],
+            [$penroRecords, 'receive_at_penro_records_final'],
+        ] as [$actor, $action]) {
+            $routing->transition($report->fresh(), $source, $action, $actor->id);
+        }
+
+        test()->actingAs($penroRecords);
+        $row = $tracking->workspaceQueues()['incoming']->firstWhere(
+            fn (array $candidate): bool => $candidate['source'] === $source
+                && (int) $candidate['source_id'] === $report->id
+        );
+
+        expect($row)->not->toBeNull()
+            ->and($row['routing']['actions'])->not->toBeEmpty()
+            ->and($row['incoming_action_category'])->toBe('release');
+
+        $routing->transition($report->fresh(), $source, 'release_to_regional', $penroRecords->id);
+        $workspace = $tracking->workspaceQueues();
+        expect($workspace['incoming']->firstWhere(
+            fn (array $candidate): bool => $candidate['source'] === $source
+                && (int) $candidate['source_id'] === $report->id
+        ))->toBeNull();
+    }
+});

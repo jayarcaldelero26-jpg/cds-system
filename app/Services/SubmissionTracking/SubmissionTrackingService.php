@@ -502,7 +502,10 @@ final class SubmissionTrackingService
 
         $incoming = ($snapshotRecords ?? $this->records($filters))
             ->filter(fn (mixed $row): bool => is_array($row) && ! ($row['routing_complete'] ?? false))
-            ->filter(fn (array $row): bool => $this->isCurrentOperationalOwner($row, auth()->user()))
+            // Keep Incoming aligned with the canonical executable action
+            // projection. This includes the final PENRO Records release
+            // stage, which must remain discoverable until it is completed.
+            ->filter(fn (array $row): bool => $this->isActionableWorkspaceRow($row, auth()->user()))
             ->unique($key)
             ->values();
         $queueMembership = [];
@@ -610,6 +613,29 @@ final class SubmissionTrackingService
         $responsibleOffice = $this->organization->normalizeOffice(data_get($row, 'routing.responsible_office'));
         $targetOffice = $this->organization->normalizeOffice(data_get($row, 'target_office'));
         return $responsibleOffice === $actorOffice || ($targetOffice !== null && $targetOffice === $actorOffice);
+    }
+
+    /** @param array<string,mixed> $row */
+    private function isActionableWorkspaceRow(array $row, ?\App\Models\User $user): bool
+    {
+        if (! $user) return false;
+
+        if (($row['source'] ?? null) === 'conservation') {
+            return $this->isCurrentOperationalOwner($row, $user);
+        }
+
+        if (($row['pamb_routing_applicable'] ?? false) === true) {
+            if (! $this->isCurrentOperationalOwner($row, $user)) return false;
+            $flags = $row['pamb_action_flags'] ?? [];
+
+            return (bool) ($flags['can_submit'] ?? false)
+                || (bool) ($flags['can_review'] ?? false)
+                || (bool) ($flags['can_release'] ?? false)
+                || (bool) ($flags['can_approve_for_regional_release'] ?? false);
+        }
+
+        return collect(data_get($row, 'routing.actions', []))
+            ->contains(fn (mixed $action): bool => is_array($action) && filled($action['key'] ?? null));
     }
     private function pambCurrentStageKey(array $record): ?string    {
         $current = collect($record['routing_timeline'] ?? [])->firstWhere('status', 'current');
