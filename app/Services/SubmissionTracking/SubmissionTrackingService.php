@@ -906,7 +906,7 @@ final class SubmissionTrackingService
             'date_accomplished' => null,
             'reporting_period' => $period,
             'period_key' => $record->getAttribute('period_key'),
-            'deadline_submission' => $record->getAttribute('deadline_submission'),
+            'deadline_submission' => DatePresentationNormalizer::toDateString($record->getRawOriginal('deadline_submission')),
             'days_complied' => $record->getAttribute('days_complied') ?? $record->getAttribute('number_days_complied'),
             'submission_status' => $this->statusPresenter->status($record, $sourceKey),
             'timeliness' => $record->getAttribute($isEngp ? 'timeliness_rating' : 'timeliness'),

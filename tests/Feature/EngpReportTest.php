@@ -54,6 +54,56 @@ test('ENGP registry contains exactly twelve workflows, office exception, and exa
     }
 });
 
+test('ENGP RIMS store path persists the January exception and generic monthly deadlines', function () {
+    $this->actingAs($this->user)
+        ->post(route('engp-reports.store', 'rims'), [
+            'office' => 'CENRO Baganga',
+            'section_name' => 'NGP',
+            'reporting_year' => 2026,
+            'period_key' => '2026-01',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('engp_report_submissions', [
+        'workflow_key' => 'rims',
+        'reporting_year' => 2026,
+        'period_key' => '2026-01',
+        'deadline_submission' => '2026-01-29',
+    ]);
+
+    $this->actingAs($this->user)
+        ->post(route('engp-reports.store', 'rims'), [
+            'office' => 'CENRO Baganga',
+            'section_name' => 'NGP',
+            'reporting_year' => 2026,
+            'period_key' => '2026-02',
+        ])
+        ->assertRedirect();
+
+    $this->assertDatabaseHas('engp_report_submissions', [
+        'workflow_key' => 'rims',
+        'reporting_year' => 2026,
+        'period_key' => '2026-02',
+        'deadline_submission' => '2026-02-20',
+    ]);
+});
+
+test('ENGP tracking transports submission deadlines as date-only values', function () {
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'rims',
+        'activity_name' => 'Updating and Operationalization of RIMS for NGP Physical Accomplishments',
+        'period_key' => '2026-01',
+        'period_label' => 'January 2026',
+        'deadline_submission' => '2026-01-29',
+        'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]));
+
+    $row = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+
+    expect($row['deadline_submission'])->toBe('2026-01-29');
+});
+
 test('ENGP uses signed calendar-day compliance and source timeliness thresholds', function () {
     expect((new EngpReportSubmission(engpPayload(['date_received_penro' => '2026-01-18'])))->days_complied)->toBe(2)
         ->and((new EngpReportSubmission(engpPayload(['date_received_penro' => '2026-01-17'])))->timeliness_rating)->toBe('Outstanding')

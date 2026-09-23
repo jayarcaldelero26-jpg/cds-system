@@ -1011,8 +1011,13 @@ export default function Index({
                 ? previous
                 : next,
         );
+        const selectedIsLinkedRecord =
+            selected &&
+            trackingContext.selected_record?.source === selected.source &&
+            trackingContext.selected_record?.source_id === selected.source_id;
         if (
             selected &&
+            !selectedIsLinkedRecord &&
             !rows.some(
                 (row) =>
                     row.source === selected.source &&

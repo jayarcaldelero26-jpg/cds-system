@@ -159,7 +159,13 @@ final class ReportRequirementRegistry
             }
             if ($frequency === 'monthly') {
                 [$periodYear, $month] = array_map('intval', explode('-', $periodKey));
-                return CarbonImmutable::create($periodYear, $month, (($definition['requirement_key'] ?? '') === 'rims' && $month === 1) ? 29 : 20)->toDateString();
+                $isRims = in_array('rims', [
+                    $key,
+                    $definition['requirement_key'] ?? null,
+                    $definition['code'] ?? null,
+                ], true);
+
+                return CarbonImmutable::create($periodYear, $month, ($isRims && $month === 1) ? 29 : 20)->toDateString();
             }
             if ($frequency === 'quarterly') {
                 return CarbonImmutable::create($year, ((int) substr($periodKey, 1)) * 3, 10)->toDateString();
