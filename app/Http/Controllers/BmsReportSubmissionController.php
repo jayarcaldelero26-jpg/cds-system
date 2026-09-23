@@ -32,7 +32,14 @@ class BmsReportSubmissionController extends Controller
         $validated['created_by'] = $request->user()?->id;
         $validated['updated_by'] = $request->user()?->id;
 
-        BmsReportSubmission::create($validated);
+        try {
+            BmsReportSubmission::create($validated);
+        } catch (\Throwable $exception) {
+            if (! empty($validated['mov_file_path'])) {
+                $this->attachments->delete($validated['mov_file_path']);
+            }
+            throw $exception;
+        }
 
         return redirect()->back()->with('success', 'BMS report submission successfully added.');
     }

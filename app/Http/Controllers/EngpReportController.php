@@ -140,6 +140,7 @@ class EngpReportController extends Controller
         $period = $this->workflows->period($workflow, (int) $validated['reporting_year'], $validated['period_key']);
         $validated = [...$validated, 'workflow_key' => $workflow, 'activity_name' => $config['activity'], 'document_type' => $config['document'], 'period_label' => $period['label'], 'deadline_submission' => $this->workflows->deadline($workflow, (int) $validated['reporting_year'], $validated['period_key']), 'updated_by' => $request->user()?->id];
         $newPath = null;
+        $oldPath = $record->exists ? $record->mov_file_path : null;
         $save = function (EngpReportSubmission $target) use (&$validated, &$record): void {
             DB::transaction(function () use ($target, $validated): void {
                 if ($target->trashed()) $target->restore();
@@ -167,6 +168,7 @@ class EngpReportController extends Controller
             }
 
             unset($validated['created_by']);
+            $oldPath = $existing->mov_file_path;
             try {
                 $save($existing);
             } catch (Throwable $fallbackException) {
@@ -176,6 +178,9 @@ class EngpReportController extends Controller
         } catch (Throwable $exception) {
             if ($newPath) $this->attachments->delete($newPath);
             throw $exception;
+        }
+        if ($newPath && $oldPath && $newPath !== $oldPath) {
+            $this->attachments->delete($oldPath);
         }
         return back()->with('success', $message);
     }

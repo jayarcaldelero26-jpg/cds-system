@@ -70,7 +70,13 @@ class ConservationReportSubmissionController extends Controller
         if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? null);
         $validated = $this->storeMov($request, $validated);
-        $submission = ConservationReportSubmission::create([...$validated, 'workflow_key' => $workflow, 'created_by' => $request->user()?->id, 'updated_by' => $request->user()?->id]);
+        $newPath = $validated['mov_file_path'] ?? null;
+        try {
+            $submission = ConservationReportSubmission::create([...$validated, 'workflow_key' => $workflow, 'created_by' => $request->user()?->id, 'updated_by' => $request->user()?->id]);
+        } catch (\Throwable $exception) {
+            if ($newPath) $this->attachments->delete($newPath);
+            throw $exception;
+        }
         if ($submission->mov_file_path && $request->user()) {
             $this->pambMov->recordUpload($submission, $request->user());
         }

@@ -12,6 +12,7 @@ use App\Services\SubmissionTracking\DocumentRoutingPresenter;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 
@@ -86,6 +87,32 @@ test('ENGP RIMS store path persists the January exception and generic monthly de
         'period_key' => '2026-02',
         'deadline_submission' => '2026-02-20',
     ]);
+});
+
+test('ENGP MOV replacement removes the superseded physical file after persistence', function (): void {
+    $oldPath = 'engp-report/old-mov.pdf';
+    Storage::disk('local')->put($oldPath, 'old');
+    $report = EngpReportSubmission::create(engpPayload([
+        'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+        'mov_file_path' => $oldPath,
+    ]));
+
+    $this->actingAs($this->user)
+        ->put(route('engp-reports.update', ['cbep', $report->id]), [
+            'office' => 'CENRO Baganga',
+            'section_name' => 'NGP',
+            'reporting_year' => 2026,
+            'period_key' => '2026-01',
+            'mov' => UploadedFile::fake()->create('replacement.pdf', 12, 'application/pdf'),
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $currentPath = $report->fresh()->mov_file_path;
+    expect($currentPath)->not->toBe($oldPath)
+        ->and(Storage::disk('local')->exists($oldPath))->toBeFalse()
+        ->and(Storage::disk('local')->exists($currentPath))->toBeTrue();
 });
 
 test('ENGP tracking transports submission deadlines as date-only values', function () {

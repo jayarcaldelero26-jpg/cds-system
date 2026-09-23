@@ -213,6 +213,7 @@ final class DocumentRoutingPresenter
             'business_route_confirmation' => $profile['business_route_confirmation'], 'detailed_route_requires_confirmation' => $profile['detailed_route_requires_confirmation'],
             'originating_office' => $profile['originating_office'], 'final_destination' => $profile['final_destination'],
             'current_location' => $this->stageLocation($current, $record, $state), 'current_status' => $this->stageStatus($current, $record, $state),
+            'processing_percentage' => $this->processingPercentage($sourceKey, $currentStage),
             'responsible_office' => $this->organizationalOffice($record, data_get($current, 'key'), data_get($current, 'office') ?: $record->getAttribute('target_office')),
             'responsible_user_category' => $this->organization->categoryLabel(data_get($informationalAction, 'categories.0')) ?: data_get($current, 'actor_category'),
             'current_stage' => data_get($current, 'key'),
@@ -228,6 +229,46 @@ final class DocumentRoutingPresenter
             'correction_detail' => data_get($state, 'correction_event.metadata.correction_detail') ?? data_get($state, 'correction_event.remarks'),
             'actions' => $allowed, 'capabilities' => $state['capabilities'], 'timeline' => $timeline, 'routing_history' => $history,
         ];
+    }
+
+    private function processingPercentage(string $sourceKey, string $stage): int
+    {
+        $engp = [
+            DocumentRoutingProfileRegistry::PREPARATION => 0,
+            DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF => 20,
+            DocumentRoutingProfileRegistry::CENRO_CHIEF => 35,
+            DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS => 50,
+            DocumentRoutingProfileRegistry::CENRO_RECORDS => 65,
+            DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS => 80,
+            DocumentRoutingProfileRegistry::PENRO_RECORDS => 100,
+            DocumentRoutingProfileRegistry::RELEASED_REGIONAL => 100,
+        ];
+        if ($sourceKey === 'engp') return $engp[$stage] ?? 100;
+
+        return [
+            DocumentRoutingProfileRegistry::PREPARATION => 0,
+            DocumentRoutingProfileRegistry::PENRO_ORIGIN => 0,
+            DocumentRoutingProfileRegistry::PAMO_ORIGIN => 0,
+            DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF => 20,
+            DocumentRoutingProfileRegistry::CENRO_CHIEF => 35,
+            DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS => 50,
+            DocumentRoutingProfileRegistry::CENRO_RECORDS => 65,
+            DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS => 80,
+            DocumentRoutingProfileRegistry::PENRO_RECORDS => 90,
+            DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO => 90,
+            DocumentRoutingProfileRegistry::OFFICE_PENRO => 92,
+            DocumentRoutingProfileRegistry::TRANSIT_TSD => 94,
+            DocumentRoutingProfileRegistry::TSD => 95,
+            DocumentRoutingProfileRegistry::TRANSIT_CDS_FOCAL => 97,
+            DocumentRoutingProfileRegistry::CDS_FOCAL => 98,
+            DocumentRoutingProfileRegistry::TRANSIT_CDS_CHIEF => 99,
+            DocumentRoutingProfileRegistry::CDS_CHIEF => 100,
+            DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO_RETURN => 100,
+            DocumentRoutingProfileRegistry::OFFICE_PENRO_RETURN => 100,
+            DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS_FINAL => 100,
+            DocumentRoutingProfileRegistry::PENRO_RECORDS_FINAL => 100,
+            DocumentRoutingProfileRegistry::RELEASED_REGIONAL => 100,
+        ][$stage] ?? 100;
     }
 
     /** @param array<string,mixed>|null $action */

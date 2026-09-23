@@ -1,7 +1,11 @@
 ﻿<?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\BmsReportSubmission;
+use App\Models\OrganizationalOffice;
 use App\Models\PambRoutingEvent;
+use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\SubmissionRoutingAttachment;
 use App\Models\User;
 use App\Services\Attachments\ProtectedAttachmentService;
@@ -17,6 +21,22 @@ use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 
 uses(RefreshDatabase::class);
+
+function attachmentRoutingActor(string $category, string $office): User
+{
+    $user = User::factory()->create(['section' => $category, 'office_designated' => $office, 'unit_assignment' => OrganizationalAccessService::CONSERVATION]);
+    $user->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+    $user->givePermissionTo(Permission::findOrCreate('bms.update', 'web'));
+    return $user;
+}
+
+function attachmentRoutingReport(string $name): BmsReportSubmission
+{
+    $creator = User::factory()->create();
+    $area = ProtectedArea::create(['name' => $name, 'short_name' => strtoupper(substr($name, 0, 3)), 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $creator->id, 'updated_by' => $creator->id]);
+    ProtectedAreaOfficeAssignment::create(['protected_area_id' => $area->id, 'organizational_office_id' => OrganizationalOffice::where('code', 'cenro_mati')->value('id')]);
+    return BmsReportSubmission::create(['protected_area_id' => $area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Routing report', 'document_type' => 'Report', 'semester' => '1st Semester', 'date_accomplished' => '2026-08-03']);
+}
 
 function attachmentPambReport(): ConservationReportSubmission
 {
@@ -63,15 +83,15 @@ test('cycle-qualified PAMB occurrences retain distinct exact attachment event id
 });
 
 test('all generic routing actions remain valid without optional attachments', function (): void {
-    $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
-    $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
-    $records = routingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
-    $penroRecords = routingActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
-    $office = routingActor(OrganizationalAccessService::OFFICE_PENRO, 'PENRO Davao Oriental');
-    $tsd = routingActor(OrganizationalAccessService::PENRO_TSD_CHIEF, 'PENRO Davao Oriental');
-    $penroFocal = routingActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
-    $penroChief = routingActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
-    $report = routingReport('Attachment Optional Route');
+    $focal = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = attachmentRoutingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $records = attachmentRoutingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    $penroRecords = attachmentRoutingActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $office = attachmentRoutingActor(OrganizationalAccessService::OFFICE_PENRO, 'PENRO Davao Oriental');
+    $tsd = attachmentRoutingActor(OrganizationalAccessService::PENRO_TSD_CHIEF, 'PENRO Davao Oriental');
+    $penroFocal = attachmentRoutingActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $penroChief = attachmentRoutingActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
+    $report = attachmentRoutingReport('Attachment Optional Route');
     $service = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
 
     foreach ([
@@ -93,8 +113,8 @@ test('all generic routing actions remain valid without optional attachments', fu
 
 test('generic attachment links to the exact event and history presentation', function (): void {
     Storage::fake('local');
-    $actor = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
-    $report = routingReport('Generic Attachment Presentation');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = attachmentRoutingReport('Generic Attachment Presentation');
     $event = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->transition($report, 'bms', 'forward_to_cenro_chief', $actor->id);
     $file = UploadedFile::fake()->create('generic-signed.pdf', 24, 'application/pdf');
     $attachments = app(RoutingAttachmentService::class);
@@ -140,8 +160,8 @@ test('PAMB internal routing attachment links to the exact persisted event', func
 // Attachment validation matrix is covered by the existing endpoint and policy suites.
 test('failed transition cleans the newly stored routing file and preserves prior copies', function (): void {
     Storage::fake('local');
-    $actor = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
-    $report = routingReport('Failed Attachment Transition');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = attachmentRoutingReport('Failed Attachment Transition');
     $attachments = app(RoutingAttachmentService::class);
     $old = UploadedFile::fake()->create('prior-copy.pdf', 6, 'application/pdf');
     $oldAttachment = $attachments->create('bms', $report->id, $old, $attachments->store($old), $actor, 'prior-stage', 'prior-action');
@@ -171,8 +191,8 @@ test('failed transition cleans the newly stored routing file and preserves prior
 
 test('original MOV is the current document when no routed copy exists', function (): void {
     Storage::fake('local');
-    $actor = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
-    $report = routingReport('Original MOV Fallback');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = attachmentRoutingReport('Original MOV Fallback');
     $actor->update(['protected_area_id' => $report->protected_area_id]);
     $report->update(['mov_file_path' => 'bms-reports/original-mov.pdf', 'mov_file_name' => 'original-mov.pdf']);
     Storage::disk('local')->put('bms-reports/original-mov.pdf', 'original');
@@ -212,7 +232,55 @@ test('effective document prefers the latest routing version and preserves exact 
         ->and(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(2)
         ->and(SubmissionRoutingAttachment::findOrFail($first->id)->pamb_routing_event_id)->toBe($firstEvent->id)
         ->and(SubmissionRoutingAttachment::findOrFail($latest->id)->pamb_routing_event_id)->toBe($secondEvent->id)
-        ->and(Storage::disk('local')->exists($report->mov_file_path))->toBeTrue();
+        ->and(Storage::disk('local')->exists($first->stored_path))->toBeFalse()
+        ->and(Storage::disk('local')->exists($latest->stored_path))->toBeTrue()
+        ->and(Storage::disk('local')->exists($report->mov_file_path))->toBeFalse()
+        ->and($report->fresh()->mov_file_path)->toBe($latest->stored_path);
+});
+
+test('routing document replacement retains one current binary per logical slot and cleans failed uploads', function (): void {
+    Storage::fake('local');
+    $report = attachmentRoutingReport('Routing Replacement Safety');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $attachments = app(RoutingAttachmentService::class);
+
+    $firstFile = UploadedFile::fake()->create('version-one.pdf', 8, 'application/pdf');
+    $first = $attachments->create('bms', $report->id, $firstFile, $attachments->store($firstFile), $actor, 'stage-one', 'stage-one');
+    expect(Storage::disk('local')->allFiles('submission-routing-attachments'))->toHaveCount(1);
+
+    $secondFile = UploadedFile::fake()->create('version-two.pdf', 9, 'application/pdf');
+    $second = $attachments->create('bms', $report->id, $secondFile, $attachments->store($secondFile), $actor, 'stage-two', 'stage-two');
+    expect(Storage::disk('local')->exists($first->stored_path))->toBeFalse()
+        ->and(Storage::disk('local')->exists($second->stored_path))->toBeTrue()
+        ->and(Storage::disk('local')->allFiles('submission-routing-attachments'))->toHaveCount(1);
+
+    $thirdPath = $attachments->store(UploadedFile::fake()->create('version-three.pdf', 10, 'application/pdf'));
+    $third = $attachments->create('bms', $report->id, UploadedFile::fake()->create('version-three.pdf', 10, 'application/pdf'), $thirdPath, $actor, 'stage-three', 'stage-three');
+    expect(Storage::disk('local')->exists($second->stored_path))->toBeFalse()
+        ->and(Storage::disk('local')->allFiles('submission-routing-attachments'))->toHaveCount(1);
+
+    $current = SubmissionRoutingAttachment::query()->where('source', 'bms')->where('source_id', $report->id)->latest('id')->firstOrFail();
+    expect($current->stage_key)->toBe('stage-three');
+});
+
+test('routing replacement preserves distinct correction attachment slots', function (): void {
+    Storage::fake('local');
+    $report = attachmentRoutingReport('Distinct Attachment Slots');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $attachments = app(RoutingAttachmentService::class);
+
+    $routingOne = UploadedFile::fake()->create('routing-one.pdf', 8, 'application/pdf');
+    $first = $attachments->create('bms', $report->id, $routingOne, $attachments->store($routingOne), $actor, 'stage-one', 'stage-one');
+    $correction = UploadedFile::fake()->create('correction.pdf', 8, 'application/pdf');
+    $correctionAttachment = $attachments->create('bms', $report->id, $correction, $attachments->store($correction), $actor, 'correction', 'correction', null, null, null, 'correction_reference');
+    $routingTwo = UploadedFile::fake()->create('routing-two.pdf', 8, 'application/pdf');
+    $second = $attachments->create('bms', $report->id, $routingTwo, $attachments->store($routingTwo), $actor, 'stage-two', 'stage-two');
+
+    expect(Storage::disk('local')->exists($first->stored_path))->toBeFalse()
+        ->and(Storage::disk('local')->exists($second->stored_path))->toBeTrue()
+        ->and(Storage::disk('local')->exists($correctionAttachment->stored_path))->toBeTrue()
+        ->and(SubmissionRoutingAttachment::query()->where('source', 'bms')->where('source_id', $report->id)->count())->toBe(3)
+        ->and(Storage::disk('local')->allFiles('submission-routing-attachments'))->toHaveCount(2);
 });
 
 test('Conservation Full Details exposes the effective completed copy to scoped viewers', function (): void {

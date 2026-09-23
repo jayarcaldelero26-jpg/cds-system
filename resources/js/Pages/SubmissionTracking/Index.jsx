@@ -352,10 +352,27 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                         <p className="text-xs font-extrabold text-gray-900 dark:text-white">
                             Routing Progress
                         </p>
-                        <span className="text-[10px] text-gray-500">
-                            Summary
+                        <span className="text-[10px] font-bold text-green-700 dark:text-green-300">
+                            {Number.isFinite(Number(routing.processing_percentage))
+                                ? `${routing.processing_percentage}% processing`
+                                : "Summary"}
                         </span>
                     </div>
+                    {Number.isFinite(Number(routing.processing_percentage)) && (
+                        <div
+                            className="mb-3 h-1.5 overflow-hidden rounded-full bg-green-100 dark:bg-green-950"
+                            role="progressbar"
+                            aria-label="Processing progress"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                            aria-valuenow={Number(routing.processing_percentage)}
+                        >
+                            <div
+                                className="h-full rounded-full bg-green-700 transition-[width] dark:bg-green-400"
+                                style={{ width: `${Math.max(0, Math.min(100, Number(routing.processing_percentage)))}%` }}
+                            />
+                        </div>
+                    )}
                     <div className="space-y-2">
                         {progress.length ? (
                             progress.map((item, index) => (
@@ -370,16 +387,21 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                                     }
                                     className="flex gap-2"
                                 >
-                                    <span
-                                        className={
-                                            "mt-0.5 h-2 w-2 shrink-0 rounded-full " +
-                                            (item.status === "completed"
-                                                ? "bg-green-600"
-                                                : item.status === "current"
-                                                  ? "bg-green-600 ring-4 ring-green-100 dark:ring-green-950"
-                                                  : "bg-gray-300 dark:bg-gray-600")
-                                        }
-                                    />
+                                    {item.status === "current" ? (
+                                        <span className="edats-tracking-current-marker relative mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center" aria-hidden="true">
+                                            <span className="edats-tracking-current-marker__pulse absolute left-1/2 top-1/2 h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border" />
+                                            <span className="relative z-10 h-2.5 w-2.5 rounded-full bg-green-700 dark:bg-green-400" />
+                                        </span>
+                                    ) : (
+                                        <span
+                                            className={
+                                                "mt-0.5 h-2 w-2 shrink-0 rounded-full " +
+                                                (item.status === "completed"
+                                                    ? "bg-green-600"
+                                                    : "bg-gray-300 dark:bg-gray-600")
+                                            }
+                                        />
+                                    )}
                                     <div className="min-w-0">
                                         <p className="truncate font-semibold text-gray-800 dark:text-gray-200">
                                             {item.compactLabel ||

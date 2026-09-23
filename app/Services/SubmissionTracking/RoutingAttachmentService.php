@@ -6,9 +6,11 @@ use App\Models\DocumentRoutingEvent;
 use App\Models\PambRoutingEvent;
 use App\Models\SubmissionRoutingAttachment;
 use App\Models\User;
+use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
@@ -21,7 +23,52 @@ final class RoutingAttachmentService
     public function discard(?string $path): void { if (is_string($path) && $path !== '') Storage::disk(self::DISK)->delete($path); }
     public function create(string $source, int $sourceId, UploadedFile $file, string $path, ?User $user, ?string $stageKey, ?string $actionKey, ?string $remarks = null, ?DocumentRoutingEvent $documentEvent = null, ?PambRoutingEvent $pambEvent = null, string $purpose = 'routing_copy'): SubmissionRoutingAttachment
     {
-        return SubmissionRoutingAttachment::query()->create(['source' => $source, 'source_id' => $sourceId, 'document_routing_event_id' => $documentEvent?->getKey(), 'pamb_routing_event_id' => $pambEvent?->getKey(), 'stage_key' => $stageKey, 'action_key' => $actionKey, 'purpose' => $purpose, 'original_name' => $this->filename($file->getClientOriginalName()), 'stored_path' => $path, 'mime_type' => $file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream', 'file_size' => (int) ($file->getSize() ?: 0), 'uploaded_by' => $user?->getKey(), 'remarks' => filled($remarks) ? trim($remarks) : null]);
+        $previous = $this->currentSlotAttachment($source, $sourceId, $purpose);
+        $previousPrimary = $purpose === 'routing_copy' ? $this->primaryAttachment($source, $sourceId) : null;
+
+        try {
+            $attachment = DB::transaction(function () use ($source, $sourceId, $documentEvent, $pambEvent, $stageKey, $actionKey, $purpose, $file, $path, $user, $remarks, $previousPrimary): SubmissionRoutingAttachment {
+                $attachment = SubmissionRoutingAttachment::query()->create([
+                    'source' => $source,
+                    'source_id' => $sourceId,
+                    'document_routing_event_id' => $documentEvent?->getKey(),
+                    'pamb_routing_event_id' => $pambEvent?->getKey(),
+                    'stage_key' => $stageKey,
+                    'action_key' => $actionKey,
+                    'purpose' => $purpose,
+                    'original_name' => $this->filename($file->getClientOriginalName()),
+                    'stored_path' => $path,
+                    'mime_type' => $file->getMimeType() ?: $file->getClientMimeType() ?: 'application/octet-stream',
+                    'file_size' => (int) ($file->getSize() ?: 0),
+                    'uploaded_by' => $user?->getKey(),
+                    'remarks' => filled($remarks) ? trim($remarks) : null,
+                ]);
+
+                if ($purpose === 'routing_copy' && $previousPrimary !== null) {
+                    $this->replacePrimaryAttachment($previousPrimary, $path, $file);
+                }
+
+                return $attachment;
+            });
+
+            // Keep event/version metadata, but retain only the current binary
+            // for this logical slot. The new DB reference is persisted before
+            // any previous physical file is removed.
+            if ($previous && $previous->stored_path !== $path) {
+                $this->discard($previous->stored_path);
+            }
+
+            if ($previousPrimary !== null && $previousPrimary['path'] !== $path) {
+                $this->discard($previousPrimary['path']);
+            }
+
+            return $attachment;
+        } catch (\Throwable $exception) {
+            // The caller also cleans up failed routing transactions; this
+            // guard covers direct service use and failed attachment inserts.
+            if ($path) $this->discard($path);
+            throw $exception;
+        }
     }
     public function latest(string $source, int $sourceId): ?SubmissionRoutingAttachment { return SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->latest('id')->first(); }
     public function forDocumentEvents(iterable $ids): array { return SubmissionRoutingAttachment::query()->whereIn('document_routing_event_id', collect($ids)->filter()->all())->get()->keyBy('document_routing_event_id')->all(); }
@@ -86,4 +133,71 @@ final class RoutingAttachmentService
         return $preview ? response()->file($path, $headers) : response()->download($path, $attachment->original_name, $headers);
     }
     private function filename(string $name): string { $name = basename(str_replace('\\', '/', $name)); $name = preg_replace('/[\x00-\x1F\x7F"]+/', '_', $name) ?: 'routing-attachment'; return trim($name, '. ') ?: 'routing-attachment'; }
+
+    private function currentSlotAttachment(string $source, int $sourceId, string $purpose): ?SubmissionRoutingAttachment
+    {
+        return SubmissionRoutingAttachment::query()
+            ->where('source', $source)
+            ->where('source_id', $sourceId)
+            ->where(function ($query) use ($purpose): void {
+                if ($purpose === 'routing_copy') {
+                    $query->whereNull('purpose')->orWhere('purpose', 'routing_copy');
+                    return;
+                }
+
+                $query->where('purpose', $purpose);
+            })
+            ->latest('id')
+            ->first();
+    }
+
+    /** @return array{record:Model,path:string,name:?string,mime:?string,size:?int}|null */
+    private function primaryAttachment(string $source, int $sourceId): ?array
+    {
+        $protectedSource = match ($source) {
+            'conservation' => 'conservation-report',
+            'engp' => 'engp-report',
+            'bms' => 'bms-report',
+            'bams' => 'bams-report',
+            'imea' => 'imea-report',
+            'imea-maintenance' => 'imea-maintenance',
+            'aws' => 'aws',
+            'ipaf-management' => 'ipaf-management',
+            'revenue' => 'ipaf-revenue',
+            default => null,
+        };
+        if ($protectedSource === null) return null;
+
+        $definition = app(ProtectedAttachmentService::class)->definition($protectedSource);
+        if (! is_array($definition) || ($definition['kind'] ?? null) !== 'scalar') return null;
+
+        /** @var class-string<Model> $modelClass */
+        $modelClass = $definition['model'];
+        $record = $modelClass::query()->find($sourceId);
+        $path = $record?->getAttribute($definition['path']);
+        if (! $record || ! is_string($path) || trim($path) === '') return null;
+
+        return [
+            'record' => $record,
+            'path' => $path,
+            'name' => isset($definition['name']) ? $record->getAttribute($definition['name']) : null,
+            'mime' => isset($definition['mime']) ? $record->getAttribute($definition['mime']) : null,
+            'size' => isset($definition['size']) ? $record->getAttribute($definition['size']) : null,
+        ];
+    }
+
+    /** @param array{record:Model,path:string,name:?string,mime:?string,size:?int} $previous */
+    private function replacePrimaryAttachment(array $previous, string $path, UploadedFile $file): void
+    {
+        $record = $previous['record'];
+        $definition = app(ProtectedAttachmentService::class)->registry();
+        $source = collect($definition)->first(fn (array $item): bool => ($item['model'] ?? null) === $record::class && ($item['kind'] ?? null) === 'scalar' && $record->getAttribute($item['path'] ?? '') === $previous['path']);
+        if (! is_array($source)) return;
+
+        $changes = [$source['path'] => $path];
+        if (isset($source['name'])) $changes[$source['name']] = $this->filename($file->getClientOriginalName());
+        if (isset($source['mime'])) $changes[$source['mime']] = $file->getMimeType() ?: $file->getClientMimeType();
+        if (isset($source['size'])) $changes[$source['size']] = (int) ($file->getSize() ?: 0);
+        $record->update($changes);
+    }
 }

@@ -88,6 +88,28 @@
     .edats-current-stage-marker__ripple { animation: none; opacity: 0.16; transform: translate(-50%, -50%) scale(1); }
 }
 
+@keyframes edats-tracking-status-pulse {
+    0% { transform: translate(-50%, -50%) scale(0.8); opacity: 0.5; }
+    50% { transform: translate(-50%, -50%) scale(1.7); opacity: 0.22; }
+    100% { transform: translate(-50%, -50%) scale(2.2); opacity: 0; }
+}
+
+.edats-tracking-current-marker { overflow: visible; }
+.edats-tracking-current-marker__pulse {
+    border-color: rgb(22 163 74 / 0.45);
+    background: rgb(22 163 74 / 0.06);
+    animation: edats-tracking-status-pulse 2.1s ease-out infinite;
+    transform-origin: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .edats-tracking-current-marker__pulse {
+        animation: none;
+        opacity: 0.2;
+        transform: translate(-50%, -50%) scale(1.15);
+    }
+}
+
 input:-webkit-autofill,
 select:-webkit-autofill,
 textarea:-webkit-autofill {
