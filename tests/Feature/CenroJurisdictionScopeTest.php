@@ -61,9 +61,12 @@ test('CENRO office scope is jurisdiction-wide while PAMO remains exact PA', func
         ->and($organization->scopeProtectedAreaQuery(ProtectedArea::query(), $mati, 'id')->pluck('short_name')->sort()->values()->all())
         ->toBe(['MPL', 'PBPLS'])
         ->and($organization->scopeProtectedAreaQuery(ProtectedArea::query(), $pamo, 'id')->pluck('short_name')->all())
-        ->toBe([])
-        ->and($organization->canAccessProtectedArea($pamo, $apl->id))->toBeFalse()
+        ->toBe(['APL'])
+        ->and($organization->effectiveCategory($pamo))->toBe(OrganizationalAccessService::PAMO)
+        ->and($organization->canAccessProtectedArea($pamo, $apl->id))->toBeTrue()
         ->and($organization->canViewSubmissionTracking($pamo))->toBeFalse()
+        ->and($organization->canAccessProtectedArea($pamo, $mhrws->id))->toBeFalse()
+        ->and($organization->isGlobal($pamo))->toBeFalse()
         ->and($organization->canAccessProtectedArea($baganga, $mhrws->id))->toBeFalse()
         ->and($organization->canAccessProtectedArea($mati, $apl->id))->toBeFalse();
 });

@@ -299,14 +299,7 @@ final class DocumentRoutingTransitionService
         if ($record->getAttribute('date_received_penro')) return [DocumentRoutingProfileRegistry::PENRO_RECORDS, true];
         if ($record->getAttribute('date_report_released_cenro')) return [DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS, true];
         if ($direct) {
-            if ($actor && app(OrganizationalAccessService::class)->effectiveCategory($actor) === OrganizationalAccessService::PAMO) {
-                return [DocumentRoutingProfileRegistry::PAMO_ORIGIN, false];
-            }
-
             return [DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS, false];
-        }
-        if ($actor && app(OrganizationalAccessService::class)->effectiveCategory($actor) === OrganizationalAccessService::PAMO) {
-            return [DocumentRoutingProfileRegistry::PAMO_ORIGIN, false];
         }
         return [DocumentRoutingProfileRegistry::PREPARATION, false];
     }

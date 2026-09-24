@@ -28,8 +28,8 @@ const allNavigation = [
         unit: 'conservation',
         children: [
             { label: 'Homestay', href: '/conservation-reports/homestay', permission: 'canViewTechnicalReports' },
-            { label: 'Regular PAMB Meetings', href: '/conservation-reports/regular_pamb', permission: 'canViewTechnicalReports' },
-            { label: 'Special PAMB Meetings', href: '/conservation-reports/special_pamb', permission: 'canViewTechnicalReports' },
+            { label: 'Regular PAMB Meetings', href: '/conservation-reports/regular_pamb', permission: 'canViewPambWorkflow' },
+            { label: 'Special PAMB Meetings', href: '/conservation-reports/special_pamb', permission: 'canViewPambWorkflow' },
             { label: 'Maintenance of Monuments', href: '/conservation-reports/maintenance_monuments', permission: 'canViewTechnicalReports' },
             { label: 'Maintenance of Buoy', href: '/conservation-reports/maintenance_buoy', permission: 'canViewTechnicalReports' },
             { label: 'TWC Meetings', href: '/conservation-reports/twc_meetings', permission: 'canViewTechnicalReports' },

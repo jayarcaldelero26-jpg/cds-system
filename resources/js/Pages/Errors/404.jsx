@@ -8,9 +8,9 @@ export default function Error404() {
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300">
                     <Icon icon="lucide:shield-alert" width="28" height="28" aria-hidden="true" />
                 </div>
-                <h1 className="mt-4 text-xl font-bold text-slate-900 dark:text-white">Access Restricted</h1>
+                <h1 className="mt-4 text-xl font-bold text-slate-900 dark:text-white">Page Not Found</h1>
                 <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                    Your account does not currently have permission to access this area.
+                    The page you requested could not be found.
                 </p>
                 <div className="mt-6 flex justify-center">
                     <Link

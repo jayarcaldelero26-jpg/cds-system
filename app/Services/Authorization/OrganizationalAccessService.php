@@ -89,6 +89,10 @@ final class OrganizationalAccessService
     public function canViewSubmissionTracking(?User $user): bool
     {
         if (! $user || ! $user->is_active) return false;
+        if ($this->effectiveCategory($user) === self::PAMO) {
+            return $user->protected_area_id !== null
+                && $user->getAllPermissions()->contains('name', 'submission-tracking.view');
+        }
         if ($this->isGlobal($user) || $this->hasSubmissionTrackingScope($user)) return true;
         $legacy = in_array($user->section, ['CDS', 'ENGP'], true) || (blank($user->unit_assignment) && in_array($user->section, self::OPERATIONAL_CATEGORIES, true));
         return $legacy && $user->can('reports.view');
@@ -215,6 +219,9 @@ final class OrganizationalAccessService
             if ($hasAssignment) return true;
             return $this->same($this->supervisingOfficeNameForProtectedArea((int) $protectedAreaId), $user->office_designated);
         }
+        if ($this->effectiveCategory($user) === self::PAMO) {
+            return $user->protected_area_id !== null && (int) $user->protected_area_id === (int) $protectedAreaId;
+        }
         return $this->isPenroCategory($this->effectiveCategory($user));
     }
 
@@ -231,6 +238,11 @@ final class OrganizationalAccessService
         if (! $this->canAccessUnit($user, self::CONSERVATION)) return $query->whereRaw('1 = 0');
         if ($this->isGlobal($user)) return $query;
         $category = $this->effectiveCategory($user);
+        if ($category === self::PAMO) {
+            return $user->protected_area_id === null
+                ? $query->whereRaw('1 = 0')
+                : $query->where($query->getModel()->getTable().'.'.$column, (int) $user->protected_area_id);
+        }
         if (! $this->isCenroCategory($category)) return $this->isPenroCategory($category) ? $query : $query->whereRaw('1 = 0');
         $officeCode = $this->officeCode($user->office_designated);
         if ($officeCode === null) return $query->whereRaw('1 = 0');
@@ -394,7 +406,7 @@ final class OrganizationalAccessService
     public function effectiveCategory(User $user): ?string
     {
         $section = $this->normalizeCategory($user->section);
-        return in_array($section, self::OPERATIONAL_CATEGORIES, true) ? $section : null;
+        return $section === self::PAMO || in_array($section, self::OPERATIONAL_CATEGORIES, true) ? $section : null;
     }
     public function normalizeAssignment(array $data): array
     {

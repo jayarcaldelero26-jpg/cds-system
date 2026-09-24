@@ -5,6 +5,7 @@ use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -23,6 +24,7 @@ function p2PamoScopeUser(?int $protectedAreaId = null): User
     ]);
     $role = Role::findOrCreate('PAMO', 'web');
     $role->syncPermissions([
+        Permission::findOrCreate('technical-reports.view', 'web'),
         Permission::findOrCreate('submission-tracking.view', 'web'),
     ]);
     $user->assignRole($role);
@@ -58,13 +60,34 @@ test('assigned PAMO sees only Regular and Special PAMB submissions for its assig
     $access = app(PambSubmissionAccessService::class);
 
     $visibleIds = $access->scopeQuery(ConservationReportSubmission::query(), $pamo)->pluck('id')->all();
+    $organization = app(OrganizationalAccessService::class);
 
     expect($access->canView($pamo, $regular))->toBeTrue()
         ->and($access->canView($pamo, $special))->toBeTrue()
         ->and($access->canView($pamo, $other))->toBeFalse()
         ->and($access->canPerformForSubmission($pamo, 'submit', $regular))->toBeTrue()
         ->and($visibleIds)->toContain($regular->id, $special->id)
-        ->and($visibleIds)->not->toContain($other->id);
+        ->and($visibleIds)->not->toContain($other->id)
+        ->and($organization->effectiveCategory($pamo))->toBe(OrganizationalAccessService::PAMO)
+        ->and($organization->canAccessProtectedArea($pamo, $areaA->id))->toBeTrue()
+        ->and($organization->canAccessProtectedArea($pamo, $areaB->id))->toBeFalse()
+        ->and($organization->isGlobal($pamo))->toBeFalse();
+
+    $this->actingAs($pamo)
+        ->get(route('conservation-reports.index', ['workflow' => 'regular_pamb']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('protectedAreas', 1)
+            ->where('protectedAreas.0.id', $areaA->id)
+            ->where('auth.canViewPambWorkflow', true)
+            ->where('auth.canBrowseConservationModules', true)
+            ->where('auth.canViewTechnicalReports', false)
+            ->where('auth.canViewBms', false));
+
+    $this->actingAs($pamo)
+        ->get(route('conservation-reports.index', ['workflow' => 'regular_pamb', 'protected_area_id' => $areaB->id]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page->has('submissions.data', 0));
 
     $this->actingAs($pamo)
         ->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $regular->id]))
@@ -72,6 +95,11 @@ test('assigned PAMO sees only Regular and Special PAMB submissions for its assig
         ->assertInertia(fn ($page) => $page
             ->where('trackingContext.selected_record.source_id', $regular->id)
             ->where('queues.for_submission.0.source_id', $regular->id));
+
+    $this->actingAs($pamo)
+        ->get(route('settings.index'))
+        ->assertForbidden()
+        ->assertInertia(fn ($page) => $page->component('Errors/403'));
 });
 
 test('unassigned PAMO cannot see PAMB submissions and permission remains required', function (): void {

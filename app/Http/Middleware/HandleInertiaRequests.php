@@ -59,13 +59,17 @@ class HandleInertiaRequests extends Middleware
         $allowsDevelopment = $organization->canAccessUnit($user, OrganizationalAccessService::DEVELOPMENT);
         $canBrowseConservation = $organization->canViewConservationModules($user);
         $canBrowseDevelopment = $organization->canViewDevelopmentModules($user);
+        $can = static fn (?string $ability): bool => $isAdmin || ($user?->can($ability) ?? false);
+        $canViewPambWorkflow = ($canBrowseConservation && $can('technical-reports.view')) || ($user
+            && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
+            && $user->can('technical-reports.view')
+            && $organization->canAccessProtectedArea($user, $user->protected_area_id));
 
         // Susiha ang section sa user ('CDS' o 'MES')
         $userSection = $user?->section ?? '';
         $isMes = ($userSection === 'MES'); // Monitoring and Enforcement Section
         $isCds = ($userSection === 'CDS'); // Conservation Development Section
 
-        $can = static fn (?string $ability): bool => $isAdmin || ($user?->can($ability) ?? false);
         $canPrepare = static fn (string $ability, string $source): bool => $user && in_array($organization->effectiveCategory($user), [OrganizationalAccessService::CENRO_RECORDS, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_FOCAL], true)
             ? $organization->canPrepareProtectedAreaSource($user, $source)
             : $can($ability);
@@ -98,11 +102,12 @@ class HandleInertiaRequests extends Middleware
                 'canManagePasskeys' => $isAdmin,
                 'organizationalUnit' => $userUnit,
                 'unitVisibility' => [
-                    'conservation' => $canBrowseConservation,
+                    'conservation' => $canBrowseConservation || $canViewPambWorkflow,
                     'development' => $canBrowseDevelopment,
                     'effectiveUnits' => $organization->effectiveUnits($user),
                     'isGlobal' => $isAdmin,
                 ],
+                'canViewPambWorkflow' => (bool) $canViewPambWorkflow,
                 'canManageAdministration' => $isAdmin || (!$isMes && $can('compliance-alerts.manage')),
                 'canCorrectSubmissionRouting' => $isAdmin && ($user?->can('submission-tracking.correct-routing') ?? false),
                 'canAdminRoutingOverride' => $isAdmin && ($user?->can('submission-tracking.admin-override') ?? false),
@@ -188,7 +193,7 @@ class HandleInertiaRequests extends Middleware
                 // Reports (CDS ra)
                 'canViewReports' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('reports.view'),
                 'canViewSubmissionTracking' => $organization->canViewSubmissionTracking($user),
-                'canBrowseConservationModules' => $canBrowseConservation,
+                'canBrowseConservationModules' => $canBrowseConservation || $canViewPambWorkflow,
                 'canBrowseDevelopmentModules' => $canBrowseDevelopment,
                 'canViewComplianceAlerts' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('compliance-alerts.manage'),
                 'canManageComplianceAlerts' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('compliance-alerts.manage'),

@@ -6,6 +6,7 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Auth\Access\AuthorizationException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Inertia\Inertia;
 use App\Http\Middleware\PreventBackHistory;
 
@@ -49,13 +50,23 @@ return Application::configure(basePath: dirname(__DIR__))
                 ->setStatusCode(404);
         });
 
-        $exceptions->render(function (AuthorizationException $e, Request $request) {
-            if (! $request->is('bms', 'bms/*')) {
-                return null;
-            }
+        $exceptions->render(function (AuthorizationException|HttpExceptionInterface $e, Request $request) {
+            if ($e instanceof HttpExceptionInterface && $e->getStatusCode() !== 403) return null;
 
-            return Inertia::render('Errors/403', [
-                'message' => 'You do not have permission to perform this BMS action.',
-            ])->toResponse($request)->setStatusCode(403);
+            return Inertia::render('Errors/403')
+                ->toResponse($request)
+                ->setStatusCode(403);
+        });
+
+        $exceptions->render(function (HttpExceptionInterface $e, Request $request) {
+            if ($e->getStatusCode() !== 419) return null;
+
+            return Inertia::render('Errors/419')->toResponse($request)->setStatusCode(419);
+        });
+
+        $exceptions->render(function (\Throwable $e, Request $request) {
+            if (! app()->isProduction()) return null;
+
+            return Inertia::render('Errors/500')->toResponse($request)->setStatusCode(500);
         });
     })->create();

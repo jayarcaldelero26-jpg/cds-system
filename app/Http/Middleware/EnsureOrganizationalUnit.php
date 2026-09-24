@@ -21,7 +21,15 @@ final class EnsureOrganizationalUnit
 
         if (! $unit || ! $request->user()) return $next($request);
         $organization = app(OrganizationalAccessService::class);
-        abort_unless($organization->canBrowseModuleUnit($request->user(), $unit), 403);
+        $user = $request->user();
+        $pamoPambRead = $unit === OrganizationalAccessService::CONSERVATION
+            && $request->isMethod('GET')
+            && in_array($request->route('workflow'), ['regular_pamb', 'special_pamb'], true)
+            && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
+            && $user->can('technical-reports.view')
+            && $organization->canAccessProtectedArea($user, $user->protected_area_id);
+
+        abort_unless($pamoPambRead || $organization->canBrowseModuleUnit($user, $unit), 403);
         return $next($request);
     }
 }
