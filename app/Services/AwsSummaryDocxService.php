@@ -12,24 +12,24 @@ final class AwsSummaryDocxService
     {
         abort_unless(class_exists(ZipArchive::class), 500, 'The DOCX export extension is unavailable.');
 
-        $path = tempnam(storage_path('app'), 'aws-docx-');
-        $zip = new ZipArchive();
-        abort_unless($path !== false && $zip->open($path, ZipArchive::OVERWRITE) === true, 500, 'The DOCX document could not be created.');
-
-        $rows = array_values(is_array($rows) ? $rows : iterator_to_array($rows));
-        $zip->addFromString('[Content_Types].xml', $this->contentTypes());
-        $zip->addFromString('_rels/.rels', $this->rootRelationships());
-        $zip->addFromString('docProps/core.xml', $this->coreProperties($periodLabel));
-        $zip->addFromString('docProps/app.xml', $this->appProperties());
-        $zip->addFromString('word/document.xml', $this->document($rows, $mode, $periodLabel));
-        $zip->addFromString('word/styles.xml', $this->styles());
-        $zip->addFromString('word/settings.xml', $this->settings());
-        $zip->addFromString('word/_rels/document.xml.rels', $this->documentRelationships());
-        $zip->close();
-
-        return response()->download($path, $filename, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        ])->deleteFileAfterSend(true);
+        return TemporaryExportFile::zipDownload(
+            'aws-docx-',
+            $filename,
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'The DOCX document could not be created.',
+            'The DOCX document could not be created.',
+            function (ZipArchive $zip) use ($rows, $mode, $periodLabel): void {
+                $rows = array_values(is_array($rows) ? $rows : iterator_to_array($rows));
+                $zip->addFromString('[Content_Types].xml', $this->contentTypes());
+                $zip->addFromString('_rels/.rels', $this->rootRelationships());
+                $zip->addFromString('docProps/core.xml', $this->coreProperties($periodLabel));
+                $zip->addFromString('docProps/app.xml', $this->appProperties());
+                $zip->addFromString('word/document.xml', $this->document($rows, $mode, $periodLabel));
+                $zip->addFromString('word/styles.xml', $this->styles());
+                $zip->addFromString('word/settings.xml', $this->settings());
+                $zip->addFromString('word/_rels/document.xml.rels', $this->documentRelationships());
+            },
+        );
     }
 
     /** @param array<int, array<string, mixed>> $rows */

@@ -13,6 +13,7 @@ import { router, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
 import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
 import StatusBadge from '@/Components/StatusBadge';
+import TargetOfficeSelect from '@/Components/Form/TargetOfficeSelect';
 import { formatReportDate } from '@/Utils/dateFormatters';
 
 const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
@@ -21,13 +22,13 @@ const date = value => formatReportDate(value);
 const badge = value => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className="inline-flex rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-800 dark:bg-green-950/60 dark:text-green-200">{show(value)}</span>;
 const monitoringBadge = value => { const normalized = String(value || '').toLowerCase(); const variant = normalized.includes('submitted') ? 'active' : normalized.includes('not yet') ? 'inactive' : normalized.includes('ongoing') ? 'pending' : 'info'; return <StatusBadge variant={variant}>{show(value)}</StatusBadge>; };
 
-export default function Index({ workflow, workflowConfig, workflows = [], submissions = {}, periods = [], periodsByYear = {}, offices = [], years = [], filters = {}, year, summary = null, summaryRows = [] }) {
+export default function Index({ workflow, workflowConfig, workflows = [], submissions = {}, periods = [], periodsByYear = {}, offices = [], targetOffices = [], years = [], filters = {}, year, summary = null, summaryRows = [] }) {
     const { auth = {} } = usePage().props;
     const canCreate = Boolean(auth.canCreateTechnicalReports);
     const canUpdate = Boolean(auth.canUpdateTechnicalReports);
     const canDelete = Boolean(auth.canDeleteTechnicalReports);
     if (!workflow) return <Summary workflows={summary || []} rows={summaryRows} />;
-    return <Tracker workflow={workflow} config={workflowConfig} rows={submissions} periods={periods} periodsByYear={periodsByYear} offices={offices} years={years} filters={filters} year={year} canCreate={canCreate} canUpdate={canUpdate} canDelete={canDelete} />;
+    return <Tracker workflow={workflow} config={workflowConfig} rows={submissions} periods={periods} periodsByYear={periodsByYear} offices={offices} targetOffices={targetOffices} years={years} filters={filters} year={year} canCreate={canCreate} canUpdate={canUpdate} canDelete={canDelete} />;
 }
 
 function Summary({ workflows, rows = [] }) {
@@ -35,18 +36,19 @@ function Summary({ workflows, rows = [] }) {
     return <AuthenticatedLayout title="ENGP Summary Monitoring"><PageHeader title="ENGP REPORT SUBMISSION (HARD COPIES) TO PENRO" description="Scheduled ENGP requirements and actual encoded submissions using the authoritative monitoring status." /><div className="mt-6 space-y-5"><CrudTable title="Summary Monitoring" subtitle="Workflow definitions remain scheduled obligations; the live record count reflects actual encoded submissions only. Weekly Accomplishment is intentionally excluded from this source summary." columns={[{ key: 'label', label: 'Workflow', render: row => <span className="font-bold dark:text-white">{row.label}</span> }, { key: 'records', label: 'Actual Encoded Submissions', render: row => row.records }]} rows={workflows} rowKey="workflow_key" emptyTitle="No ENGP workflows" emptyDescription="No summary workflows are available." />{rows.length > 0 && <CrudTable title="Live Submission Status" subtitle="Actual ENGP report records with presentation status, routing status, and recorded dates." columns={columns} rows={rows} rowKey="id" emptyTitle="No ENGP records" emptyDescription="No live report records are available." tableClassName="min-w-[1900px]" />}</div></AuthenticatedLayout>;
 }
 
-function Tracker({ workflow, config, rows = {}, periods, periodsByYear, offices, years, filters, year, canCreate, canUpdate, canDelete }) {
+function Tracker({ workflow, config, rows = {}, periods, periodsByYear, offices, targetOffices = [], years, filters, year, canCreate, canUpdate, canDelete }) {
     const records = rows.data || [];
     const [selected, setSelected] = useState(null);
     const [modal, setModal] = useState(null);
     const [preview, setPreview] = useState(null);
-    const empty = { office: '', section_name: '', reporting_year: year, period_key: periods[0]?.key || '', mov: null, mov_external_url: '', remarks: '' };
+    const officeOptions = targetOffices.filter(office => offices.includes(office.name));
+    const empty = { office: officeOptions.length === 1 ? String(officeOptions[0].id) : '', section_name: '', reporting_year: year, period_key: periods[0]?.key || '', mov: null, mov_external_url: '', remarks: '' };
     const form = useForm(empty);
 
     useEffect(() => () => { if (preview?.temporary) URL.revokeObjectURL(preview.url); }, [preview]);
 
     const openCreate = () => { form.setData(empty); form.clearErrors(); setSelected(null); setPreview(null); setModal('create'); };
-    const openEdit = record => { form.setData({ ...empty, office: record.office || '', section_name: record.section_name || '', reporting_year: record.reporting_year || year, period_key: record.period_key || '', deadline_submission: record.deadline_submission || '', mov: null, mov_external_url: record.mov_external_url || '', remarks: record.remarks || '' }); form.clearErrors(); setSelected(record); setPreview(record.mov || null); setModal('edit'); };
+    const openEdit = record => { form.setData({ ...empty, office: String(officeOptions.find(office => office.name === record.office)?.id || ''), section_name: record.section_name || '', reporting_year: record.reporting_year || year, period_key: record.period_key || '', deadline_submission: record.deadline_submission || '', mov: null, mov_external_url: record.mov_external_url || '', remarks: record.remarks || '' }); form.clearErrors(); setSelected(record); setPreview(record.mov || null); setModal('edit'); };
     const close = () => { setModal(null); setSelected(null); setPreview(null); form.reset(); form.clearErrors(); };
     const chooseMov = file => { form.setData('mov', file); setPreview(file ? { name: file.name, type: file.type, size: file.size, url: URL.createObjectURL(file), temporary: true } : selected?.mov || null); };
     const submit = event => { event.preventDefault(); if (form.processing) return; const edit = modal === 'edit'; form.transform(data => edit ? { ...data, _method: 'put' } : data); form.post(edit ? route('engp-reports.update', [workflow, selected.id]) : route('engp-reports.store', workflow), { forceFormData: true, preserveScroll: true, onSuccess: close }); };
@@ -64,7 +66,7 @@ function Tracker({ workflow, config, rows = {}, periods, periodsByYear, offices,
             <Details record={selected} />
         </CrudDetailsModal>
             <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} title={`${modal === 'edit' ? 'Edit' : 'Add'} ${config.label}`} subtitle="Period-based ENGP report submission record." onClose={close} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} saveLabel={modal === 'edit' ? 'Update Report' : 'Save Report'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}>
-            <FormFields form={form} config={config} periods={periods} periodsByYear={periodsByYear} offices={offices} selected={selected} preview={preview} chooseMov={chooseMov} />
+            <FormFields form={form} config={config} periods={periods} periodsByYear={periodsByYear} offices={officeOptions} selected={selected} preview={preview} chooseMov={chooseMov} />
         </CrudFormModal>
     </AuthenticatedLayout>;
 }
@@ -80,7 +82,7 @@ function FormFields({ form, config, periods, periodsByYear, offices, selected, c
 
     return <>
         <CrudSection title="General / Report Information"><div className="grid gap-4 sm:grid-cols-2">
-            <div className={label}><FloatingSelect id="engp-office" label="Office" required value={form.data.office} onChange={change('office')}><option value="">Select Office</option>{offices.map(office => <option key={office}>{office}</option>)}</FloatingSelect>{error('office')}</div>
+            <div className={label}><TargetOfficeSelect id="engp-office" label="Office" required value={form.data.office} options={offices} onChange={value => form.setData('office', value)} error={form.errors.office} /></div>
             <div className={label}><FloatingInput id="engp-section" label="Name of Section" value={form.data.section_name || ''} onChange={change('section_name')} />{error('section_name')}</div>
             <div className={label}><FloatingInput id="engp-activity" label="Name of Activity" value={config.activity} readOnly /></div>
             <div className={label}><FloatingInput id="engp-document" label="Document Type" value={config.document} readOnly /></div>

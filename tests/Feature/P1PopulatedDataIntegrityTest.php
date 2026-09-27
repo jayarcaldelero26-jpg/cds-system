@@ -102,7 +102,7 @@ test('generic and direct-PENRO histories remain chronological with one authorita
     $user = p1dUser(); $area = p1dArea($user); $records = p1dReports($area, $user);
     $registry = app(DocumentRoutingProfileRegistry::class);
     $actions = $registry->actionProfile('bms', false)['actions'];
-    $path = ['forward_to_cenro_chief', 'receive_at_cenro_chief', 'forward_to_cenro_records', 'receive_at_cenro_records', 'forward_to_penro_records', 'receive_at_penro_records', 'receive_at_office_penro', 'assign_to_tsd_chief', 'receive_at_tsd_chief', 'forward_to_cds_focal', 'receive_at_cds_focal', 'forward_to_cds_chief', 'receive_at_cds_chief', 'recommend_to_office_penro', 'receive_at_office_penro_final', 'approve_for_regional_release', 'receive_at_penro_records_final', 'release_to_regional'];
+    $path = ['forward_to_cenro_chief', 'receive_at_cenro_chief', 'forward_to_cenro_records', 'receive_at_cenro_records', 'forward_to_penro_records', 'receive_at_penro_records', 'forward_to_office_penro', 'receive_at_office_penro', 'assign_to_tsd_chief', 'receive_at_tsd_chief', 'forward_to_cds_focal', 'receive_at_cds_focal', 'forward_to_cds_chief', 'receive_at_cds_chief', 'recommend_to_office_penro', 'receive_at_office_penro_final', 'approve_for_regional_release', 'receive_at_penro_records_final', 'release_to_regional'];
     $at = CarbonImmutable::parse('2026-08-28 08:00:00', 'Asia/Manila');
     foreach ($path as $key) {
         $action = collect($actions)->firstWhere('key', $key);

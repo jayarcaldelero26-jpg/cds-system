@@ -6,7 +6,6 @@ use App\Models\DocumentRoutingEvent;
 use App\Models\PambRoutingEvent;
 use App\Models\SubmissionRoutingAttachment;
 use App\Models\User;
-use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
@@ -24,10 +23,8 @@ final class RoutingAttachmentService
     public function create(string $source, int $sourceId, UploadedFile $file, string $path, ?User $user, ?string $stageKey, ?string $actionKey, ?string $remarks = null, ?DocumentRoutingEvent $documentEvent = null, ?PambRoutingEvent $pambEvent = null, string $purpose = 'routing_copy'): SubmissionRoutingAttachment
     {
         $previous = $this->currentSlotAttachment($source, $sourceId, $purpose);
-        $previousPrimary = $purpose === 'routing_copy' ? $this->primaryAttachment($source, $sourceId) : null;
-
         try {
-            $attachment = DB::transaction(function () use ($source, $sourceId, $documentEvent, $pambEvent, $stageKey, $actionKey, $purpose, $file, $path, $user, $remarks, $previousPrimary): SubmissionRoutingAttachment {
+            $attachment = DB::transaction(function () use ($source, $sourceId, $documentEvent, $pambEvent, $stageKey, $actionKey, $purpose, $file, $path, $user, $remarks): SubmissionRoutingAttachment {
                 $attachment = SubmissionRoutingAttachment::query()->create([
                     'source' => $source,
                     'source_id' => $sourceId,
@@ -44,10 +41,6 @@ final class RoutingAttachmentService
                     'remarks' => filled($remarks) ? trim($remarks) : null,
                 ]);
 
-                if ($purpose === 'routing_copy' && $previousPrimary !== null) {
-                    $this->replacePrimaryAttachment($previousPrimary, $path, $file);
-                }
-
                 return $attachment;
             });
 
@@ -56,10 +49,6 @@ final class RoutingAttachmentService
             // any previous physical file is removed.
             if ($previous && $previous->stored_path !== $path) {
                 $this->discard($previous->stored_path);
-            }
-
-            if ($previousPrimary !== null && $previousPrimary['path'] !== $path) {
-                $this->discard($previousPrimary['path']);
             }
 
             return $attachment;
@@ -94,36 +83,29 @@ final class RoutingAttachmentService
         ];
     }
 
-    /** Resolve the effective current copy without changing event/version history. */
+    /** Resolve only the official source document; event-linked copies are presented with their routing events. */
     public function currentDescriptor(string $source, int $sourceId, ?array $original = null, ?string $fallbackUrl = null, ?string $fallbackName = null): ?array
     {
-        $latest = SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->where(function ($query): void { $query->whereNull('purpose')->orWhere('purpose', '!=', 'correction_reference'); })->latest('id')->first();
-        if ($latest) {
-            return $this->descriptor($latest);
-        }
-
         $url = $original['url'] ?? $original['preview_url'] ?? $fallbackUrl;
-        if (! is_string($url) || trim($url) === '') {
-            return null;
+        if (is_string($url) && trim($url) !== '') {
+            $mimeType = $original['mime_type'] ?? $original['type'] ?? null;
+            return [
+                'id' => $original['id'] ?? null,
+                'name' => $original['name'] ?? $fallbackName ?? 'Original MOV / report',
+                'mime_type' => $mimeType,
+                'type' => $mimeType,
+                'size' => $original['size'] ?? null,
+                'uploaded_at' => $original['uploaded_at'] ?? null,
+                'source' => 'Original MOV / report',
+                'is_routing_copy' => false,
+                'version_source' => 'original',
+                'url' => $url,
+                'download_url' => $original['download_url'] ?? $url,
+                'preview_url' => $original['preview_url'] ?? $url,
+            ];
         }
 
-        $mimeType = $original['mime_type'] ?? $original['type'] ?? null;
-        $downloadUrl = $original['download_url'] ?? $url;
-
-        return [
-            'id' => $original['id'] ?? null,
-            'name' => $original['name'] ?? $fallbackName ?? 'Original MOV / report',
-            'mime_type' => $mimeType,
-            'type' => $mimeType,
-            'size' => $original['size'] ?? null,
-            'uploaded_at' => $original['uploaded_at'] ?? null,
-            'source' => 'Original MOV / report',
-            'is_routing_copy' => false,
-            'version_source' => 'original',
-            'url' => $url,
-            'download_url' => $downloadUrl,
-            'preview_url' => $original['preview_url'] ?? $url,
-        ];
+        return null;
     }
     public function response(Model $record, SubmissionRoutingAttachment $attachment, bool $preview = false): BinaryFileResponse
     {
@@ -151,53 +133,4 @@ final class RoutingAttachmentService
             ->first();
     }
 
-    /** @return array{record:Model,path:string,name:?string,mime:?string,size:?int}|null */
-    private function primaryAttachment(string $source, int $sourceId): ?array
-    {
-        $protectedSource = match ($source) {
-            'conservation' => 'conservation-report',
-            'engp' => 'engp-report',
-            'bms' => 'bms-report',
-            'bams' => 'bams-report',
-            'imea' => 'imea-report',
-            'imea-maintenance' => 'imea-maintenance',
-            'aws' => 'aws',
-            'ipaf-management' => 'ipaf-management',
-            'revenue' => 'ipaf-revenue',
-            default => null,
-        };
-        if ($protectedSource === null) return null;
-
-        $definition = app(ProtectedAttachmentService::class)->definition($protectedSource);
-        if (! is_array($definition) || ($definition['kind'] ?? null) !== 'scalar') return null;
-
-        /** @var class-string<Model> $modelClass */
-        $modelClass = $definition['model'];
-        $record = $modelClass::query()->find($sourceId);
-        $path = $record?->getAttribute($definition['path']);
-        if (! $record || ! is_string($path) || trim($path) === '') return null;
-
-        return [
-            'record' => $record,
-            'path' => $path,
-            'name' => isset($definition['name']) ? $record->getAttribute($definition['name']) : null,
-            'mime' => isset($definition['mime']) ? $record->getAttribute($definition['mime']) : null,
-            'size' => isset($definition['size']) ? $record->getAttribute($definition['size']) : null,
-        ];
-    }
-
-    /** @param array{record:Model,path:string,name:?string,mime:?string,size:?int} $previous */
-    private function replacePrimaryAttachment(array $previous, string $path, UploadedFile $file): void
-    {
-        $record = $previous['record'];
-        $definition = app(ProtectedAttachmentService::class)->registry();
-        $source = collect($definition)->first(fn (array $item): bool => ($item['model'] ?? null) === $record::class && ($item['kind'] ?? null) === 'scalar' && $record->getAttribute($item['path'] ?? '') === $previous['path']);
-        if (! is_array($source)) return;
-
-        $changes = [$source['path'] => $path];
-        if (isset($source['name'])) $changes[$source['name']] = $this->filename($file->getClientOriginalName());
-        if (isset($source['mime'])) $changes[$source['mime']] = $file->getMimeType() ?: $file->getClientMimeType();
-        if (isset($source['size'])) $changes[$source['size']] = (int) ($file->getSize() ?: 0);
-        $record->update($changes);
-    }
 }

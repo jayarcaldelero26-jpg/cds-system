@@ -6,6 +6,8 @@ use App\Models\NonWorkingDay;
 use App\Models\PambRoutingEvent;
 use App\Models\ProtectedArea;
 use App\Models\User;
+use App\Models\DocumentArchive;
+use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\BusinessCalendarService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\DocumentRoutingPresenter;
@@ -13,6 +15,7 @@ use App\Services\SubmissionTracking\RoutingStatusPresenter;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -41,6 +44,22 @@ function timelinePambReport(object $test, array $overrides = []): ConservationRe
 
 function timelineService(): PambRoutingTimelineService { return app(PambRoutingTimelineService::class); }
 
+final class PambRoutingTestArchiveGateway implements GoogleDriveArchiveGateway
+{
+    public array $objects = [];
+    public function findByIdentityAndHash(array $identity, string $sha256): ?array { return null; }
+    public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
+    {
+        $id = 'pamb-test-archive-'.count($this->objects);
+        $this->objects[$id] = ['identity' => $identity, 'sha256' => $sha256, 'size' => filesize($localPath)];
+        return ['file_id' => $id, 'folder_id' => $folderId];
+    }
+    public function verify(string $fileId, string $sha256, int $size): bool { return $this->verifyAvailability($fileId, $sha256, $size) === 'verified'; }
+    public function verifyAvailability(string $fileId, string $sha256, int $size): string { return ($this->objects[$fileId]['sha256'] ?? null) === $sha256 && ($this->objects[$fileId]['size'] ?? null) === $size ? 'verified' : 'content_mismatch'; }
+    public function replace(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array { return ['file_id' => $fileId, 'folder_id' => $folderId]; }
+    public function retrieve(string $fileId) { $stream = fopen('php://memory', 'r+'); rewind($stream); return $stream; }
+}
+
 function routeEvent(ConservationReportSubmission $report, string $stage, string $date, ?int $userId = null): PambRoutingEvent
 {
     return timelineService()->record($report, $stage, $date.' 09:00:00', $userId, null);
@@ -59,16 +78,28 @@ test('detailed routing applies only to the three PAMB meeting workflows', functi
         ->and(timelineService()->applies(timelinePambReport($this, ['workflow_key' => 'updating_pamb_manual'])))->toBeFalse();
 });
 
+test('PAMB presentation exposes semantic official-document capability for legacy milestones', function (): void {
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
+    $presented = app(DocumentRoutingPresenter::class)->presentPamb($report, timelineService()->present($report));
+
+    expect($presented['document_update_capabilities'][SubmissionTrackingService::CENRO_RELEASE])->toBeTrue()
+        ->and($presented['document_update_capabilities'][SubmissionTrackingService::PENRO_RECEIPT])->toBeFalse()
+        ->and($presented['document_update_capabilities'][SubmissionTrackingService::REGIONAL_ENDORSEMENT])->toBeTrue();
+});
+
 test('canonical receipt appears once and internal forward does not auto-create receipt', function () {
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
     $before = timelineService()->present($report);
     expect($before['timeline'][1]['key'])->toBe(PambRoutingTimelineService::RECORDS_RECEIVED)
         ->and($before['timeline'][2]['key'])->toBe(PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO)
+        ->and($before['timeline'][1]['can_replace_document'])->toBeFalse()
+        ->and($before['timeline'][2]['can_replace_document'])->toBeTrue()
         ->and(PambRoutingEvent::count())->toBe(0);
 
     routeEvent($report, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, '2026-08-05');
     $after = timelineService()->present($report->fresh());
     expect(PambRoutingEvent::count())->toBe(1)
+        ->and(collect($after['timeline'])->firstWhere('key', PambRoutingTimelineService::RECEIVED_BY_PENRO)['can_replace_document'])->toBeFalse()
         ->and($after['current_document_location'])->toBe('For Receipt by Office of the PENRO')
         ->and(collect($after['timeline'])->firstWhere('key', PambRoutingTimelineService::RECEIVED_BY_PENRO)['status'])->toBe('current');
 });
@@ -282,14 +313,23 @@ test('PENRO-managed PAMB skips CENRO without creating a fake event', function ()
 });
 
 test('normal routing endpoint ignores client timestamp and records actor once', function () {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-10 14:30:00', BusinessCalendarService::TIMEZONE));
-    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05']);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    $path = 'conservation-report-movs/pamb-routed-current.pdf';
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05', 'mov_file_path' => $path, 'mov_file_name' => 'current.pdf']);
+    Storage::disk('local')->put($path, "%PDF-1.4\ncurrent PAMB");
+    $gateway = new PambRoutingTestArchiveGateway();
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
     $this->actingAs($this->user)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, 'occurred_at' => '2020-01-01 00:00:00', 'remarks' => 'Slip 123'])->assertSessionHasNoErrors();
     $event = $report->fresh()->routingEvents()->first();
     expect($event->occurred_at->toDateTimeString())->toBe('2026-08-10 14:30:00')
         ->and($event->recorded_by)->toBe($this->user->id)
-        ->and(AuditLog::query()->where('action', 'PAMB Internal Routing Event Recorded')->where('entity_id', (string) $report->id)->count())->toBe(1);
+        ->and(AuditLog::query()->where('action', 'PAMB Internal Routing Event Recorded')->where('entity_id', (string) $report->id)->count())->toBe(1)
+        ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(1)
+        ->and($gateway->objects)->toHaveCount(1);
 });
 
 test('Super Admin cannot execute a normal PENRO routing stage', function () {

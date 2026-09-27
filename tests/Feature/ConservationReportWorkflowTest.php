@@ -2,6 +2,7 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentAttachmentHistory;
 use App\Models\NonWorkingDay;
 use App\Models\ProtectedArea;
 use App\Models\User;
@@ -514,7 +515,12 @@ test('the standard report form requires an attachment and leaves routing dates f
         ->and($report->date_received_penro)->toBeNull()
         ->and($report->date_endorsed_regional)->toBeNull()
         ->and($report->mov_file_path)->not->toBeNull();
+    expect($report->mov_file_path)->toStartWith('current-documents/conservation-report/'.$report->id.'/mov/');
     Storage::disk('local')->assertExists($report->mov_file_path);
+    $this->assertDatabaseHas('document_attachment_histories', [
+        'source_type' => 'conservation-report', 'source_id' => $report->id, 'logical_slot' => 'mov', 'action' => 'UPLOAD',
+    ]);
+    $this->assertDatabaseMissing('document_routing_events', ['source_type' => 'conservation', 'source_id' => $report->id]);
 });
 test('editing a conservation report preserves its attachment unless an explicit replacement is uploaded', function () {
     Storage::fake('local');
@@ -532,8 +538,12 @@ test('editing a conservation report preserves its attachment unless an explicit 
     $this->actingAs($this->user)->post(route('conservation-reports.update', ['homestay', $report]), [...$payload, '_method' => 'put', 'mov' => UploadedFile::fake()->create('replacement.pdf', 100, 'application/pdf')])->assertSessionHasNoErrors();
     $replacement = $report->fresh()->mov_file_path;
     expect($replacement)->not->toBe('conservation-report-movs/original.pdf');
+    expect($replacement)->toStartWith('current-documents/conservation-report/'.$report->id.'/mov/');
     Storage::disk('public')->assertMissing('conservation-report-movs/original.pdf');
     Storage::disk('local')->assertExists($replacement);
+    $this->assertDatabaseHas('document_attachment_histories', [
+        'source_type' => 'conservation-report', 'source_id' => $report->id, 'logical_slot' => 'mov', 'action' => 'Replaced',
+    ]);
 });
 
 test('a crafted hidden attachment removal flag cannot erase an existing conservation MOV', function () {

@@ -6,6 +6,8 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ImeaReportSubmission;
 use App\Models\ProtectedArea;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -34,9 +36,20 @@ function attachmentPrimaryPayload(array $overrides = []): array
     ], $overrides);
 }
 
+function attachPolicyAreaToOffice(ProtectedArea $area, User $actor, string $officeName = 'CENRO Mati'): void
+{
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('name', $officeName)->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $actor->id,
+    ]);
+}
+
 test('PAMB Minutes and Resolution accept primary attachments through 100 MB', function (): void {    $area = ProtectedArea::create([
         'name' => 'Attachment PAMB Area', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
+    attachPolicyAreaToOffice($area, $this->user);
     foreach ([['Minutes', 'minutes.pdf'], ['Reso', 'resolution.pdf']] as [$documentType, $filename]) {
         $this->actingAs($this->user)->post(route('conservation-reports.store', 'regular_pamb'), attachmentPrimaryPayload([
             'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati',
@@ -61,6 +74,7 @@ test('BAMS, BMS, and IMEA report submissions accept primary attachments through 
         'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
+    attachPolicyAreaToOffice($area, $this->user);
 
     foreach ([
         ['bams.report-submissions.store', 'bams.pdf'],
@@ -92,6 +106,7 @@ test('IMEA maintenance MOV attachments use a 20 MB limit', function (): void {
         'created_by' => $this->user->id,
         'updated_by' => $this->user->id,
     ]);
+    attachPolicyAreaToOffice($area, $this->user);
 
     $payload = [
         'protected_area_id' => $area->id,
@@ -117,6 +132,7 @@ test('direct report requests cannot bypass required activity-date fields or mult
         'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
+    attachPolicyAreaToOffice($area, $this->user);
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'maintenance_monuments'), [
         'protected_area_id' => $area->id, 'activity_name' => 'Maintenance of Monuments', 'document_type' => 'Final Report',

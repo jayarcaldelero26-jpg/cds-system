@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\EngpReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Engp\EngpMonitoringStatusResolver;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
@@ -22,7 +25,7 @@ use Throwable;
 
 class EngpReportController extends Controller
 {
-    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses, private readonly SubmissionTrackingService $tracking) {}
+    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses, private readonly SubmissionTrackingService $tracking, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
 
     public function index(Request $request, ?string $workflow = null): Response
     {
@@ -67,6 +70,7 @@ class EngpReportController extends Controller
             'periodsByYear' => $periodsByYear,
             'years' => $years,
             'offices' => $offices,
+            'targetOffices' => collect(app(SubmissionFormScopeService::class)->officeOptions($request->user()))->filter(fn (array $office): bool => in_array($office['name'], $offices, true))->values()->all(),
             'filters' => [...$request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']), 'year' => $year],
             'summary' => $workflow ? null : $this->summary($year, $request->user()),
             'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with('releaseEvents')->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
@@ -77,6 +81,7 @@ class EngpReportController extends Controller
     {
         $config = $this->workflows->find($workflow);
         abort_unless($config, 404);
+        app(SubmissionFormScopeService::class)->normalizeRequest($request, 'office', '');
         $this->rejectRoutingFields($request);
         $validated = $this->validateData($request, $workflow, $config, false);
         abort_unless($this->organization->canUseDevelopmentOffice($request->user(), $validated['office']), 403);
@@ -91,6 +96,7 @@ class EngpReportController extends Controller
         abort_unless($config && $engpReportSubmission->workflow_key === $workflow, 404);
         $this->rejectRoutingFields($request);
         $this->tracking->assertMutable($engpReportSubmission);
+        app(SubmissionFormScopeService::class)->normalizeRequest($request, 'office', '');
         $validated = $this->validateData($request, $workflow, $config, true);
         return $this->persist($request, $engpReportSubmission, $validated, $workflow, $config, 'ENGP report updated.');
     }
@@ -101,7 +107,8 @@ class EngpReportController extends Controller
         abort_unless($this->workflows->find($workflow) && $engpReportSubmission->workflow_key === $workflow, 404);
         $this->tracking->assertMutable($engpReportSubmission);
         $path = $engpReportSubmission->mov_file_path;
-        $engpReportSubmission->delete();
+        app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)
+            ->deleteSource($engpReportSubmission, fn () => $engpReportSubmission->delete());
         if ($path) $this->attachments->delete($path);
         return back()->with('success', 'ENGP report deleted.');
     }
@@ -136,11 +143,11 @@ class EngpReportController extends Controller
     private function persist(Request $request, EngpReportSubmission $record, array $validated, string $workflow, array $config, string $message): RedirectResponse
     {
         $wasNew = ! $record->exists;
+        $createdHere = false;
         unset($validated['_editing'], $validated['mov']);
+        $file = $request->file('mov');
         $period = $this->workflows->period($workflow, (int) $validated['reporting_year'], $validated['period_key']);
         $validated = [...$validated, 'workflow_key' => $workflow, 'activity_name' => $config['activity'], 'document_type' => $config['document'], 'period_label' => $period['label'], 'deadline_submission' => $this->workflows->deadline($workflow, (int) $validated['reporting_year'], $validated['period_key']), 'updated_by' => $request->user()?->id];
-        $newPath = null;
-        $oldPath = $record->exists ? $record->mov_file_path : null;
         $save = function (EngpReportSubmission $target) use (&$validated, &$record): void {
             DB::transaction(function () use ($target, $validated): void {
                 if ($target->trashed()) $target->restore();
@@ -149,38 +156,32 @@ class EngpReportController extends Controller
             $record = $target;
         };
 
-        try {
-            if ($request->hasFile('mov')) {
-                $file = $request->file('mov');
-                $newPath = $this->attachments->store($file, 'engp-report');
-                if (! is_string($newPath)) throw new RuntimeException('The report file could not be stored.');
-                $validated['mov_file_path'] = $newPath;
-            }
-            if (! $record->exists) $validated['created_by'] = $request->user()?->id;
-            $save($record);
-        } catch (UniqueConstraintViolationException $exception) {
-            if (! $wasNew) throw $exception;
-
-            $existing = $this->findSubmissionForPeriod($workflow, $validated);
-            if (! $existing) {
-                if ($newPath) $this->attachments->delete($newPath);
-                throw ValidationException::withMessages(['period_key' => 'A submission already exists for this office and reporting period. Refresh the page and try again.']);
-            }
-
-            unset($validated['created_by']);
-            $oldPath = $existing->mov_file_path;
+        if (! $record->exists) {
+            $validated['created_by'] = $request->user()?->id;
             try {
-                $save($existing);
-            } catch (Throwable $fallbackException) {
-                if ($newPath) $this->attachments->delete($newPath);
-                throw $fallbackException;
+                $save($record);
+                $createdHere = true;
+            } catch (UniqueConstraintViolationException $exception) {
+                if (! $wasNew) throw $exception;
+                $existing = $this->findSubmissionForPeriod($workflow, $validated);
+                if (! $existing) throw ValidationException::withMessages(['period_key' => 'A submission already exists for this office and reporting period. Refresh the page and try again.']);
+                unset($validated['created_by']);
+                $record = $existing;
             }
-        } catch (Throwable $exception) {
-            if ($newPath) $this->attachments->delete($newPath);
-            throw $exception;
         }
-        if ($newPath && $oldPath && $newPath !== $oldPath) {
-            $this->attachments->delete($oldPath);
+
+        if ($file) {
+            $adapter = $this->documentAdapters->resolve('engp-report', $record, 'mov');
+            try {
+                $this->documents->replaceUsingAdapter($record, 'engp', 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                    static fn (): null => null,
+                    $request->input('remarks'), $validated, 'REPLACEMENT');
+            } catch (Throwable $exception) {
+                if ($createdHere) $record->forceDelete();
+                throw $exception;
+            }
+        } elseif (! $createdHere) {
+            $save($record);
         }
         return back()->with('success', $message);
     }

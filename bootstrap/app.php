@@ -18,7 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(
-            env('TRUSTED_PROXIES'),
+            null,
             Request::HEADER_X_FORWARDED_HOST
                 | Request::HEADER_X_FORWARDED_PORT
                 | Request::HEADER_X_FORWARDED_PROTO,
@@ -29,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
             \App\Http\Middleware\HandleInertiaRequests::class,
             \App\Http\Middleware\EnsureOrganizationalUnit::class,
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
+            \App\Http\Middleware\SecurityHeaders::class,
             PreventBackHistory::class, // 🚀 Gidugang kini dinhi aron ma-prevent ang back button cache
         ]);
 
@@ -41,7 +42,8 @@ return Application::configure(basePath: dirname(__DIR__))
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(
-            fn (Request $request) => $request->is('api/*'),
+            fn (Request $request) => $request->is('api/*')
+                || ($request->is('confirm-password') && $request->expectsJson()),
         );
 
         $exceptions->render(function (NotFoundHttpException $e, $request) {

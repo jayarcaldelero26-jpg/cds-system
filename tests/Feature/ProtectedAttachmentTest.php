@@ -2,6 +2,7 @@
 
 use App\Models\BmsRecord;
 use App\Models\BmsReportSubmission;
+use App\Models\ConservationReportSubmission;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\ProtectedArea;
@@ -128,6 +129,26 @@ test('protected attachments require source permission and serve only the resolve
         ->assertNotFound();
 });
 
+test('production security policy keeps same-origin protected document previews available', function () {
+    app()->detectEnvironment(fn () => 'production');
+    config(['app.env' => 'production', 'app.debug' => false]);
+    Storage::fake('local');
+    Storage::fake('public');
+    $record = protectedAttachmentRecord();
+    Storage::disk('local')->put($record->attachment, "%PDF-1.4\nprivate preview");
+
+    $response = $this->actingAs(protectedAttachmentUser())
+        ->get(route('attachments.show', ['source' => 'bms-data', 'record' => $record->id, 'attachment' => 'attachment']));
+
+    $response->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf')
+        ->assertHeader('X-Frame-Options', 'SAMEORIGIN');
+    expect($response->headers->get('Content-Security-Policy'))
+        ->toContain("frame-src 'self' blob:")
+        ->toContain("frame-ancestors 'self'")
+        ->toContain("object-src 'none'");
+});
+
 test('effective Gate-authorized BMS workflow users can access protected BMS report attachments within scope', function () {
     Storage::fake('local');
     Storage::fake('public');
@@ -145,6 +166,114 @@ test('effective Gate-authorized BMS workflow users can access protected BMS repo
             ->assertOk()
             ->assertHeader('Content-Type', 'application/pdf');
     }
+});
+
+test('current routing holder can preview and download only the routed official document without source-module CRUD access', function (): void {
+    Storage::fake('local');
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $report = effectiveBmsAttachmentReport($owner, 'bms-report-movs/routed-current.pdf');
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.7\nrouted current official copy");
+
+    $actors = [
+        'focal' => effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga'),
+        'chief' => effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga'),
+        'cenro_records' => effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Baganga'),
+        'penro_records' => effectiveBmsAttachmentUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental'),
+    ];
+    foreach ($actors as $actor) $actor->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    foreach ([
+        [$actors['focal'], 'forward_to_cenro_chief'],
+        [$actors['chief'], 'receive_at_cenro_chief'],
+        [$actors['chief'], 'forward_to_cenro_records'],
+        [$actors['cenro_records'], 'receive_at_cenro_records'],
+        [$actors['cenro_records'], 'forward_to_penro_records'],
+        [$actors['penro_records'], 'receive_at_penro_records'],
+    ] as [$actor, $action]) $routing->transition($report->fresh(), 'bms', $action, $actor->id);
+
+    $penroRecords = $actors['penro_records'];
+    expect($penroRecords->can('bms.view'))->toBeFalse()
+        ->and($penroRecords->can('technical-reports.view'))->toBeFalse()
+        ->and($penroRecords->can('bms.create'))->toBeFalse()
+        ->and($routing->canAccessCurrentDocument($report->fresh(), 'bms', $penroRecords))->toBeTrue();
+
+    $this->actingAs($penroRecords)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+    $this->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']).'?download=1')
+        ->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename="routed-current.pdf"');
+
+    $nonHolder = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $nonHolder->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+    $this->actingAs($nonHolder)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']))
+        ->assertForbidden();
+
+    auth()->logout();
+    $this->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']))
+        ->assertRedirect(route('login'));
+});
+
+test('Conservation PENRO Records holder can preview and download its current official report copy', function (): void {
+    Storage::fake('local');
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $area = ProtectedArea::create([
+        'name' => 'Conservation Routed Document PA', 'short_name' => 'CRD',
+        'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental',
+        'region' => 'Region XI', 'status' => 'Active', 'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('name', 'CENRO Baganga')->value('id'),
+        'assignment_type' => 'supervising',
+    ]);
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'maintenance_pa_information_system', 'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Maintenance of Protected Area Information System',
+        'document_type' => 'Report', 'date_accomplished' => '2026-09-01', 'created_by' => $owner->id,
+        'updated_by' => $owner->id, 'mov_file_name' => 'current-maintenance-report.pdf',
+        'mov_file_path' => 'conservation-report-movs/current-maintenance-report.pdf',
+    ]);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.7\ncurrent conservation report");
+    $actors = [
+        'focal' => effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga'),
+        'chief' => effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga'),
+        'cenro_records' => effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Baganga'),
+        'penro_records' => effectiveBmsAttachmentUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental'),
+    ];
+    foreach ($actors as $actor) $actor->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    foreach ([
+        [$actors['focal'], 'forward_to_cenro_chief'], [$actors['chief'], 'receive_at_cenro_chief'],
+        [$actors['chief'], 'forward_to_cenro_records'], [$actors['cenro_records'], 'receive_at_cenro_records'],
+        [$actors['cenro_records'], 'forward_to_penro_records'], [$actors['penro_records'], 'receive_at_penro_records'],
+    ] as [$actor, $action]) $routing->transition($report->fresh(), 'conservation', $action, $actor->id);
+
+    $holder = $actors['penro_records'];
+    expect($holder->can('technical-reports.view'))->toBeFalse()
+        ->and($routing->canAccessCurrentDocument($report->fresh(), 'conservation', $holder))->toBeTrue();
+    $this->actingAs($holder)
+        ->get(route('attachments.show', ['source' => 'conservation-report', 'record' => $report->id, 'attachment' => 'mov']))
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+    $this->get(route('attachments.show', ['source' => 'conservation-report', 'record' => $report->id, 'attachment' => 'mov']).'?download=1')
+        ->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename="current-maintenance-report.pdf"');
+});
+
+test('shared upload dropzone uses an SVG icon and contains no mojibake glyphs', function (): void {
+    $dropzone = file_get_contents(resource_path('js/Components/Attachments/AttachmentDropzone.jsx'));
+    $dateFormatters = file_get_contents(resource_path('js/Utils/dateFormatters.js'));
+    expect($dropzone)->toContain('<svg')
+        ->and($dropzone)->not->toContain(json_decode('"\\u00e2\\u2020\\u00a5"'))
+        ->and($dropzone)->not->toContain(json_decode('"\\u00c3\\u2014"'))
+        ->and($dropzone)->not->toContain(json_decode('"\\u00c2\\u00b7"'))
+        ->and($dateFormatters)->not->toContain(json_decode('"\\u00e2\\u20ac\\u201d"'));
 });
 
 test('BMS protected attachment keeps scope, global, and cross-source authorization boundaries', function () {

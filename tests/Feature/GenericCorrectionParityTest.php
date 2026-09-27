@@ -10,6 +10,10 @@ use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Spatie\Permission\Models\Permission;
 
+beforeEach(function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+});
+
 function correctionParityUser(string $section, string $office): User
 {
     $user = User::factory()->create(['unit_assignment' => 'conservation', 'section' => $section, 'office_designated' => $office]);
@@ -85,6 +89,7 @@ test('generic Homestay supports CENRO, PENRO CDS Chief, and Office correction cy
     correctionParityTransition($tracking, $cenroRecords, $report->id, 'receive_at_cenro_records');
     correctionParityTransition($tracking, $cenroRecords, $report->id, 'forward_to_penro_records');
     correctionParityTransition($tracking, $penroRecords, $report->id, 'receive_at_penro_records');
+    correctionParityTransition($tracking, $penroRecords, $report->id, 'forward_to_office_penro');
     correctionParityTransition($tracking, $office, $report->id, 'receive_at_office_penro');
     correctionParityTransition($tracking, $office, $report->id, 'assign_to_tsd_chief');
     correctionParityTransition($tracking, $tsd, $report->id, 'receive_at_tsd_chief');

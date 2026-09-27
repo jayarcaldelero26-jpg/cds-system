@@ -110,6 +110,18 @@
     }
 }
 
+/* Keep muted neutral text legible in dark mode even in older views that do not
+   yet declare a dark:text-* utility. Explicit dark text colors remain intact. */
+.dark [class~="text-gray-500"]:not([class*="dark:text-"]),
+.dark [class~="text-slate-500"]:not([class*="dark:text-"]) {
+    color: #9ca3af;
+}
+
+.dark [class~="text-gray-600"]:not([class*="dark:text-"]),
+.dark [class~="text-slate-600"]:not([class*="dark:text-"]) {
+    color: #d1d5db;
+}
+
 input:-webkit-autofill,
 select:-webkit-autofill,
 textarea:-webkit-autofill {

@@ -5,15 +5,18 @@ namespace App\Http\Controllers;
 use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Compliance\ComplianceMovService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Throwable;
 
 class ImeaFacilityMaintenanceReportController extends Controller
@@ -21,6 +24,8 @@ class ImeaFacilityMaintenanceReportController extends Controller
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
+        private readonly CurrentDocumentReplacementService $documents,
+        private readonly ReportDocumentAdapterResolver $documentAdapters,
     ) {}
 
     public function index(Request $request): Response
@@ -37,16 +42,17 @@ class ImeaFacilityMaintenanceReportController extends Controller
             ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', $request->input('quarter')))
             ->latest('id')->paginate(10)->withQueryString()->through(fn ($report) => $this->data($report));
 
-        return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']), 'filters' => $request->only(['search', 'protected_area_id', 'quarter'])]);
+        return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']), ...app(SubmissionFormScopeService::class)->options($request->user()), 'filters' => $request->only(['search', 'protected_area_id', 'quarter'])]);
     }
 
     public function store(Request $request): RedirectResponse { return $this->persist($request, new ImeaFacilityMaintenanceReport); }
     public function update(Request $request, ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea($request->user(), $maintenanceReport->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($maintenanceReport); return $this->persist($request, $maintenanceReport); }
-    public function destroy(ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($maintenanceReport); $path = $maintenanceReport->mov_file_path; DB::transaction(fn () => $maintenanceReport->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', 'Maintenance report deleted successfully.'); }
-    public function showMov(ImeaFacilityMaintenanceReport $maintenanceReport): BinaryFileResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); return $this->attachments->response('imea-maintenance', $maintenanceReport, 'mov'); }
+    public function destroy(ImeaFacilityMaintenanceReport $maintenanceReport): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($maintenanceReport); $path = $maintenanceReport->mov_file_path; app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)->deleteSource($maintenanceReport, fn () => $maintenanceReport->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', 'Maintenance report deleted successfully.'); }
+    public function showMov(ImeaFacilityMaintenanceReport $maintenanceReport): HttpResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $maintenanceReport->protected_area_id); return $this->attachments->response('imea-maintenance', $maintenanceReport, 'mov'); }
 
     private function persist(Request $request, ImeaFacilityMaintenanceReport $report): RedirectResponse
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $wasExisting = $report->exists;
         if ($wasExisting) {
             $this->organization->assertCanAccessProtectedArea($request->user(), $report->protected_area_id);
@@ -59,22 +65,29 @@ class ImeaFacilityMaintenanceReportController extends Controller
         if ($wasExisting && ! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($report, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }
-        $oldPath = $report->mov_file_path;
-        $newPath = null;
-        $removeOld = $request->hasFile('mov');
-        try {
-            if ($request->hasFile('mov')) {
-                $file = $request->file('mov');
-                $newPath = $this->attachments->store($file, 'imea-maintenance');
-                if (! is_string($newPath)) throw new RuntimeException('The MOV could not be stored.');
-                $validated = [...$validated, 'mov_file_name' => $file->getClientOriginalName(), 'mov_file_path' => $newPath, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()];
+        $file = $request->file('mov');
+        unset($validated['mov']);
+        $validated['updated_by'] = $request->user()->id;
+        if (! $wasExisting) $validated['created_by'] = $request->user()->id;
+        if ($wasExisting && $file) {
+            $adapter = $this->documentAdapters->resolve('imea-maintenance', $report, 'mov');
+            $this->documents->replaceUsingAdapter($report, 'imea-maintenance', 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                fn (ImeaFacilityMaintenanceReport $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'), [...$validated, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()], 'REPLACEMENT');
+        } elseif ($wasExisting) {
+            DB::transaction(fn () => $report->update($validated));
+        } else {
+            $report = ImeaFacilityMaintenanceReport::query()->create($validated);
+            try {
+                $adapter = $this->documentAdapters->resolve('imea-maintenance', $report, 'mov');
+                $this->documents->replaceUsingAdapter($report, 'imea-maintenance', 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                    fn (ImeaFacilityMaintenanceReport $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                    $request->input('remarks'), ['mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()], 'UPLOAD');
+            } catch (Throwable $exception) {
+                $report->delete();
+                throw $exception;
             }
-            unset($validated['mov']);
-            $validated['updated_by'] = $request->user()->id;
-            if (! $wasExisting) $validated['created_by'] = $request->user()->id;
-            DB::transaction(fn () => $wasExisting ? $report->update($validated) : ImeaFacilityMaintenanceReport::create($validated));
-        } catch (Throwable $exception) { if ($newPath) $this->attachments->delete($newPath); throw $exception; }
-        if ($removeOld && $oldPath) $this->attachments->delete($oldPath);
+        }
         return back()->with('success', $wasExisting ? 'Maintenance report updated successfully.' : 'Maintenance report added successfully.');
     }
 

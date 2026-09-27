@@ -9,7 +9,7 @@
         <!-- DENR is the primary authenticated-application mark. -->
         <link rel="icon" type="image/png" href="{{ asset('images/DENR LOGO.png') }}">
 
-        @routes
+        @routes(null, \Illuminate\Support\Facades\Vite::cspNonce())
         @viteReactRefresh
         @vite(['resources/js/app.jsx', "resources/js/Pages/{$page['component']}.jsx"])
         @inertiaHead

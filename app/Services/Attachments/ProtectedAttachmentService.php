@@ -16,10 +16,13 @@ use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
 use App\Models\ManagementPlanProfile;
 use App\Models\TechnicalReport;
+use App\Models\DocumentArchive;
+use App\Services\Archive\GoogleDriveArchiveGateway;
+use App\Services\Archive\GoogleDriveArchiveException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Explicit source registry for protected active-module attachments.
@@ -32,24 +35,26 @@ final class ProtectedAttachmentService
     private const PRIVATE_DISK = 'local';
     private const HISTORICAL_DISK = 'public';
 
+    public function __construct(private readonly GoogleDriveArchiveGateway $archiveGateway) {}
+
     /** @return array<string, array<string, mixed>> */
     public function registry(): array
     {
         return [
-            'conservation-report' => ['model' => ConservationReportSubmission::class, 'ability' => 'technical-reports.view', 'folder' => 'conservation-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name'],
+            'conservation-report' => ['model' => ConservationReportSubmission::class, 'ability' => 'technical-reports.view', 'folder' => 'conservation-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'routing_source' => 'conservation', 'official_key' => 'mov'],
             'bms-data' => ['model' => BmsRecord::class, 'ability' => 'bms.view', 'folder' => 'bms-attachments', 'kind' => 'scalar', 'key' => 'attachment', 'path' => 'attachment'],
-            'bms-report' => ['model' => BmsReportSubmission::class, 'ability' => 'bms.view', 'folder' => 'bms-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name'],
-            'bams-report' => ['model' => BamsReportSubmission::class, 'ability' => 'bams.view', 'folder' => 'bams-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name'],
+            'bms-report' => ['model' => BmsReportSubmission::class, 'ability' => 'bms.view', 'folder' => 'bms-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'routing_source' => 'bms', 'official_key' => 'mov'],
+            'bams-report' => ['model' => BamsReportSubmission::class, 'ability' => 'bams.view', 'folder' => 'bams-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'routing_source' => 'bams', 'official_key' => 'mov'],
             'imea-data' => ['model' => ImeaAssessment::class, 'ability' => 'imea.view', 'folder' => 'imea-attachments', 'kind' => 'json', 'key' => 'attachments', 'field' => 'attachments'],
-            'imea-report' => ['model' => ImeaReportSubmission::class, 'ability' => 'imea.view', 'folder' => 'imea-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name'],
-            'imea-maintenance' => ['model' => ImeaFacilityMaintenanceReport::class, 'ability' => 'imea.view', 'folder' => 'imea-maintenance-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name'],
-            'aws' => ['model' => Aws::class, 'ability' => 'aws.view', 'folder' => 'aws_reports', 'kind' => 'scalar', 'key' => 'report_file', 'path' => 'report_file_path', 'name' => 'report_file_name'],
-            'management-plan' => ['model' => ManagementPlan::class, 'ability' => 'management-plans.view', 'folder' => 'management-plans', 'kind' => 'json', 'key' => 'attachments', 'field' => 'attachments'],
+            'imea-report' => ['model' => ImeaReportSubmission::class, 'ability' => 'imea.view', 'folder' => 'imea-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'routing_source' => 'imea', 'official_key' => 'mov'],
+            'imea-maintenance' => ['model' => ImeaFacilityMaintenanceReport::class, 'ability' => 'imea.view', 'folder' => 'imea-maintenance-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'routing_source' => 'imea-maintenance', 'official_key' => 'mov'],
+            'aws' => ['model' => Aws::class, 'ability' => 'aws.view', 'folder' => 'aws_reports', 'kind' => 'scalar', 'key' => 'report_file', 'path' => 'report_file_path', 'name' => 'report_file_name', 'routing_source' => 'aws', 'official_key' => 'report_file'],
+            'management-plan' => ['model' => ManagementPlan::class, 'ability' => 'management-plans.view', 'folder' => 'management-plans', 'kind' => 'json', 'key' => 'attachments', 'field' => 'attachments', 'routing_source' => 'management-plans', 'official_key' => '0'],
             'management-plan-profile' => ['model' => ManagementPlanProfile::class, 'ability' => 'management-plans.view', 'folder' => 'management-plan-profiles', 'kind' => 'json', 'key' => 'documents', 'field' => 'documents'],
             'technical-report' => ['model' => TechnicalReport::class, 'ability' => 'technical-reports.view', 'folder' => 'technical-reports', 'kind' => 'scalar', 'key' => 'attachment', 'path' => 'attachment', 'name' => 'attachment_original_name', 'mime' => 'attachment_mime_type', 'size' => 'attachment_size'],
-            'engp-report' => ['model' => EngpReportSubmission::class, 'ability' => 'technical-reports.view', 'folder' => 'engp-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'external' => 'mov_external_url'],
-            'ipaf-management' => ['model' => IpafManagementReport::class, 'ability' => 'technical-reports.view', 'folder' => 'ipaf-management-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'mime' => 'mov_mime_type', 'size' => 'mov_size'],
-            'ipaf-revenue' => ['model' => IpafRevenueCollection::class, 'ability' => 'technical-reports.view', 'folder' => 'ipaf-revenue-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'mime' => 'mov_mime_type', 'size' => 'mov_size'],
+            'engp-report' => ['model' => EngpReportSubmission::class, 'ability' => 'technical-reports.view', 'folder' => 'engp-report-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'external' => 'mov_external_url', 'routing_source' => 'engp', 'official_key' => 'mov'],
+            'ipaf-management' => ['model' => IpafManagementReport::class, 'ability' => 'technical-reports.view', 'folder' => 'ipaf-management-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'mime' => 'mov_mime_type', 'size' => 'mov_size', 'routing_source' => 'ipaf-management', 'official_key' => 'mov'],
+            'ipaf-revenue' => ['model' => IpafRevenueCollection::class, 'ability' => 'technical-reports.view', 'folder' => 'ipaf-revenue-movs', 'kind' => 'scalar', 'key' => 'mov', 'path' => 'mov_file_path', 'name' => 'mov_file_name', 'mime' => 'mov_mime_type', 'size' => 'mov_size', 'routing_source' => 'revenue', 'official_key' => 'mov'],
         ];
     }
 
@@ -57,6 +62,19 @@ final class ProtectedAttachmentService
     public function definition(string $source): ?array
     {
         return $this->registry()[$source] ?? null;
+    }
+
+    /** @return array{source:string,definition:array<string,mixed>}|null */
+    public function officialDefinitionForRoutingSource(string $routingSource): ?array
+    {
+        foreach ($this->registry() as $source => $definition) {
+            if (($definition['routing_source'] ?? null) === $routingSource
+                && is_string($definition['official_key'] ?? null)) {
+                return ['source' => $source, 'definition' => $definition];
+            }
+        }
+
+        return null;
     }
 
     /** @return list<array{key:string,path:mixed,external:?string}> */
@@ -225,22 +243,92 @@ final class ProtectedAttachmentService
         ];
     }
 
-    public function response(string $source, Model $record, string $key): BinaryFileResponse
+    public function response(string $source, Model $record, string $key): Response
     {
         abort_unless($this->definition($source), 404);
         $resolved = $this->resolveRecordAttachment($source, $record, $key);
         abort_unless($resolved !== null && $resolved['path'] !== null, 404);
 
         $diskPath = $this->resolveDiskPath($resolved['path']);
-        abort_unless($diskPath !== null, 404);
+        if ($diskPath === null) {
+            return $this->archivedResponse($source, $record, $key, $resolved);
+        }
 
         $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size'], $diskPath);
         $filename = $this->safeFilename($resolved['name'] ?: basename($resolved['path']));
-        $disposition = $this->isInlineMime($info['mime_type'], $filename) ? 'inline' : 'attachment';
+        $disposition = request()->boolean('download') || ! $this->isInlineMime($info['mime_type'], $filename) ? 'attachment' : 'inline';
 
         return response()->file($diskPath['absolute'], [
             'Content-Type' => $info['mime_type'],
             'Content-Disposition' => $disposition.'; filename="'.$filename.'"',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    /** Caller must authorize the report before invoking this protected fallback. */
+    private function archivedResponse(string $source, Model $record, string $key, array $resolved): Response
+    {
+        $definition = $this->definition($source);
+        abort_unless($definition !== null
+            && ($definition['official_key'] ?? null) === $key
+            && is_string($definition['routing_source'] ?? null), 404);
+
+        $archive = DocumentArchive::query()
+            ->where('source_type', $definition['routing_source'])
+            ->where('source_id', $record->getKey())
+            ->where('logical_slot', $key)
+            ->where('archive_status', 'ARCHIVED')
+            ->first();
+        abort_unless($archive && filled($archive->google_drive_file_id)
+            && filled($archive->archived_sha256), 404);
+        abort_if($archive->remote_availability === 'unavailable', 404);
+
+        try {
+            $sourceStream = $this->archiveGateway->retrieve($archive->google_drive_file_id);
+        } catch (\Throwable $exception) {
+            $archive->forceFill([
+                'remote_availability' => $exception instanceof GoogleDriveArchiveException && $exception->httpStatus === 404 ? 'unavailable' : 'unknown',
+                'last_verified_at' => now(),
+                'last_verification_error_class' => $exception instanceof GoogleDriveArchiveException && $exception->httpStatus === 404 ? 'NOT_FOUND' : 'PROVIDER_ERROR',
+            ])->save();
+            abort(404);
+        }
+        abort_unless(is_resource($sourceStream), 404);
+        $stream = fopen('php://temp', 'w+b');
+        abort_unless(is_resource($stream), 404);
+        $hash = hash_init('sha256');
+        $bytes = 0;
+        while (! feof($sourceStream)) {
+            $chunk = fread($sourceStream, 8192);
+            if ($chunk === false) break;
+            if ($chunk === '') break;
+            $bytes += strlen($chunk);
+            hash_update($hash, $chunk);
+            fwrite($stream, $chunk);
+        }
+        fclose($sourceStream);
+        $sha256 = hash_final($hash);
+        if ($bytes !== (int) $archive->archived_size || ! hash_equals($archive->archived_sha256, $sha256)) {
+            fclose($stream);
+            $archive->forceFill(['remote_availability' => 'unknown', 'last_verified_at' => now(), 'last_verification_error_class' => 'CONTENT_MISMATCH'])->save();
+            abort(404);
+        }
+        $archive->forceFill(['remote_availability' => 'verified', 'last_verified_at' => now(), 'last_verification_error_class' => null])->save();
+        rewind($stream);
+
+        $filename = $this->safeFilename($archive->original_filename ?: $resolved['name'] ?: basename((string) $resolved['path']));
+        $mime = $resolved['mime'] ?: (strtolower(pathinfo($filename, PATHINFO_EXTENSION)) === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+        $disposition = request()->boolean('download') || ! $this->isInlineMime($mime, $filename) ? 'attachment' : 'inline';
+
+        return response()->stream(function () use ($stream): void {
+            $output = fopen('php://output', 'wb');
+            if ($output !== false) stream_copy_to_stream($stream, $output);
+            if (is_resource($output)) fclose($output);
+            if (is_resource($stream)) fclose($stream);
+        }, 200, [
+            'Content-Type' => $mime,
+            'Content-Disposition' => $disposition.'; filename="'.$filename.'"',
+            'Content-Length' => (string) $archive->archived_size,
             'X-Content-Type-Options' => 'nosniff',
         ]);
     }

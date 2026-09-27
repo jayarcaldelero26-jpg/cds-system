@@ -7,6 +7,8 @@ use App\Models\AwsObservation;
 use App\Models\ProtectedArea;
 use Carbon\CarbonImmutable;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Compliance\ComplianceMovService;
 use App\Services\AwsMonthlySummaryService;
 use App\Services\AwsMonthlySummaryXlsxService;
@@ -15,6 +17,7 @@ use App\Services\AwsWeatherConditionService;
 use App\Services\AwsImportRowReader;
 use App\Services\AwsProtectedAreaScope;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
@@ -23,12 +26,13 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\Rule;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Throwable;
 
 class AwsController extends Controller
 {
+    private const MAX_DAILY_IMPORT_RECORDS = 20000;
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
@@ -38,6 +42,8 @@ class AwsController extends Controller
         private readonly AwsSummaryDocxService $monthlySummaryDocx,
         private readonly AwsWeatherConditionService $weather,
         private readonly AwsImportRowReader $importRows,
+        private readonly CurrentDocumentReplacementService $documents,
+        private readonly ReportDocumentAdapterResolver $documentAdapters,
     ) {}
 
     public function dataIndex(Request $request)
@@ -52,7 +58,7 @@ class AwsController extends Controller
         [$summaryStart, $summaryEnd] = $this->summaryBounds($summaryMode, $summaryPeriod);
 
         // 1. REPORTS QUERY: Kuhaon lang kadtong mga pormal nga report (walay timestamps/raw data flag)
-        $reportsQuery = $this->awsScope->query(Aws::with('protectedArea'), $request->user())->whereNull('timestamps')->latest();
+        $reportsQuery = $this->organization->scopeProtectedAreaQuery(Aws::with('protectedArea'), $request->user())->whereNull('timestamps')->latest();
 
         if ($request->has('protected_area_id') && $request->protected_area_id) {
             $reportsQuery->where('protected_area_id', $request->protected_area_id);
@@ -180,6 +186,7 @@ class AwsController extends Controller
             'chartRecords'   => $chartData,
             'protectedAreas' => $this->awsScope->options($request->user()),
             'organizationalOffices' => $this->organization->officeOptions(),
+            ...app(SubmissionFormScopeService::class)->options($request->user()),
             'dataOnly' => $request->boolean('aws_data'),
             'allProtectedAreasMode' => $summaryProtectedAreaId === null,
             'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'reporting_period', 'quarter', 'report_document_type', 'report_year', 'report_quarter', 'report_office', 'report_status', 'graph_start_date', 'graph_end_date', 'graph_range']),
@@ -357,6 +364,7 @@ class AwsController extends Controller
     }
     public function store(Request $request)
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $this->normalizeReportInput($request);
         if (! $request->filled('document_type') && $request->filled('reporting_period')) {
             $request->merge(['document_type' => $request->input('reporting_period')]);
@@ -367,21 +375,18 @@ class AwsController extends Controller
         $validated = $this->deriveCanonicalPeriod($validated);
         $this->validateMonitoringPeriod($validated);
         $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
-        $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id']);
-        $storedPath = null;
-
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
+        $file = $request->file('report_file');
+        unset($validated['report_file']);
+        $validated['timestamps'] = null;
+        $report = Aws::query()->create($validated);
         try {
-            if ($request->hasFile('report_file')) {
-                $storedPath = $this->attachments->store($request->file('report_file'), 'aws');
-                if (! is_string($storedPath)) throw new RuntimeException('The AWS report file could not be stored.');
-                $validated['report_file_path'] = $storedPath;
-                $validated['report_file_name'] = $request->file('report_file')->getClientOriginalName();
-            }
-
-            $validated['timestamps'] = null;
-            DB::transaction(fn () => Aws::create($validated));
+            $adapter = $this->documentAdapters->resolve('aws', $report, 'report_file');
+            $this->documents->replaceUsingAdapter($report, 'aws', 'report_file', $file, $adapter, 'report_file', (int) $request->user()->id,
+                fn (Aws $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'), [], 'UPLOAD');
         } catch (Throwable $exception) {
-            if ($storedPath) $this->attachments->delete($storedPath);
+            $report->delete();
             throw $exception;
         }
 
@@ -393,6 +398,7 @@ class AwsController extends Controller
         $aws = $this->authorizedRecord($request, $aws->id);
         abort_unless($aws->timestamps === null, 404);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($aws);
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $this->normalizeReportInput($request);
         if (! $request->filled('document_type') && $request->filled('reporting_period')) {
             $request->merge(['document_type' => $request->input('reporting_period')]);
@@ -401,30 +407,21 @@ class AwsController extends Controller
         $validated = $this->deriveCanonicalPeriod($validated, $aws);
         $this->validateMonitoringPeriod($validated);
         $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
-        $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
+        $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id'] ?? $aws->protected_area_id);
         if (! $request->hasFile('report_file') && ! app(ComplianceMovService::class)->hasValidSingleFile($aws, 'report_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['report_file' => ComplianceMovService::MESSAGE]);
         }
-        $oldPath = $aws->report_file_path;
-        $storedPath = null;
-        $removeOld = $request->hasFile('report_file');
-
-        try {
-            if ($request->hasFile('report_file')) {
-                $storedPath = $this->attachments->store($request->file('report_file'), 'aws');
-                if (! is_string($storedPath)) throw new RuntimeException('The AWS report file could not be stored.');
-                $validated['report_file_path'] = $storedPath;
-                $validated['report_file_name'] = $request->file('report_file')->getClientOriginalName();
-            }
-
-            $validated['timestamps'] = null;
+        $hasReplacement = $request->hasFile('report_file');
+        unset($validated['report_file']);
+        $validated['timestamps'] = null;
+        if ($hasReplacement) {
+            $adapter = $this->documentAdapters->resolve('aws', $aws, 'report_file');
+            $this->documents->replaceUsingAdapter($aws, 'aws', 'report_file', $request->file('report_file'), $adapter, 'report_file', (int) $request->user()->id,
+                fn (Aws $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'), $validated, 'REPLACEMENT');
+        } else {
             DB::transaction(fn () => $aws->update($validated));
-        } catch (Throwable $exception) {
-            if ($storedPath) $this->attachments->delete($storedPath);
-            throw $exception;
         }
-
-        if ($removeOld && $oldPath) $this->attachments->delete($oldPath);
 
         return redirect()->route('aws.index')->with('success', 'AWS report submission successfully updated.');
     }
@@ -434,13 +431,14 @@ class AwsController extends Controller
         $aws = $this->authorizedRecord(request(), $aws->id);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($aws);
         $path = $aws->report_file_path;
-        DB::transaction(fn () => $aws->delete());
+        app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)
+            ->deleteSource($aws, fn () => $aws->delete());
         if ($path) $this->attachments->delete($path);
 
         return redirect()->route('aws.index')->with('success', $aws->timestamps === null ? 'AWS report submission successfully deleted.' : 'AWS raw data record successfully deleted.');
     }
 
-    public function showReportFile(Aws $aws): BinaryFileResponse
+    public function showReportFile(Aws $aws): Response
     {
         $aws = $this->authorizedRecord(request(), $aws->id);
         return $this->attachments->response('aws', $aws, 'report_file');
@@ -465,9 +463,11 @@ class AwsController extends Controller
             $tracking->assertMutable($record);
         }
 
-        DB::transaction(function () use ($validated, $request) {
-            $this->awsScope->query(Aws::query(), $request->user())
-                ->whereIn('id', $validated['ids'])->delete();
+        DB::transaction(function () use ($records): void {
+            $lifecycle = app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class);
+            foreach ($records as $record) {
+                $lifecycle->deleteSource($record, fn () => $record->delete());
+            }
         });
 
         foreach ($records as $record) {
@@ -482,7 +482,7 @@ class AwsController extends Controller
     public function import(Request $request)
     {
         set_time_limit(300);
-        ini_set('memory_limit', '512M');
+        ini_set('memory_limit', '256M');
 
         $validated = $request->validate([
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
@@ -490,6 +490,7 @@ class AwsController extends Controller
         ]);
         $this->awsScope->assertCanAccess($request->user(), $validated['protected_area_id']);
 
+        $transactionStarted = false;
         try {
             $file = $request->file('file');
             ['header' => $header, 'rows' => $importRows] = $this->importRows->read($file);
@@ -608,18 +609,15 @@ class AwsController extends Controller
                 }
 
                 if (!isset($rowsByDate[$dateKey])) {
+                    if (count($rowsByDate) >= self::MAX_DAILY_IMPORT_RECORDS) {
+                        throw new RuntimeException('The AWS file exceeds the maximum of 20,000 daily records.');
+                    }
                     $rowsByDate[$dateKey] = [
-                        'precipitation' => [],
-                        'port2_precipitation' => [],
-                        'port2_max_precipitation_rate' => [],
-                        'port3_water_content' => [],
-                        'port3_soil_temperature' => [],
-                        'port3_ec' => [],
-                        'wind_direction' => [],
-                        'wind_speed' => [],
-                        'air_temperature' => [],
-                        'relative_humidity' => [],
-                        'atmospheric_pressure' => [],
+                        'sums' => [],
+                        'counts' => [],
+                        'maxima' => [],
+                        'wind_sin_sum' => 0.0,
+                        'wind_cos_sum' => 0.0,
                         'observation_count' => 0,
                     ];
                 }
@@ -642,33 +640,44 @@ class AwsController extends Controller
                     return is_numeric($val) ? (float) $val : null;
                 };
 
-                $appendIndexed = function(array &$bucket, ?int $index) use ($row, $cleanDecimal): void {
+                $appendIndexed = function(array &$metrics, string $field, ?int $index, string $mode = 'sum') use ($row, $cleanDecimal): void {
                     if ($index === null || ! array_key_exists($index, $row)) {
                         return;
                     }
 
                     $numericVal = $cleanDecimal($row[$index]);
-                    if ($numericVal !== null) {
-                        $bucket[] = $numericVal;
+                    if ($numericVal === null) return;
+                    if ($field === 'wind_direction') {
+                        $normalized = fmod($numericVal, 360.0);
+                        if ($normalized < 0) $normalized += 360.0;
+                        $radians = deg2rad($normalized);
+                        $metrics['wind_sin_sum'] += sin($radians);
+                        $metrics['wind_cos_sum'] += cos($radians);
+                        $metrics['counts'][$field] = ($metrics['counts'][$field] ?? 0) + 1;
+                    } elseif ($mode === 'max') {
+                        $metrics['maxima'][$field] = isset($metrics['maxima'][$field]) ? max($metrics['maxima'][$field], $numericVal) : $numericVal;
+                    } else {
+                        $metrics['sums'][$field] = ($metrics['sums'][$field] ?? 0.0) + $numericVal;
+                        $metrics['counts'][$field] = ($metrics['counts'][$field] ?? 0) + 1;
                     }
                 };
 
                 // Port 1 / ATMOS 41
-                $appendIndexed($rowsByDate[$dateKey]['precipitation'], $port1PrecipIndex);
-                $appendIndexed($rowsByDate[$dateKey]['wind_direction'], $windDirectionIndex);
-                $appendIndexed($rowsByDate[$dateKey]['wind_speed'], $windSpeedIndex);
-                $appendIndexed($rowsByDate[$dateKey]['air_temperature'], $airTemperatureIndex);
-                $appendIndexed($rowsByDate[$dateKey]['relative_humidity'], $relativeHumidityIndex);
-                $appendIndexed($rowsByDate[$dateKey]['atmospheric_pressure'], $pressureIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'precipitation', $port1PrecipIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'wind_direction', $windDirectionIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'wind_speed', $windSpeedIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'air_temperature', $airTemperatureIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'relative_humidity', $relativeHumidityIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'atmospheric_pressure', $pressureIndex);
 
                 // Port 2 / ECRN-100 â€” hidden rainfall reference.
-                $appendIndexed($rowsByDate[$dateKey]['port2_precipitation'], $port2PrecipIndex);
-                $appendIndexed($rowsByDate[$dateKey]['port2_max_precipitation_rate'], $port2MaxRateIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'port2_precipitation', $port2PrecipIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'port2_max_precipitation_rate', $port2MaxRateIndex, 'max');
 
                 // Port 3 / TEROS 12 â€” hidden soil-condition context.
-                $appendIndexed($rowsByDate[$dateKey]['port3_water_content'], $port3WaterIndex);
-                $appendIndexed($rowsByDate[$dateKey]['port3_soil_temperature'], $port3SoilTempIndex);
-                $appendIndexed($rowsByDate[$dateKey]['port3_ec'], $port3EcIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'port3_water_content', $port3WaterIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'port3_soil_temperature', $port3SoilTempIndex);
+                $appendIndexed($rowsByDate[$dateKey], 'port3_ec', $port3EcIndex);
             }
 
             if (empty($rowsByDate)) {
@@ -677,17 +686,18 @@ class AwsController extends Controller
 
             // --- DUPLICATE CHECK ---
             $dates = array_keys($rowsByDate);
-            $existingDates = $this->awsScope->query(Aws::query(), $request->user())
-                ->where('protected_area_id', $request->protected_area_id)
-                ->whereIn('start_date', $dates)
-                ->whereNotNull('timestamps')
-                ->pluck('start_date')
-                ->toArray();
-            $existingDates = array_unique(array_merge($existingDates, $this->awsScope->query(AwsObservation::query(), $request->user())
-                ->where('protected_area_id', $request->protected_area_id)
-                ->whereIn('start_date', $dates)
-                ->pluck('start_date')
-                ->toArray()));
+            $existingDates = [];
+            foreach (array_chunk($dates, 500) as $dateChunk) {
+                $existingDates = array_merge($existingDates, $this->awsScope->query(Aws::query(), $request->user())
+                    ->where('protected_area_id', $request->protected_area_id)
+                    ->whereIn('start_date', $dateChunk)
+                    ->whereNotNull('timestamps')
+                    ->pluck('start_date')->all());
+                $existingDates = array_merge($existingDates, $this->awsScope->query(AwsObservation::query(), $request->user())
+                    ->where('protected_area_id', $request->protected_area_id)
+                    ->whereIn('start_date', $dateChunk)->pluck('start_date')->all());
+            }
+            $existingDates = array_values(array_unique($existingDates));
 
             if (!empty($existingDates)) {
                 $totalExisting = count($existingDates);
@@ -707,25 +717,7 @@ class AwsController extends Controller
 
             // Wind direction is circular data. Example: 359Â° and 1Â° average to 0Â° (North),
             // not 180Â°. Use circular mean before converting to the compass label.
-            $circularMeanDegrees = function(array $degrees): ?float {
-                if (empty($degrees)) {
-                    return null;
-                }
-
-                $sinSum = 0.0;
-                $cosSum = 0.0;
-
-                foreach ($degrees as $degree) {
-                    $normalized = fmod((float) $degree, 360.0);
-                    if ($normalized < 0) {
-                        $normalized += 360.0;
-                    }
-
-                    $radians = deg2rad($normalized);
-                    $sinSum += sin($radians);
-                    $cosSum += cos($radians);
-                }
-
+            $circularMeanDegreesFromSums = static function(float $sinSum, float $cosSum): ?float {
                 if (abs($sinSum) < 1e-12 && abs($cosSum) < 1e-12) {
                     return null;
                 }
@@ -738,6 +730,10 @@ class AwsController extends Controller
                 return $mean;
             };
 
+            $mean = static fn (array $metrics, string $field): ?float => ($metrics['counts'][$field] ?? 0) > 0
+                ? $metrics['sums'][$field] / $metrics['counts'][$field]
+                : null;
+
             $degreesToCompass = function($deg) {
                 if ($deg === null) return 'â€”';
                 $deg = fmod((float)$deg, 360);
@@ -748,34 +744,23 @@ class AwsController extends Controller
             };
 
             DB::beginTransaction();
+            $transactionStarted = true;
             $successCount = 0;
 
             foreach ($rowsByDate as $date => $metrics) {
-                $totalPrecip = !empty($metrics['precipitation'])
-                    ? array_sum($metrics['precipitation'])
-                    : null;
+                $totalPrecip = $metrics['counts']['precipitation'] ?? 0 ? $metrics['sums']['precipitation'] : null;
 
                 // Port 2: independent precipitation reference. We retain it but
                 // do not replace the displayed Port 1 rainfall value.
-                $port2Precip = !empty($metrics['port2_precipitation'])
-                    ? array_sum($metrics['port2_precipitation'])
-                    : null;
+                $port2Precip = $metrics['counts']['port2_precipitation'] ?? 0 ? $metrics['sums']['port2_precipitation'] : null;
 
-                $port2MaxRate = !empty($metrics['port2_max_precipitation_rate'])
-                    ? max($metrics['port2_max_precipitation_rate'])
-                    : null;
+                $port2MaxRate = $metrics['maxima']['port2_max_precipitation_rate'] ?? null;
 
-                $avgPort3Water = !empty($metrics['port3_water_content'])
-                    ? array_sum($metrics['port3_water_content']) / count($metrics['port3_water_content'])
-                    : null;
+                $avgPort3Water = $mean($metrics, 'port3_water_content');
 
-                $avgPort3SoilTemp = !empty($metrics['port3_soil_temperature'])
-                    ? array_sum($metrics['port3_soil_temperature']) / count($metrics['port3_soil_temperature'])
-                    : null;
+                $avgPort3SoilTemp = $mean($metrics, 'port3_soil_temperature');
 
-                $avgPort3Ec = !empty($metrics['port3_ec'])
-                    ? array_sum($metrics['port3_ec']) / count($metrics['port3_ec'])
-                    : null;
+                $avgPort3Ec = $mean($metrics, 'port3_ec');
 
                 $rainfallDifferenceMm = null;
                 $rainfallDifferencePercent = null;
@@ -804,11 +789,11 @@ class AwsController extends Controller
                     }
                 }
 
-                $avgWindDir  = $circularMeanDegrees($metrics['wind_direction']);
-                $avgWindSpd  = !empty($metrics['wind_speed']) ? array_sum($metrics['wind_speed']) / count($metrics['wind_speed']) : null;
-                $avgTemp     = !empty($metrics['air_temperature']) ? array_sum($metrics['air_temperature']) / count($metrics['air_temperature']) : null;
-                $avgHum      = !empty($metrics['relative_humidity']) ? array_sum($metrics['relative_humidity']) / count($metrics['relative_humidity']) : null;
-                $avgPress    = !empty($metrics['atmospheric_pressure']) ? array_sum($metrics['atmospheric_pressure']) / count($metrics['atmospheric_pressure']) : null;
+                $avgWindDir  = ($metrics['counts']['wind_direction'] ?? 0) > 0 ? $circularMeanDegreesFromSums($metrics['wind_sin_sum'], $metrics['wind_cos_sum']) : null;
+                $avgWindSpd  = $mean($metrics, 'wind_speed');
+                $avgTemp     = $mean($metrics, 'air_temperature');
+                $avgHum      = $mean($metrics, 'relative_humidity');
+                $avgPress    = $mean($metrics, 'atmospheric_pressure');
 
                 $windDirectionLabel = $degreesToCompass($avgWindDir);
                 $calculatedRemarks = $this->weather->classifyDaily([
@@ -866,9 +851,10 @@ class AwsController extends Controller
             }
 
             DB::commit();
+            $transactionStarted = false;
             return redirect()->route('aws.index', ['tab' => 'monitoring-summary'])->with('success', "Successfully imported {$successCount} daily weather records from Zentra file!");
         } catch (\Exception $e) {
-            DB::rollBack();
+            if (($transactionStarted ?? false) && DB::transactionLevel() > 0) DB::rollBack();
             return back()->withErrors(['file' => 'Error importing file: ' . $e->getMessage()]);
         }
     }
@@ -876,7 +862,11 @@ class AwsController extends Controller
     private function authorizedRecord(Request $request, int $id): Aws
     {
         $record = Aws::query()->findOrFail($id);
-        $this->awsScope->assertCanAccess($request->user(), $record->protected_area_id);
+        if ($record->timestamps === null) {
+            $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id);
+        } else {
+            $this->awsScope->assertCanAccess($request->user(), $record->protected_area_id);
+        }
 
         return $record;
     }

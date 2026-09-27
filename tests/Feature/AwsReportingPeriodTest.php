@@ -2,6 +2,8 @@
 
 use App\Models\Aws;
 use App\Models\ProtectedArea;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -17,12 +19,15 @@ function awsPeriodUser(): User
 
 function awsPeriodArea(User $user): ProtectedArea
 {
-    return ProtectedArea::create([
+    $area = ProtectedArea::create([
         'name' => 'AWS Period Test PA', 'short_name' => 'AWSPT',
         'category' => 'Protected Landscape', 'municipality' => 'Mati',
         'province' => 'Davao Oriental', 'region' => 'Region XI',
         'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
+    $officeId = OrganizationalOffice::query()->where('name', 'CENRO Mati')->value('id');
+    ProtectedAreaOfficeAssignment::query()->create(['protected_area_id' => $area->id, 'organizational_office_id' => $officeId, 'assignment_type' => 'supervising', 'assigned_by' => $user->id]);
+    return $area;
 }
 
 test('AWS coverage ranges derive the year and preserve the selected quarter', function (): void {

@@ -8,6 +8,7 @@ use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Support\DatePresentationNormalizer;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 
 /**
  * The single presentation contract for report routing status.
@@ -27,11 +28,12 @@ final class RoutingStatusPresenter
         private readonly EngpReportWorkflowRegistry $engpWorkflows,
         private readonly ProtectedAreaRoutingPolicy $routingPolicy,
         private readonly PambComplianceCalculator $pambCompliance,
+        private readonly DocumentRoutingTransitionService $genericRouting,
     ) {}
 
-    public function status(Model $record, ?string $sourceKey = null): string
+    public function status(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null): string
     {
-        return match ($this->stage($record, $sourceKey)) {
+        return match ($this->stage($record, $sourceKey, $routingEvents)) {
             'not_ready' => self::NO_ACTIVITY,
             SubmissionTrackingService::CENRO_RELEASE => self::PENDING_CENRO,
             SubmissionTrackingService::PENRO_RECEIPT => self::PENDING_PENRO,
@@ -40,17 +42,28 @@ final class RoutingStatusPresenter
         };
     }
 
-    public function stage(Model $record, ?string $sourceKey = null): string
+    public function stage(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null): string
     {
         $sourceKey ??= $this->sourceKey($record);
 
         if ($record instanceof EngpReportSubmission || $sourceKey === 'engp') {
-            // ENGP's canonical route ends at PENRO Records receipt. Unlike
-            // workflows with release-component milestones, ENGP receipt is
-            // the terminal routing event and must take precedence here.
-            if ($this->date($record, 'date_received_penro')) {
-                return 'endorsed';
-            }
+            $routingStage = $this->genericRouting->state($record, 'engp', $routingEvents)['stage'];
+            if ($routingStage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL) return 'endorsed';
+            if (in_array($routingStage, [
+                DocumentRoutingProfileRegistry::PENRO_RECORDS,
+                DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO,
+                DocumentRoutingProfileRegistry::OFFICE_PENRO,
+                DocumentRoutingProfileRegistry::TRANSIT_TSD,
+                DocumentRoutingProfileRegistry::TSD,
+                DocumentRoutingProfileRegistry::TRANSIT_CDS_FOCAL,
+                DocumentRoutingProfileRegistry::CDS_FOCAL,
+                DocumentRoutingProfileRegistry::TRANSIT_CDS_CHIEF,
+                DocumentRoutingProfileRegistry::CDS_CHIEF,
+                DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO_RETURN,
+                DocumentRoutingProfileRegistry::OFFICE_PENRO_RETURN,
+                DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS_FINAL,
+                DocumentRoutingProfileRegistry::PENRO_RECORDS_FINAL,
+            ], true)) return SubmissionTrackingService::REGIONAL_ENDORSEMENT;
 
             $components = $this->engpWorkflows->releaseComponents(
                 (string) $record->getAttribute('workflow_key'),

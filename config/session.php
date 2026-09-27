@@ -169,7 +169,10 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE', false),
+    'secure' => \App\Support\ProductionSecuritySettings::secureCookie(
+        (string) env('APP_ENV', 'production'),
+        env('SESSION_SECURE_COOKIE', false),
+    ),
 
     /*
     |--------------------------------------------------------------------------
@@ -182,7 +185,10 @@ return [
     |
     */
 
-    'http_only' => env('SESSION_HTTP_ONLY', true),
+    'http_only' => \App\Support\ProductionSecuritySettings::httpOnlyCookie(
+        (string) env('APP_ENV', 'production'),
+        env('SESSION_HTTP_ONLY', true),
+    ),
 
     /*
     |--------------------------------------------------------------------------
@@ -199,7 +205,10 @@ return [
     |
     */
 
-    'same_site' => env('SESSION_SAME_SITE', 'lax'),
+    'same_site' => \App\Support\ProductionSecuritySettings::sameSite(
+        (string) env('APP_ENV', 'production'),
+        env('SESSION_SAME_SITE', 'lax'),
+    ),
 
     /*
     |--------------------------------------------------------------------------

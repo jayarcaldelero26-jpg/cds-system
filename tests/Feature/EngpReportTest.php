@@ -2,6 +2,7 @@
 
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
+use App\Models\DocumentArchive;
 use App\Models\NonWorkingDay;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
@@ -9,8 +10,10 @@ use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingPresenter;
+use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\Archive\GoogleDriveArchiveGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -157,11 +160,15 @@ test('ENGP tracking uses the canonical CENRO-to-PENRO route instead of release c
         ->and(app(SubmissionTrackingService::class)->genericTransitionKeys('engp', $report->id))->toContain('receive_at_cenro_chief');
 });
 
-test('ENGP routing elapsed processing time uses Conservation weekdays and active calendar closures, then stops at PENRO receipt', function () {
+test('ENGP routing remains active after PENRO receipt and completes only after final regional release', function () {
     $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Baganga']);
     $records = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'office_designated' => 'CENRO Baganga']);
     $penro = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'office_designated' => 'PENRO Davao Oriental']);
-    foreach ([$chief, $records, $penro] as $actor) {
+    $office = User::factory()->create(['section' => OrganizationalAccessService::OFFICE_PENRO, 'office_designated' => 'PENRO Davao Oriental']);
+    $tsd = User::factory()->create(['section' => OrganizationalAccessService::PENRO_TSD_CHIEF, 'office_designated' => 'PENRO Davao Oriental']);
+    $penroFocal = User::factory()->create(['section' => OrganizationalAccessService::PENRO_FOCAL, 'office_designated' => 'PENRO Davao Oriental']);
+    $penroChief = User::factory()->create(['section' => OrganizationalAccessService::PENRO_CHIEF, 'office_designated' => 'PENRO Davao Oriental']);
+    foreach ([$chief, $records, $penro, $office, $tsd, $penroFocal, $penroChief] as $actor) {
         $actor->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
     }
 
@@ -211,16 +218,46 @@ test('ENGP routing elapsed processing time uses Conservation weekdays and active
     $report->refresh();
     $events = app(DocumentRoutingTransitionService::class)->events($report, 'engp');
     $routing = $presenter->present($report, 'engp', null, $events);
-    expect($routing['working_days_pending'])->toBeNull()
-        ->and($report->submission_status)->toBe('Completed')
-        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing_complete'])->toBeTrue()
+    expect($routing['working_days_pending'])->toBeInt()
+        ->and($report->submission_status)->toBe('Pending Regional Endorsement')
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing_complete'])->toBeFalse()
+        ->and($routing['processing_percentage'])->toBe(80)
         ->and($events->count())->toBe(6);
+
+    foreach ([
+        [$penro, 'forward_to_office_penro'], [$office, 'receive_at_office_penro'],
+        [$office, 'assign_to_tsd_chief'], [$tsd, 'receive_at_tsd_chief'],
+        [$tsd, 'forward_to_cds_focal'], [$penroFocal, 'receive_at_cds_focal'],
+        [$penroFocal, 'forward_to_cds_chief'], [$penroChief, 'receive_at_cds_chief'],
+    ] as [$actor, $action]) {
+        $tracking->transition('engp', $report->id, $action, null, $actor->id);
+    }
+    $report->refresh();
+    $events = app(DocumentRoutingTransitionService::class)->events($report, 'engp');
+    expect($presenter->present($report, 'engp', null, $events)['processing_percentage'])->toBe(98);
+
+    $tracking->transition('engp', $report->id, 'recommend_to_office_penro', null, $penroChief->id);
+    $report->refresh();
+    $events = app(DocumentRoutingTransitionService::class)->events($report, 'engp');
+    expect($presenter->present($report, 'engp', null, $events)['processing_percentage'])->toBe(100);
+
+    foreach ([
+        [$office, 'receive_at_office_penro_final'],
+        [$office, 'approve_for_regional_release'], [$penro, 'receive_at_penro_records_final'],
+        [$penro, 'release_to_regional'],
+    ] as [$actor, $action]) {
+        $tracking->transition('engp', $report->id, $action, null, $actor->id);
+    }
+    $report->refresh();
+    expect($report->submission_status)->toBe('Completed')
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing_complete'])->toBeTrue()
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['stage'])->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
 
     CarbonImmutable::setTestNow();
     BusinessCalendarService::forgetCache();
 });
 
-test('ENGP PENRO receipt is terminal without release components while other report routing remains unchanged', function () {
+test('ENGP PENRO receipt is nonterminal even when no legacy release components exist', function () {
     $report = new EngpReportSubmission(engpPayload([
         'workflow_key' => 'ngp_produce', 'period_key' => 'Q1', 'period_label' => 'Quarter 1',
         'deadline_submission' => '2026-03-10', 'date_received_penro' => null,
@@ -230,7 +267,7 @@ test('ENGP PENRO receipt is terminal without release components while other repo
         ->and($report->releaseEvents()->count())->toBe(0);
 
     $report->setAttribute('date_received_penro', '2026-03-11');
-    expect($report->submission_status)->toBe('Completed')
+    expect($report->submission_status)->toBe('Pending Regional Endorsement')
         ->and($report->releaseEvents()->count())->toBe(0);
 
     $conservation = new ConservationReportSubmission([
@@ -238,6 +275,58 @@ test('ENGP PENRO receipt is terminal without release components while other repo
         'date_report_released_cenro' => '2026-03-10', 'date_received_penro' => '2026-03-11',
     ]);
     expect($conservation->submission_status)->toBe('Pending Regional Endorsement');
+});
+
+test('ENGP checkpoint uses the shared archive lifecycle and canonical Development path', function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    app()->forgetInstance(GoogleDriveArchiveGateway::class);
+    app()->instance(GoogleDriveArchiveGateway::class, new \App\Services\Archive\FakeDocumentArchiveGateway());
+
+    $actors = [];
+    foreach ([
+        'focal' => [OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga'],
+        'chief' => [OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga'],
+        'records' => [OrganizationalAccessService::CENRO_RECORDS, 'CENRO Baganga'],
+        'penro' => [OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental'],
+    ] as $key => [$category, $office]) {
+        $actors[$key] = User::factory()->create([
+            'section' => $category, 'office_designated' => $office, 'unit_assignment' => OrganizationalAccessService::DEVELOPMENT,
+        ]);
+        foreach (['reports.view', 'technical-reports.update'] as $ability) {
+            $actors[$key]->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+        }
+    }
+
+    $path = 'engp-report/final-uattest-cbep.pdf';
+    Storage::disk('local')->put($path, "%PDF-1.4\nfinal archive UAT fixture");
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'mov_file_path' => $path,
+        'mov_file_name' => 'CBEP UAT.pdf', 'created_by' => $actors['focal']->id, 'updated_by' => $actors['focal']->id,
+    ]));
+    app(\App\Services\Reports\ReportTrackingNumberService::class)->ensureFor(collect([['record' => $report, 'key' => 'engp']]));
+    $steps = [
+        [$actors['focal'], 'forward_to_cenro_chief'], [$actors['chief'], 'receive_at_cenro_chief'],
+        [$actors['chief'], 'forward_to_cenro_records'], [$actors['records'], 'receive_at_cenro_records'],
+        [$actors['records'], 'forward_to_penro_records'], [$actors['penro'], 'receive_at_penro_records'],
+    ];
+    foreach ($steps as [$actor, $stage]) {
+        $this->actingAs($actor)->post(route('submission-tracking.transition', ['engp', $report->id, $stage]), ['stage' => $stage])->assertRedirect();
+    }
+    expect(DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe(0);
+
+    $forward = 'forward_to_office_penro';
+    $this->actingAs($actors['penro'])
+        ->post(route('submission-tracking.transition', ['engp', $report->id, $forward]), ['stage' => $forward])
+        ->assertRedirect();
+
+    $archive = DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $report->id)->firstOrFail();
+    expect($archive->archive_status)->toBe('ARCHIVED')
+        ->and($archive->google_drive_file_id)->toStartWith('fake-archive-')
+        ->and($archive->original_filename)->toBe('2026-CDS-000001.pdf')
+        ->and($report->fresh()->mov_file_path)->toBe($path)
+        ->and(app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'engp')['stage'])
+            ->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO);
 });
 
 test('ENGP report creation is optional-MOV and its ordinary alert closes at PENRO receipt', function () {
@@ -333,7 +422,7 @@ test('authorized ENGP users can advance a report to CENRO Chief through Submissi
 });
 
 
-test('ENGP PENRO receipt completes routing and makes the report immutable', function () {
+test('ENGP PENRO receipt does not complete routing or make the report immutable', function () {
     $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Baganga']);
     $records = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'office_designated' => 'CENRO Baganga']);
     $penro = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'office_designated' => 'PENRO Davao Oriental']);
@@ -357,16 +446,9 @@ test('ENGP PENRO receipt completes routing and makes the report immutable', func
     $report->refresh();
     $row = $tracking->records()->firstWhere('source_id', $report->id);
     expect($report->date_received_penro)->not->toBeNull()
-        ->and($row['routing_complete'])->toBeTrue();
-
-    $this->actingAs($this->user)
-        ->from(route('engp-reports.index', 'cbep'))
-        ->put(route('engp-reports.update', ['cbep', $report->id]), [
-            'office' => 'CENRO Baganga', 'section_name' => 'Should remain unchanged',
-            'reporting_year' => 2026, 'period_key' => '2026-01', 'remarks' => 'immutable check',
-        ])
-        ->assertRedirect()
-        ->assertSessionHasErrors('submission');
+        ->and($row['routing_complete'])->toBeFalse()
+        ->and($row['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($row['submission_status'])->toBe('Pending Regional Endorsement');
 });
 
 test('ENGP administrative override records the generic routing event', function () {
@@ -433,7 +515,7 @@ test('ENGP tracking transitions enforce originating office scope', function () {
     expect($report->releaseEvents()->count())->toBe(0);
 });
 
-test('ENGP ordinary updates reject routing fields and preserve existing routing dates', function () {
+test('ENGP ordinary updates reject routing fields while PENRO-received submissions remain editable before final release', function () {
     $report = EngpReportSubmission::create(engpPayload([
         'workflow_key' => 'site_visit',
         'activity_name' => 'ENGP Site Visit Report',
@@ -467,10 +549,10 @@ test('ENGP ordinary updates reject routing fields and preserve existing routing 
             'remarks' => 'Ordinary edit',
         ])
         ->assertRedirect()
-        ->assertSessionHasErrors('submission');
+        ->assertSessionHasNoErrors();
 
     expect($report->fresh()->date_received_penro?->toDateString())->toBe('2026-03-11')
-        ->and($report->fresh()->section_name)->toBe('NGP');
+        ->and($report->fresh()->section_name)->toBe('Updated Section');
 });
 
 test('ENGP summary excludes the weekly accomplishment workflow', function () {

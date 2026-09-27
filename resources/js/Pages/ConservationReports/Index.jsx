@@ -1,12 +1,13 @@
 import { usePage } from '@inertiajs/react';
 import StandardAReportSubmissionTracker from '@/Components/StandardAReportSubmissionTracker';
 
-export default function Index({ workflow, submissions, protectedAreas, targetOffices = [], filters = {} }) {
+export default function Index({ workflow, submissions, protectedAreas, protectedAreasByOffice = {}, targetOffices = [], filters = {} }) {
     const { auth = {} } = usePage().props;
 
     return <StandardAReportSubmissionTracker
         submissions={submissions}
         protectedAreas={protectedAreas}
+        protectedAreasByOffice={protectedAreasByOffice}
         targetOffices={targetOffices}
         filters={filters}
         moduleLabel={workflow.label}

@@ -5,6 +5,7 @@ use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaFacility;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
+use App\Support\CsvCellSanitizer;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -128,4 +129,48 @@ test('IMEA Facilities CSV exports the canonical PA name once and preserves broad
     $this->actingAs($penro)->get(route('imea.facilities.report'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page->has('protectedAreas', 2)->where('totalFacilities', 2));
+});
+
+test('IMEA facilities CSV neutralizes formula-leading text while preserving numeric cells and CSV syntax', function (): void {
+    $user = imeaFacilitiesCenroUser();
+    $area = imeaFacilitiesArea('=SUM(1,1)', $user);
+    imeaFacilitiesAssign($area, 'cenro_baganga');
+    imeaFacilityFixture($area, [
+        'facility_type' => '=SUM(1,1)',
+        'unit_no' => 12,
+        'year_established' => 2022,
+        'location_brgy_muni' => "\t+CMD",
+        'management_zone' => ' -1+2',
+        'within_easement_zone' => '@SUM(A1:A2)',
+        'status' => '="formula result"',
+        'source_of_fund' => " \n-1+2",
+        'tenurial_instrument' => "Plain, \"quoted\"\nline UTF-8 ñ",
+        'recommendations' => '@SUM(A1:A2)',
+        'remarks' => 'Normal text with, comma and "quote".',
+    ]);
+
+    $response = $this->actingAs($user)->get(route('imea.facilities.export', ['protected_area_id' => $area->id]))->assertOk();
+    $stream = fopen('php://temp', 'w+');
+    fwrite($stream, $response->streamedContent());
+    rewind($stream);
+    $header = fgetcsv($stream);
+    $row = fgetcsv($stream);
+    fclose($stream);
+
+    expect($header)->toHaveCount(13)
+        ->and($row)->toHaveCount(13)
+        ->and($row[0])->toBe("'=SUM(1,1)")
+        ->and($row[2])->toBe("'=SUM(1,1)")
+        ->and($row[3])->toBe('12')
+        ->and($row[4])->toBe('2022')
+        ->and($row[5])->toBe("'\t+CMD")
+        ->and($row[6])->toBe("' -1+2")
+        ->and($row[7])->toBe("'@SUM(A1:A2)")
+        ->and($row[8])->toBe("'=".'"formula result"')
+        ->and($row[9])->toBe("' \n-1+2")
+        ->and($row[10])->toBe("Plain, \"quoted\"\nline UTF-8 ñ")
+        ->and($row[11])->toBe("'@SUM(A1:A2)")
+        ->and($row[12])->toBe('Normal text with, comma and "quote".')
+        ->and(CsvCellSanitizer::text(-12.5))->toBe(-12.5)
+        ->and(CsvCellSanitizer::text("'@SUM(A1:A2)"))->toBe("'@SUM(A1:A2)");
 });

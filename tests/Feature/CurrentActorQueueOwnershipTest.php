@@ -10,6 +10,10 @@ use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Spatie\Permission\Models\Permission;
 
+beforeEach(function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+});
+
 function currentActorOwnershipUser(string $section, string $office): User
 {
     $user = User::factory()->create([
@@ -81,6 +85,7 @@ test('the canonical current actor always owns exactly one active queue and hando
         [$cenroRecords, 'receive_at_cenro_records'],
         [$cenroRecords, 'forward_to_penro_records'],
         [$penroRecords, 'receive_at_penro_records'],
+        [$penroRecords, 'forward_to_office_penro'],
         [$office, 'receive_at_office_penro'],
         [$office, 'assign_to_tsd_chief'],
         [$tsd, 'receive_at_tsd_chief'],

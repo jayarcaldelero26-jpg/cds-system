@@ -18,6 +18,9 @@ use Illuminate\Support\Collection;
  */
 final class DocumentRoutingPresenter
 {
+    /** @var array<int, ?string> */
+    private array $supervisingOfficeCache = [];
+
     public function __construct(
         private readonly DocumentRoutingProfileRegistry $profiles,
         private readonly ProtectedAreaRoutingPolicy $routingPolicy,
@@ -78,6 +81,11 @@ final class DocumentRoutingPresenter
             'deadline' => $record->getAttribute('deadline_submission'),
             'compliance_status' => $record->getAttribute('timeliness'),
             'actions' => $pamb['actions'] ?? [],
+            'document_update_capabilities' => [
+                \App\Services\SubmissionTracking\SubmissionTrackingService::CENRO_RELEASE => true,
+                \App\Services\SubmissionTracking\SubmissionTrackingService::PENRO_RECEIPT => false,
+                \App\Services\SubmissionTracking\SubmissionTrackingService::REGIONAL_ENDORSEMENT => true,
+            ],
             'timeline' => array_map(function (array $event) use ($overrides, $record): array {
                 $override = $overrides->get($event['stage_key'] ?? $event['key']);
                 return [
@@ -163,7 +171,10 @@ final class DocumentRoutingPresenter
             $timeline[] = [
                 'key' => $stage,
                 'label' => $this->stageLabel($stage, $action, $start),
-                'event_type' => $event?->event_key ?? (data_get($action, 'event_key') ?? 'stage'),
+                // A start/current stage can have an incoming correction action
+                // in the profile even when no such event occurred. Only real
+                // events may classify a stage as a correction.
+                'event_type' => $event?->event_key ?? ($stage === $start ? 'stage' : (data_get($action, 'event_key') ?? 'stage')),
                 'action_label' => data_get($action, 'action_label'),
                 'from' => $event?->from_office ?? data_get($action, 'from_office'),
                 'to' => $event?->to_office ?? data_get($action, 'to_office'),
@@ -192,6 +203,7 @@ final class DocumentRoutingPresenter
                 ! ($action['correction'] ?? false)
                 && $action['key'] !== 'receive_at_penro_records_final'
             )),
+            'can_replace_document' => (bool) ($action['can_replace_document'] ?? false),
         ])->values()->all();
 
         $attachments = $this->routingAttachments->forDocumentEvents($state['events']->pluck('id'));
@@ -233,18 +245,6 @@ final class DocumentRoutingPresenter
 
     private function processingPercentage(string $sourceKey, string $stage): int
     {
-        $engp = [
-            DocumentRoutingProfileRegistry::PREPARATION => 0,
-            DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF => 20,
-            DocumentRoutingProfileRegistry::CENRO_CHIEF => 35,
-            DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS => 50,
-            DocumentRoutingProfileRegistry::CENRO_RECORDS => 65,
-            DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS => 80,
-            DocumentRoutingProfileRegistry::PENRO_RECORDS => 100,
-            DocumentRoutingProfileRegistry::RELEASED_REGIONAL => 100,
-        ];
-        if ($sourceKey === 'engp') return $engp[$stage] ?? 100;
-
         return [
             DocumentRoutingProfileRegistry::PREPARATION => 0,
             DocumentRoutingProfileRegistry::PENRO_ORIGIN => 0,
@@ -252,17 +252,17 @@ final class DocumentRoutingPresenter
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF => 20,
             DocumentRoutingProfileRegistry::CENRO_CHIEF => 35,
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS => 50,
-            DocumentRoutingProfileRegistry::CENRO_RECORDS => 65,
+            DocumentRoutingProfileRegistry::CENRO_RECORDS => 50,
             DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS => 80,
-            DocumentRoutingProfileRegistry::PENRO_RECORDS => 90,
-            DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO => 90,
-            DocumentRoutingProfileRegistry::OFFICE_PENRO => 92,
-            DocumentRoutingProfileRegistry::TRANSIT_TSD => 94,
-            DocumentRoutingProfileRegistry::TSD => 95,
-            DocumentRoutingProfileRegistry::TRANSIT_CDS_FOCAL => 97,
-            DocumentRoutingProfileRegistry::CDS_FOCAL => 98,
-            DocumentRoutingProfileRegistry::TRANSIT_CDS_CHIEF => 99,
-            DocumentRoutingProfileRegistry::CDS_CHIEF => 100,
+            DocumentRoutingProfileRegistry::PENRO_RECORDS => 80,
+            DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO => 85,
+            DocumentRoutingProfileRegistry::OFFICE_PENRO => 85,
+            DocumentRoutingProfileRegistry::TRANSIT_TSD => 88,
+            DocumentRoutingProfileRegistry::TSD => 90,
+            DocumentRoutingProfileRegistry::TRANSIT_CDS_FOCAL => 92,
+            DocumentRoutingProfileRegistry::CDS_FOCAL => 94,
+            DocumentRoutingProfileRegistry::TRANSIT_CDS_CHIEF => 96,
+            DocumentRoutingProfileRegistry::CDS_CHIEF => 98,
             DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO_RETURN => 100,
             DocumentRoutingProfileRegistry::OFFICE_PENRO_RETURN => 100,
             DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS_FINAL => 100,
@@ -306,12 +306,6 @@ final class DocumentRoutingPresenter
 
     private function pendingDays(array $state, Model $record, mixed $event, string $sourceKey): ?int
     {
-        // A valid PENRO receipt is ENGP's terminal routing point. Keep its
-        // timeline/history, but do not report further actor processing time.
-        if ($sourceKey === 'engp' && filled($record->getAttribute('date_received_penro'))) {
-            return null;
-        }
-
         $since = $this->pendingSince($state, $record, $event);
         if (! $since) return null;
         $office = $event?->to_office ?? $record->getAttribute('target_office');
@@ -398,11 +392,11 @@ final class DocumentRoutingPresenter
         ];
 
         if (in_array($stage, $cenroStages, true)) {
-            return $this->organization->supervisingOfficeNameForProtectedArea((int) $record->getAttribute('protected_area_id')) ?: $fallback;
+            return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: $fallback;
         }
         if ($stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL) return 'Regional Office';
         if ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
-            return $this->organization->supervisingOfficeNameForProtectedArea((int) $record->getAttribute('protected_area_id')) ?: $fallback;
+            return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: $fallback;
         }
         if ($stage !== null) {
             $targetOffice = (string) $record->getAttribute('target_office');
@@ -415,10 +409,20 @@ final class DocumentRoutingPresenter
     {
         if ($actor === null) return $fallback;
         if (str_contains($actor, 'CENRO') || $actor === 'PAMO' || $actor === 'CENRO') {
-            return $this->organization->supervisingOfficeNameForProtectedArea((int) $record->getAttribute('protected_area_id')) ?: $fallback;
+            return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: $fallback;
         }
         if (str_contains($actor, 'PENRO') || $actor === 'Office of the PENRO') return 'PENRO Davao Oriental';
         if ($actor === 'Regional Office') return 'Regional Office';
         return $fallback;
+    }
+
+    private function supervisingOffice(int $protectedAreaId): ?string
+    {
+        if ($protectedAreaId <= 0) return null;
+        if (! array_key_exists($protectedAreaId, $this->supervisingOfficeCache)) {
+            $this->supervisingOfficeCache[$protectedAreaId] = $this->organization->supervisingOfficeNameForProtectedArea($protectedAreaId);
+        }
+
+        return $this->supervisingOfficeCache[$protectedAreaId];
     }
 }

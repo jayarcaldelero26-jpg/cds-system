@@ -4,6 +4,7 @@ namespace App\Services\SubmissionTracking;
 
 use App\Models\DocumentRoutingEvent;
 use App\Models\User;
+use App\Services\Archive\ArchiveCheckpointPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
 use App\Services\Notifications\EdatsInAppNotificationService;
@@ -19,7 +20,7 @@ final class DocumentRoutingTransitionService
     public function __construct(
         private readonly DocumentRoutingProfileRegistry $profiles,
         private readonly DocumentRoutingAccessService $access,
-        private readonly EdatsInAppNotificationService $notifications,
+        private readonly ArchiveCheckpointPolicy $checkpointPolicy,
     ) {}
 
     /** @param Collection<int,DocumentRoutingEvent>|null $events */
@@ -70,7 +71,7 @@ final class DocumentRoutingTransitionService
         } elseif ($correctionReceived) {
             $actions = array_map(function (array $action): array {
                 if ($action['key'] === 'forward_to_penro_records') {
-                    return [...$action, 'action_label' => 'Resubmit Corrected Copy', 'label' => 'Corrected copy resubmitted to PENRO Records', 'correction_cycle' => true];
+                    return [...$action, 'action_label' => 'Resubmit Corrected Copy', 'label' => 'Corrected copy resubmitted to PENRO Records', 'correction_cycle' => true, 'document_operation' => 'correction_resubmission'];
                 }
                 return $action;
             }, $actions);
@@ -82,7 +83,10 @@ final class DocumentRoutingTransitionService
             'events' => $events->sortBy(fn (DocumentRoutingEvent $event): string => ($event->occurred_at?->toDateTimeString() ?? '').sprintf('%010d', $event->id))->values(),
             'profile' => $profile['profile'],
             'actions' => $actions,
-            'correction' => $lastCorrection || $correctionReceived || (bool) data_get($last?->metadata, 'correction_cycle', false),
+            // correction_cycle is historical metadata carried forward with the
+            // routing chain. Only a latest unresolved return is current state;
+            // correction receipt and later routing resolve it.
+            'correction' => $lastCorrection,
             'correction_event' => ($lastCorrection || $correctionReceived) ? $lastCorrectionEvent : null,
         ];
     }
@@ -128,10 +132,34 @@ final class DocumentRoutingTransitionService
         return is_array($action) && (bool) ($action['correction'] ?? false);
     }
 
+    /** Return the profile-derived document operation for an action available at the current stage. */
+    public function documentOperation(EloquentModel $record, string $sourceKey, string $actionKey): ?string
+    {
+        $action = collect($this->state($record, $sourceKey)['actions'])->firstWhere('key', $actionKey);
+        $operation = is_array($action) ? ($action['document_operation'] ?? null) : null;
+
+        return in_array($operation, ['forward', 'correction_resubmission'], true) ? $operation : null;
+    }
+
     public function assertCanView(EloquentModel $record, string $sourceKey, ?User $actor = null): void
     {
         $actor ??= auth()->user();
         abort_unless($actor && $this->access->canView($actor, $record, $sourceKey, $this->ability($sourceKey)), 403);
+    }
+
+    /** Current official documents are available to users authorized for an action at the live routing stage. */
+    public function canAccessCurrentDocument(EloquentModel $record, string $sourceKey, ?User $actor): bool
+    {
+        if (! $actor || ! $actor->is_active) return false;
+        if (app(OrganizationalAccessService::class)->isGlobal($actor)) return true;
+
+        $state = $this->state($record, $sourceKey, null, $actor);
+        foreach ($state['actions'] as $action) {
+            if (($action['internal_only'] ?? false) || ($action['from'] ?? null) !== $state['stage']) continue;
+            if ($this->access->canPerform($actor, $record, $sourceKey, $action)) return true;
+        }
+
+        return false;
     }
 
     public function transition(EloquentModel $record, string $sourceKey, string $actionKey, ?int $userId, ?string $remarks = null, ?string $correctionReasonKey = null, ?string $correctionDetail = null): DocumentRoutingEvent
@@ -169,6 +197,8 @@ final class DocumentRoutingTransitionService
                 $remarks = trim((string) $correctionDetail) ?: null;
             }
 
+            $this->checkpointPolicy->assertTransitionAllowed($action['key'], $action['from'], $action['to']);
+
             $event = DocumentRoutingEvent::query()->create([
                 'source_type' => $sourceKey,
                 'source_id' => $locked->getKey(),
@@ -195,42 +225,11 @@ final class DocumentRoutingTransitionService
             ]);
 
             $this->syncCompatibilityMilestone($locked, $sourceKey, $action['key']);
-
-            // Ordinary PENRO Records receipt is an atomic acknowledgement and
-            // handoff. Keep the receipt event as the returned event so an
-            // optional received/stamped copy remains linked to that receipt,
-            // while the second event makes Office of the PENRO the owner
-            // immediately within the same transaction.
-            if ($sourceKey !== 'engp' && $actionKey === 'receive_at_penro_records') {
-                $handoff = collect($this->profiles->actionProfile($sourceKey, false)['actions'])
-                    ->firstWhere('key', 'forward_to_office_penro');
-
-                if (is_array($handoff)) {
-                    DocumentRoutingEvent::query()->create([
-                        'source_type' => $sourceKey,
-                        'source_id' => $locked->getKey(),
-                        'workflow_key' => $locked->getAttribute('workflow_key'),
-                        'event_key' => $handoff['event_key'],
-                        'from_stage' => $handoff['from'],
-                        'to_stage' => $handoff['to'],
-                        'from_office' => $handoff['from_office'],
-                        'to_office' => $handoff['to_office'],
-                        'occurred_at' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
-                        'recorded_by' => $actor->getKey(),
-                        'remarks' => null,
-                        'metadata' => [
-                            'state_source' => 'routing_events',
-                            'action_key' => $handoff['key'],
-                            'atomic_handoff_after' => $event->id,
-                        ],
-                    ]);
-                }
-            }
             return $event->load('recordedBy:id,name,section');
         });
         $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
         try {
-            $this->notifications->notifyGenericTransition($record, $sourceKey, $event, $action);
+            app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, $action);
         } catch (\Throwable $exception) {
             report($exception);
         }
@@ -257,6 +256,7 @@ final class DocumentRoutingTransitionService
             if (($action['correction'] ?? false) && blank(trim((string) $remarks))) {
                 throw ValidationException::withMessages(['remarks' => 'Correction remarks are required.']);
             }
+            $this->checkpointPolicy->assertTransitionAllowed($action['key'], $action['from'], $action['to']);
             $event = DocumentRoutingEvent::query()->create([
                 'source_type' => $sourceKey,
                 'source_id' => $locked->getKey(),
@@ -276,7 +276,7 @@ final class DocumentRoutingTransitionService
         });
         $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
         try {
-            $this->notifications->notifyGenericTransition($record, $sourceKey, $event, $action);
+            app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, $action);
         } catch (\Throwable $exception) {
             report($exception);
         }
@@ -288,13 +288,19 @@ final class DocumentRoutingTransitionService
         $current = (string) $state['stage'];
         $actions = collect($state['actions']);
         $allowed = $actor ? $actions->filter(fn (array $action): bool => ! ($action['internal_only'] ?? false) && $action['from'] === $current && $this->access->canPerform($actor, $record, $sourceKey, $action, $this->ability($sourceKey)))->values() : collect();
+        $allowed = $allowed->map(fn (array $action): array => [...$action, 'can_replace_document' => in_array($action['document_operation'] ?? null, ['forward', 'correction_resubmission'], true)])->values();
         return [...$state, 'allowed_actions' => $allowed->all(), 'capabilities' => $actor ? $this->access->capabilities($actor, $record, $sourceKey, $allowed->all(), $this->ability($sourceKey)) : []];
     }
 
     /** @return array{0:string,1:bool} */
     private function legacyStage(EloquentModel $record, bool $direct, ?User $actor, string $sourceKey): array
     {
-        if ($sourceKey === 'engp') return [DocumentRoutingProfileRegistry::PREPARATION, false];
+        if ($sourceKey === 'engp') {
+            if ($record->getAttribute('date_endorsed_regional')) return [DocumentRoutingProfileRegistry::RELEASED_REGIONAL, true];
+            if ($record->getAttribute('date_received_penro')) return [DocumentRoutingProfileRegistry::PENRO_RECORDS, true];
+            if ($record->getAttribute('date_report_released_cenro')) return [DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS, true];
+            return [DocumentRoutingProfileRegistry::PREPARATION, false];
+        }
         if ($record->getAttribute('date_endorsed_regional')) return [DocumentRoutingProfileRegistry::RELEASED_REGIONAL, true];
         if ($record->getAttribute('date_received_penro')) return [DocumentRoutingProfileRegistry::PENRO_RECORDS, true];
         if ($record->getAttribute('date_report_released_cenro')) return [DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS, true];

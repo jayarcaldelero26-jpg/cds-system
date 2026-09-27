@@ -326,7 +326,9 @@ test('history uses authoritative ENGP period labels and clean non-applicable fie
         ->and($row['reporting_period'])->toBe('Quarter 1')
         ->and($row['protected_area'])->toBeNull()
         ->and($row['date_accomplished'])->toBeNull()
-        ->and($row['stage'])->toBe('cenro_preparation')
+        ->and($row['stage'])->toBe('penro_records')
+        ->and($row['submission_status'])->toBe('Pending Regional Endorsement')
+        ->and($row['routing_complete'])->toBeFalse()
         ->and($row['completed_at'])->toBeNull();
 });
 

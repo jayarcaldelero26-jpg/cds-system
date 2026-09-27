@@ -1,0 +1,68 @@
+# Local configuration and secrets
+.env
+.env.*
+auth.json
+
+# Git, recovery snapshots, and local editor/agent state
+.git
+.recovery
+.codex
+.agents
+.vscode
+.idea
+.cursor
+.zed
+.nova
+.history
+.fleet
+.vscode-test
+
+# Host dependencies and generated frontend build (generated inside the image)
+vendor
+node_modules
+public/build
+public/hot
+public/storage
+
+# Exclude all host runtime storage contents while retaining the directory tree
+# and tracked .gitignore placeholders required by the Dockerfile's chown step.
+storage/**
+!storage/**/
+!storage/**/.gitignore
+
+# Database files, dumps, backups, and local archives
+database/*.sqlite
+database/*.sqlite-*
+database/*.db
+database/*.sql
+database/*.dump
+database/*.bak
+database/*.gz
+database/backups
+*.sql
+*.dump
+*.bak
+*.backup
+*.sqlite
+*.sqlite-*
+*.zip
+
+# Logs, temporary files, test/browser artifacts, and local tooling output
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+.phpunit.cache
+.phpunit.result.cache
+playwright-report
+test-results
+coverage
+screenshots
+videos
+*.har
+*.webm
+*.mp4
+*.trace
+tmp
+temp

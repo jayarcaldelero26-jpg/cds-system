@@ -21,12 +21,6 @@ class HandleInertiaRequests extends Middleware
     {
         $user = Auth::user();
 
-        // Keep legacy privileged accounts usable after approval state was
-        // introduced. Ordinary users never receive this compatibility path.
-        if ($user && app(OrganizationalAccessService::class)->isGlobal($user) && ! $user->is_approved) {
-            $user->forceFill(['is_approved' => true])->saveQuietly();
-        }
-
         if ($user && ! $user->is_approved) {
             Auth::guard('web')->logout();
             $request->session()->invalidate();
@@ -91,13 +85,14 @@ class HandleInertiaRequests extends Middleware
                     'unit_assignment' => $user->unit_assignment,
                     'organizational_unit' => $userUnit,
                     'protected_area_id' => $user->protected_area_id,
-                    'roles' => collect([$organization->accountRole($user)]),
+                    'roles' => $user->getRoleNames()->values(),
                     'account_role' => $organization->accountRole($user),
                     'user_category' => $organization->effectiveCategory($user),
                     'is_active' => $user->is_active,
                     'is_approved' => $user->is_approved,
                 ] : null,
                 'canManageUsers' => $isAdmin,
+                'canViewStorage' => $user?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN) ?? false,
                 'canViewSystemDiagnostics' => $isAdmin || ($user?->can('system-diagnostics.view') ?? false),
                 'canManagePasskeys' => $isAdmin,
                 'organizationalUnit' => $userUnit,

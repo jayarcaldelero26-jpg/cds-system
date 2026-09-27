@@ -25,7 +25,7 @@ export function dateOnlyTimestamp(value) {
     return parseDateOnly(value)?.getTime() ?? Number.NaN;
 }
 
-export function formatReportDate(value, fallback = '—') {
+export function formatReportDate(value, fallback = '\u2014') {
     if (!value) return fallback;
 
     const date = parseDateOnly(value);
@@ -34,12 +34,12 @@ export function formatReportDate(value, fallback = '—') {
     return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 }
 
-export function formatReportValue(value, fallback = '—') {
+export function formatReportValue(value, fallback = '\u2014') {
     if (value === null || value === undefined || value === '') return fallback;
     return REPORT_DATE_PATTERN.test(String(value)) ? formatReportDate(value, fallback) : value;
 }
 
-export function formatReportDateTime(value, fallback = 'â€”') {
+export function formatReportDateTime(value, fallback = '\u2014') {
     if (!value) return fallback;
 
     const date = new Date(value);

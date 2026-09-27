@@ -7,7 +7,12 @@ use App\Models\User;
 use App\Services\AwsMonthlySummaryService;
 use App\Services\AwsWeatherConditionService;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Role;
+
+require_once __DIR__.'/../Support/IsolatedExportStorage.php';
+beforeEach(function (): void { isolateGeneratedExportStorage(); });
+afterEach(function (): void { removeIsolatedGeneratedExportStorage(); });
 
 function weatherAuditAdmin(): User
 {
@@ -196,6 +201,38 @@ test('aws import rejects unsupported files and missing timestamp headers', funct
         'protected_area_id' => $area->id,
         'file' => UploadedFile::fake()->createWithContent('weather.csv', "Temperature,Humidity\n25,80\n"),
     ])->assertSessionHasErrors('file');
+});
+
+test('AWS import rejects a duplicate date without partially inserting other dates', function (): void {
+    $user = weatherAuditAdmin();
+    $area = weatherAuditArea($user, 'AWS Duplicate Import PA');
+    weatherAuditDaily($area, '2026-04-01');
+    $csv = "Timestamps,mm precipitation,Wind Speed (m/s),Air Temperature (C)\n2026-04-01 00:00:00,1,2,25\n2026-04-02 00:00:00,2,3,26\n";
+
+    $this->actingAs($user)->post(route('aws.import'), [
+        'protected_area_id' => $area->id,
+        'file' => UploadedFile::fake()->createWithContent('weather.csv', $csv),
+    ])->assertSessionHasErrors('file');
+
+    expect(AwsObservation::query()->where('protected_area_id', $area->id)->count())->toBe(0);
+});
+
+test('AWS import rolls back earlier daily inserts when a later database insert fails', function (): void {
+    $user = weatherAuditAdmin();
+    $area = weatherAuditArea($user, 'AWS Import Rollback PA');
+    DB::statement("CREATE TRIGGER reject_second_aws_import BEFORE INSERT ON aws_observations WHEN NEW.start_date = '2026-04-02' BEGIN SELECT RAISE(ABORT, 'test-only insert failure'); END");
+
+    try {
+        $csv = "Timestamps,mm precipitation,Wind Speed (m/s),Air Temperature (C)\n2026-04-01 00:00:00,1,2,25\n2026-04-02 00:00:00,2,3,26\n";
+        $this->actingAs($user)->post(route('aws.import'), [
+            'protected_area_id' => $area->id,
+            'file' => UploadedFile::fake()->createWithContent('weather.csv', $csv),
+        ])->assertRedirect()->assertSessionHasErrors('file');
+
+        expect(AwsObservation::query()->where('protected_area_id', $area->id)->count())->toBe(0);
+    } finally {
+        DB::statement('DROP TRIGGER IF EXISTS reject_second_aws_import');
+    }
 });
 
 test('screen and all export formats receive the same generated weather remark', function () {

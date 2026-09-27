@@ -18,6 +18,7 @@ use Spatie\Permission\PermissionRegistrar;
 use Spatie\Permission\Models\Role;
 use App\Services\AuditLogService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\Authorization\AdministratorPreservationService;
 
 class UserController extends Controller
 {
@@ -47,7 +48,7 @@ class UserController extends Controller
                 'operational_group' => $organization->operationalGroupForCategory(app(OrganizationalAccessService::class)->effectiveCategory($user), $user->unit_assignment),
                     'protected_area_id' => $user->protected_area_id,
                     'role' => $user->roles->first()?->name,
-                    'account_role' => $organization->accountRole($user),
+                    'account_role' => $organization->accountType($user),
                     'protected_area_name' => $user->protectedArea?->name,
                     'access_configured' => $user->roles->contains(fn ($role): bool => $role->name !== 'no_role'),
                     'is_approved' => (bool) $user->is_approved,
@@ -117,7 +118,7 @@ class UserController extends Controller
                 'section' => $user->section,                     // Ã°Å¸Å¡â‚¬ Gidugang para ma-load sa edit form
                     'protected_area_id' => $user->protected_area_id,
                     'role' => $user->roles->first()?->name,
-                'account_role' => $organization->accountRole($user),
+                'account_role' => $organization->accountType($user),
                 'unit_assignment' => $user->unit_assignment,
                 'effective_category' => app(OrganizationalAccessService::class)->effectiveCategory($user),
                 'operational_group' => $organization->operationalGroupForCategory(app(OrganizationalAccessService::class)->effectiveCategory($user), $user->unit_assignment),
@@ -176,8 +177,22 @@ class UserController extends Controller
         }
 
         DB::transaction(function () use ($user, $data, $role): void {
-            $user->update($data);
-            $user->syncRoles([$role]);
+            $preservation = app(AdministratorPreservationService::class);
+            $lockedAdministratorIds = $preservation->lockUsableAdministratorIds();
+            $lockedUser = User::query()->lockForUpdate()->findOrFail($user->getKey());
+            $removesAdministrativeAccess = $preservation->isAdministrator($lockedUser)
+                && (! $preservation->isAdministratorRole($role) || (($data['is_active'] ?? $lockedUser->is_active) === false));
+
+            if ($removesAdministrativeAccess) {
+                $preservation->assertAnotherUsableAdministrator(
+                    $lockedUser,
+                    $lockedAdministratorIds,
+                    ! $preservation->isAdministratorRole($role) ? 'account_role' : 'is_active',
+                );
+            }
+
+            $lockedUser->update($data);
+            $lockedUser->syncRoles([$role]);
         });
 
         app(PermissionRegistrar::class)->forgetCachedPermissions();
@@ -247,7 +262,11 @@ class UserController extends Controller
         }
 
         DB::transaction(function () use ($user): void {
-            $user->update(['is_active' => false]);
+            $preservation = app(AdministratorPreservationService::class);
+            $lockedAdministratorIds = $preservation->lockUsableAdministratorIds();
+            $lockedUser = User::query()->lockForUpdate()->findOrFail($user->getKey());
+            $preservation->assertAnotherUsableAdministrator($lockedUser, $lockedAdministratorIds, 'is_active');
+            $lockedUser->update(['is_active' => false]);
         });
 
         app(AuditLogService::class)->record(
@@ -312,8 +331,15 @@ class UserController extends Controller
     {
         $this->authorize('delete', $user);
 
-        app(AuditLogService::class)->record('user_management', 'User Deleted', User::class, $user->id, 'User Management', 'Deleted a user account.');
-        $user->delete();
+        DB::transaction(function () use ($user): void {
+            $preservation = app(AdministratorPreservationService::class);
+            $lockedAdministratorIds = $preservation->lockUsableAdministratorIds();
+            $lockedUser = User::query()->lockForUpdate()->findOrFail($user->getKey());
+            $preservation->assertAnotherUsableAdministrator($lockedUser, $lockedAdministratorIds, 'account_role');
+
+            app(AuditLogService::class)->record('user_management', 'User Deleted', User::class, $lockedUser->id, 'User Management', 'Deleted a user account.');
+            $lockedUser->delete();
+        });
 
         return to_route('admin.users.index')->with('success', 'User deleted successfully.');
     }

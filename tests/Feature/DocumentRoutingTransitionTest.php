@@ -12,6 +12,7 @@ use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -48,7 +49,31 @@ function performRouting(DocumentRoutingTransitionService $service, BmsReportSubm
     $service->transition($report, 'bms', $action, $actor->id);
 }
 
-test('generic CENRO custody route atomically receives and hands off at PENRO Records', function (): void {
+test('a correction marker requires a real return event while genuine correction history stays visible', function (): void {
+    $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $report = routingReport('Correction marker parity PA');
+    $routing = app(DocumentRoutingTransitionService::class);
+    $presenter = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class);
+
+    test()->actingAs($focal);
+    $withoutCorrection = $presenter->present($report, 'bms', collect(), collect());
+    expect($withoutCorrection['correction'])->toBeFalse()
+        ->and($withoutCorrection['timeline'][0]['label'])->toBe('CENRO CDS Focal Person')
+        ->and($withoutCorrection['timeline'][0]['event_type'])->toBe('stage')
+        ->and($withoutCorrection['timeline'][0]['event_type'])->not->toBe('returned_for_correction');
+
+    performRouting($routing, $report, 'forward_to_cenro_chief', $focal);
+    performRouting($routing, $report, 'receive_at_cenro_chief', $chief);
+    $routing->transition($report->fresh(), 'bms', 'return_to_cenro_focal', $chief->id, 'Please correct the report.');
+    $withCorrection = $presenter->present($report->fresh(), 'bms', null, $routing->events($report->fresh(), 'bms'));
+    expect($withCorrection['correction'])->toBeTrue()
+        ->and(collect($withCorrection['timeline'])->pluck('event_type'))->toContain('returned_for_correction')
+        ->and(collect($withCorrection['routing_history'])->pluck('label'))->toContain('Returned for Correction');
+});
+
+test('generic custody route requires an explicit PENRO Records forward after receipt', function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
     $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $cenroRecords = routingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
@@ -77,6 +102,9 @@ test('generic CENRO custody route atomically receives and hands off at PENRO Rec
     performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     performRouting($service, $report, 'forward_to_penro_records', $cenroRecords);
 
+    expect(fn () => performRouting($service, $report, 'forward_to_office_penro', $penroRecords))
+        ->toThrow(ValidationException::class);
+
     $transit = $service->state($report->fresh(), 'bms');
     expect($transit['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
         ->and($report->fresh()->date_report_released_cenro)->not->toBeNull()
@@ -85,11 +113,13 @@ test('generic CENRO custody route atomically receives and hands off at PENRO Rec
     performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
     expect($report->fresh()->date_received_penro)->not->toBeNull();
     $ordinaryPenroActions = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
-    expect(collect($ordinaryPenroActions)->pluck('key')->all())
-        ->not->toContain('forward_to_office_penro')
-        ->not->toContain('release_to_regional');
+    expect($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and(collect($ordinaryPenroActions)->pluck('key')->all())->toBe(['forward_to_office_penro']);
     expect(fn () => performRouting($service, $report, 'receive_at_office_penro', $penroFocal))
+        ->toThrow(ValidationException::class);
+    expect(fn () => performRouting($service, $report, 'forward_to_office_penro', $officePenro))
         ->toThrow(HttpException::class);
+    performRouting($service, $report, 'forward_to_office_penro', $penroRecords);
     performRouting($service, $report, 'receive_at_office_penro', $officePenro);
 
     expect(fn () => performRouting($service, $report, 'assign_to_tsd_chief', $tsdChief))
@@ -315,7 +345,11 @@ test('Records correction returns to the immediate sender and resubmission preser
         ->and($report->fresh()->date_received_penro)->toBeNull()
         ->and($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::CENRO_RECORDS);
     performRouting($service, $report, 'receive_correction', $cenroRecords);
-    expect($service->state($report->fresh(), 'bms')['correction'])->toBeTrue();
+    $resolved = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)
+        ->present($report->fresh(), 'bms', null, $service->events($report->fresh(), 'bms'));
+    expect($service->state($report->fresh(), 'bms')['correction'])->toBeFalse()
+        ->and($resolved['correction'])->toBeFalse()
+        ->and(collect($resolved['routing_history'])->pluck('event_type'))->toContain('returned_for_correction', 'correction_received');
 });
 
 test('Records correction HTTP action accepts server-timed reasoned requests without a date', function (): void {
@@ -345,6 +379,7 @@ test('Records correction HTTP action accepts server-timed reasoned requests with
 });
 
 test('Records correction accepts an optional reference attachment without replacing the source document', function (): void {
+    Storage::fake('local');
     $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $cenroRecords = routingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');

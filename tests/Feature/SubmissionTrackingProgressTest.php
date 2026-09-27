@@ -93,9 +93,26 @@ test('processing percentage is profile-aware for ENGP and extended generic routi
         'to_office' => 'PENRO Records Unit', 'occurred_at' => now(), 'recorded_by' => $penroRecords->id,
     ]);
     $engpEvents = DocumentRoutingEvent::query()->where('source_type', 'engp')->where('source_id', $engp->id)->get();
-    expect($presenter->present($engp->fresh(), 'engp', null, $engpEvents)['processing_percentage'])->toBe(100);
+    $penroView = $presenter->present($engp->fresh(), 'engp', null, $engpEvents);
+    expect($penroView['processing_percentage'])->toBe(80)
+        ->and($penroView['current_stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($penroView['next_expected_action'])->toBe('Forward to Office of the PENRO');
+
+    $penroAction = collect(app(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::class)->actionProfile('engp')['actions'])
+        ->firstWhere('key', 'forward_to_office_penro');
+    expect($penroAction)->not->toBeNull()
+        ->and($penroAction)->not->toHaveKey('internal_only');
 
     $extended = progressReport('Extended Progress PA');
+    DocumentRoutingEvent::create([
+        'source_type' => 'bms', 'source_id' => $extended->id, 'workflow_key' => $extended->workflow_key,
+        'event_key' => 'received', 'from_stage' => DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS,
+        'to_stage' => DocumentRoutingProfileRegistry::CENRO_RECORDS, 'from_office' => 'CENRO CDS Chief',
+        'to_office' => 'CENRO Records Unit', 'occurred_at' => now(), 'recorded_by' => $records->id,
+    ]);
+    $extendedEvents = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $extended->id)->get();
+    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(50);
+
     DocumentRoutingEvent::create([
         'source_type' => 'bms', 'source_id' => $extended->id, 'workflow_key' => $extended->workflow_key,
         'event_key' => 'received', 'from_stage' => DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS,
@@ -103,7 +120,7 @@ test('processing percentage is profile-aware for ENGP and extended generic routi
         'to_office' => 'PENRO Records Unit', 'occurred_at' => now(), 'recorded_by' => $penroRecords->id,
     ]);
     $extendedEvents = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $extended->id)->get();
-    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(90);
+    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(80);
 
     DocumentRoutingEvent::create([
         'source_type' => 'bms', 'source_id' => $extended->id, 'workflow_key' => $extended->workflow_key,
@@ -113,7 +130,7 @@ test('processing percentage is profile-aware for ENGP and extended generic routi
     ]);
 
     $extendedEvents = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $extended->id)->get();
-    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(100);
+    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(98);
     DocumentRoutingEvent::create([
         'source_type' => 'bms', 'source_id' => $extended->id, 'workflow_key' => $extended->workflow_key,
         'event_key' => 'recommended', 'from_stage' => DocumentRoutingProfileRegistry::CDS_CHIEF,
@@ -130,9 +147,12 @@ test('tracking detail exposes the profile-aware processing percentage and compac
     $css = file_get_contents(base_path('resources/css/app.css'));
 
     expect($tracking)
+        ->toContain('Processing Progress')
         ->toContain('aria-label="Processing progress"')
         ->toContain('edats-tracking-current-marker__pulse')
         ->toContain('processing_percentage')
+        ->not->toContain('official-report-document-update')
+        ->not->toContain('Official report document update')
         ->and($css)
         ->toContain('@keyframes edats-tracking-status-pulse')
         ->toContain('2.1s ease-out infinite')

@@ -102,7 +102,7 @@ const calculateTrendStatus = (points) => {
   return { slope, status };
 };
 
-export default function Index({ auth, bmsRecords, protectedAreas, filters, spatialLayers = [], annexHeaderMetadata, reportSubmissions, reportFilters, bmsThreats = [], initialTab }) {
+export default function Index({ auth, bmsRecords, protectedAreas, targetOffices = [], protectedAreasByOffice = {}, filters, spatialLayers = [], annexHeaderMetadata, reportSubmissions, reportFilters, bmsThreats = [], initialTab }) {
   const canCreateBms = Boolean(auth?.canCreateBms);
   const canUpdateBms = Boolean(auth?.canUpdateBms);
   const canDeleteBms = Boolean(auth?.canDeleteBms);
@@ -772,7 +772,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     </div>                    )}
 
                     {activeTab === 'report-tracker' &&
-          <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} filters={reportFilters} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} dateConductedRangesEnabled={true} />
+          <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} filters={reportFilters} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} workflowConfig={{ document_type_required: false, period_required: true, date_accomplished_required: true }} dateConductedRangesEnabled={true} />
           }
 
                     {/* TAB 1: SPECIES RECORDS VIEW */}
@@ -1255,7 +1255,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, filters, spati
                     {activeTab === 'import' &&
           <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Bulk Import Transect Data</h3>
-                            <p className="text-sm text-gray-500 mb-6">Upload a CSV or TXT file following the Annex summary template format (maximum 50 MB).</p>
+                            <p className="text-sm text-gray-500 mb-6">Upload a CSV or TXT file following the Annex summary template format (maximum 50 MB). Each imported observation must include a valid monitoring date; rows without one are skipped.</p>
                             <form onSubmit={submitImport} className="space-y-5">
                                 <div>
 

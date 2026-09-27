@@ -214,6 +214,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     const userUnit = isGlobalUnitScope
         ? null
         : auth?.user?.unit_assignment || auth?.organizationalUnit || (userSection === 'ENGP' ? 'development' : null);
+    const isSubmissionTrackingPage = url.split('?')[0] === '/submission-tracking';
+    const trackingView = new URLSearchParams(url.split('?')[1] || '').get('view') || 'incoming';
+    const trackingViewLabel = ({ incoming: 'Incoming', outgoing: 'Outgoing', history: 'History' })[trackingView] || 'Incoming';
     const [openDropdowns, setOpenDropdowns] = useState({});
     const navigationRef = useRef(null);
     const navigation = useMemo(() => withGenericModuleNavigation(allNavigation, genericModuleNavigation), [genericModuleNavigation]);
@@ -316,8 +319,8 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
             );
         }
 
-        const childCommon = `${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} ${
-            isChildActive ? 'bg-green-600 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white'
+        const childCommon = `${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
+            isChildActive ? 'border-l-2 border-green-200 bg-green-600 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white'
         }`;
         const href = child.externalConfig === 'engpIacGeneratorUrl' ? engpIacGeneratorUrl : child.href;
 
@@ -349,7 +352,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         );
 
         return (
-            <Link key={child.label} href={child.href} onClick={onClose} className={childCommon}>
+            <Link key={child.label} href={child.href} onClick={onClose} className={childCommon} aria-current={isChildActive ? 'page' : undefined}>
                 <span className="min-w-0 flex-1 whitespace-normal">{child.label}</span>
             </Link>
         );
@@ -396,7 +399,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                                         onClick={() => toggleDropdown(item.label)}
                                         aria-expanded={isOpen}
                                         aria-label={`${item.label}: ${isOpen ? 'collapse' : 'expand'}`}
-                                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition focus:outline-none ${matchesNavigationItem(item, url) ? 'bg-white/12 text-white' : 'text-green-100/85 hover:bg-white/8 hover:text-white'}`}
+                                        className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${matchesNavigationItem(item, url) ? 'border-l-2 border-green-300 bg-green-900/60 text-white ring-1 ring-inset ring-white/15' : 'text-green-100/85 hover:bg-white/8 hover:text-white'}`}
                                     >
                                         <MenuIcon name={item.icon} active={matchesNavigationItem(item, url)} />
                                         <span className="flex-1 text-left">{item.label}</span>
@@ -410,7 +413,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
                         const active = matchesNavigationItem(item, url);
 
-                        const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition ${
+                        const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
                             active
                                 ? 'bg-white/14 text-white font-semibold'
                                 : 'text-green-100/85 hover:bg-white/8 hover:text-white'
@@ -424,13 +427,19 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                             </div></Tooltip>
                         );
                         return (
-                            <Link key={item.label} href={item.href} onClick={onClose} className={common}>
+                            <Link key={item.label} href={item.href} onClick={onClose} className={common} aria-current={active ? 'page' : undefined}>
                                 <MenuIcon name={item.icon} active={active} />
                                 <span>{item.label}</span>
                             </Link>
                         );
                     })}
                 </nav>
+                {isSubmissionTrackingPage && (
+                    <div className="mx-3 mb-3 rounded-lg border border-green-300/35 bg-green-900/70 px-3 py-2.5" role="status" aria-label={`Current page: Submission Tracking, ${trackingViewLabel}`}>
+                        <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-green-200">Current page</p>
+                        <p className="mt-0.5 text-xs font-bold text-white">Submission Tracking <span className="font-medium text-green-200">/ {trackingViewLabel}</span></p>
+                    </div>
+                )}
                 <div className="border-t border-white/10 p-4 text-xs leading-5 text-green-200">CDS-SMART<br />Conservation and Development Section · PENRO Davao Oriental</div>
             </aside>
         </>

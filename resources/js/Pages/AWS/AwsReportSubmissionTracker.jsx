@@ -1,13 +1,14 @@
 import { usePage } from '@inertiajs/react';
 import ReportSubmissionTracker from '@/Pages/Bms/ReportSubmissionTracker';
 
-export default function AwsReportSubmissionTracker({ records = [], pagination, protectedAreas = [], organizationalOffices = [], filters = {} }) {
+export default function AwsReportSubmissionTracker({ records = [], pagination, protectedAreas = [], organizationalOffices = [], targetOffices = [], protectedAreasByOffice = {}, filters = {} }) {
     const { auth = {} } = usePage().props;
 
     return <ReportSubmissionTracker
         submissions={{ data: records.map(record => ({ ...record, mov: record.report_file, mov_url: record.report_file?.url })), total: pagination?.total ?? records.length, links: pagination?.links || [] }}
         protectedAreas={protectedAreas}
-        targetOffices={organizationalOffices}
+        targetOffices={targetOffices}
+        protectedAreasByOffice={protectedAreasByOffice}
         filters={filters}
         moduleLabel="Automated Weather Station"
         submissionRoutes={{
@@ -39,6 +40,10 @@ export default function AwsReportSubmissionTracker({ records = [], pagination, p
             date_conducted_type: 'date',
             date_conducted_required: true,
             target_office_select: true,
+            activity_required: false,
+            period_required: false,
+            date_accomplished_required: false,
+            document_type_required: true,
             days_complied_field: 'number_days_complied',
             penro_delay_field: 'total_days_delayed_penro',
         }}

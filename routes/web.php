@@ -29,6 +29,7 @@ use App\Http\Controllers\ProtectedAttachmentController;
 use App\Http\Controllers\SubmissionRoutingAttachmentController;
 use App\Http\Controllers\ModuleDefinitionController;
 use App\Http\Controllers\SystemDiagnosticsController;
+use App\Http\Controllers\StorageSettingsController;
 use App\Http\Controllers\Admin\AuditLogController;
 use App\Services\Dashboard\DashboardMonitoringService;
 
@@ -39,22 +40,7 @@ Route::get('/', function (DashboardMonitoringService $monitoring) {
     // The public page deliberately receives aggregates only. The dashboard
     // service remains the single source of report-monitoring calculations.
     // Public visits must not allocate tracking references as a side effect.
-    $dashboard = $monitoring->overview([], false);
-    $summary = $dashboard['summary'];
-    $publicSummary = $monitoring->publicSummary();
-
-    return Inertia::render('Welcome', [
-        'overview' => [
-            'tracked_reports' => $summary['tracked_reports'],
-            'submitted' => $summary['submitted'],
-            'overdue' => $summary['overdue'],
-            'reports_due' => $summary['reports_due'],
-            'compliant' => $summary['compliant'],
-            'monitoring_sources' => collect($dashboard['rows'])->pluck('source')->filter()->unique()->count(),
-        ],
-        'publicSummary' => $publicSummary,
-        'reportTrend' => $monitoring->publicSubmissionTrend(),
-    ]);
+    return Inertia::render('Welcome', $monitoring->publicLandingData());
 })->name('welcome');
 
 Route::get('/dashboard', [DashboardController::class, 'index'])->middleware(['auth', 'verified'])->name('dashboard');
@@ -110,6 +96,8 @@ Route::middleware('auth')->group(function () {
     Route::get('admin/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->middleware('can:audit-logs.view')->name('audit-logs.show');
     Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');
     Route::get('settings/system-diagnostics', [SystemDiagnosticsController::class, 'index'])->middleware('can:system-diagnostics.view')->name('settings.system-diagnostics.index');
+    Route::get('settings/storage', [StorageSettingsController::class, 'index'])->middleware('admin')->name('settings.storage.index');
+    Route::post('settings/storage/refresh', [StorageSettingsController::class, 'refresh'])->middleware('admin')->name('settings.storage.refresh');
     Route::get('settings/module-management', [ModuleDefinitionController::class, 'index'])->middleware('can:module-definitions.view')->name('module-definitions.index');
     Route::post('settings/module-management', [ModuleDefinitionController::class, 'store'])->middleware('can:module-definitions.create')->name('module-definitions.store');
     Route::put('settings/module-management/{moduleDefinition}', [ModuleDefinitionController::class, 'update'])->middleware('can:module-definitions.update')->name('module-definitions.update');

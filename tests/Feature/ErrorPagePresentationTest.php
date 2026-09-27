@@ -39,18 +39,17 @@ test('expired sessions retain 419 and render the session expired page', function
 
     $this->get('/__verification/errors/419')
         ->assertStatus(419)
-        ->assertSee('"component":"Errors\\/419"', false)
-        ->assertSee('419-');
+        ->assertInertia(fn (Assert $page) => $page->component('Errors/419'));
 });
 
 test('production exceptions retain 500 and render no exception details', function (): void {
     configureProductionErrorPresentation();
+    config(['app.debug' => true]);
     Route::get('/__verification/errors/500', fn () => throw new RuntimeException('verification-secret-stack-marker'));
 
     $this->get('/__verification/errors/500')
         ->assertInternalServerError()
-        ->assertSee('"component":"Errors\\/500"', false)
-        ->assertSee('500-')
+        ->assertInertia(fn (Assert $page) => $page->component('Errors/500'))
         ->assertDontSee('verification-secret-stack-marker')
         ->assertDontSee('RuntimeException');
 });

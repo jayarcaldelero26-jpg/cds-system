@@ -18,7 +18,7 @@ use Webauthn\PublicKeyCredentialRequestOptions;
 
 final class AdminRoutingOverrideService
 {
-    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly DocumentRoutingTransitionService $generic, private readonly PambRoutingTimelineService $pamb, private readonly OrganizationalAccessService $organization, private readonly AuditLogService $audit, private readonly VerifyPasskey $verifyPasskey) {}
+    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly DocumentRoutingTransitionService $generic, private readonly PambRoutingTimelineService $pamb, private readonly OrganizationalAccessService $organization, private readonly AuditLogService $audit, private readonly VerifyPasskey $verifyPasskey, private readonly RoutingTransitionLifecycle $transitionLifecycle) {}
     public function canUse(User $user): bool { return $this->organization->isGlobal($user) && $user->is_active && $user->can('submission-tracking.admin-override'); }
 
     /** @return array<string,mixed> */
@@ -68,12 +68,16 @@ final class AdminRoutingOverrideService
         $passkey = ($this->verifyPasskey)($credential, $options, $admin); $before = $this->available($source, $recordId, $admin); $selected = collect($before['actions'])->firstWhere('key', $actionKey); if (! $selected) throw ValidationException::withMessages(['action' => 'That override action is no longer valid.']); $record = $this->tracking->source($source)['model']::query()->findOrFail($recordId);
         return DB::transaction(function () use ($source, $recordId, $actionKey, $admin, $reason, $passkey, $before, $selected, $record): SubmissionRoutingOverride {
             $fresh = $this->available($source, $recordId, $admin); if ($fresh['current_stage'] !== $before['current_stage'] || ! collect($fresh['actions'])->contains('key', $actionKey)) throw ValidationException::withMessages(['stage' => 'The record changed while passkey verification was in progress. Refresh and try again.']);
-            $eventKey = null; $resulting = null;
+            $eventKey = null; $resulting = null; $event = null;
             if ($before['engine'] === 'generic') { $event = $this->generic->transitionAsOverride($record, $source, $actionKey, $admin, ['override_for_category' => $selected['accountable_category_key'], 'override_for_office' => $selected['accountable_office'], 'override_reason' => $reason], $reason); $eventKey = $event->event_key; $resulting = $event->to_stage; }
             elseif ($this->pamb->isInternalStageKey($actionKey)) { $event = $this->pamb->record($record, $actionKey, CarbonImmutable::now()->toDateTimeString(), $admin->id, $reason); $eventKey = $event->stage_key; $resulting = $event->stage_key; }
             else { $this->tracking->transitionPambAsOverride($record, $actionKey, $admin->id); $eventKey = $actionKey; $resulting = $actionKey; }
             $override = SubmissionRoutingOverride::query()->create(['source' => $source, 'source_record_id' => $recordId, 'engine' => $before['engine'], 'action_key' => $actionKey, 'event_key' => $eventKey, 'actual_actor_user_id' => $admin->id, 'actual_actor_category' => $this->organization->effectiveCategory($admin), 'overridden_accountable_category' => $selected['accountable_category_key'], 'overridden_office' => $selected['accountable_office'], 'protected_area_id' => $record->getAttribute('protected_area_id'), 'reason' => $reason, 'authentication_method' => 'webauthn_passkey', 'passkey_id' => $passkey->getKey(), 'previous_stage' => $before['current_stage'], 'resulting_stage' => $resulting, 'metadata' => ['administrative_override' => true, 'action_label' => $selected['action_label']]]);
-            $this->audit->record('submission_tracking', 'Submission Tracking Administrative Override', $source, $recordId, $source, 'Administrative override executed by '.$admin->name.'.', ['administrative_override' => true, 'action_key' => $actionKey, 'override_for_category' => $selected['accountable_category_key'], 'override_for_office' => $selected['accountable_office'], 'reason' => $reason, 'authentication_method' => 'webauthn_passkey', 'override_id' => $override->id], $admin->id); return $override;
+            $this->audit->record('submission_tracking', 'Submission Tracking Administrative Override', $source, $recordId, $source, 'Administrative override executed by '.$admin->name.'.', ['administrative_override' => true, 'action_key' => $actionKey, 'override_for_category' => $selected['accountable_category_key'], 'override_for_office' => $selected['accountable_office'], 'reason' => $reason, 'authentication_method' => 'webauthn_passkey', 'override_id' => $override->id], $admin->id);
+            if ($event instanceof \App\Models\DocumentRoutingEvent || $event instanceof \App\Models\PambRoutingEvent) {
+                $this->transitionLifecycle->afterTransition($event, $admin);
+            }
+            return $override;
         });
     }
 }

@@ -62,6 +62,15 @@ final class SubmissionTrackingService
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
             });
 
+        // sourceQuery applies office/PA scope before hydration. CENRO visibility
+        // has one additional direct-PENRO exclusion; apply it to the already
+        // eager-loaded PA instead of re-fetching every conservation row by ID.
+        $user = auth()->user();
+        if ($user && $this->pambAccess->isCenro($user)) {
+            $loaded = $loaded->reject(fn (array $item): bool => $item['key'] === 'conservation'
+                && $this->routingPolicy->isDirectPenro($item['record']))->values();
+        }
+
         $this->moduleResolver->prime($loaded->pluck('record'));
         $trackingNumbers = $assignTrackingNumbers
             ? $this->trackingNumbers->ensureFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]))
@@ -70,15 +79,14 @@ final class SubmissionTrackingService
 
         $routingAudits = $this->routingAudits($loaded);
         $routingEvents = $this->genericRoutingEvents($loaded);
+        $pambEventIds = $loaded->where('key', 'conservation')
+            ->flatMap(fn (array $item) => $item['record']->routingEvents->pluck('id'))
+            ->unique()->values();
+        $pambAttachments = $this->routingAttachments->forPambEvents($pambEventIds);
+        $documentRoutingPresenter = app(DocumentRoutingPresenter::class);
 
         return $loaded
-            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers))
-            ->filter(function (array $record): bool {
-                $user = auth()->user();
-                if ($record['source'] !== 'conservation' || ! $user) return true;
-                $model = ConservationReportSubmission::query()->with('protectedArea')->find($record['source_id']);
-                return $model ? $this->pambAccess->canView($user, $model) : false;
-            })
+            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers, $pambAttachments, $documentRoutingPresenter))
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
             ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
             ->values();
@@ -88,6 +96,43 @@ final class SubmissionTrackingService
     public function search(string $term, int $limit = 5): Collection
     {
         return $this->records(['search' => $term], max(1, $limit));
+    }
+
+    /**
+     * Stream only authoritative receipt-date values for aggregate consumers.
+     * This avoids normalizing/routing-enriching every historical record when a
+     * public chart needs month counts only.
+     *
+     * @return \Generator<int, mixed>
+     */
+    public function receivedDateValues(int $chunkSize = 500): \Generator
+    {
+        $chunkSize = max(1, min(2000, $chunkSize));
+        $user = auth()->user();
+
+        foreach ($this->sources() as $key => $source) {
+            $model = new $source['model'];
+            $schema = Schema::connection($model->getConnectionName());
+            $table = $model->getTable();
+            if (! $this->columnExists($schema, $table, 'date_received_penro')) continue;
+
+            $query = $this->sourceQuery($key, $source, [], false)
+                ->whereNotNull($table.'.date_received_penro')
+                ->select([$table.'.id', $table.'.date_received_penro']);
+
+            if ($key === 'conservation' && $user && $this->pambAccess->isCenro($user)) {
+                $query->with('protectedArea:id,name,short_name');
+            }
+
+            foreach ($query->lazyById($chunkSize, $table.'.id', 'id') as $record) {
+                if ($key === 'conservation' && $user && $this->pambAccess->isCenro($user)
+                    && $this->routingPolicy->isDirectPenro($record)) {
+                    continue;
+                }
+
+                yield $record->getAttribute('date_received_penro');
+            }
+        }
     }
 
     /** @return array{records: Collection<int,array<string,mixed>>, queues: array<string,Collection<int,array<string,mixed>>>, modules: list<string>} */
@@ -486,7 +531,11 @@ final class SubmissionTrackingService
      */
     public function workspaceQueues(array $filters = [], ?Collection $snapshotRecords = null): array
     {
-        $queues = $this->queues($filters, $snapshotRecords);
+        // Reuse the exact authorized normalized snapshot for all three
+        // workspace projections; previously queues(), Incoming, and Outgoing
+        // could each trigger a separate cross-source scan.
+        $records = $snapshotRecords ?? $this->records($filters);
+        $queues = $this->queues($filters, $records);
         $key = static fn (array $row): string => ($row['source'] ?? '').':'.($row['source_id'] ?? '');
 
         $history = collect($queues)
@@ -500,7 +549,7 @@ final class SubmissionTrackingService
                 ?? '')
             ->values();
 
-        $incoming = ($snapshotRecords ?? $this->records($filters))
+        $incoming = $records
             ->filter(fn (mixed $row): bool => is_array($row) && ! ($row['routing_complete'] ?? false))
             // Keep Incoming aligned with the canonical executable action
             // projection. This includes the final PENRO Records release
@@ -535,7 +584,7 @@ final class SubmissionTrackingService
             'incoming_action_category' => $this->incomingActionCategory($row, $queueMembership[$key($row)] ?? []),
         ])->values();
 
-        $outgoing = $this->outgoingByLatestOffice($snapshotRecords ?? $this->records($filters), auth()->user())
+        $outgoing = $this->outgoingByLatestOffice($records, auth()->user())
             ->filter(fn (mixed $row): bool => is_array($row) && ! ($row['routing_complete'] ?? false))
             ->unique($key)
             ->reject(fn (array $row): bool => $incoming->contains(fn (array $active): bool => $key($active) === $key($row)))
@@ -796,7 +845,7 @@ final class SubmissionTrackingService
 
         if ($withRelations) {
             if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
-            if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy']);
+            if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy', 'movReviewedBy:id,name']);
             if ($key === 'engp') $query->with('releaseEvents');
         }
         if ($key === 'conservation') {
@@ -809,10 +858,21 @@ final class SubmissionTrackingService
         if ($key === 'aws') {
             $query->whereNull($table.'.timestamps');
         }
-        if ($user = auth()->user()) {
-            if ($key === 'conservation') $query = $this->pambAccess->scopeQuery($query, $user);
+        $user = auth()->user();
+        if ($user) {
+            if ($key === 'conservation') $query = $this->pambAccess->scopeQuery($query, $user, $this->organization);
             elseif ($key === 'engp') $query = $this->organization->scopeDevelopmentQuery($query, $user);
             elseif ($this->hasProtectedAreaColumn($source['model'])) $query = $this->organization->scopeProtectedAreaQuery($query, $user);
+        }
+        if ($key === 'conservation' && $user
+            && $this->organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)
+            && ! $this->organization->isGlobal($user)
+            && ! $this->pambAccess->isCenro($user)
+            && ! $this->pambAccess->isPamo($user)
+            && ! $this->pambAccess->isPenro($user)) {
+            // The former model-level visibility check permits unknown legacy
+            // categories to see only records without a PA assignment.
+            $query->whereNull($table.'.protected_area_id');
         }
         $this->applyDatabaseFilters($query, $key, $filters);
         if ($key !== 'conservation' && $key !== 'engp' && ($source['requires_date_accomplished'] ?? true)) $query->whereNotNull('date_accomplished');
@@ -866,22 +926,22 @@ final class SubmissionTrackingService
     private function sources(): array
     {
         return [
-            'engp' => ['model' => EngpReportSubmission::class, 'module' => fn (Model $record) => $this->engpWorkflows->find((string) $record->workflow_key)['label'] ?? 'ENGP Report', 'target_office' => 'office', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'supports_regional_endorsement' => false, 'url' => fn (Model $record) => route('engp-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('engp-reports.mov', [$record->workflow_key, $record]) : $this->safeExternalUrl($record->mov_external_url), 'mov_external' => fn (Model $record) => $this->safeExternalUrl($record->mov_external_url) !== null && empty($record->mov_file_path)],
-            'conservation' => ['model' => ConservationReportSubmission::class, 'module' => fn (Model $record) => $this->workflows->find((string) $record->workflow_key)['label'] ?? 'Conservation Report', 'ability' => 'technical-reports.update', 'url' => fn (Model $record) => route('conservation-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? $this->attachments->url('conservation-report', $record, 'mov') : null],
-            'bms' => ['model' => BmsReportSubmission::class, 'module' => fn () => 'BMS Report', 'ability' => 'bms.update', 'url' => fn () => route('bms.index', ['tracker' => 1]), 'mov_url' => fn (Model $record) => $record->mov_file_path ? $this->attachments->url('bms-report', $record, 'mov') : null],
-            'bams' => ['model' => BamsReportSubmission::class, 'module' => fn () => 'BAMS Report', 'ability' => 'bams.update', 'url' => fn () => route('bams.report-submissions.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('bams.report-submissions.mov', $record) : null],
-            'imea' => ['model' => ImeaReportSubmission::class, 'module' => fn () => 'IMEA Report', 'ability' => 'imea.update', 'url' => fn () => route('imea.report-submissions.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('imea.report-submissions.mov', $record) : null],
-            'aws' => ['model' => Aws::class, 'module' => fn () => 'AWS Report', 'ability' => 'aws.update', 'url' => fn () => route('aws.index'), 'mov_url' => fn (Model $record) => $record->report_file_path ? route('aws.report-file.show', $record) : null],
-            'ipaf-management' => ['model' => IpafManagementReport::class, 'module' => fn () => 'Management of IPAF', 'ability' => 'technical-reports.update', 'url' => fn () => route('ipaf.index', ['ipaf_tab' => 'management']), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('ipaf.management.mov', $record) : null],
-            'imea-maintenance' => ['model' => ImeaFacilityMaintenanceReport::class, 'module' => fn () => 'IMEA Facility Maintenance', 'ability' => 'imea.update', 'url' => fn () => route('imea.maintenance-reports.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('imea.maintenance-reports.mov', $record) : null],
-            'revenue' => ['model' => IpafRevenueCollection::class, 'module' => fn () => 'Revenue Collection', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'url' => fn () => route('ipaf.index', ['ipaf_tab' => 'revenue']), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('ipaf.revenue.mov', $record) : null],
-            'management-plans' => ['model' => ManagementPlan::class, 'module' => fn () => 'Management Plans', 'ability' => 'management-plans.update', 'url' => fn () => route('management-plans.index'), 'mov_url' => fn (Model $record) => data_get(collect($record->attachments ?? [])->first(), 'url')],
+            'engp' => ['model' => EngpReportSubmission::class, 'archive_unit' => 'Development Unit', 'archive_office_attribute' => 'office', 'archive_module_code' => fn (Model $record) => 'engp_'.(string) $record->workflow_key, 'module' => fn (Model $record) => $this->engpWorkflows->find((string) $record->workflow_key)['label'] ?? 'ENGP Report', 'target_office' => 'office', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'supports_regional_endorsement' => true, 'url' => fn (Model $record) => route('engp-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('engp-reports.mov', [$record->workflow_key, $record]) : $this->safeExternalUrl($record->mov_external_url), 'mov_external' => fn (Model $record) => $this->safeExternalUrl($record->mov_external_url) !== null && empty($record->mov_file_path)],
+            'conservation' => ['model' => ConservationReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn (Model $record) => (string) $record->workflow_key, 'module' => fn (Model $record) => $this->workflows->find((string) $record->workflow_key)['label'] ?? 'Conservation Report', 'ability' => 'technical-reports.update', 'url' => fn (Model $record) => route('conservation-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? $this->attachments->url('conservation-report', $record, 'mov') : null],
+            'bms' => ['model' => BmsReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'bms', 'module' => fn () => 'BMS Report', 'ability' => 'bms.update', 'url' => fn () => route('bms.index', ['tracker' => 1]), 'mov_url' => fn (Model $record) => $record->mov_file_path ? $this->attachments->url('bms-report', $record, 'mov') : null],
+            'bams' => ['model' => BamsReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'bams', 'module' => fn () => 'BAMS Report', 'ability' => 'bams.update', 'url' => fn () => route('bams.report-submissions.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('bams.report-submissions.mov', $record) : null],
+            'imea' => ['model' => ImeaReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'imea', 'module' => fn () => 'IMEA Report', 'ability' => 'imea.update', 'url' => fn () => route('imea.report-submissions.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('imea.report-submissions.mov', $record) : null],
+            'aws' => ['model' => Aws::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'automated_weather_station', 'module' => fn () => 'AWS Report', 'ability' => 'aws.update', 'url' => fn () => route('aws.index'), 'mov_url' => fn (Model $record) => $record->report_file_path ? route('aws.report-file.show', $record) : null],
+            'ipaf-management' => ['model' => IpafManagementReport::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'ipaf_management', 'module' => fn () => 'Management of IPAF', 'ability' => 'technical-reports.update', 'url' => fn () => route('ipaf.index', ['ipaf_tab' => 'management']), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('ipaf.management.mov', $record) : null],
+            'imea-maintenance' => ['model' => ImeaFacilityMaintenanceReport::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'imea_facility_maintenance', 'module' => fn () => 'IMEA Facility Maintenance', 'ability' => 'imea.update', 'url' => fn () => route('imea.maintenance-reports.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('imea.maintenance-reports.mov', $record) : null],
+            'revenue' => ['model' => IpafRevenueCollection::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'revenue_collection', 'module' => fn () => 'Revenue Collection', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'url' => fn () => route('ipaf.index', ['ipaf_tab' => 'revenue']), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('ipaf.revenue.mov', $record) : null],
+            'management-plans' => ['model' => ManagementPlan::class, 'archive_unit' => 'Development Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'management_plans', 'module' => fn () => 'Management Plans', 'ability' => 'management-plans.update', 'url' => fn () => route('management-plans.index'), 'mov_url' => fn (Model $record) => data_get(collect($record->attachments ?? [])->first(), 'url')],
         ];
     }
 
     /** @param array<string, mixed> $source
      *  @return array<string, mixed> */
-    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection, array $trackingNumbers = []): array
+    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection, array $trackingNumbers = [], array $pambAttachments = [], ?DocumentRoutingPresenter $documentRoutingPresenter = null): array
     {
         $isEngp = $sourceKey === 'engp';
         $period = $isEngp
@@ -936,7 +996,7 @@ final class SubmissionTrackingService
                 $record->getRawOriginal('deadline_submission') ?? $record->getAttribute('deadline_submission')
             ),
             'days_complied' => $record->getAttribute('days_complied') ?? $record->getAttribute('number_days_complied'),
-            'submission_status' => $this->statusPresenter->status($record, $sourceKey),
+            'submission_status' => $this->statusPresenter->status($record, $sourceKey, $routingEvents),
             'timeliness' => $record->getAttribute($isEngp ? 'timeliness_rating' : 'timeliness'),
             'penro_delay_days' => $record->getAttribute('penro_delay') ?? $record->getAttribute('total_days_delayed_penro'),
             'mov_status' => ($record->getAttribute('mov_file_path') || $record->getAttribute('report_file_path') || $record->getAttribute('mov_external_url') || ! empty($record->getAttribute('attachments'))) ? 'Complete' : ($record->getAttribute('date_received_penro') ? 'MOV Not Yet Submitted' : 'Not Yet Available'),
@@ -953,14 +1013,20 @@ final class SubmissionTrackingService
             $data[$field] = $field === 'date_conducted' ? $this->text($record, $field) : $this->date($record, $field);
         }
         $data['date_report_released_cenro'] = $releaseDate;
-        $data['date_endorsed_regional'] = $isEngp ? null : ($data['date_endorsed_regional'] ?? null);
+        $data['date_endorsed_regional'] = $isEngp ? $this->routingCompletedAt($record, $routingEvents) : ($data['date_endorsed_regional'] ?? null);
         $data['release_events'] = $isEngp ? $record->releaseEvents->map(fn ($event) => ['id' => $event->id, 'period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values()->all() : [];
         $data['routing_corrections_count'] = $correctionCounts[$sourceKey.':'.$record->getKey()] ?? 0;
-        $data['stage'] = $this->stage($record);
-        $data['routing_complete'] = $this->isRoutingComplete($record);
-        $data['completed_at'] = $data['routing_complete'] ? $this->routingCompletedAt($record) : null;
+        $data['stage'] = $isEngp
+            ? $this->statusPresenter->stage($record, $sourceKey, $routingEvents)
+            : $this->stage($record);
+        $data['routing_complete'] = $isEngp
+            ? $this->genericRouting->state($record, 'engp', $routingEvents)['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL
+            : $this->isRoutingComplete($record);
+        $data['completed_at'] = $data['routing_complete'] ? $this->routingCompletedAt($record, $routingEvents) : null;
         $data['can_transition'] = $this->organization->canUseSubmissionTrackingSource(auth()->user(), $sourceKey, $source['ability']);
-        $pambRouting = $sourceKey === 'conservation' ? $this->pambRouting->present($record) : ['applicable' => false, 'timeline' => [], 'current_document_location' => null, 'routing_summary' => [], 'summary_metrics' => []];
+        $pambRouting = $sourceKey === 'conservation'
+            ? $this->pambRouting->present($record, null, $pambAttachments, $routingAudits)
+            : ['applicable' => false, 'timeline' => [], 'current_document_location' => null, 'routing_summary' => [], 'summary_metrics' => []];
         $data['pamb_routing_applicable'] = $pambRouting['applicable'];
         $data['routing_timeline'] = $pambRouting['timeline'];
         if ($pambRouting['applicable'] && ($user = auth()->user())) {
@@ -997,8 +1063,8 @@ final class SubmissionTrackingService
             : 'Not Applicable';
         $data['turnaround_display'] = $this->semanticTurnaroundDisplay($record, $data, $data['mov_processing']);
         $data['routing'] = $sourceKey === 'conservation' && $pambRouting['applicable']
-            ? app(DocumentRoutingPresenter::class)->presentPamb($record, $pambRouting)
-            : app(DocumentRoutingPresenter::class)->present($record, $sourceKey, $routingAudits, $routingEvents);
+            ? ($documentRoutingPresenter ?? app(DocumentRoutingPresenter::class))->presentPamb($record, $pambRouting)
+            : ($documentRoutingPresenter ?? app(DocumentRoutingPresenter::class))->present($record, $sourceKey, $routingAudits, $routingEvents);
         $latestPambOccurredAt = $pambRouting['applicable']
             ? collect($pambRouting['timeline'] ?? [])
                 ->filter(fn (mixed $stage): bool => is_array($stage) && filled($stage['occurred_at'] ?? null))
@@ -1086,6 +1152,7 @@ final class SubmissionTrackingService
                         'correction' => false,
                         'correction_cycle' => true,
                         'attachment_allowed' => true,
+                        'can_replace_document' => true,
                     ]];
                 } else {
                     $data['routing']['actions'] = [[
@@ -1096,6 +1163,7 @@ final class SubmissionTrackingService
                         'to_office' => $targetOffice,
                         'correction' => false,
                         'attachment_allowed' => true,
+                        'can_replace_document' => false,
                     ], [
                         'key' => 'return_for_correction_penro_records',
                         'label' => 'Returned by PENRO Records for Correction',
@@ -1106,6 +1174,7 @@ final class SubmissionTrackingService
                         'correction_reference_allowed' => true,
                         'receipt_correction_context' => 'penro_records',
                         'attachment_allowed' => false,
+                        'can_replace_document' => false,
                     ]];
                 }
                 if ($actor = auth()->user()) {
@@ -1148,7 +1217,7 @@ final class SubmissionTrackingService
         if ($this->usesGenericRecord($sourceKey, $record)) {
             $data['current_document_location'] = $data['routing']['current_location'];
             $data['stage'] = $data['routing']['current_stage'] ?? $data['stage'];
-            $data['routing_complete'] = $sourceKey === 'engp' ? $this->isRoutingComplete($record) : ($data['stage'] ?? null) === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
+            $data['routing_complete'] = ($data['routing']['current_stage'] ?? $data['stage'] ?? null) === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
             $data['completed_at'] = $data['routing_complete'] ? data_get($data['routing'], 'last_action.occurred_at') : null;
         }
         $data['current_document'] = $this->routingAttachments->currentDescriptor(
@@ -1279,7 +1348,7 @@ final class SubmissionTrackingService
     public function isRoutingComplete(Model $record): bool
     {
         if ($record instanceof EngpReportSubmission) {
-            return $this->routingCompletedAt($record) !== null;
+            return $this->genericRouting->state($record, 'engp')['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
         }
 
         return $this->stage($record) === 'endorsed'
@@ -1312,18 +1381,21 @@ final class SubmissionTrackingService
         if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $this->genericRouting->isCorrectionAction($record, $sourceKey, $stage)) return false;
 
         if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && $this->pambRouting->applies($record)) {
-            $stage = $this->pambRouting->canonicalStageKey($stage);
-
-            return ! in_array($stage, [
-                PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL,
-            ], true);
+            return $this->pambRouting->documentOperation($stage) === 'forward';
         }
 
         return $stage !== 'receive_at_penro_records_final';
     }
 
-    private function routingCompletedAt(Model $record): ?string
+    private function routingCompletedAt(Model $record, ?Collection $routingEvents = null): ?string
     {
+        if ($record instanceof EngpReportSubmission) {
+            $state = $this->genericRouting->state($record, 'engp', $routingEvents);
+            if ($state['stage'] !== DocumentRoutingProfileRegistry::RELEASED_REGIONAL) return null;
+            $event = $state['events']->last(fn ($candidate): bool => $candidate->to_stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
+            return DatePresentationNormalizer::toDateString($event?->occurred_at ?? $record->getRawOriginal('date_endorsed_regional'));
+        }
+
         $terminalStage = $this->terminalStage($record);
         $value = match ($terminalStage) {
             self::PENRO_RECEIPT => $record->getRawOriginal('date_received_penro'),
@@ -1337,7 +1409,7 @@ final class SubmissionTrackingService
     private function terminalStage(Model $record): string
     {
         return $record instanceof EngpReportSubmission
-            ? self::PENRO_RECEIPT
+            ? self::REGIONAL_ENDORSEMENT
             : $this->routingPolicy->terminalStage($record);
     }
 
@@ -1494,7 +1566,7 @@ final class SubmissionTrackingService
 
     private function isTrackingNumber(string $value): bool
     {
-        return preg_match('/^EDATS-(?:PA|ENGP)-\d{4}-\d+$/i', trim($value)) === 1;
+        return preg_match('/^(?:EDATS-(?:PA|ENGP)-\d{4}-\d+|\d{4}-CDS-\d{6})$/i', trim($value)) === 1;
     }
 
     /** Cache immutable schema metadata for the lifetime of this service instance. */

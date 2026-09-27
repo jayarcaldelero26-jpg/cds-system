@@ -13,8 +13,7 @@ use Illuminate\Support\Facades\DB;
 /** Assigns stable, human-readable references to actual report records only. */
 final class ReportTrackingNumberService
 {
-    private const DOMAIN_PA = 'PA';
-    private const DOMAIN_ENGP = 'ENGP';
+    private const DOMAIN_CDS = 'CDS';
 
     /** @param Collection<int,array{record:Model,key:string}> $items @return array<string,string> */
     public function ensureFor(Collection $items): array
@@ -99,6 +98,23 @@ final class ReportTrackingNumberService
                 ->first();
             if ($existing) return $existing->tracking_number;
 
+            $sourceModel = $this->sourceModels()[$candidate['source_type']] ?? null;
+            if (! $sourceModel) {
+                throw new \InvalidArgumentException('Unsupported report tracking source type.');
+            }
+            $sourceQuery = $sourceModel::query();
+            if (in_array(SoftDeletes::class, class_uses_recursive($sourceModel), true)) $sourceQuery->withTrashed();
+            if (! $sourceQuery->whereKey($candidate['source_id'])->lockForUpdate()->first()) {
+                throw new \RuntimeException('Cannot allocate a tracking reference for a missing source record.');
+            }
+
+            $existing = ReportTrackingReference::query()
+                ->where('source_type', $candidate['source_type'])
+                ->where('source_id', $candidate['source_id'])
+                ->lockForUpdate()
+                ->first();
+            if ($existing) return $existing->tracking_number;
+
             DB::table('report_tracking_sequences')->insertOrIgnore([
                 'domain' => $candidate['domain'],
                 'reporting_year' => $candidate['reporting_year'],
@@ -115,7 +131,7 @@ final class ReportTrackingNumberService
             $number = (int) $sequence->next_value;
             $sequence->update(['next_value' => $number + 1]);
 
-            $tracking = sprintf('EDATS-%s-%d-%06d', $candidate['domain'], $candidate['reporting_year'], $number);
+            $tracking = sprintf('%04d-CDS-%06d', $candidate['reporting_year'], $number);
             try {
                 ReportTrackingReference::query()->create([
                     'tracking_number' => $tracking,
@@ -163,7 +179,51 @@ final class ReportTrackingNumberService
 
     public function domain(string $sourceType): string
     {
-        return $sourceType === 'engp' ? self::DOMAIN_ENGP : self::DOMAIN_PA;
+        return self::DOMAIN_CDS;
+    }
+
+    /** @param class-string<Model> $modelClass */
+    public function sourceTypeFor(string $modelClass): ?string
+    {
+        foreach ($this->sourceModels() as $sourceType => $sourceModel) {
+            if ($modelClass === $sourceModel) return $sourceType;
+        }
+
+        return null;
+    }
+
+    /** @return 'live'|'tombstoned'|'unexpected_missing_source' */
+    public function classifyReference(ReportTrackingReference $reference): string
+    {
+        if ($reference->source_deleted_at !== null) return 'tombstoned';
+
+        $modelClass = $this->sourceModels()[$reference->source_type] ?? null;
+        if (! $modelClass) return 'unexpected_missing_source';
+        $query = $modelClass::query();
+        if (in_array(SoftDeletes::class, class_uses_recursive($modelClass), true)) $query->withTrashed();
+
+        return $query->whereKey($reference->source_id)->exists() ? 'live' : 'unexpected_missing_source';
+    }
+
+    /** @return array{status:string,tracking_number:string,source_type:string,source_id:int,source:?Model} */
+    public function resolveReference(ReportTrackingReference $reference): array
+    {
+        $status = $this->classifyReference($reference);
+        $source = null;
+        if ($status === 'live') {
+            $modelClass = $this->sourceModels()[$reference->source_type];
+            $query = $modelClass::query();
+            if (in_array(SoftDeletes::class, class_uses_recursive($modelClass), true)) $query->withTrashed();
+            $source = $query->find($reference->source_id);
+        }
+
+        return [
+            'status' => $status,
+            'tracking_number' => $reference->tracking_number,
+            'source_type' => $reference->source_type,
+            'source_id' => (int) $reference->source_id,
+            'source' => $source,
+        ];
     }
 
     private function reportingYear(Model $record): int

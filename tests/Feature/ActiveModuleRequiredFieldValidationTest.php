@@ -4,10 +4,12 @@ use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function (): void {
+    Storage::fake('local');
     Role::findOrCreate('CDS Admin', 'web');
 
     foreach (['protected-areas.create', 'bms.create', 'bams.create'] as $ability) {

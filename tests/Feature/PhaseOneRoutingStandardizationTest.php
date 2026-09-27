@@ -28,6 +28,10 @@ use Spatie\Permission\Models\Permission;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+});
+
 function phaseOneActor(string $category, string $office): User
 {
     $user = User::factory()->create([
@@ -94,7 +98,7 @@ function phaseOneReportForSource(string $source, User $owner): \Illuminate\Datab
     };
 }
 
-test('generic PENRO Records receipt atomically hands off to Office of the PENRO', function (): void {
+test('generic PENRO Records receipt stays at PENRO Records until an explicit forward', function (): void {
     $focal = phaseOneActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = phaseOneActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $records = phaseOneActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
@@ -109,6 +113,7 @@ test('generic PENRO Records receipt atomically hands off to Office of the PENRO'
         [$records, 'forward_to_penro_records'],
     ] as [$actor, $action]) $routing->transition($report, 'bms', $action, $actor->id);
 
+    $eventsBeforeReceipt = $routing->events($report->fresh(), 'bms')->count();
     $receipt = $routing->transition($report->fresh(), 'bms', 'receive_at_penro_records', $penroRecords->id);
     $events = $routing->events($report->fresh(), 'bms');
     $state = $routing->state($report->fresh(), 'bms');
@@ -117,10 +122,16 @@ test('generic PENRO Records receipt atomically hands off to Office of the PENRO'
     $allowedPenro = $routing->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
 
     expect($receipt->event_key)->toBe('received')
-        ->and($events->pluck('metadata')->pluck('action_key')->all())->toContain('receive_at_penro_records', 'forward_to_office_penro')
-        ->and($state['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
-        ->and(collect($allowedOffice)->pluck('key')->all())->toBe(['receive_at_office_penro'])
-        ->and(collect($allowedPenro)->pluck('key')->all())->toBe([]);
+        ->and($events->count())->toBe($eventsBeforeReceipt + 1)
+        ->and($events->pluck('metadata')->pluck('action_key')->all())->toContain('receive_at_penro_records')
+        ->and($events->pluck('metadata')->pluck('action_key')->all())->not->toContain('forward_to_office_penro')
+        ->and($state['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and(collect($allowedOffice)->pluck('key')->all())->toBe([])
+        ->and(collect($allowedPenro)->pluck('key')->all())->toBe(['forward_to_office_penro']);
+
+    $routing->transition($report->fresh(), 'bms', 'forward_to_office_penro', $penroRecords->id);
+    expect($routing->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->and(collect($routing->presentation($report->fresh(), 'bms', null, $office)['allowed_actions'])->pluck('key')->all())->toBe(['receive_at_office_penro']);
 });
 
 test('generic correction reference uploads use correction_reference and never become effective copies', function (): void {
@@ -220,16 +231,18 @@ test('the canonical completion guard covers every non-NGP source model', functio
     }
 });
 
-test('all non-NGP generic profiles retain explicit final release while ordinary PENRO receipt is handled atomically', function (): void {
+test('all non-NGP generic profiles retain explicit PENRO Records forward and final release', function (): void {
     $registry = app(DocumentRoutingProfileRegistry::class);
     foreach (['conservation', 'bms', 'bams', 'imea', 'aws', 'ipaf-management', 'imea-maintenance', 'revenue', 'management-plans'] as $source) {
         $actions = collect($registry->actionProfile($source)['actions'])->keyBy('key');
         expect($actions->get('receive_at_penro_records')['event_key'] ?? null)->toBe('received')
+            ->and($actions->get('forward_to_office_penro')['to'] ?? null)->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+            ->and(($actions->get('forward_to_office_penro')['internal_only'] ?? false))->toBeFalse()
             ->and($actions->get('release_to_regional')['to'] ?? null)->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
     }
 });
 
-test('each generic source atomically transfers ordinary PENRO receipt ownership to Office PENRO', function (string $source): void {
+test('each generic source separates PENRO Records receipt from explicit Office PENRO forward', function (string $source): void {
     $focal = phaseOneActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = phaseOneActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $records = phaseOneActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
@@ -253,6 +266,7 @@ test('each generic source atomically transfers ordinary PENRO receipt ownership 
     expect($before['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
         ->and(collect($before['allowed_actions'])->pluck('key')->all())->toContain('receive_at_penro_records');
 
+    $eventsBeforeReceipt = $routing->events($report->fresh(), $source)->count();
     $receipt = $routing->transition($report->fresh(), $source, 'receive_at_penro_records', $penroRecords->id);
     $events = $routing->events($report->fresh(), $source);
     $penro = $routing->presentation($report->fresh(), $source, null, $penroRecords);
@@ -266,13 +280,20 @@ test('each generic source atomically transfers ordinary PENRO receipt ownership 
     ];
 
     expect($receipt->event_key)->toBe('received')
-        ->and($events->pluck('metadata')->pluck('action_key')->all())->toContain('receive_at_penro_records', 'forward_to_office_penro')
-        ->and($routing->state($report->fresh(), $source)['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
-        ->and(collect($penro['allowed_actions'])->pluck('key')->all())->toBe([])
-        ->and(collect($officePresentation['allowed_actions'])->pluck('key')->all())->toBe(['receive_at_office_penro'])
+        ->and($events->count())->toBe($eventsBeforeReceipt + 1)
+        ->and($events->pluck('metadata')->pluck('action_key')->all())->toContain('receive_at_penro_records')
+        ->and($events->pluck('metadata')->pluck('action_key')->all())->not->toContain('forward_to_office_penro')
+        ->and($routing->state($report->fresh(), $source)['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and(collect($penro['allowed_actions'])->pluck('key')->all())->toBe(['forward_to_office_penro'])
+        ->and(collect($officePresentation['allowed_actions'])->pluck('key')->all())->toBe([])
         ->and(collect($operationalActions)->flatten(1)->count())->toBe(1)
         ->and(app(SubmissionTrackingService::class)->isRoutingComplete($report->fresh()))->toBeFalse()
-        ->and(collect($routing->actionKeys($report->fresh(), $source))->contains('forward_to_office_penro'))->toBeFalse();
+        ->and(collect($routing->actionKeys($report->fresh(), $source))->contains('forward_to_office_penro'))->toBeTrue();
+
+    $routing->transition($report->fresh(), $source, 'forward_to_office_penro', $penroRecords->id);
+    expect($routing->state($report->fresh(), $source)['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->and(collect($routing->presentation($report->fresh(), $source, null, $penroRecords)['allowed_actions'])->pluck('key')->all())->toBe([])
+        ->and(collect($routing->presentation($report->fresh(), $source, null, $office)['allowed_actions'])->pluck('key')->all())->toBe(['receive_at_office_penro']);
 })->with(['bms', 'bams', 'imea', 'aws', 'ipaf-management', 'revenue', 'imea-maintenance', 'management-plans', 'conservation']);
 
 test('generic final PENRO Records release is visible in Incoming before release for every active extended source', function (): void {
@@ -292,7 +313,7 @@ test('generic final PENRO Records release is visible in Incoming before release 
         foreach ([
             [$focal, 'forward_to_cenro_chief'], [$chief, 'receive_at_cenro_chief'],
             [$chief, 'forward_to_cenro_records'], [$records, 'receive_at_cenro_records'],
-            [$records, 'forward_to_penro_records'], [$penroRecords, 'receive_at_penro_records'],
+            [$records, 'forward_to_penro_records'], [$penroRecords, 'receive_at_penro_records'], [$penroRecords, 'forward_to_office_penro'],
             [$office, 'receive_at_office_penro'], [$office, 'assign_to_tsd_chief'],
             [$tsd, 'receive_at_tsd_chief'], [$tsd, 'forward_to_cds_focal'],
             [$penroFocal, 'receive_at_cds_focal'], [$penroFocal, 'forward_to_cds_chief'],

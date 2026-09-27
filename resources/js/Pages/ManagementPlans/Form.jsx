@@ -9,15 +9,17 @@ import TimelinessBadge, { isTimelinessValue } from '../../Components/TimelinessB
 import SaveProgressIndicator from '@/Components/Attachments/SaveProgressIndicator';
 import DatePicker from '@/Components/DatePicker';
 import { canonicalDateConductedValue, legacyDateConductedHelper } from '@/Utils/dateConductedRanges';
+import TargetOfficeSelect from '@/Components/Form/TargetOfficeSelect';
+import ProtectedAreaSelect from '@/Components/Form/ProtectedAreaSelect';
 
 const labelClass = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
 const badgeClass = (value) => ({ 'Report Submitted': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
 const Badge = ({ value }) => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(value)}`}>{value || 'No Data'}</span>;
 
-export default function Form({ title, managementPlan, managementPlanType, protectedAreas = [] }) {
+export default function Form({ title, managementPlan, managementPlanType, protectedAreas = [], targetOffices = [], protectedAreasByOffice = {} }) {
   const isEdit = Boolean(managementPlan);
   const form = useForm({
-    target_office: managementPlan?.target_office || '', protected_area_id: managementPlan?.protected_area_id || '', activity_name: managementPlan?.activity_name || '', document_type: managementPlan?.document_type || '', semester: managementPlan?.semester || '', date_conducted: managementPlan?.date_conducted || '', date_accomplished: managementPlan?.date_accomplished || '', remarks: managementPlan?.remarks || '', attachments: [], removed_attachments: []
+    target_office: String(targetOffices.find(office => office.name === managementPlan?.target_office)?.id || (targetOffices.length === 1 ? targetOffices[0].id : '')), protected_area_id: managementPlan?.protected_area_id || '', activity_name: managementPlan?.activity_name || '', document_type: managementPlan?.document_type || '', semester: managementPlan?.semester || '', date_conducted: managementPlan?.date_conducted || '', date_accomplished: managementPlan?.date_accomplished || '', remarks: managementPlan?.remarks || '', attachments: [], removed_attachments: []
   });
   const attachments = useManagementPlanAttachments(managementPlan?.attachments || [], (newFiles, removedPaths) => form.setData((data) => ({ ...data, attachments: newFiles, removed_attachments: removedPaths })));
   const error = (name) => form.errors[name] && <span className="mt-1 block text-xs text-red-500">{form.errors[name]}</span>;
@@ -32,8 +34,8 @@ export default function Form({ title, managementPlan, managementPlanType, protec
             <Card className="xl:col-span-7"><form onSubmit={submit} className="space-y-5"><SaveProgressIndicator processing={form.processing} progress={form.progress} />
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-xs text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300"><span className="font-semibold">Plan:</span> <span className="font-bold">{managementPlanType.name}</span></div>
                 <CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className={labelClass}><FloatingInput id="form-target-office" label="Target Office" required value={form.data.target_office} onChange={change('target_office')} />{error('target_office')}</div>
-                    <div className={labelClass}><FloatingSelect id="form-name-of-pa" label="Name of PA" required value={form.data.protected_area_id} onChange={change('protected_area_id')}><option value="">Select Protected Area</option>{protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</FloatingSelect>{error('protected_area_id')}</div>
+                    <div className={labelClass}><TargetOfficeSelect id="form-target-office" value={form.data.target_office} options={targetOffices} required onChange={value => form.setData({ ...form.data, target_office: value, protected_area_id: '' })} error={form.errors.target_office} /></div>
+                    <div className={labelClass}><ProtectedAreaSelect id="form-name-of-pa" label="Name of PA" required value={form.data.protected_area_id} targetOfficeId={form.data.target_office} protectedAreasByOffice={protectedAreasByOffice} onChange={value => form.setData('protected_area_id', value)} error={form.errors.protected_area_id} disabled={!form.data.target_office} /></div>
                     <div className={labelClass}><FloatingInput id="form-name-of-activity" label="Name of Activity" required value={form.data.activity_name} onChange={change('activity_name')} />{error('activity_name')}</div>
                     <div className={labelClass}><FloatingSelect id="form-type-of-document" label="Type of Document" required value={form.data.document_type} onChange={change('document_type')}><option value="">Select Type of Document</option><option value="Final Report">Final Report</option><option value="Progress Report">Progress Report</option></FloatingSelect>{error('document_type')}</div>
                     <div className={labelClass}><FloatingSelect id="form-semester" label="Semester" required value={form.data.semester} onChange={change('semester')}><option value="">Select Semester</option><option>1st Semester</option><option>2nd Semester</option></FloatingSelect>{error('semester')}</div>

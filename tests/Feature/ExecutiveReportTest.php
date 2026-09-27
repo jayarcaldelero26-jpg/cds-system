@@ -9,9 +9,14 @@ use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
+require_once __DIR__.'/../Support/IsolatedExportStorage.php';
+
 beforeEach(function (): void {
+    isolateGeneratedExportStorage();
     $this->seed(ModuleDefinitionSeeder::class);
 });
+
+afterEach(function (): void { removeIsolatedGeneratedExportStorage(); });
 
 function executiveReportGlobalUser(): User
 {

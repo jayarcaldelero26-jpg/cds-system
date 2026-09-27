@@ -14,6 +14,9 @@ use Illuminate\Database\Eloquent\Model;
 
 final class OrganizationalAccessService
 {
+    /** @var array<string, list<int>> */
+    private array $fallbackProtectedAreaIdsCache = [];
+
     public const CONSERVATION = 'conservation';
     public const DEVELOPMENT = 'development';
     public const CENRO_RECORDS = 'CENRO_RECORDS';
@@ -70,6 +73,19 @@ final class OrganizationalAccessService
     }
 
     public function accountRole(?User $user): ?string
+    {
+        if (! $user) return null;
+        if ($user->hasRole(self::ACCOUNT_ROLE_SUPER_ADMIN)) return self::ACCOUNT_ROLE_SUPER_ADMIN;
+        if ($user->hasRole('CDS Admin')) return 'CDS Admin';
+
+        return self::ACCOUNT_ROLE_USER;
+    }
+
+    /**
+     * Return the account-management category used by the User form. It is
+     * separate from the canonical Spatie role and from organizational scope.
+     */
+    public function accountType(?User $user): ?string
     {
         if (! $user) return null;
         return $this->isGlobal($user) ? self::ACCOUNT_ROLE_SUPER_ADMIN : self::ACCOUNT_ROLE_USER;
@@ -294,7 +310,7 @@ final class OrganizationalAccessService
 
     public function officeOptions(): array
     {
-        return OrganizationalOffice::query()->whereIn('name', [...$this->cenroOffices(), ...$this->penroOffices()])->orderByRaw("CASE office_type WHEN 'cenro' THEN 1 ELSE 2 END")->orderBy('name')->get(['id', 'code', 'name', 'office_type'])->map(fn (OrganizationalOffice $office): array => ['id' => $office->id, 'code' => $office->code, 'name' => $office->name, 'label' => $office->office_type === 'penro' ? 'PENRO Davao Oriental' : $office->name, 'office_type' => $office->office_type, 'is_active' => true])->all();
+        return OrganizationalOffice::query()->where('is_active', true)->whereIn('name', [...$this->cenroOffices(), ...$this->penroOffices()])->orderByRaw("CASE office_type WHEN 'cenro' THEN 1 ELSE 2 END")->orderBy('name')->get(['id', 'code', 'name', 'office_type'])->map(fn (OrganizationalOffice $office): array => ['id' => $office->id, 'code' => $office->code, 'name' => $office->name, 'label' => $office->office_type === 'penro' ? 'PENRO Davao Oriental' : $office->name, 'office_type' => $office->office_type, 'is_active' => true])->all();
     }
 
     public function assignSupervisingOffice(ProtectedArea $protectedArea, int $officeId, User $actor): void
@@ -453,6 +469,11 @@ final class OrganizationalAccessService
         if (! $area) return null;
         $assigned = $area->supervisingOfficeAssignment?->office?->name;
         if (filled($assigned)) return $this->normalizeOffice($assigned);
+        return $this->fallbackSupervisingOfficeForProtectedArea($area);
+    }
+
+    private function fallbackSupervisingOfficeForProtectedArea(ProtectedArea $area): ?string
+    {
         foreach ([
             ['short_names' => ['MHRWS'], 'full_names' => ['Mt. Hamiguitan Range Wildlife Sanctuary', 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)'], 'office' => 'PENRO Davao Oriental'],
             ['short_names' => ['APL'], 'full_names' => ['Aliwagwag Protected Landscape', 'Aliwagwag Protected Landscape (APL)'], 'office' => 'CENRO Baganga'],
@@ -486,7 +507,25 @@ final class OrganizationalAccessService
     {
         $normalizedOffice = $this->normalizeOffice($office);
         if (! $normalizedOffice) return [];
-        return ProtectedArea::query()->pluck('id')->filter(fn (mixed $id): bool => $this->same($this->supervisingOfficeNameForProtectedArea((int) $id), $normalizedOffice))->map(fn (mixed $id): int => (int) $id)->values()->all();
+        if (array_key_exists($normalizedOffice, $this->fallbackProtectedAreaIdsCache)) {
+            return $this->fallbackProtectedAreaIdsCache[$normalizedOffice];
+        }
+
+        return $this->fallbackProtectedAreaIdsCache[$normalizedOffice] = ProtectedArea::query()
+            ->with('supervisingOfficeAssignment.office')
+            ->get(['id', 'name', 'short_name'])
+            ->filter(function (ProtectedArea $area) use ($normalizedOffice): bool {
+                $assigned = $area->supervisingOfficeAssignment?->office?->name;
+                $supervisingOffice = filled($assigned)
+                    ? $this->normalizeOffice($assigned)
+                    : $this->fallbackSupervisingOfficeForProtectedArea($area);
+
+                return $this->same($supervisingOffice, $normalizedOffice);
+            })
+            ->pluck('id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->values()
+            ->all();
     }
 
     public function canonicalOffices(): array

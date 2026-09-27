@@ -36,6 +36,22 @@ function pambRoleUser(string $role, string $section, string $office = 'CENRO Mat
     return $user;
 }
 
+final class PambMovArchiveGateway implements \App\Services\Archive\GoogleDriveArchiveGateway
+{
+    private array $objects = [];
+    public function findByIdentityAndHash(array $identity, string $sha256): ?array { return null; }
+    public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
+    {
+        $id = 'pamb-mov-archive-'.count($this->objects);
+        $this->objects[$id] = ['sha256' => $sha256, 'size' => filesize($localPath)];
+        return ['file_id' => $id, 'folder_id' => $folderId];
+    }
+    public function verify(string $fileId, string $sha256, int $size): bool { return $this->verifyAvailability($fileId, $sha256, $size) === 'verified'; }
+    public function verifyAvailability(string $fileId, string $sha256, int $size): string { return ($this->objects[$fileId]['sha256'] ?? null) === $sha256 && ($this->objects[$fileId]['size'] ?? null) === $size ? 'verified' : 'content_mismatch'; }
+    public function replace(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array { return ['file_id' => $fileId, 'folder_id' => $folderId]; }
+    public function retrieve(string $fileId) { $stream = fopen('php://memory', 'r+'); rewind($stream); return $stream; }
+}
+
 function pambReport(User $user, array $overrides = []): ConservationReportSubmission
 {
     return ConservationReportSubmission::create([...[
@@ -172,7 +188,7 @@ test('a direct-PENRO Regular PAMB report does not enter a CENRO Incoming workspa
         ->and($tracking->records()->firstWhere('source_id', $report->id)['routing']['responsible_user_category'])->toBe('PENRO_RECORDS');
 });
 
-test('PENRO Records receipt accepts a working copy and hands off directly to Office of the PENRO', function (): void {
+test('PENRO Records receipt has no upload and hands off directly to Office of the PENRO', function (): void {
     Storage::fake('local');
     $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
     $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
@@ -186,19 +202,20 @@ test('PENRO Records receipt accepts a working copy and hands off directly to Off
     $before = $tracking->records()->firstWhere('source_id', $report->id);
     expect(collect($before['routing']['actions'])->pluck('action_label')->all())
         ->toBe(['Receive', 'Return for Correction'])
-        ->and(collect($before['routing']['actions'])->firstWhere('key', 'penro_receipt')['attachment_allowed'])->toBeTrue()
+        ->and(collect($before['routing']['actions'])->firstWhere('key', 'penro_receipt')['attachment_allowed'])->toBeFalse()
         ->and(collect($before['routing']['actions'])->pluck('key')->all())->not->toContain('release_to_regional');
 
-    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeTrue();
+    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeFalse();
     $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
         'stage' => SubmissionTrackingService::PENRO_RECEIPT,
         'date' => '2026-08-05',
-        'attachment' => UploadedFile::fake()->create('penro-received.pdf', 12, 'application/pdf'),
+        'official_document' => UploadedFile::fake()->createWithContent('must-not-replace.pdf', '%PDF disallowed receive replacement'),
+    ])->assertSessionHasErrors('official_document');
+    $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT,
+        'date' => '2026-08-05',
     ])->assertSessionHasNoErrors();
-    $attachment = SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->firstOrFail();
-    expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(1)
-        ->and($attachment->purpose)->toBe('routing_copy')
-        ->and($attachment->pambRoutingEvent->stage_key)->toBe(PambRoutingTimelineService::RECORDS_RECEIVED);
+    expect(SubmissionRoutingAttachment::query()->where('source', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
 
     $this->actingAs($records);
     $recordsWorkspace = $tracking->workspaceQueues();
@@ -740,6 +757,8 @@ test('PAMB review uses the correct Chief for the routing context', function (): 
 });
 
 test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
     $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
     $cenroChief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
     $cenroRecords = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
@@ -749,6 +768,8 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
     $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
     $tsd = pambRoleUser('PENRO TSD Chief', 'PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
     $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/full-flow.pdf']);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\nfull PAMB flow");
+    app()->instance(\App\Services\Archive\GoogleDriveArchiveGateway::class, new PambMovArchiveGateway());
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
     $this->actingAs($penroChief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [

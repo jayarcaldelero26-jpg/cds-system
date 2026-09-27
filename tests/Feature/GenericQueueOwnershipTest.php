@@ -9,6 +9,10 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Spatie\Permission\Models\Permission;
 
+beforeEach(function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+});
+
 function genericQueueUser(string $section, string $office): User
 {
     $user = User::factory()->create([
@@ -189,7 +193,8 @@ test('generic Homestay remains discoverable through the complete shared custody 
         [$chief, 'forward_to_cenro_records', 'cenro_release'],
         [$cenroRecords, 'receive_at_cenro_records', 'cenro_release'],
         [$cenroRecords, 'forward_to_penro_records', 'penro_receipt'],
-        [$penroRecords, 'receive_at_penro_records', 'office_initial_routing'],
+        [$penroRecords, 'receive_at_penro_records', 'penro_records_routing'],
+        [$penroRecords, 'forward_to_office_penro', 'office_initial_routing'],
         [$office, 'receive_at_office_penro', 'office_initial_routing'],
         [$office, 'assign_to_tsd_chief', 'tsd_routing'],
         [$tsd, 'receive_at_tsd_chief', 'tsd_routing'],
@@ -205,13 +210,15 @@ test('generic Homestay remains discoverable through the complete shared custody 
 
     $queueViewers = [
         'for_review' => $chief, 'cenro_release' => $cenroRecords, 'penro_receipt' => $penroRecords,
+        'penro_records_routing' => $penroRecords,
         'office_initial_routing' => $office, 'tsd_routing' => $tsd,
         'cds_processing' => $penroFocal, 'cds_review' => $penroChief, 'office_final_verdict' => $office,
         'penro_records_final' => $penroRecords,
     ];
     $nextActions = [
         'for_review' => 'receive_at_cenro_chief', 'cenro_release' => 'receive_at_cenro_records',
-        'penro_receipt' => 'receive_at_penro_records', 'office_initial_routing' => 'receive_at_office_penro', 'tsd_routing' => 'receive_at_tsd_chief',
+        'penro_receipt' => 'receive_at_penro_records', 'penro_records_routing' => 'forward_to_office_penro',
+        'office_initial_routing' => 'receive_at_office_penro', 'tsd_routing' => 'receive_at_tsd_chief',
         'cds_processing' => 'receive_at_cds_focal', 'cds_review' => 'receive_at_cds_chief',
         'office_final_verdict' => 'receive_at_office_penro_final', 'penro_records_final' => 'receive_at_penro_records_final',
     ];

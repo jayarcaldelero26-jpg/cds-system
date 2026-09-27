@@ -40,6 +40,7 @@ test('the final Conservation workflow batch has its authoritative periods, docum
 
 test('the final Conservation workflow batch accepts custom activity text', function (string $workflow, string $document, string $period) {
     Storage::fake('public');
+    Storage::fake('local');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', $workflow), [
         'protected_area_id' => $this->area->id,
@@ -128,6 +129,7 @@ test('Monitoring Mangroves, Corals, Seagrass uses Standard A thresholds', functi
 
 test('the final Conservation workflow batch rejects document types outside its configuration', function (string $workflow, string $invalidDocument) {
     Storage::fake('public');
+    Storage::fake('local');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', $workflow), [
         'activity_name' => 'Custom local activity',

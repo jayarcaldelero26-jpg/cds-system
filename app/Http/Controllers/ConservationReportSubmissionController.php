@@ -9,29 +9,33 @@ use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\DateConductedRangeService;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\RoutingAttachmentService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class ConservationReportSubmissionController extends Controller
 {
     private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments, private readonly DateConductedRangeService $dateConductedRanges) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments, private readonly DateConductedRangeService $dateConductedRanges, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
 
     public function index(Request $request, string $workflow): Response
     {
-        $config = [...$this->workflow($workflow), 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow)];
+        $meetingWorkflow = $this->pambCompliance->isMeeting($workflow);
+        $config = [...$this->workflow($workflow), 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow), 'activity_required' => true, 'document_type_required' => false, 'period_required' => false, 'date_conducted_required' => $meetingWorkflow, 'date_accomplished_required' => ! $meetingWorkflow];
         $submissions = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
             ->where('workflow_key', $workflow)
             ->with(['protectedArea:id,name,short_name', 'movReviewEvents.recordedBy'])
@@ -48,8 +52,7 @@ class ConservationReportSubmissionController extends Controller
             ->latest('id')->paginate(10)->withQueryString()
             ->through(fn (ConservationReportSubmission $submission) => $this->submissionData($submission));
 
-        $availableTargetOffices = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
-            ->whereNotNull('target_office')->distinct()->orderBy('target_office')->pluck('target_office');
+        $formScope = app(SubmissionFormScopeService::class)->options($request->user());
 
         return Inertia::render('ConservationReports/Index', [
             'workflow' => $config,
@@ -57,34 +60,42 @@ class ConservationReportSubmissionController extends Controller
             'protectedAreas' => $this->pambAccess->isPamo($request->user())
                 ? ProtectedArea::query()->whereKey($request->user()->protected_area_id)->orderBy('name')->get(['id', 'name', 'short_name'])
                 : app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name', 'short_name']),
-            'targetOffices' => $availableTargetOffices,
+            ...$formScope,
             'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type']),
         ]);
     }
 
     public function store(Request $request, string $workflow): RedirectResponse
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? null);
         if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? null);
-        $validated = $this->storeMov($request, $validated);
-        $newPath = $validated['mov_file_path'] ?? null;
+        $file = $request->file('mov');
+        unset($validated['mov']);
         try {
             $submission = ConservationReportSubmission::create([...$validated, 'workflow_key' => $workflow, 'created_by' => $request->user()?->id, 'updated_by' => $request->user()?->id]);
         } catch (\Throwable $exception) {
-            if ($newPath) $this->attachments->delete($newPath);
             throw $exception;
         }
-        if ($submission->mov_file_path && $request->user()) {
-            $this->pambMov->recordUpload($submission, $request->user());
+        try {
+            $adapter = $this->documentAdapters->resolve('conservation-report', $submission, 'mov');
+            $this->documents->replaceUsingAdapter($submission, 'conservation-report', 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                fn (ConservationReportSubmission $record) => $this->assertScopedWorkflow($request, $workflow, $record->target_office, $record->protected_area_id),
+                $request->input('remarks'), [], 'UPLOAD');
+        } catch (\Throwable $exception) {
+            $submission->delete();
+            throw $exception;
         }
+        if ($request->user()) $this->pambMov->recordUpload($submission->fresh(), $request->user());
         return back()->with('success', 'Conservation report successfully added.');
     }
 
     public function update(Request $request, string $workflow, ConservationReportSubmission $submission): RedirectResponse
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $this->ensureWorkflow($workflow, $submission);
         if (app(SubmissionTrackingService::class)->isRoutingComplete($submission)) {
@@ -94,23 +105,18 @@ class ConservationReportSubmissionController extends Controller
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? $submission->target_office);
         if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? $submission->protected_area_id);
-        $oldPath = $submission->mov_file_path;
-        $newPath = null;
-        $replaceOld = $request->hasFile('mov');
-        try {
-            if ($request->hasFile('mov')) {
-                $validated = $this->storeMov($request, $validated);
-                $newPath = $validated['mov_file_path'] ?? null;
-            }
-            $submission->update([...$validated, ...($newPath ? ['mov_processing_status' => null, 'mov_submitted_at' => null, 'mov_submitted_by' => null, 'mov_reviewed_at' => null, 'mov_reviewed_by' => null, 'mov_review_remarks' => null] : []), 'updated_by' => $request->user()?->id]);
-            if ($newPath && $request->user()) {
-                $this->pambMov->recordUpload($submission, $request->user());
-            }
-        } catch (\Throwable $exception) {
-            if ($newPath) $this->attachments->delete($newPath);
-            throw $exception;
+        $hasReplacement = $request->hasFile('mov');
+        unset($validated['mov']);
+        $attributes = [...$validated, ...($hasReplacement ? ['mov_processing_status' => null, 'mov_submitted_at' => null, 'mov_submitted_by' => null, 'mov_reviewed_at' => null, 'mov_reviewed_by' => null, 'mov_review_remarks' => null] : []), 'updated_by' => $request->user()?->id];
+        if ($hasReplacement) {
+            $adapter = $this->documentAdapters->resolve('conservation-report', $submission, 'mov');
+            $this->documents->replaceUsingAdapter($submission, 'conservation-report', 'mov', $request->file('mov'), $adapter, 'mov', (int) $request->user()->id,
+                fn (ConservationReportSubmission $record) => $this->assertScopedWorkflow($request, $workflow, $record->target_office, $record->protected_area_id),
+                $request->input('remarks'), $attributes, 'REPLACEMENT');
+            $this->pambMov->recordUpload($submission->fresh(), $request->user());
+        } else {
+            $submission->update($attributes);
         }
-        if ($replaceOld && $oldPath) $this->attachments->delete($oldPath);
         return back()->with('success', 'Conservation report successfully updated.');
     }
 
@@ -121,12 +127,13 @@ class ConservationReportSubmissionController extends Controller
             throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
         }
         $path = $submission->mov_file_path;
-        $submission->delete();
+        app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)
+            ->deleteSource($submission, fn () => $submission->delete());
         if ($path) $this->attachments->delete($path);
         return back()->with('success', 'Conservation report deleted.');
     }
 
-    public function showMov(string $workflow, ConservationReportSubmission $submission): BinaryFileResponse
+    public function showMov(string $workflow, ConservationReportSubmission $submission): HttpResponse
     {
         $this->ensureWorkflow($workflow, $submission);
         return $this->attachments->response('conservation-report', $submission, 'mov');
@@ -183,19 +190,6 @@ class ConservationReportSubmissionController extends Controller
             'mov.required' => 'A report attachment / MOV is required.',
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ];
-    }
-
-    /** @param array<string, mixed> $validated */
-    private function storeMov(Request $request, array $validated): array
-    {
-        unset($validated['mov']);
-        if ($request->hasFile('mov')) {
-            $file = $request->file('mov');
-            $validated['mov_file_name'] = $file->getClientOriginalName();
-            $validated['mov_file_path'] = $this->attachments->store($file, 'conservation-report');
-        }
-
-        return $validated;
     }
 
     private function deleteMov(ConservationReportSubmission $submission): void

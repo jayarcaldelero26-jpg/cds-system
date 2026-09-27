@@ -9,8 +9,11 @@ use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Models\IpafRevenueTarget;
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\IpafBankBalanceSyncService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -22,7 +25,7 @@ use InvalidArgumentException;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Throwable;
 
 class IpafController extends Controller
@@ -30,6 +33,8 @@ class IpafController extends Controller
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
+        private readonly CurrentDocumentReplacementService $documents,
+        private readonly ReportDocumentAdapterResolver $documentAdapters,
     ) {}
 
     public function index(Request $request): Response
@@ -51,6 +56,7 @@ class IpafController extends Controller
             'revenueCollections' => $revenues,
             'managementReports' => $management,
             'protectedAreas' => $protectedAreas,
+            ...app(SubmissionFormScopeService::class)->options($request->user()),
             'filters' => $request->only(['ipaf_tab', 'revenue_search', 'revenue_protected_area_id', 'revenue_month', 'revenue_year', 'management_search', 'management_protected_area_id', 'summary_year', 'summary_quarter', 'summary_protected_area_id', 'accounting_year', 'accounting_protected_area_id', 'analysis_year', 'analysis_protected_area_id']),
             'revenueTotals' => ['total_collected' => $totalCollected, ...IpafRevenueCollection::split($totalCollected)],
             ...$quarterly,
@@ -60,7 +66,7 @@ class IpafController extends Controller
     public function storeRevenue(Request $request): RedirectResponse { return $this->persist($request, new IpafRevenueCollection, $this->revenueRules(true), 'Revenue Collection', 'ipaf-revenue-movs', 'Revenue collection added successfully.'); }
     public function updateRevenue(Request $request, IpafRevenueCollection $revenueCollection): RedirectResponse { return $this->persist($request, $revenueCollection, $this->revenueRules(false), 'Revenue Collection', 'ipaf-revenue-movs', 'Revenue collection updated successfully.'); }
     public function destroyRevenue(IpafRevenueCollection $revenueCollection): RedirectResponse { return $this->destroyRecord($revenueCollection, 'Revenue collection deleted successfully.'); }
-    public function revenueMov(IpafRevenueCollection $revenueCollection): BinaryFileResponse { return $this->mov($revenueCollection); }
+    public function revenueMov(IpafRevenueCollection $revenueCollection): HttpResponse { return $this->mov($revenueCollection); }
     public function updateRevenueTargets(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -173,10 +179,11 @@ class IpafController extends Controller
     public function storeManagement(Request $request): RedirectResponse { return $this->persist($request, new IpafManagementReport, $this->managementRules(true), 'Management of Integrated Area Protected Area Fund (IPAF)', 'ipaf-management-movs', 'Management of IPAF report added successfully.'); }
     public function updateManagement(Request $request, IpafManagementReport $managementReport): RedirectResponse { return $this->persist($request, $managementReport, $this->managementRules(false), 'Management of Integrated Area Protected Area Fund (IPAF)', 'ipaf-management-movs', 'Management of IPAF report updated successfully.'); }
     public function destroyManagement(IpafManagementReport $managementReport): RedirectResponse { return $this->destroyRecord($managementReport, 'Management of IPAF report deleted successfully.'); }
-    public function managementMov(IpafManagementReport $managementReport): BinaryFileResponse { return $this->mov($managementReport); }
+    public function managementMov(IpafManagementReport $managementReport): HttpResponse { return $this->mov($managementReport); }
 
     private function persist(Request $request, Model $record, array $rules, string $activity, string $folder, string $message): RedirectResponse
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $data = $request->validate($rules, ['mov.required' => 'A report attachment / MOV is required.']);
         $protectedAreaId = $record->exists ? $record->protected_area_id : ($data['protected_area_id'] ?? null);
         $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
@@ -185,17 +192,39 @@ class IpafController extends Controller
             $record = $this->organization->scopeProtectedAreaQuery($record::query(), $request->user())->findOrFail($record->id);
             app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($record);
         }
-        $exists = $record->exists; $old = $record->mov_file_path; $new = null; $replace = $request->hasFile('mov');
-        try {
-            if ($request->hasFile('mov')) { $file = $request->file('mov'); $new = $this->attachments->store($file, $this->attachmentSource($record)); if (! is_string($new)) throw new RuntimeException('The MOV could not be stored.'); $data = [...$data, 'mov_file_name' => $file->getClientOriginalName(), 'mov_file_path' => $new, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()]; }
-            unset($data['mov']); $data['activity_name'] = $activity; $data['updated_by'] = $request->user()->id; if (! $exists) $data['created_by'] = $request->user()->id;
-            DB::transaction(fn () => $exists ? $record->update($data) : $record::create($data));
-        } catch (Throwable $e) { if ($new) $this->attachments->delete($new); throw $e; }
-        if ($replace && $old) $this->attachments->delete($old);
+        $exists = $record->exists;
+        $file = $request->file('mov');
+        unset($data['mov']);
+        $data['activity_name'] = $activity;
+        $data['updated_by'] = $request->user()->id;
+        if (! $exists) $data['created_by'] = $request->user()->id;
+        if ($exists && $file) {
+            $source = $this->attachmentSource($record);
+            $adapter = $this->documentAdapters->resolve($source, $record, 'mov');
+            $this->documents->replaceUsingAdapter($record, $source, 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                fn (Model $authorized) => $this->organization->assertCanAccessProtectedArea($request->user(), $authorized->protected_area_id),
+                $request->input('remarks'), [...$data, 'mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()], 'REPLACEMENT');
+        } elseif ($exists) {
+            DB::transaction(fn () => $record->update($data));
+        } else {
+            $record = $record::query()->create($data);
+            if ($file) {
+                $source = $this->attachmentSource($record);
+                $adapter = $this->documentAdapters->resolve($source, $record, 'mov');
+                try {
+                    $this->documents->replaceUsingAdapter($record, $source, 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                        fn (Model $authorized) => $this->organization->assertCanAccessProtectedArea($request->user(), $authorized->protected_area_id),
+                        $request->input('remarks'), ['mov_mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'mov_size' => $file->getSize()], 'UPLOAD');
+                } catch (Throwable $exception) {
+                    $record->delete();
+                    throw $exception;
+                }
+            }
+        }
         return back()->with('success', $message);
     }
-    private function destroyRecord(Model $record, string $message): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($record); $path = $record->mov_file_path; DB::transaction(fn () => $record->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', $message); }
-    private function mov(Model $record): BinaryFileResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); return $this->attachments->response($this->attachmentSource($record), $record, 'mov'); }
+    private function destroyRecord(Model $record, string $message): RedirectResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($record); $path = $record->mov_file_path; app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)->deleteSource($record, fn () => $record->delete()); if ($path) $this->attachments->delete($path); return back()->with('success', $message); }
+    private function mov(Model $record): HttpResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); return $this->attachments->response($this->attachmentSource($record), $record, 'mov'); }
     private function search($query, string $search): void { $search = trim($search); $query->where(fn ($q) => $q->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($q) => $q->where('name', 'like', "%{$search}%"))); }
     private function commonRules(bool $requireMov): array { return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'document_type' => ['required', Rule::in(['Final Report', 'Progress Report'])], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'remarks' => ['nullable', 'string']]; }
     private function revenueRules(bool $requireMov): array { return [...$this->commonRules($requireMov), 'reporting_month' => ['required', 'integer', 'between:1,12'], 'reporting_year' => ['required', 'integer', 'between:2000,2100'], 'total_collected' => ['required', 'decimal:0,2', 'min:0'], 'deadline_submission' => ['required', 'date']]; }

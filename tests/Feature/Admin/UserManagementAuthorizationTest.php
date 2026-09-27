@@ -19,6 +19,20 @@ function accessAdmin(): User
     return $admin;
 }
 
+function userUpdatePayload(User $user, string $accountRole = 'User'): array
+{
+    return [
+        'name' => $user->name,
+        'email' => $user->email,
+        'account_role' => $accountRole,
+        'operational_group' => 'cenro',
+        'office_designated' => 'CENRO Baganga',
+        'section' => 'CENRO_CDS_FOCAL',
+        'unit_assignment' => 'conservation',
+        'protected_area_id' => null,
+    ];
+}
+
 test('normal users cannot access User Management', function (): void {
     $user = User::factory()->create();
     $user->assignRole('no_role');
@@ -283,7 +297,7 @@ test('a CDS admin cannot delete their own account', function (): void {
     expect(User::query()->whereKey($admin->id)->exists())->toBeTrue();
 });
 
-test('the last CDS admin cannot be deleted by the Super Admin', function (): void {
+test('a Super Admin can delete a CDS Admin while remaining as the usable administrator', function (): void {
     Role::findOrCreate('Super Admin', 'web');
     $superAdmin = User::factory()->create();
     $superAdmin->assignRole('Super Admin');
@@ -291,9 +305,91 @@ test('the last CDS admin cannot be deleted by the Super Admin', function (): voi
 
     $this->actingAs($superAdmin)
         ->delete(route('admin.users.destroy', $admin))
-        ->assertForbidden();
+        ->assertRedirect(route('admin.users.index'));
 
-    expect(User::query()->whereKey($admin->id)->exists())->toBeTrue();
+    expect(User::query()->whereKey($admin->id)->exists())->toBeFalse()
+        ->and(User::query()->whereKey($superAdmin->id)->exists())->toBeTrue();
+});
+
+test('the only usable administrator cannot demote their own role', function (): void {
+    $admin = accessAdmin();
+    $beforePassword = $admin->password;
+
+    $this->actingAs($admin)
+        ->put(route('admin.users.update', $admin), userUpdatePayload($admin))
+        ->assertSessionHasErrors('account_role');
+
+    expect($admin->fresh()->getRoleNames()->all())->toBe(['CDS Admin'])
+        ->and($admin->fresh()->is_active)->toBeTrue()
+        ->and($admin->fresh()->is_approved)->toBeTrue()
+        ->and($admin->fresh()->password)->toBe($beforePassword);
+});
+
+test('the shared invariant rejects a managed administrator demotion when no other usable administrator remains', function (): void {
+    $managed = accessAdmin();
+    $preservation = app(\App\Services\Authorization\AdministratorPreservationService::class);
+
+    expect(fn () => \Illuminate\Support\Facades\DB::transaction(function () use ($preservation, $managed): void {
+        $lockedIds = $preservation->lockUsableAdministratorIds();
+        $preservation->assertAnotherUsableAdministrator($managed, $lockedIds);
+    }))->toThrow(\Illuminate\Validation\ValidationException::class);
+
+    expect($managed->fresh()->getRoleNames()->all())->toBe(['CDS Admin']);
+});
+
+test('administrator demotion proceeds when another usable administrator remains', function (): void {
+    $admin = accessAdmin();
+    $managed = accessAdmin();
+
+    $this->actingAs($admin)
+        ->put(route('admin.users.update', $managed), userUpdatePayload($managed))
+        ->assertRedirect(route('admin.users.index'));
+
+    expect($managed->fresh()->getRoleNames()->all())->toBe(['no_role'])
+        ->and($admin->fresh()->getRoleNames()->all())->toBe(['CDS Admin']);
+});
+
+test('inactive and unapproved administrators do not satisfy the role-demotion fallback invariant', function (): void {
+    foreach ([['is_active' => false, 'is_approved' => true], ['is_active' => true, 'is_approved' => false]] as $state) {
+        $target = accessAdmin();
+        $fallback = accessAdmin();
+        $fallback->update($state);
+
+        expect(app(\App\Services\Authorization\AdministratorPreservationService::class)
+            ->hasOtherUsableAdministrator($target))->toBeFalse();
+        $target->delete();
+        $fallback->delete();
+    }
+});
+
+test('serialized administrator handoff rechecks the remaining usable administrator before a second demotion', function (): void {
+    $first = accessAdmin();
+    $second = accessAdmin();
+
+    $this->actingAs($first)
+        ->put(route('admin.users.update', $second), userUpdatePayload($second))
+        ->assertRedirect(route('admin.users.index'));
+
+    $this->put(route('admin.users.update', $first), userUpdatePayload($first))
+        ->assertSessionHasErrors('account_role');
+
+    expect($first->fresh()->getRoleNames()->all())->toBe(['CDS Admin'])
+        ->and($second->fresh()->getRoleNames()->all())->toBe(['no_role']);
+});
+
+test('assigning a global role does not approve an unapproved account', function (): void {
+    Role::findOrCreate('Super Admin', 'web');
+    $admin = accessAdmin();
+    $managed = User::factory()->create(['is_approved' => false, 'is_active' => false]);
+    $managed->assignRole('no_role');
+
+    $this->actingAs($admin)
+        ->put(route('admin.users.update', $managed), userUpdatePayload($managed, 'Super Admin'))
+        ->assertRedirect(route('admin.users.index'));
+
+    expect($managed->fresh()->getRoleNames()->all())->toBe(['Super Admin'])
+        ->and($managed->fresh()->is_approved)->toBeFalse()
+        ->and($managed->fresh()->is_active)->toBeFalse();
 });
 
 test('a CDS admin can delete another CDS admin while one remains', function (): void {

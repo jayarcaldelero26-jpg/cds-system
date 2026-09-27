@@ -1,6 +1,17 @@
 <?php
 
 use App\Models\User;
+use App\Models\ConservationReportSubmission;
+use App\Models\EngpReportSubmission;
+use App\Models\ProtectedArea;
+use App\Services\Dashboard\DashboardMonitoringService;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
+
+afterEach(function (): void {
+    CarbonImmutable::setTestNow();
+});
 use Illuminate\Support\Facades\File;
 use Inertia\Testing\AssertableInertia as Assert;
 
@@ -16,6 +27,54 @@ test('the welcome page is public and exposes only safe overview aggregates', fun
             ->missing('overview.rows')
             ->missing('overview.users')
             ->missing('overview.attachments'));
+});
+
+test('public landing bundle preserves summary and trend values while loading current-year records once', function (): void {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-26 10:00:00', 'Asia/Manila'));
+    $user = User::factory()->create(['section' => 'CDS']);
+    $area = ProtectedArea::create([
+        'name' => 'Public Landing Performance PA', 'short_name' => 'PLP', 'category' => 'Protected Landscape',
+        'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI',
+        'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati',
+        'activity_name' => 'Public landing meeting', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-02-03', 'date_accomplished' => '2026-02-03', 'deadline_submission' => '2026-02-28',
+        'date_received_penro' => '2026-03-02', 'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    EngpReportSubmission::create([
+        'workflow_key' => 'cbep', 'office' => 'CENRO Mati', 'activity_name' => 'Public landing ENGP', 'document_type' => 'Monthly Report',
+        'reporting_year' => 2026, 'period_key' => '2026-02', 'period_label' => 'February 2026',
+        'deadline_submission' => '2026-02-28', 'date_received_penro' => '2026-02-27',
+        'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+
+    $queries = [];
+    DB::listen(function (QueryExecuted $query) use (&$queries): void { $queries[] = strtolower($query->sql); });
+    $response = $this->get('/')->assertOk();
+    $payload = $response->viewData('page')['props'];
+    $conservationFullReads = collect($queries)->filter(fn (string $sql): bool => str_starts_with(trim($sql), 'select * from "conservation_report_submissions"'))->count();
+    $engpFullReads = collect($queries)->filter(fn (string $sql): bool => str_starts_with(trim($sql), 'select * from "engp_report_submissions"'))->count();
+
+    $service = app(DashboardMonitoringService::class);
+    $legacyOverview = $service->overview([], false);
+    $expectedOverview = [
+        'tracked_reports' => $legacyOverview['summary']['tracked_reports'],
+        'submitted' => $legacyOverview['summary']['submitted'],
+        'overdue' => $legacyOverview['summary']['overdue'],
+        'reports_due' => $legacyOverview['summary']['reports_due'],
+        'compliant' => $legacyOverview['summary']['compliant'],
+        'monitoring_sources' => collect($legacyOverview['rows'])->pluck('source')->filter()->unique()->count(),
+    ];
+
+    expect($payload['overview'])->toBe($expectedOverview)
+        ->and($payload['publicSummary'])->toBe($service->publicSummary())
+        ->and($payload['reportTrend'])->toBe($service->publicSubmissionTrend())
+        ->and(collect($payload['reportTrend'])->firstWhere('label', 'Mar 26')['count'])->toBe(1)
+        ->and($conservationFullReads)->toBe(1)
+        ->and($engpFullReads)->toBe(1);
+    CarbonImmutable::setTestNow();
 });
 
 test('welcome page source uses CDS-SMART branding and the existing login route', function () {

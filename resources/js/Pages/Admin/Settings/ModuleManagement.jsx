@@ -1,12 +1,13 @@
-import { Head, router, useForm } from '@inertiajs/react';
+import { Head, router, useForm, usePage } from '@inertiajs/react';
 import { useState } from 'react';
-import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import PageHeader from '@/Components/PageHeader';
+import SettingsShell from '@/Components/Admin/SettingsShell';
+import SettingsPageHeader from '@/Components/Admin/SettingsPageHeader';
 
 const empty = { name: '', program_area: '', module_type: 'regular_target', reporting_frequency: 'monthly', plan_duration_years: '', deadline_mode: 'standard_working_days', default_deadline_days: '15', allow_deadline_override: false, description: '', is_active: true };
 const deadlineLabels = { standard_working_days: 'Standard Working Days', calendar_days: 'Calendar Days', custom: 'Custom Deadline', none: 'No Deadline' };
 
 export default function ModuleManagement({ definitions = [], filters = {}, programAreas = [], frequencies = [] }) {
+    const { props } = usePage();
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const form = useForm(empty);
@@ -20,9 +21,9 @@ export default function ModuleManagement({ definitions = [], filters = {}, progr
     };
     const toggle = definition => router.patch(route('module-definitions.status', definition.id), {}, { preserveScroll: true });
 
-    return <AuthenticatedLayout title="Module Management">
+    return <SettingsShell active="Module Management" canViewStorage={props.auth?.canViewStorage} canViewDiagnostics={props.auth?.canViewSystemDiagnostics}>
         <Head title="Module Management" />
-        <PageHeader title="Module Management" description="Standardize module metadata, Program Areas, and deadline policies." />
+        <SettingsPageHeader title="Module Management" description="Manage CDS-SMART modules and availability." />
         <section className="mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
                 <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-4">
@@ -40,7 +41,7 @@ export default function ModuleManagement({ definitions = [], filters = {}, progr
             </div>
         </section>
         {open && <ModuleForm form={form} editing={editing} programAreas={programAreas} frequencies={frequencies} onClose={() => !form.processing && setOpen(false)} onSubmit={submit} />}
-    </AuthenticatedLayout>;
+    </SettingsShell>;
 }
 
 function ModuleForm({ form, editing, programAreas, frequencies, onClose, onSubmit }) {

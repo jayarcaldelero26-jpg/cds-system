@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Head, router, useForm, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
+import SettingsShell from '@/Components/Admin/SettingsShell';
+import SettingsPageHeader from '@/Components/Admin/SettingsPageHeader';
 import DatePicker from '@/Components/DatePicker';
 import CrudTable from '@/Components/Crud/CrudTable';
 import CrudFormModal from '@/Components/Crud/CrudFormModal';
@@ -181,8 +183,16 @@ export default function ComplianceAlertsIndex({ view = 'operational', groups = [
     ];
     const tabs = view === 'operational' ? [['protected_area', 'Protected Area'], ['engp', 'ENGP / Development'], ['history', 'History']] : [];
 
-    return <AuthenticatedLayout title={view === 'settings' ? 'Compliance Alert Settings' : view === 'recipients' ? 'Recipient Mapping' : view === 'calendar' ? 'Business Calendar' : 'Compliance Alerts'}><Head title={view === 'settings' ? 'Compliance Alert Settings' : view === 'recipients' ? 'Recipient Mapping' : view === 'calendar' ? 'Business Calendar' : 'Compliance Alerts'} />
-         <PageHeader title={view === 'settings' ? 'Compliance Alert Settings' : view === 'recipients' ? 'Recipient Mapping' : view === 'calendar' ? 'Business Calendar' : 'Compliance Alerts'} description={view === 'settings' ? 'Configure delivery, destination-aware memorandum templates, signatory details, and operational settings.' : view === 'recipients' ? 'Manage exact Protected Area and Target Office recipient routing mappings.' : view === 'calendar' ? 'Manage holidays and declared non-working days used in report deadline and timeliness calculations.' : 'Separate operational views for Protected Area and ENGP / Development compliance contexts.'} actions={null} />
+    const isSettingsPage = view === 'settings';
+    const pageTitle = isSettingsPage ? 'Compliance Alerts' : view === 'recipients' ? 'Recipient Mapping' : view === 'calendar' ? 'Business Calendar' : 'Compliance Alerts';
+    const pageDescription = isSettingsPage ? 'Configure compliance monitoring and alert behavior.' : view === 'recipients' ? 'Manage exact Protected Area and Target Office recipient routing mappings.' : view === 'calendar' ? 'Manage holidays and declared non-working days used in report deadline and timeliness calculations.' : 'Separate operational views for Protected Area and ENGP / Development compliance contexts.';
+    const Layout = isSettingsPage ? SettingsShell : AuthenticatedLayout;
+    const layoutProps = isSettingsPage
+        ? { active: 'Compliance Alerts', canViewStorage: auth?.canViewStorage, canViewDiagnostics: auth?.canViewSystemDiagnostics }
+        : { title: pageTitle };
+
+    return <Layout {...layoutProps}><Head title={pageTitle} />
+         {isSettingsPage ? <SettingsPageHeader title={pageTitle} description={pageDescription} /> : <PageHeader title={pageTitle} description={pageDescription} actions={null} />}
         {view === 'operational' && safeMode && <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Automatic delivery is disabled by the current production setting. Alerts remain visible and unmapped recipients are not sent.</div>}
 
         {view === 'operational' && manualDeliveryPlan.unmapped?.length > 0 && <div className="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">{manualDeliveryPlan.unmapped.length} PA / office group(s) have no valid recipient mapping. Automatic delivery will log them as skipped, and Send Now is blocked.</div>}
@@ -229,7 +239,7 @@ export default function ComplianceAlertsIndex({ view = 'operational', groups = [
         <CrudFormModal open={nonWorkingDayFormOpen} mode={editingNonWorkingDay ? 'edit' : 'create'} icon="∷" title={editingNonWorkingDay ? 'Edit Non-Working Day' : 'Add Non-Working Day'} subtitle="Business calendar configuration" onClose={resetNonWorkingDay} onSubmit={submitNonWorkingDay} processing={nonWorkingDayForm.processing} errors={nonWorkingDayForm.errors} saveLabel={editingNonWorkingDay ? 'Save Changes' : 'Save Non-Working Day'}>
             <div className="grid gap-4 sm:grid-cols-2"><DatePicker id="compliance-non-working-date" label="Date" required value={nonWorkingDayForm.data.date || ''} onChange={(value) => nonWorkingDayForm.setData('date', value)} error={nonWorkingDayForm.errors.date} /><FloatingInput label="Name / Description" required value={nonWorkingDayForm.data.name || ''} onChange={event => nonWorkingDayForm.setData('name', event.target.value)} error={nonWorkingDayForm.errors.name} /><FloatingSelect label="Type" required value={nonWorkingDayForm.data.type || ''} onChange={event => nonWorkingDayForm.setData('type', event.target.value)} error={nonWorkingDayForm.errors.type}><option value="NATIONAL_HOLIDAY">National Holiday</option><option value="LOCAL_HOLIDAY">Local Holiday</option><option value="SPECIAL_NON_WORKING_DAY">Special Non-Working Day</option><option value="OFFICE_DECLARED_NON_WORKING_DAY">Office-Declared Non-Working Day</option></FloatingSelect><FloatingSelect label="Scope" required value={nonWorkingDayForm.data.scope || ''} onChange={event => nonWorkingDayForm.setData('scope', event.target.value)} error={nonWorkingDayForm.errors.scope}><option value="NATIONAL">National</option><option value="DAVAO_ORIENTAL">Davao Oriental</option><option value="OFFICE">Office</option></FloatingSelect>{nonWorkingDayForm.data.scope === 'OFFICE' && <FloatingInput label="Office / Location" required value={nonWorkingDayForm.data.location || ''} onChange={event => nonWorkingDayForm.setData('location', event.target.value)} error={nonWorkingDayForm.errors.location} />}<FloatingInput label="Reference / Proclamation No. (optional)" value={nonWorkingDayForm.data.reference || ''} onChange={event => nonWorkingDayForm.setData('reference', event.target.value)} error={nonWorkingDayForm.errors.reference} /><FloatingSelect label="Status" required value={nonWorkingDayForm.data.is_active ? '1' : '0'} onChange={event => nonWorkingDayForm.setData('is_active', event.target.value === '1')} error={nonWorkingDayForm.errors.is_active}><option value="1">Active</option><option value="0">Inactive</option></FloatingSelect></div><FloatingTextarea label="Remarks (optional)" rows={3} value={nonWorkingDayForm.data.remarks || ''} onChange={event => nonWorkingDayForm.setData('remarks', event.target.value)} error={nonWorkingDayForm.errors.remarks} />
         </CrudFormModal>
-    </AuthenticatedLayout>;
+    </Layout>;
 }
 
 function SettingsSection({ title, children }) { return <section className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900"><h2 className="mb-4 text-sm font-bold text-gray-900 dark:text-white">{title}</h2>{children}</section>; }

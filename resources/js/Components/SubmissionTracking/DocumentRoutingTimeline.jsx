@@ -55,64 +55,18 @@ function Marker({ status }) {
 export default function DocumentRoutingTimeline({ row, onAction }) {
     const routing = row?.routing;
     if (!routing) return null;
-    const current = (routing.timeline || []).find(
-        (event) => event.status === "current",
-    );
     const actions = row.can_transition ? routing.actions || [] : [];
 
     return (
         <div className="space-y-4">
             <CrudSection
-                title="Current Processing"
-                subtitle="Server-derived routing state. Routing status is separate from compliance status."
+                title="Routing Activity"
+                subtitle="Recent activity and operational timing. Current holder and routing status are summarized above."
             >
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
                     <SummaryItem
-                        label="Current Location"
-                        value={routing.current_location}
-                    />
-                    <SummaryItem
-                        label="Current Status"
-                        value={routing.current_status}
-                    />
-                    <SummaryItem
-                        label="Responsible Office"
-                        value={routing.responsible_office}
-                    />
-                    <SummaryItem
-                        label="Responsible User Category"
-                        value={routing.responsible_user_category}
-                    />
-                    <SummaryItem
                         label="In Transit To"
                         value={routing.in_transit_to}
-                    />
-                    <SummaryItem
-                        label="Pending Since"
-                        value={routing.pending_since}
-                        date
-                    />
-                    <SummaryItem
-                        label="Working Days Pending"
-                        value={
-                            routing.working_days_pending === null ||
-                            routing.working_days_pending === undefined
-                                ? null
-                                : `${routing.working_days_pending} working day${routing.working_days_pending === 1 ? "" : "s"}`
-                        }
-                    />
-                    <SummaryItem
-                        label="Next Expected Action"
-                        value={routing.next_expected_action}
-                    />
-                    <SummaryItem
-                        label="Deadline"
-                        value={routing.deadline}
-                        date
-                    />
-                    <SummaryItem
-                        label="Compliance Status"
-                        value={routing.compliance_status}
                     />
                     <SummaryItem
                         label="Last Updated"

@@ -55,17 +55,15 @@ test('CENRO focal rejects a create form that omits target office', function (): 
 
 });
 
-test('CENRO focal cannot spoof another target office during save', function (): void {
+test('CENRO focal cannot submit another target office during save', function (): void {
     $this->actingAs($this->user)
         ->post(route('conservation-reports.store', 'regular_pamb'), focalRegularPambPayload([
             'protected_area_id' => $this->area->id,
             'target_office' => 'CENRO Mati',
         ]))
-        ->assertSessionHasNoErrors()
-        ->assertRedirect();
+        ->assertForbidden();
 
-    expect(ConservationReportSubmission::query()->latest('id')->value('target_office'))
-        ->toBe('CENRO Baganga');
+    expect(ConservationReportSubmission::query()->count())->toBe(0);
 });
 
 test('CENRO focal still reaches the regular PAMB page with its own office scope', function (): void {

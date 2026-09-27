@@ -39,7 +39,12 @@ return [
     |
     */
 
-    'debug' => (bool) env('APP_DEBUG', false),
+    // Never expose detailed exception pages in production, even if APP_DEBUG
+    // is accidentally enabled in the deployment environment.
+    'debug' => \App\Support\ProductionSecuritySettings::debugEnabled(
+        (string) env('APP_ENV', 'production'),
+        env('APP_DEBUG', false),
+    ),
 
     /*
     |--------------------------------------------------------------------------

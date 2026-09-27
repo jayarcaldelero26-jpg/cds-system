@@ -23,45 +23,52 @@ final class ExecutiveReportExportService
     private function xlsx(array $report): BinaryFileResponse
     {
         abort_unless(class_exists(ZipArchive::class), 500, 'The XLSX export extension is unavailable.');
-        $path = tempnam(storage_path('app'), 'executive-report-');
-        $zip = new ZipArchive();
-        abort_unless($path !== false && $zip->open($path, ZipArchive::OVERWRITE) === true, 500, 'The XLSX workbook could not be created.');
-
-        $sheets = [
-            'Executive Summary' => $this->summaryRows($report),
-            'PA Performance' => $this->performanceRows(collect($report['pa_performance'] ?? [])->all(), 'Protected Area'),
-            'Office Performance' => $this->performanceRows(collect($report['office_performance'] ?? [])->all(), 'Office'),
-            'Report Family Performance' => $this->performanceRows(collect($report['family_performance'] ?? [])->all(), 'Report Family'),
-            'Attention Required' => $this->attentionRows($report['attention'] ?? []),
-        ];
-        $zip->addFromString('[Content_Types].xml', $this->contentTypes(count($sheets)));
-        $zip->addFromString('_rels/.rels', $this->rootRelationships());
-        $zip->addFromString('docProps/core.xml', $this->coreProperties($report));
-        $zip->addFromString('docProps/app.xml', $this->appProperties());
-        $zip->addFromString('xl/workbook.xml', $this->workbook(array_keys($sheets)));
-        $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships(count($sheets)));
-        $zip->addFromString('xl/styles.xml', $this->xlsxStyles());
-        foreach (array_values($sheets) as $index => $rows) $zip->addFromString('xl/worksheets/sheet'.($index + 1).'.xml', $this->worksheet($rows));
-        $zip->close();
-        return response()->download($path, $this->filename($report, 'xlsx'), ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend(true);
+        return \App\Services\TemporaryExportFile::zipDownload(
+            'executive-report-',
+            $this->filename($report, 'xlsx'),
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'The XLSX workbook could not be created.',
+            'The XLSX workbook could not be created.',
+            function (ZipArchive $zip) use ($report): void {
+                $sheets = [
+                    'Executive Summary' => $this->summaryRows($report),
+                    'PA Performance' => $this->performanceRows(collect($report['pa_performance'] ?? [])->all(), 'Protected Area'),
+                    'Office Performance' => $this->performanceRows(collect($report['office_performance'] ?? [])->all(), 'Office'),
+                    'Report Family Performance' => $this->performanceRows(collect($report['family_performance'] ?? [])->all(), 'Report Family'),
+                    'Attention Required' => $this->attentionRows($report['attention'] ?? []),
+                ];
+                $zip->addFromString('[Content_Types].xml', $this->contentTypes(count($sheets)));
+                $zip->addFromString('_rels/.rels', $this->rootRelationships());
+                $zip->addFromString('docProps/core.xml', $this->coreProperties($report));
+                $zip->addFromString('docProps/app.xml', $this->appProperties());
+                $zip->addFromString('xl/workbook.xml', $this->workbook(array_keys($sheets)));
+                $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships(count($sheets)));
+                $zip->addFromString('xl/styles.xml', $this->xlsxStyles());
+                foreach (array_values($sheets) as $index => $rows) $zip->addFromString('xl/worksheets/sheet'.($index + 1).'.xml', $this->worksheet($rows));
+            },
+        );
     }
 
     private function docx(array $report): BinaryFileResponse
     {
         abort_unless(class_exists(ZipArchive::class), 500, 'The DOCX export extension is unavailable.');
-        $path = tempnam(storage_path('app'), 'executive-report-');
-        $zip = new ZipArchive();
-        abort_unless($path !== false && $zip->open($path, ZipArchive::OVERWRITE) === true, 500, 'The DOCX document could not be created.');
-        $zip->addFromString('[Content_Types].xml', $this->docxContentTypes());
-        $zip->addFromString('_rels/.rels', $this->rootRelationships('word/document.xml', 'word/styles.xml'));
-        $zip->addFromString('docProps/core.xml', $this->coreProperties($report));
-        $zip->addFromString('docProps/app.xml', $this->appProperties());
-        $zip->addFromString('word/document.xml', $this->document($report));
-        $zip->addFromString('word/styles.xml', $this->docxStyles());
-        $zip->addFromString('word/settings.xml', '<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="90"/></w:settings>');
-        $zip->addFromString('word/_rels/document.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>');
-        $zip->close();
-        return response()->download($path, $this->filename($report, 'docx'), ['Content-Type' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'])->deleteFileAfterSend(true);
+        return \App\Services\TemporaryExportFile::zipDownload(
+            'executive-report-',
+            $this->filename($report, 'docx'),
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'The DOCX document could not be created.',
+            'The DOCX document could not be created.',
+            function (ZipArchive $zip) use ($report): void {
+                $zip->addFromString('[Content_Types].xml', $this->docxContentTypes());
+                $zip->addFromString('_rels/.rels', $this->rootRelationships('word/document.xml', 'word/styles.xml'));
+                $zip->addFromString('docProps/core.xml', $this->coreProperties($report));
+                $zip->addFromString('docProps/app.xml', $this->appProperties());
+                $zip->addFromString('word/document.xml', $this->document($report));
+                $zip->addFromString('word/styles.xml', $this->docxStyles());
+                $zip->addFromString('word/settings.xml', '<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="90"/></w:settings>');
+                $zip->addFromString('word/_rels/document.xml.rels', '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>');
+            },
+        );
     }
 
     /** @return list<array{values:array<int,mixed>,header:bool}> */

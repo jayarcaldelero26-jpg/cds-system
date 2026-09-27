@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ImeaAssessment;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaFacility;
+use App\Support\CsvCellSanitizer;
 use App\Services\Attachments\ProtectedAttachmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\DB;
@@ -423,19 +424,19 @@ class ImeaAssessmentController extends Controller
             // CSV Rows
             foreach ($facilities as $row) {
                 fputcsv($file, [
-                    $row->protectedArea?->name ?? 'N/A',
+                    CsvCellSanitizer::text($row->protectedArea?->name ?? 'N/A'),
                     $row->inventory_date ?? '—',
-                    $row->facility_type,
+                    CsvCellSanitizer::text($row->facility_type),
                     $row->unit_no,
                     $row->year_established ?? '—',
-                    $row->location_brgy_muni ?? '—',
-                    $row->management_zone,
-                    $row->within_easement_zone,
-                    $row->status,
-                    $row->source_of_fund ?? '—',
-                    $row->tenurial_instrument ?? '—',
-                    $row->recommendations ?? '—',
-                    $row->remarks ?? '—',
+                    CsvCellSanitizer::text($row->location_brgy_muni ?? '—'),
+                    CsvCellSanitizer::text($row->management_zone),
+                    CsvCellSanitizer::text($row->within_easement_zone),
+                    CsvCellSanitizer::text($row->status),
+                    CsvCellSanitizer::text($row->source_of_fund ?? '—'),
+                    CsvCellSanitizer::text($row->tenurial_instrument ?? '—'),
+                    CsvCellSanitizer::text($row->recommendations ?? '—'),
+                    CsvCellSanitizer::text($row->remarks ?? '—'),
                 ]);
             }
 

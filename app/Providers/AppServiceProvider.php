@@ -19,6 +19,13 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        $this->app->singleton(\App\Services\Archive\GoogleDriveArchiveGateway::class, function (): \App\Services\Archive\GoogleDriveArchiveGateway {
+            return match (config('services.document_archive.driver')) {
+                'fake' => new \App\Services\Archive\FakeDocumentArchiveGateway(),
+                'google-drive' => new \App\Services\Archive\GoogleDriveDocumentArchiveGateway(),
+                default => new \App\Services\Archive\UnconfiguredGoogleDriveArchiveGateway(),
+            };
+        });
         $this->app->scoped(ReportRequirementRegistry::class, fn (): ReportRequirementRegistry => new ReportRequirementRegistry());
         $this->app->scoped(ModuleMetadataResolver::class, function ($app): ModuleMetadataResolver {
             return new ModuleMetadataResolver(

@@ -4,10 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Models\BmsReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Compliance\ComplianceMovService;
 use App\Services\DateConductedRangeService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 
@@ -19,25 +23,30 @@ class BmsReportSubmissionController extends Controller
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
         private readonly DateConductedRangeService $dateConductedRanges,
+        private readonly CurrentDocumentReplacementService $documents,
+        private readonly ReportDocumentAdapterResolver $documentAdapters,
     ) {}
     public function store(Request $request)
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $validated = $request->validate($this->rules(requireMov: true), [
             'mov.required' => 'A primary report attachment is required.',
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges'));
-        $validated = $this->storeMov($request, $validated);
+        unset($validated['mov']);
         $validated['created_by'] = $request->user()?->id;
         $validated['updated_by'] = $request->user()?->id;
-
+        $submission = new BmsReportSubmission($validated);
+        $submission->saveOrFail();
         try {
-            BmsReportSubmission::create($validated);
+            $adapter = $this->documentAdapters->resolve('bms-report', $submission, 'mov');
+            $this->documents->replaceUsingAdapter($submission, 'bms', 'mov', $request->file('mov'), $adapter, 'mov', (int) $request->user()->id,
+                fn ($record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'), [], 'UPLOAD');
         } catch (\Throwable $exception) {
-            if (! empty($validated['mov_file_path'])) {
-                $this->attachments->delete($validated['mov_file_path']);
-            }
+            $submission->delete();
             throw $exception;
         }
 
@@ -48,6 +57,7 @@ class BmsReportSubmissionController extends Controller
     {
         $this->organization->assertCanAccessProtectedArea($request->user(), $bmsReportSubmission->protected_area_id);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($bmsReportSubmission);
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $validated = $request->validate($this->rules($bmsReportSubmission->document_type), [
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
@@ -56,22 +66,27 @@ class BmsReportSubmissionController extends Controller
         if (! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);
         }
-        $oldPath = $bmsReportSubmission->mov_file_path;
-        $newPath = null;
-        $replaceOld = $request->hasFile('mov');
-        try {
-            if ($request->hasFile('mov')) {
-                $validated = $this->storeMov($request, $validated);
-                $newPath = $validated['mov_file_path'] ?? null;
-            }
-            unset($validated['mov']);
-            $validated['updated_by'] = $request->user()?->id;
+        unset($validated['mov']);
+        $validated['updated_by'] = $request->user()?->id;
+        if ($request->hasFile('mov')) {
+            $attributes = $validated;
+            unset($attributes['mov_file_path'], $attributes['mov_file_name']);
+            $adapter = $this->documentAdapters->resolve('bms-report', $bmsReportSubmission, 'mov');
+            $this->documents->replaceUsingAdapter(
+                $bmsReportSubmission,
+                'bms',
+                'mov',
+                $request->file('mov'),
+                $adapter,
+                'mov',
+                (int) $request->user()->id,
+                fn ($record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'),
+                $attributes,
+            );
+        } else {
             $bmsReportSubmission->update($validated);
-        } catch (\Throwable $exception) {
-            if ($newPath) $this->attachments->delete($newPath);
-            throw $exception;
         }
-        if ($replaceOld && $oldPath) $this->attachments->delete($oldPath);
 
         return redirect()->back()->with('success', 'BMS report submission successfully updated.');
     }
@@ -80,8 +95,11 @@ class BmsReportSubmissionController extends Controller
     {
         $this->organization->assertCanAccessProtectedArea(request()->user(), $bmsReportSubmission->protected_area_id);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($bmsReportSubmission);
-        $this->deleteMov($bmsReportSubmission);
-        $bmsReportSubmission->delete();
+        $path = $bmsReportSubmission->mov_file_path;
+        app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)
+            ->deleteSource($bmsReportSubmission, fn () => $bmsReportSubmission->delete());
+        // Keep the protected file until the database deletion has committed.
+        if ($path) $this->attachments->delete($path);
 
         return redirect()->back()->with('success', 'BMS report submission successfully deleted.');
     }
@@ -111,26 +129,6 @@ class BmsReportSubmissionController extends Controller
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];
-    }
-
-    private function storeMov(Request $request, array $validated): array
-    {
-        unset($validated['mov']);
-
-        if ($request->hasFile('mov')) {
-            $file = $request->file('mov');
-            $validated['mov_file_name'] = $file->getClientOriginalName();
-            $validated['mov_file_path'] = $this->attachments->store($file, 'bms-report');
-        }
-
-        return $validated;
-    }
-
-    private function deleteMov(BmsReportSubmission $submission): void
-    {
-        if ($submission->mov_file_path) {
-            $this->attachments->delete($submission->mov_file_path);
-        }
     }
 
 }

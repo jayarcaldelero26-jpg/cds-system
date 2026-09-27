@@ -11,6 +11,10 @@ use App\Services\SubmissionTracking\RoutingCorrectionService;
 use App\Services\SubmissionTracking\RoutingAttachmentService;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\BusinessCalendarService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
+use App\Services\SubmissionTracking\RoutingTransitionLifecycle;
+use App\Services\SubmissionTracking\SubmissionStorageStatusPresenter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -20,7 +24,7 @@ use Inertia\Response;
 
 class SubmissionTrackingController extends Controller
 {
-    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly RoutingCorrectionService $corrections, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly RoutingAttachmentService $routingAttachments, private readonly DocumentRoutingTransitionService $documentRouting) {}
+    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly RoutingCorrectionService $corrections, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly RoutingAttachmentService $routingAttachments, private readonly DocumentRoutingTransitionService $documentRouting, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters, private readonly RoutingTransitionLifecycle $transitionLifecycle) {}
 
     public function index(Request $request): Response
     {
@@ -48,6 +52,15 @@ class SubmissionTrackingController extends Controller
         $selectedId = $request->integer('source_id');
         if (filled($selectedSource) && $selectedId > 0) {
             $selectedRecord = $this->tracking->records($filters)->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId);
+            if ($selectedRecord && $request->user()?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN)) {
+                $sourceConfig = $this->tracking->source($selectedSource);
+                $selectedModel = $sourceConfig
+                    ? $sourceConfig['model']::query()->find($selectedId)
+                    : null;
+                if ($selectedModel) {
+                    $selectedRecord['storage_status'] = app(SubmissionStorageStatusPresenter::class)->present($selectedSource, $selectedModel);
+                }
+            }
         }
         return Inertia::render('SubmissionTracking/Index', [
             'queues' => $queues,
@@ -81,6 +94,20 @@ class SubmissionTrackingController extends Controller
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         abort_unless(app(OrganizationalAccessService::class)->canUseSubmissionTrackingSource($request->user(), $source, $sourceConfig['ability']), 403);
+        if ($request->hasFile('official_document')) {
+            validator($request->all(), ['official_document' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400']])->validate();
+            $documentSource = $sourceConfig['model']::query()->findOrFail($record);
+            $slotResolution = $this->documentAdapters->resolveOfficialDocumentSlot($source, $documentSource);
+            if ($slotResolution['status'] !== ReportDocumentAdapterResolver::SUPPORTED) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['official_document' => 'The official report document slot is not configured for this source.']);
+            }
+            if ($request->exists('official_document_slot') && (string) $request->input('official_document_slot') !== $slotResolution['slot']) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['official_document_slot' => 'The official document slot is determined by CDS-SMART and cannot be selected in the request.']);
+            }
+            if (! $this->officialDocumentOperation($source, $documentSource, $stage)) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['official_document' => 'An official document can only be updated when forwarding the submission or resubmitting a corrected document.']);
+            }
+        }
         // ENGP retains its existing transition contract. Phase 1 generic
         // correction attachment handling does not apply to that source.
         if ($source !== 'engp' && str_starts_with($stage, 'return_for_correction_')) {
@@ -140,6 +167,7 @@ class SubmissionTrackingController extends Controller
             'date' => ['required', 'date'],
             'stage' => ['nullable', Rule::in([SubmissionTrackingService::CENRO_RELEASE, SubmissionTrackingService::PENRO_RECEIPT, SubmissionTrackingService::REGIONAL_ENDORSEMENT])],
             'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
+            'official_document' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
         ]);
         abort_unless(($data['stage'] ?? $stage) === $stage, 422);
         $this->assertRoutingAttachmentAllowed($source, $record, $stage, $request->hasFile('attachment'));
@@ -172,6 +200,7 @@ class SubmissionTrackingController extends Controller
             }],
             'remarks' => ['nullable', 'string', 'max:2000'],
             'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
+            'official_document' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
         ]);
         abort_unless(($data['stage'] ?? $stage) === $stage, 422);
 
@@ -181,20 +210,38 @@ class SubmissionTrackingController extends Controller
         }
 
         abort_unless($this->pambAccess->canRecordInternalRouting($request->user(), $submission, $stage), 403);
+        $officialFile = $request->file('official_document');
+        $officialOperation = $officialFile ? $timeline->documentOperation($stage) : null;
+        if ($officialFile && ! $officialOperation) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['official_document' => 'An official document can only be updated when forwarding the submission or resubmitting a corrected document.']);
+        }
+        if ($officialFile) {
+            $resolution = $this->documentAdapters->resolveOfficialDocumentSlot('conservation', $submission);
+            if ($resolution['status'] !== ReportDocumentAdapterResolver::SUPPORTED || ! $resolution['adapter'] || blank($resolution['slot'])) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['official_document' => 'The official report document slot is not configured for this source.']);
+            }
+        }
         if ($request->hasFile('attachment') && ! $timeline->isCorrectionStageKey($stage) && ! $this->tracking->canAttachRoutingCopy($source, $submission, $stage)) {
             throw \Illuminate\Validation\ValidationException::withMessages(['attachment' => 'A routing document copy cannot be attached to this receipt-only or completed action.']);
         }
         $file = $request->file('attachment');
         $path = $file ? $this->routingAttachments->store($file) : null;
+        $officialPath = null;
         $attachmentPurpose = $timeline->isCorrectionStageKey($stage) ? 'correction_reference' : 'routing_copy';
         $committed = false;
         try {
-            DB::transaction(function () use ($source, $record, $stage, $data, $request, $file, $path, $attachmentPurpose): void {
+            DB::transaction(function () use ($source, $record, $stage, $data, $request, $file, $path, $officialFile, $officialOperation, &$officialPath, $attachmentPurpose): void {
                 $event = $this->tracking->recordInternalRouting($source, $record, $stage, now(BusinessCalendarService::TIMEZONE)->toDateTimeString(), $request->user()?->id, $data['remarks'] ?? null);
+                if ($officialFile) $officialPath = $this->replaceOfficialDocument($source, $record, $stage, $officialFile, $request->user(), $data['remarks'] ?? null, $event, $officialOperation);
                 if ($file && $path) $this->routingAttachments->create($source, $record, $file, $path, $request->user(), $stage, $stage, $data['remarks'] ?? null, null, $event, $attachmentPurpose);
+                $this->transitionLifecycle->afterTransition($event, $request->user());
             });
             $committed = true;
-        } catch (\Throwable $exception) { if ($path && ! $committed) $this->routingAttachments->discard($path); throw $exception; }
+        } catch (\Throwable $exception) {
+            if ($path && ! $committed) $this->routingAttachments->discard($path);
+            if ($officialPath && ! $committed) \Illuminate\Support\Facades\Storage::disk(CurrentDocumentReplacementService::DISK)->delete($officialPath);
+            throw $exception;
+        }
 
         return back()->with('success', $this->routingSuccessMessage($stage));
     }
@@ -279,11 +326,24 @@ class SubmissionTrackingController extends Controller
 
     private function transitionWithAttachment(Request $request, string $source, int $record, string $stage, ?string $date, ?string $remarks, ?string $correctionReasonKey = null, ?string $correctionDetail = null, string $attachmentPurpose = 'routing_copy'): void
     {
+        $sourceConfig = $this->tracking->source($source);
+        abort_unless($sourceConfig, 404);
         $file = $request->file('attachment');
+        $officialFile = $request->file('official_document');
+        $officialOperation = null;
+        if ($officialFile) {
+            $sourceConfig = $this->tracking->source($source);
+            abort_unless($sourceConfig, 404);
+            $document = $sourceConfig['model']::query()->findOrFail($record);
+            $officialOperation = $this->officialDocumentOperation($source, $document, $stage);
+            abort_unless($officialOperation, 422);
+        }
         $path = $file ? $this->routingAttachments->store($file) : null;
+        $officialPath = null;
         $committed = false;
+        $routingStartedAt = hrtime(true);
         try {
-            DB::transaction(function () use ($request, $source, $record, $stage, $date, $remarks, $file, $path, $correctionReasonKey, $correctionDetail, $attachmentPurpose): void {
+            DB::transaction(function () use ($request, $source, $record, $stage, $date, $remarks, $file, $path, $officialFile, $officialOperation, &$officialPath, $correctionReasonKey, $correctionDetail, $attachmentPurpose): void {
                 $event = (in_array($stage, ['receive_correction', 'forward_to_penro_records'], true) || str_starts_with($stage, 'return_for_correction_')) && $source === 'conservation'
                     ? $this->documentRouting->transition(
                         $this->tracking->source($source)['model']::query()->findOrFail($record),
@@ -295,10 +355,65 @@ class SubmissionTrackingController extends Controller
                         $correctionDetail,
                     )
                     : $this->tracking->transition($source, $record, $stage, $date, $request->user()?->id, $remarks, $correctionReasonKey, $correctionDetail);
+                if ($officialFile) {
+                    $officialPath = $this->replaceOfficialDocument($source, $record, $stage, $officialFile, $request->user(), $remarks, $event, $officialOperation);
+                }
                 if ($file && $path) $this->routingAttachments->create($source, $record, $file, $path, $request->user(), $stage, $stage, $remarks, $event instanceof \App\Models\DocumentRoutingEvent ? $event : null, $event instanceof \App\Models\PambRoutingEvent ? $event : null, $attachmentPurpose);
+                if ($event instanceof \App\Models\DocumentRoutingEvent || $event instanceof \App\Models\PambRoutingEvent) {
+                    $this->transitionLifecycle->afterTransition($event, $request->user());
+                }
             });
             $committed = true;
-        } catch (\Throwable $exception) { if ($path && ! $committed) $this->routingAttachments->discard($path); throw $exception; }
+            \Illuminate\Support\Facades\Log::debug('Submission routing transaction and required lifecycle completed.', [
+                'source_type' => $source,
+                'action' => $stage,
+                'replacement_attached' => $officialFile !== null,
+                'duration_ms' => (hrtime(true) - $routingStartedAt) / 1_000_000,
+            ]);
+        } catch (\Throwable $exception) {
+            if ($path && ! $committed) $this->routingAttachments->discard($path);
+            if ($officialPath && ! $committed) \Illuminate\Support\Facades\Storage::disk(CurrentDocumentReplacementService::DISK)->delete($officialPath);
+            throw $exception;
+        }
+    }
+
+    private function officialDocumentOperation(string $source, \Illuminate\Database\Eloquent\Model $record, string $stage): ?string
+    {
+        if (in_array($stage, [SubmissionTrackingService::CENRO_RELEASE, SubmissionTrackingService::REGIONAL_ENDORSEMENT], true)) return 'forward';
+        if ($stage === SubmissionTrackingService::PENRO_RECEIPT) return null;
+
+        return $this->documentRouting->documentOperation($record, $source, $stage);
+    }
+
+    private function replaceOfficialDocument(string $source, int $recordId, string $stage, \Illuminate\Http\UploadedFile $file, ?\App\Models\User $actor, ?string $remarks, ?\Illuminate\Database\Eloquent\Model $event, ?string $operation): ?string
+    {
+        abort_unless($actor, 403);
+        $sourceConfig = $this->tracking->source($source);
+        abort_unless($sourceConfig, 404);
+        $document = $sourceConfig['model']::query()->findOrFail($recordId);
+        $resolution = $this->documentAdapters->resolveOfficialDocumentSlot($source, $document);
+        if ($resolution['status'] !== ReportDocumentAdapterResolver::SUPPORTED
+            || ! $resolution['adapter']
+            || $resolution['slot'] === null
+            || $resolution['slot'] === '') {
+            throw \Illuminate\Validation\ValidationException::withMessages(['official_document' => 'The official report document slot is not configured for this source.']);
+        }
+        $slot = $resolution['slot'];
+        $adapter = $resolution['adapter'];
+        abort_unless($operation, 422);
+        $action = $operation === 'correction_resubmission' ? 'CORRECTION' : 'RELEASE';
+        $result = $this->documents->replaceUsingAdapter(
+            $document, $source, $slot, $file, $adapter, $slot,
+            (int) $actor->getKey(),
+            function (\Illuminate\Database\Eloquent\Model $locked) use ($actor, $source): void {
+                abort_unless(app(OrganizationalAccessService::class)->canUseSubmissionTrackingSource($actor, $source, $this->tracking->source($source)['ability'] ?? null), 403);
+                if ($locked instanceof \App\Models\ConservationReportSubmission) abort_unless($this->pambAccess->canView($actor, $locked), 403);
+            },
+            $remarks,
+            [],
+            $action,
+        );
+        return in_array($result['status'], ['uploaded', 'replaced'], true) ? $result['path'] : null;
     }
 
     private function assertRoutingAttachmentAllowed(string $source, int $record, string $stage, bool $hasAttachment): void

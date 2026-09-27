@@ -7,6 +7,10 @@ use App\Services\AwsMonthlySummaryService;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
+require_once __DIR__.'/../Support/IsolatedExportStorage.php';
+beforeEach(function (): void { isolateGeneratedExportStorage(); });
+afterEach(function (): void { removeIsolatedGeneratedExportStorage(); });
+
 
 function rangeDocxAdmin(): User
 {

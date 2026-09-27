@@ -29,12 +29,6 @@ class AuthenticatedSessionController extends Controller
 
         $user = $request->user();
 
-        // Legacy privileged accounts predate is_approved. Their authority is
-        // role-based, so normalize only CDS Admin/Super Admin accounts here.
-        if ($user && app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($user) && ! $user->is_approved) {
-            $user->forceFill(['is_approved' => true])->saveQuietly();
-        }
-
         if ($user && ! $user->is_approved) {
             Auth::guard('web')->logout();
 

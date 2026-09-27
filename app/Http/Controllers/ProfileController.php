@@ -18,11 +18,14 @@ class ProfileController extends Controller
     public function edit(Request $request): Response
     {
         $canManagePasskeys = app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($request->user());
+        $passwordConfirmedAt = (int) $request->session()->get('auth.password_confirmed_at', 0);
+        $passwordConfirmationFresh = now()->timestamp - $passwordConfirmedAt <= (int) config('auth.password_timeout', 10800);
 
         return Inertia::render('Profile/Edit', [
             'user' => $request->user(),
             'canManagePasskeys' => $canManagePasskeys,
             'passkeys' => $canManagePasskeys ? $request->user()->passkeys()->get(['id', 'name', 'created_at', 'last_used_at']) : [],
+            'passwordConfirmationFresh' => $passwordConfirmationFresh,
         ]);
     }
 

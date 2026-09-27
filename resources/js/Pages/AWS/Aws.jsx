@@ -10,7 +10,7 @@ import AwsGraph from './AwsGraph';
 import AwsReportSubmissionTracker from './AwsReportSubmissionTracker';
 import AwsMonthlySummary from './AwsMonthlySummary';
 
-export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], organizationalOffices = [], dataOnly = false, filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
+export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], organizationalOffices = [], targetOffices = [], protectedAreasByOffice = {}, dataOnly = false, filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
   const { auth = {} } = usePage().props;
 
   // Keep report/form links working. The old raw-data link now opens the
@@ -236,7 +236,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
           } />
 
                 {/* REPORTS TABLE TAB */}
-                {!dataOnly && activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} organizationalOffices={organizationalOffices} filters={filters} />}
+                {!dataOnly && activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} organizationalOffices={organizationalOffices} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} filters={filters} />}
                 {false && activeTab === 'reports' &&
         <div className="space-y-4">
                         {records.length > 0 ?
@@ -599,7 +599,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         </div>
 
                         <form onSubmit={handleImportSubmit} className="space-y-4">
-                            <p className="text-xs text-gray-500">Upload AWS monitoring data using the supported spreadsheet format.</p>
+                            <p className="text-xs text-gray-500">Upload CSV or XLSX monitoring data, up to 50 MB, 250,000 rows, 256 columns, 1 MB per cell, 4 MB per row, and 20,000 daily records.</p>
 
                             <div>
 

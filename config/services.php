@@ -2,6 +2,22 @@
 
 return [
 
+    'document_archive' => [
+        'driver' => env('DOCUMENT_ARCHIVE_DRIVER', 'unconfigured'),
+        'client_id' => env('GOOGLE_DRIVE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_DRIVE_CLIENT_SECRET'),
+        'refresh_token' => env('GOOGLE_DRIVE_REFRESH_TOKEN'),
+        'folder_id' => env('GOOGLE_DRIVE_FOLDER_ID'),
+    ],
+
+    'google_drive_archive' => [
+        // Credentials belong in a production secret store. No Drive adapter is
+        // enabled until an organizational Shared Drive integration is approved.
+        'enabled' => (bool) env('GOOGLE_DRIVE_ARCHIVE_ENABLED', false),
+        'shared_drive_id' => env('GOOGLE_DRIVE_SHARED_DRIVE_ID'),
+        'root_folder_id' => env('GOOGLE_DRIVE_ARCHIVE_ROOT_FOLDER_ID'),
+    ],
+
     'engp_iac_generator_url' => env('ENGP_IAC_GENERATOR_URL'),
 
     /*

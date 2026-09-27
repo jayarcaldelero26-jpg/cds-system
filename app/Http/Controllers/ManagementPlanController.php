@@ -7,10 +7,12 @@ use App\Models\ManagementPlanType;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\ComplianceMovService;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
@@ -18,13 +20,12 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
-use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Throwable;
 
 class ManagementPlanController extends Controller
 {
-    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization) {}
+    public function __construct(private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
 
     public function index(Request $request): Response
     {
@@ -104,6 +105,7 @@ class ManagementPlanController extends Controller
                 ->through(fn (ManagementPlan $plan) => $this->planData($plan, $managementPlanType)),
             'filters' => $filters,
             'protectedAreas' => $this->protectedAreaOptions($request->user()),
+            ...app(SubmissionFormScopeService::class)->options($request->user()),
             'planTypes' => [],
             'approvalStatuses' => ManagementPlanProfileController::APPROVAL_STATUSES,
             'documentCategories' => ManagementPlanProfileController::DOCUMENT_CATEGORIES,
@@ -117,32 +119,41 @@ class ManagementPlanController extends Controller
         return Inertia::render('ManagementPlans/Create', [
             'managementPlanType' => $this->typeData($managementPlanType),
             'protectedAreas' => $this->protectedAreaOptions(request()->user()),
+            ...app(SubmissionFormScopeService::class)->options(request()->user()),
         ]);
     }
 
     public function storeReport(Request $request, ManagementPlanType $managementPlanType): RedirectResponse
     {
         abort_unless($managementPlanType->is_active, 404);
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $this->rejectRoutingFields($request);
         $data = $request->validate($this->reportRules(requireAttachments: true));
         $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id']);
-        $newAttachments = [];
-
+        $files = $request->file('attachments', []);
+        $plan = DB::transaction(fn () => ManagementPlan::query()->create([
+            ...collect($data)->except('attachments')->toArray(),
+            'management_plan_type_id' => $managementPlanType->id,
+            'plan_type' => $managementPlanType->name,
+            'attachments' => [],
+            'created_by' => $request->user()->id,
+            'updated_by' => $request->user()->id,
+        ]));
+        $createdSlots = [];
         try {
-            foreach ($request->file('attachments', []) as $file) {
-                $newAttachments[] = $this->storeAttachment($file);
+            foreach ($files as $index => $file) {
+                $slot = (string) $index;
+                $adapter = $this->documentAdapters->resolve('management-plan', $plan, $slot);
+                $this->documents->replaceUsingAdapter($plan, 'management-plan', $slot, $file, $adapter, $slot, (int) $request->user()->id,
+                    fn (ManagementPlan $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                    null, [], 'UPLOAD');
+                $createdSlots[] = $slot;
             }
-
-            DB::transaction(fn () => ManagementPlan::create([
-                ...collect($data)->except('attachments')->toArray(),
-                'management_plan_type_id' => $managementPlanType->id,
-                'plan_type' => $managementPlanType->name,
-                'attachments' => $newAttachments,
-                'created_by' => $request->user()->id,
-                'updated_by' => $request->user()->id,
-            ]));
         } catch (Throwable $exception) {
-            $this->deleteAttachments($newAttachments);
+            foreach ($createdSlots as $slot) {
+                try { $plan->refresh(); $this->documents->clearUsingAdapter($plan, 'management-plan', $slot, $this->documentAdapters->resolve('management-plan', $plan, $slot), (int) $request->user()->id, static fn (): null => null, 'Failed multi-document upload cleanup'); } catch (Throwable $cleanupFailure) { report($cleanupFailure); }
+            }
+            $plan->forceDelete();
             throw $exception;
         }
 
@@ -158,6 +169,7 @@ class ManagementPlanController extends Controller
             'managementPlanType' => $this->typeData($managementPlanType),
             'managementPlan' => $this->planData($managementPlan->load('protectedArea:id,name'), $managementPlanType),
             'protectedAreas' => $this->protectedAreaOptions(request()->user()),
+            ...app(SubmissionFormScopeService::class)->options(request()->user()),
         ]);
     }
 
@@ -167,6 +179,7 @@ class ManagementPlanController extends Controller
         $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($managementPlan);
         $this->rejectRoutingFields($request);
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $data = $request->validate([
             ...$this->reportRules(),
             'removed_attachments' => ['nullable', 'array'],
@@ -192,26 +205,67 @@ class ManagementPlanController extends Controller
             throw ValidationException::withMessages(['removed_attachments' => 'One or more selected attachments do not belong to this management plan report.']);
         }
 
-        $retainedAttachments = array_values(array_filter($currentAttachments, fn ($attachment) => ! in_array($this->attachmentPath($attachment), $requestedPaths, true)));
-        $newAttachments = [];
-
-        try {
-            foreach ($uploadedAttachments as $file) {
-                $newAttachments[] = $this->storeAttachment($file);
-            }
-
-            DB::transaction(fn () => $managementPlan->update([
+        $requestedSlots = collect($requestedRemovals)->map(function (string $key) use ($attachmentsByKey, $attachmentsByPath) {
+            return $attachmentsByKey->has($key) ? $key : $attachmentsByPath->search(fn ($attachment) => $this->attachmentPath($attachment) === $key);
+        })->filter(fn ($slot) => $slot !== false)->map(fn ($slot) => (string) $slot)->unique()->values();
+        if ($uploadedAttachments !== []) {
+            $existingKeys = array_map('intval', array_keys($currentAttachments));
+            $nextSlot = $existingKeys === [] ? 0 : max($existingKeys) + 1;
+            $formAttributes = [
                 ...collect($data)->except(['attachments', 'removed_attachments'])->toArray(),
                 'plan_type' => $managementPlanType->name,
-                'attachments' => [...$retainedAttachments, ...$newAttachments],
                 'updated_by' => $request->user()->id,
-            ]));
-        } catch (Throwable $exception) {
-            $this->deleteAttachments($newAttachments);
-            throw $exception;
-        }
+            ];
+            $createdSlots = [];
+            try {
+                foreach (array_values($uploadedAttachments) as $offset => $file) {
+                    $slot = (string) ($nextSlot + $offset);
+                    $adapter = $this->documentAdapters->resolve('management-plan', $managementPlan, $slot);
+                    $this->documents->replaceUsingAdapter($managementPlan, 'management-plan', $slot, $file, $adapter, $slot, (int) $request->user()->id,
+                        fn (ManagementPlan $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                        null, $offset === count($uploadedAttachments) - 1 ? $formAttributes : [], 'UPLOAD');
+                    $createdSlots[] = $slot;
+                }
+            } catch (Throwable $exception) {
+                foreach ($createdSlots as $slot) {
+                    try { $managementPlan->refresh(); $this->documents->clearUsingAdapter($managementPlan, 'management-plan', $slot, $this->documentAdapters->resolve('management-plan', $managementPlan, $slot), (int) $request->user()->id, static fn (): null => null, 'Failed multi-document upload cleanup'); } catch (Throwable $cleanupFailure) { report($cleanupFailure); }
+                }
+                throw $exception;
+            }
 
-        $this->deleteAttachments($requestedPaths);
+            foreach ($requestedSlots as $slot) {
+                $managementPlan->refresh();
+                $this->documents->clearUsingAdapter(
+                    $managementPlan,
+                    'management-plan',
+                    $slot,
+                    $this->documentAdapters->resolve('management-plan', $managementPlan, $slot),
+                    (int) $request->user()->id,
+                    fn (ManagementPlan $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                    'Management plan attachment removed',
+                );
+            }
+
+            return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report updated successfully.');
+        }
+        $formAttributes = [
+            ...collect($data)->except(['attachments', 'removed_attachments'])->toArray(),
+            'plan_type' => $managementPlanType->name,
+            'updated_by' => $request->user()->id,
+        ];
+        DB::transaction(fn () => $managementPlan->update($formAttributes));
+        foreach ($requestedSlots as $slot) {
+            $managementPlan->refresh();
+            $this->documents->clearUsingAdapter(
+                $managementPlan,
+                'management-plan',
+                $slot,
+                $this->documentAdapters->resolve('management-plan', $managementPlan, $slot),
+                (int) $request->user()->id,
+                fn (ManagementPlan $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                'Management plan attachment removed',
+            );
+        }
 
         return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report updated successfully.');
     }
@@ -222,12 +276,13 @@ class ManagementPlanController extends Controller
         $managementPlan = $this->authorizedPlan($request, $managementPlan->id);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($managementPlan);
         $managementPlan->update(['updated_by' => $request->user()->id]);
-        $managementPlan->delete();
+        app(\App\Services\Reports\ReportTrackingReferenceLifecycle::class)
+            ->deleteSource($managementPlan, fn () => $managementPlan->delete());
 
         return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Management plan report deleted successfully.');
     }
 
-    public function viewScopedAttachment(ManagementPlanType $managementPlanType, ManagementPlan $managementPlan, string $attachment): BinaryFileResponse
+    public function viewScopedAttachment(ManagementPlanType $managementPlanType, ManagementPlan $managementPlan, string $attachment): HttpResponse
     {
         $this->assertOwnedByType($managementPlanType, $managementPlan);
         $this->organization->assertCanAccessProtectedArea(request()->user(), $managementPlan->protected_area_id);
@@ -235,7 +290,7 @@ class ManagementPlanController extends Controller
         return $this->attachmentResponse($managementPlan, $attachment);
     }
 
-    public function viewAttachment(ManagementPlan $managementPlan, string $attachment): BinaryFileResponse
+    public function viewAttachment(ManagementPlan $managementPlan, string $attachment): HttpResponse
     {
         $managementPlan = $this->authorizedPlan(request(), $managementPlan->id);
         return $this->attachmentResponse($managementPlan, $attachment);
@@ -258,7 +313,7 @@ class ManagementPlanController extends Controller
         abort_unless($type->is_active && $plan->management_plan_type_id === $type->id, 404);
     }
 
-    private function attachmentResponse(ManagementPlan $plan, string $attachment): BinaryFileResponse
+    private function attachmentResponse(ManagementPlan $plan, string $attachment): HttpResponse
     {
         return $this->attachments->response('management-plan', $plan, $attachment);
     }
@@ -359,26 +414,10 @@ class ManagementPlanController extends Controller
         return $this->organization->scopeProtectedAreaQuery(ManagementPlan::query(), $request->user())->findOrFail($id);
     }
 
-    private function storeAttachment(UploadedFile $file): array
-    {
-        $path = $this->attachments->store($file, 'management-plan');
-        if (! is_string($path)) {
-            throw new RuntimeException('The attachment could not be stored.');
-        }
-        return ['original_name' => $file->getClientOriginalName(), 'stored_name' => basename($path), 'path' => $path, 'mime_type' => $file->getMimeType() ?: $file->getClientMimeType(), 'size' => $file->getSize()];
-    }
-
     private function attachmentPath(mixed $attachment): ?string
     {
         $path = is_string($attachment) ? $attachment : (is_array($attachment) ? ($attachment['path'] ?? null) : null);
         return is_string($path) && $path !== '' ? $path : null;
     }
 
-    private function deleteAttachments(array $attachments): void
-    {
-        $paths = array_values(array_filter(array_map(fn ($attachment) => $this->attachmentPath($attachment), $attachments)));
-        if ($paths !== []) {
-            foreach ($paths as $path) $this->attachments->delete($path);
-        }
-    }
 }

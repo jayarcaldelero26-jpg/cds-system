@@ -14,7 +14,7 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Throwable;
 
 class TechnicalReportController extends Controller
@@ -149,7 +149,7 @@ class TechnicalReportController extends Controller
         return to_route('technical-reports.index')->with('success', 'General report updated successfully.');
     }
 
-    public function viewAttachment(TechnicalReport $technicalReport): BinaryFileResponse
+    public function viewAttachment(TechnicalReport $technicalReport): HttpResponse
     {
         $technicalReport = $this->authorizedRecord(request(), $technicalReport->id);
         return $this->attachments->response('technical-report', $technicalReport, 'attachment');

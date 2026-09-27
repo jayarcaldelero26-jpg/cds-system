@@ -167,3 +167,59 @@ test('active navigation excludes retired Technical Reports', function () {
         ->assertInertia(fn (Assert $page) => $page
             ->where('genericModuleNavigation', fn ($items): bool => collect($items)->where('label', 'Technical Reports')->isEmpty()));
 });
+
+test('all retired module codes stay out of registries, navigation, management, and direct routes', function () {
+    $retired = ModuleDefinition::RETIRED_CODES;
+    foreach ($retired as $code) {
+        ModuleDefinition::query()->create([
+            'name' => ucwords(str_replace('_', ' ', $code)),
+            'code' => $code,
+            'program_area' => 'conservation',
+            'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
+            'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+            'deadline_mode' => ModuleDefinition::DEADLINE_NONE,
+            'is_active' => true,
+        ]);
+    }
+
+    $active = ModuleDefinition::query()->create([
+        'name' => 'Active BMS',
+        'code' => 'active_bms_guard_test',
+        'program_area' => 'conservation',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
+        'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'deadline_mode' => ModuleDefinition::DEADLINE_NONE,
+        'is_active' => true,
+    ]);
+
+    expect(ModuleDefinition::query()->notRetired()->pluck('code')->all())
+        ->not->toContain(...$retired)
+        ->and(ModuleDefinition::query()->notRetired()->pluck('code')->all())
+        ->toContain($active->code);
+
+    $this->actingAs($this->user)->get(route('module-definitions.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('definitions', fn ($definitions): bool => collect($definitions)->whereIn('code', $retired)->isEmpty()
+                && collect($definitions)->contains(fn ($definition): bool => $definition['code'] === $active->code)));
+
+    $this->actingAs($this->user)->get(route('dashboard'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('genericModuleNavigation', fn ($items): bool => collect($items)->whereIn('code', $retired)->isEmpty()));
+
+    foreach ([
+        '/lawin-monitorings', '/cds-lawin', '/issue-monitorings',
+        '/ecotourism-monitorings', '/program-project-activities', '/technical-reports',
+    ] as $path) {
+        $this->actingAs($this->user)->get($path)->assertNotFound();
+    }
+
+    foreach (ModuleDefinition::query()->whereIn('code', $retired)->get() as $definition) {
+        $this->actingAs($this->user)
+            ->patch(route('module-definitions.status', $definition))
+            ->assertNotFound();
+    }
+
+    expect($active->fresh()->is_active)->toBeTrue();
+});

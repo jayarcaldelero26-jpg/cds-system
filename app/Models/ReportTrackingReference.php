@@ -10,6 +10,6 @@ class ReportTrackingReference extends Model
 
     protected function casts(): array
     {
-        return ['source_id' => 'integer', 'reporting_year' => 'integer'];
+        return ['source_id' => 'integer', 'reporting_year' => 'integer', 'source_deleted_at' => 'datetime'];
     }
 }

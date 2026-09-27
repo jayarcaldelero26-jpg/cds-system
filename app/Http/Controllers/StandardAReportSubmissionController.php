@@ -4,8 +4,11 @@ namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
+use App\Services\Attachments\CurrentDocumentReplacementService;
+use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use App\Services\DateConductedRangeService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\RedirectResponse;
@@ -15,7 +18,7 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response as HttpResponse;
 use Throwable;
 
 abstract class StandardAReportSubmissionController extends Controller
@@ -33,6 +36,8 @@ abstract class StandardAReportSubmissionController extends Controller
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
         private readonly DateConductedRangeService $dateConductedRanges,
+        private readonly CurrentDocumentReplacementService $documents,
+        private readonly ReportDocumentAdapterResolver $documentAdapters,
     ) {}
 
     public function index(Request $request): Response
@@ -60,39 +65,37 @@ abstract class StandardAReportSubmissionController extends Controller
         return Inertia::render($this->page, [
             'submissions' => $submissions,
             'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
+            ...app(SubmissionFormScopeService::class)->options($request->user()),
             'filters' => $request->only(['protected_area_id', 'semester', 'search']),
             'moduleLabel' => $this->label,
             'routePrefix' => $this->routePrefix,
             'dateConductedRangesEnabled' => $this->dateConductedRangesEnabled,
+            'workflowConfig' => ['activity_required' => true, 'document_type_required' => false, 'period_required' => true, 'date_conducted_required' => true, 'date_accomplished_required' => true],
         ]);
     }
 
     public function store(Request $request): RedirectResponse
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $validated = $request->validate($this->rules(requireMov: true), [
             'mov.required' => 'A primary report attachment is required.',
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $validated = $this->prepareDateConductedPayload($request, $validated);
-        $newPath = null;
+        $file = $request->file('mov');
+        unset($validated['mov']);
+        $validated['created_by'] = $request->user()?->id;
+        $validated['updated_by'] = $request->user()?->id;
+        $model = $this->modelClass;
+        $submission = $model::create($validated);
         try {
-            if ($request->hasFile('mov')) {
-                $file = $request->file('mov');
-                $newPath = $this->attachments->store($file, $this->attachmentSource());
-                if (! is_string($newPath)) {
-                    throw new RuntimeException('The MOV could not be stored.');
-                }
-                $validated['mov_file_name'] = $file->getClientOriginalName();
-                $validated['mov_file_path'] = $newPath;
-            }
-            unset($validated['mov']);
-            $validated['created_by'] = $request->user()?->id;
-            $validated['updated_by'] = $request->user()?->id;
-            $model = $this->modelClass;
-            DB::transaction(fn () => $model::create($validated));
+            $adapter = $this->documentAdapters->resolve($this->attachmentSource(), $submission, 'mov');
+            $this->documents->replaceUsingAdapter($submission, $this->attachmentSource(), 'mov', $file, $adapter, 'mov', (int) $request->user()->id,
+                fn (Model $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'), [], 'UPLOAD');
         } catch (Throwable $exception) {
-            if ($newPath) $this->attachments->delete($newPath);
+            $submission->delete();
             throw $exception;
         }
 
@@ -101,6 +104,7 @@ abstract class StandardAReportSubmissionController extends Controller
 
     public function update(Request $request, int $reportSubmission): RedirectResponse
     {
+        app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $submission = $this->findSubmission($reportSubmission, $request->user());
         $this->organization->assertCanAccessProtectedArea($request->user(), $submission->protected_area_id);
         app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($submission);
@@ -109,25 +113,16 @@ abstract class StandardAReportSubmissionController extends Controller
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $validated = $this->prepareDateConductedPayload($request, $validated);
-        $oldPath = $submission->mov_file_path;
-        $newPath = null;
-        $removeOld = $request->hasFile('mov');
-        try {
-            if ($request->hasFile('mov')) {
-                $file = $request->file('mov');
-                $newPath = $this->attachments->store($file, $this->attachmentSource());
-                if (! is_string($newPath)) throw new RuntimeException('The MOV could not be stored.');
-                $validated['mov_file_name'] = $file->getClientOriginalName();
-                $validated['mov_file_path'] = $newPath;
-            }
-            unset($validated['mov']);
-            $validated['updated_by'] = $request->user()?->id;
+        unset($validated['mov']);
+        $validated['updated_by'] = $request->user()?->id;
+        if ($request->hasFile('mov')) {
+            $adapter = $this->documentAdapters->resolve($this->attachmentSource(), $submission, 'mov');
+            $this->documents->replaceUsingAdapter($submission, $this->attachmentSource(), 'mov', $request->file('mov'), $adapter, 'mov', (int) $request->user()->id,
+                fn (Model $record) => $this->organization->assertCanAccessProtectedArea($request->user(), $record->protected_area_id),
+                $request->input('remarks'), $validated, 'REPLACEMENT');
+        } else {
             DB::transaction(fn () => $submission->update($validated));
-        } catch (Throwable $exception) {
-            if ($newPath) $this->attachments->delete($newPath);
-            throw $exception;
         }
-        if ($removeOld && $oldPath) $this->attachments->delete($oldPath);
 
         return back()->with('success', "{$this->label} report submission successfully updated.");
     }
@@ -144,7 +139,7 @@ abstract class StandardAReportSubmissionController extends Controller
         return back()->with('success', "{$this->label} report submission successfully deleted.");
     }
 
-    public function showMov(int $reportSubmission): BinaryFileResponse
+    public function showMov(int $reportSubmission): HttpResponse
     {
         $submission = $this->findSubmission($reportSubmission, request()->user());
         $this->organization->assertCanAccessProtectedArea(request()->user(), $submission->protected_area_id);

@@ -13,7 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
-use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
 class ManagementPlanProfileController extends Controller
@@ -110,7 +110,7 @@ class ManagementPlanProfileController extends Controller
         return to_route('management-plans.types.show', $managementPlanType->slug)->with('success', 'Plan information updated successfully.');
     }
 
-    public function viewDocument(ManagementPlanType $managementPlanType, ManagementPlanProfile $profile, string $document): BinaryFileResponse
+    public function viewDocument(ManagementPlanType $managementPlanType, ManagementPlanProfile $profile, string $document): Response
     {
         $this->assertOwned($managementPlanType, $profile);
         $this->organization->assertCanAccessProtectedArea(request()->user(), $profile->protected_area_id);

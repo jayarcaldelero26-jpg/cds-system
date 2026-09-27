@@ -12,39 +12,39 @@ final class AwsMonthlySummaryXlsxService
     {
         abort_unless(class_exists(ZipArchive::class), 500, 'The XLSX export extension is unavailable.');
 
-        $path = tempnam(storage_path('app'), 'aws-monthly-');
-        $zip = new ZipArchive();
-        abort_unless($path !== false && $zip->open($path, ZipArchive::OVERWRITE) === true, 500, 'The XLSX workbook could not be created.');
+        return TemporaryExportFile::zipDownload(
+            'aws-monthly-',
+            $filename,
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'The XLSX workbook could not be created.',
+            'The XLSX workbook could not be created.',
+            function (ZipArchive $zip) use ($rows, $periodLabel): void {
+                $rows = array_values(is_array($rows) ? $rows : iterator_to_array($rows));
+                $degree = "\u{00B0}";
+                $headers = [
+                    'Protected Area', 'Reporting Period', 'Average Atmospheric Pressure (kPa)',
+                    'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)',
+                    'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')',
+                    'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Remarks',
+                ];
+                $sheetRows = [
+                    $this->row(1, ['Automated Weather Station (AWS) Monitoring Summary'], [1]),
+                    $this->row(2, ['Reporting Period: '.$periodLabel], [1]),
+                    $this->row(3, []),
+                    $this->row(4, $headers, array_fill(0, count($headers), 1)),
+                ];
+                foreach ($rows as $index => $summary) $sheetRows[] = $this->summaryRow($index + 5, $summary);
 
-        $rows = array_values(is_array($rows) ? $rows : iterator_to_array($rows));
-        $degree = "\u{00B0}";
-        $headers = [
-            'Protected Area', 'Reporting Period', 'Average Atmospheric Pressure (kPa)',
-            'Average Air Temperature ('.$degree.'C)', 'Average Vapor Pressure Deficit (kPa)',
-            'Average Relative Humidity (%)', 'Mean Wind Direction ('.$degree.')',
-            'Total Precipitation (mm)', 'Average Wind Speed (m/s)', 'Remarks',
-        ];
-        $sheetRows = [
-            $this->row(1, ['Automated Weather Station (AWS) Monitoring Summary'], [1]),
-            $this->row(2, ['Reporting Period: '.$periodLabel], [1]),
-            $this->row(3, []),
-            $this->row(4, $headers, array_fill(0, count($headers), 1)),
-        ];
-        foreach ($rows as $index => $summary) $sheetRows[] = $this->summaryRow($index + 5, $summary);
-
-        $zip->addFromString('[Content_Types].xml', $this->contentTypes());
-        $zip->addFromString('_rels/.rels', $this->rootRelationships());
-        $zip->addFromString('docProps/core.xml', $this->coreProperties($periodLabel));
-        $zip->addFromString('docProps/app.xml', $this->appProperties());
-        $zip->addFromString('xl/workbook.xml', $this->workbook());
-        $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships());
-        $zip->addFromString('xl/styles.xml', $this->styles());
-        $zip->addFromString('xl/worksheets/sheet1.xml', $this->worksheet($sheetRows, max(4, count($rows) + 4)));
-        $zip->close();
-
-        return response()->download($path, $filename, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ])->deleteFileAfterSend(true);
+                $zip->addFromString('[Content_Types].xml', $this->contentTypes());
+                $zip->addFromString('_rels/.rels', $this->rootRelationships());
+                $zip->addFromString('docProps/core.xml', $this->coreProperties($periodLabel));
+                $zip->addFromString('docProps/app.xml', $this->appProperties());
+                $zip->addFromString('xl/workbook.xml', $this->workbook());
+                $zip->addFromString('xl/_rels/workbook.xml.rels', $this->workbookRelationships());
+                $zip->addFromString('xl/styles.xml', $this->styles());
+                $zip->addFromString('xl/worksheets/sheet1.xml', $this->worksheet($sheetRows, max(4, count($rows) + 4)));
+            },
+        );
     }
 
     private function row(int $number, array $values, array $styles = []): array { return [$number, $values, $styles]; }

@@ -10,6 +10,10 @@ use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Spatie\Permission\Models\Permission;
 
+beforeEach(function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+});
+
 function processingHistoryUser(string $section, string $office): User
 {
     $user = User::factory()->create([
@@ -72,6 +76,7 @@ test('terminal records enter History only at terminal release and leave the acti
         ['cenro_records', 'receive_at_cenro_records'],
         ['cenro_records', 'forward_to_penro_records'],
         ['penro_records', 'receive_at_penro_records'],
+        ['penro_records', 'forward_to_office_penro'],
         ['office', 'receive_at_office_penro'],
         ['office', 'assign_to_tsd_chief'],
         ['tsd', 'receive_at_tsd_chief'],

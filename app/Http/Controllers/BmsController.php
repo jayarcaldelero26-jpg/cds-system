@@ -92,6 +92,7 @@ class BmsController extends Controller
         return Inertia::render('Bms/Index', [
             'bmsRecords' => $bmsRecords,
             'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get(),
+            ...app(\App\Services\SubmissionTracking\SubmissionFormScopeService::class)->options($request->user()),
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date', 'year']),
             'spatialLayers' => $spatialLayers,
             'annexHeaderMetadata' => $this->annexHeaderFor($request),
@@ -271,6 +272,8 @@ class BmsController extends Controller
         $rowsRead = 0;
         $rowsSkipped = 0;
         $missingSpeciesRows = 0;
+        $invalidDateRows = 0;
+        $invalidDateRowNumbers = [];
         $inserted = 0;
         $updated = 0;
 
@@ -307,46 +310,14 @@ class BmsController extends Controller
                 $finalScientific = !empty($scientificName) ? $scientificName : ($commonName ?? 'Unnamed Species');
                 $finalCommon = !empty($commonName) ? $commonName : '';
 
-                $parsedDate = now()->format('Y-m-d');
-                $parsedTime = null;
-                if (!empty($rawDate)) {
-                    $formats = [
-                        'd/m/Y H:i:s', 'd/m/Y H:i', 'd/m/Y',
-                        'm/d/Y H:i:s', 'm/d/Y H:i', 'm/d/Y',
-                        'Y-m-d H:i:s', 'Y-m-d H:i', 'Y-m-d',
-                        'd-m-Y H:i:s', 'd-m-Y H:i', 'd-m-Y',
-                        'Y/m/d', 'm-d-Y'
-                    ];
-
-                    $parsedSuccessfully = false;
-                    foreach ($formats as $fmt) {
-                        $dt = DateTime::createFromFormat($fmt, trim($rawDate));
-                        $dateErrors = DateTime::getLastErrors();
-                        if ($dt !== false && ($dateErrors === false || ($dateErrors['warning_count'] === 0 && $dateErrors['error_count'] === 0))) {
-                            $parsedDate = $dt->format('Y-m-d');
-                            if (empty($time) && str_contains($fmt, 'H:i')) {
-                                $parsedTime = $dt->format('H:i:s');
-                            }
-                            $parsedSuccessfully = true;
-                            break;
-                        }
-                    }
-
-                    if (!$parsedSuccessfully) {
-                        try {
-                            $normalized = str_replace(['/', '.'], '-', trim($rawDate));
-                            $timestamp = strtotime($normalized);
-                            if ($timestamp && $timestamp > 0) {
-                                $parsedDate = date('Y-m-d', $timestamp);
-                                if (empty($time) && preg_match('/\d{1,2}:\d{2}/', $rawDate)) {
-                                    $parsedTime = date('H:i:s', $timestamp);
-                                }
-                            }
-                        } catch (Exception $e) {
-                            // Keep default
-                        }
-                    }
+                $parsed = $this->parseBmsImportDate($rawDate);
+                if ($parsed === null) {
+                    $invalidDateRows++;
+                    $rowsSkipped++;
+                    if (count($invalidDateRowNumbers) < 5) $invalidDateRowNumbers[] = $rowsRead;
+                    continue;
                 }
+                [$parsedDate, $parsedTime] = $parsed;
 
                 $record = BmsRecord::updateOrCreate(
                     [
@@ -382,14 +353,14 @@ class BmsController extends Controller
                 DB::rollBack();
 
                 return redirect()->back()->withErrors([
-                    'file' => "No valid BMS rows were processed. {$rowsRead} rows read; {$rowsSkipped} skipped ({$missingSpeciesRows} missing scientific/common name).",
+                    'file' => $this->bmsImportSummary('No valid BMS rows were processed.', $rowsRead, $rowsSkipped, $missingSpeciesRows, $invalidDateRows, $invalidDateRowNumbers),
                 ]);
             }
 
             DB::commit();
             return redirect()->back()->with(
                 'success',
-                "Import completed: {$inserted} inserted, {$updated} updated, {$rowsSkipped} skipped. ({$rowsRead} rows read; {$missingSpeciesRows} skipped for missing scientific/common name.)"
+                $this->bmsImportSummary("Import completed: {$inserted} inserted, {$updated} updated, {$rowsSkipped} skipped.", $rowsRead, $rowsSkipped, $missingSpeciesRows, $invalidDateRows, $invalidDateRowNumbers)
             );
 
         } catch (Exception $e) {
@@ -399,6 +370,42 @@ class BmsController extends Controller
             DB::rollBack();
             return redirect()->back()->withErrors(['file' => 'Import failed: ' . $e->getMessage()]);
         }
+    }
+
+    /** @return array{0:string,1:?string}|null */
+    private function parseBmsImportDate(?string $rawDate): ?array
+    {
+        if ($rawDate === null || trim($rawDate) === '') return null;
+
+        $formats = [
+            'd/m/Y H:i:s', 'd/m/Y H:i', 'd/m/Y',
+            'm/d/Y H:i:s', 'm/d/Y H:i', 'm/d/Y',
+            'Y-m-d H:i:s', 'Y-m-d H:i', 'Y-m-d',
+            'd-m-Y H:i:s', 'd-m-Y H:i', 'd-m-Y',
+            'Y/m/d', 'm-d-Y',
+        ];
+
+        foreach ($formats as $format) {
+            $date = DateTime::createFromFormat('!'.$format, trim($rawDate));
+            $errors = DateTime::getLastErrors();
+            if ($date === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) continue;
+
+            return [$date->format('Y-m-d'), str_contains($format, 'H:i') ? $date->format('H:i:s') : null];
+        }
+
+        return null;
+    }
+
+    /** @param list<int> $invalidDateRowNumbers */
+    private function bmsImportSummary(string $message, int $rowsRead, int $rowsSkipped, int $missingSpeciesRows, int $invalidDateRows, array $invalidDateRowNumbers): string
+    {
+        $summary = "{$message} {$rowsRead} rows read; {$rowsSkipped} skipped ({$missingSpeciesRows} missing scientific/common name).";
+        if ($invalidDateRows > 0) {
+            $rowContext = $invalidDateRowNumbers === [] ? '' : ' Data rows: '.implode(', ', $invalidDateRowNumbers).(count($invalidDateRowNumbers) === 5 && $invalidDateRows > 5 ? ', …' : '').'.';
+            $summary .= " {$invalidDateRows} row(s) skipped because the monitoring date is missing or invalid.".$rowContext;
+        }
+
+        return $summary;
     }
 
     public function importGeoJson(Request $request)

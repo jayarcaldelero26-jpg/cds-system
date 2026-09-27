@@ -12,6 +12,7 @@ use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Notifications\EdatsInAppNotificationService;
 use Carbon\CarbonInterface;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -98,6 +99,17 @@ final class PambRoutingTimelineService
     {
         [$baseStage] = $this->parseStageKey($stageKey);
         return in_array($baseStage, self::INTERNAL_STAGE_KEYS, true);
+    }
+
+    /** Explicit PAMB routing semantics; receipt and correction stages are not document handoffs. */
+    public function documentOperation(string $stageKey): ?string
+    {
+        return in_array($this->canonicalStageKey($stageKey), [
+            self::FORWARDED_RECORDS_TO_PENRO, self::FORWARDED_PENRO_TO_TSD,
+            self::FORWARDED_TSD_TO_CDS, self::FORWARDED_CDS_FOCAL_TO_CHIEF,
+            self::FORWARDED_CDS_TO_PENRO, self::FORWARDED_PENRO_TO_RECORDS,
+            self::RELEASED_TO_REGIONAL,
+        ], true) ? 'forward' : null;
     }
 
     public function nextStageKey(ConservationReportSubmission $report): ?string
@@ -285,7 +297,7 @@ final class PambRoutingTimelineService
     }
 
     /** @return array<string, mixed> */
-    public function present(ConservationReportSubmission $report, ?CarbonInterface $asOf = null): array
+    public function present(ConservationReportSubmission $report, ?CarbonInterface $asOf = null, ?array $routingAttachments = null, ?Collection $auditLogs = null): array
     {
         if (! $this->applies($report)) {
             return [
@@ -302,16 +314,16 @@ final class PambRoutingTimelineService
         $allEvents = $report->routingEvents->sortBy('id')->values();
         $activeCycle = $this->currentCycle($allEvents);
         if ($activeCycle > 1) {
-            return $this->presentCorrectionCycle($report, $allEvents, $asOf, $activeCycle);
+            return $this->presentCorrectionCycle($report, $allEvents, $asOf, $activeCycle, $routingAttachments);
         }
         $events = $this->eventsByStage($allEvents);
-        $attachments = $this->routingAttachments->forPambEvents($allEvents->pluck('id'));
+        $attachments = $routingAttachments ?? $this->routingAttachments->forPambEvents($allEvents->pluck('id'));
         $dates = $this->milestoneDates($report, $events);
         $definitions = $this->definitions($report);
         $hasRegionalEndorsement = isset($dates[self::RELEASED_TO_REGIONAL]);
         $legacyRegionalDate = $report->date_endorsed_regional && ! $hasRegionalEndorsement ? $this->date($report->date_endorsed_regional) : null;
         $nextKey = $hasRegionalEndorsement ? null : $this->nextStageKeyFor($report, $allEvents);
-        $canonicalActors = $this->canonicalActors($report);
+        $canonicalActors = $this->canonicalActors($report, $auditLogs);
         $timeline = [];
 
         foreach ($definitions as $definition) {
@@ -361,13 +373,15 @@ final class PambRoutingTimelineService
                 'is_internal' => in_array($key, self::INTERNAL_STAGE_KEYS, true),
                 'can_record' => $key === $nextKey && in_array($key, self::INTERNAL_STAGE_KEYS, true) && ! ($key === self::RECEIVED_BY_PENRO_FINAL && $date),
                 'action_label' => $key === self::RECEIVED_BY_PENRO_FINAL ? ($date ? 'Review and select an action' : 'Record Receipt') : ($definition['action_label'] ?? null),
+                'can_replace_document' => $this->documentOperation($key) === 'forward',
                 'actions' => $key === self::RECORDS_RECEIVED && $status === 'current' ? [
                     [
                         'key' => 'penro_receipt',
                         'label' => 'Receive',
                         'action_label' => 'Receive',
                         'correction' => false,
-                        'attachment_allowed' => true,
+                        'attachment_allowed' => false,
+                        'can_replace_document' => false,
                     ],
                     [
                         'key' => 'return_for_correction_penro_records',
@@ -480,12 +494,12 @@ final class PambRoutingTimelineService
     }
 
     /** @param \Illuminate\Support\Collection<int, PambRoutingEvent> $allEvents */
-    private function presentCorrectionCycle(ConservationReportSubmission $report, \Illuminate\Support\Collection $allEvents, ?CarbonInterface $asOf, int $cycle): array
+    private function presentCorrectionCycle(ConservationReportSubmission $report, Collection $allEvents, ?CarbonInterface $asOf, int $cycle, ?array $routingAttachments = null): array
     {
         $nextKey = $this->nextStageKeyFor($report, $allEvents);
         $nextBase = $this->canonicalStageKey((string) $nextKey);
         $cycleEvents = $this->eventsForCycle($allEvents, $this->currentCycle($allEvents));
-        $attachments = $this->routingAttachments->forPambEvents($allEvents->pluck('id'));
+        $attachments = $routingAttachments ?? $this->routingAttachments->forPambEvents($allEvents->pluck('id'));
         $cycleDates = $this->milestoneDates($report, $cycleEvents);
         $finalReceiptRecorded = isset($cycleDates[self::RECEIVED_BY_PENRO_FINAL]);
         $definitions = collect($this->definitions($report))->keyBy('key');
@@ -978,15 +992,18 @@ final class PambRoutingTimelineService
     }
 
     /** @return array<string, array{name:?string,category:?string,office:?string}> */
-    private function canonicalActors(ConservationReportSubmission $report): array
+    private function canonicalActors(ConservationReportSubmission $report, ?Collection $auditLogs = null): array
     {
-        return AuditLog::query()
+        $logs = $auditLogs ?? AuditLog::query()
             ->where('event_type', 'submission_tracking')
             ->where('entity_type', 'conservation')
             ->where('entity_id', (string) $report->getKey())
             ->with('user:id,name,section,office_designated')
             ->latest('id')
-            ->get()
+            ->get();
+
+        return $logs
+            ->sortByDesc('id')
             ->filter(fn (AuditLog $log): bool => filled($log->metadata['stage'] ?? null) && filled($log->user?->name))
             ->groupBy(function (AuditLog $log): string {
                 return match ($log->metadata['stage']) {

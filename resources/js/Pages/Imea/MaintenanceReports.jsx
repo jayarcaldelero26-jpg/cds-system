@@ -16,6 +16,8 @@ import DatePicker from '@/Components/DatePicker';
 import WorkflowTabs from './WorkflowTabs';
 import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge';
 import { canonicalDateConductedValue, legacyDateConductedHelper } from '@/Utils/dateConductedRanges';
+import TargetOfficeSelect from '@/Components/Form/TargetOfficeSelect';
+import ProtectedAreaSelect from '@/Components/Form/ProtectedAreaSelect';
 
 const empty = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', quarter: 'Quarter 1', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
 const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
@@ -29,7 +31,7 @@ const Detail = ({ label, children }) => {
   return <div><span className="block text-xs text-gray-500">{label}</span><span className="font-semibold text-gray-800 dark:text-gray-200">{children}</span></div>;
 };
 
-export default function MaintenanceReports({ reports = {}, protectedAreas = [], filters = {} }) {
+export default function MaintenanceReports({ reports = {}, protectedAreas = [], targetOffices = [], protectedAreasByOffice = {}, filters = {} }) {
   const { auth = {} } = usePage().props;
   const canCreate = Boolean(auth.canCreateImea),canUpdate = Boolean(auth.canUpdateImea),canDelete = Boolean(auth.canDeleteImea);
   const rows = reports.data || [],links = reports.links || [];
@@ -38,7 +40,7 @@ export default function MaintenanceReports({ reports = {}, protectedAreas = [], 
   const existingMov = editing?.mov || null;
   useEffect(() => () => {if (preview?.temporary) URL.revokeObjectURL(preview.url);}, [preview]);
   useEffect(() => {if (!selected) return;const refreshed = rows.find((row) => row.id === selected.id);if (refreshed) setSelected(refreshed);}, [reports.data]);
-  const openForm = (report) => {setEditing(report || {});form.clearErrors();form.setData(report ? { ...empty, ...report, mov: null } : empty);setPreview(report?.mov || null);};
+  const openForm = (report) => {setEditing(report || {});form.clearErrors();form.setData(report ? { ...empty, ...report, target_office: String(targetOffices.find(office => office.name === report.target_office)?.id || ''), mov: null } : { ...empty, target_office: targetOffices.length === 1 ? String(targetOffices[0].id) : '' });setPreview(report?.mov || null);};
   const closeForm = () => {setEditing(null);setPreview(null);form.reset();form.clearErrors();};
   const selectMov = (file) => {form.setData((data) => ({ ...data, mov: file }));setPreview(file ? { name: file.name, type: file.type, size: file.size, url: URL.createObjectURL(file), temporary: true } : existingMov);};
   const submit = (event) => {event.preventDefault();if (form.processing) return;const isEdit = Boolean(editing?.id);form.transform((data) => isEdit ? { ...data, _method: 'put' } : data);form.post(isEdit ? route('imea.maintenance-reports.update', editing.id) : route('imea.maintenance-reports.store'), { forceFormData: true, preserveScroll: true, onSuccess: closeForm });};
@@ -67,8 +69,8 @@ function ReportForm({ form, protectedAreas, selectMov, existingMov, preview, set
   const change = (name) => (event) => form.setData(name, event.target.value);
   const error = (name) => form.errors[name] && <span className="mt-1 block text-xs text-red-500">{form.errors[name]}</span>;
   return <><CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className={label}><FloatingInput id="maintenancereports-target-office" label="Target Office" required value={form.data.target_office} onChange={change('target_office')} />{error('target_office')}</div>
-        <div className={label}><FloatingSelect id="maintenancereports-protected-area" label="Protected Area" required value={form.data.protected_area_id} onChange={change('protected_area_id')}><option value="">Select Protected Area</option>{protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</FloatingSelect>{error('protected_area_id')}</div>
+        <div className={label}><TargetOfficeSelect id="maintenancereports-target-office" value={form.data.target_office} options={targetOffices} required onChange={value => form.setData({ ...form.data, target_office: value, protected_area_id: '' })} error={form.errors.target_office} /></div>
+        <div className={label}><ProtectedAreaSelect id="maintenancereports-protected-area" label="Protected Area" required value={form.data.protected_area_id} targetOfficeId={form.data.target_office} protectedAreasByOffice={protectedAreasByOffice} onChange={value => form.setData('protected_area_id', value)} error={form.errors.protected_area_id} disabled={!form.data.target_office} /></div>
         <div className={label}><FloatingInput id="maintenancereports-name-of-activity" label="Name of Activity" required value={form.data.activity_name} onChange={change('activity_name')} />{error('activity_name')}</div>
         <div className={label}><FloatingSelect id="maintenancereports-type-of-document" label="Type of Document" required value={form.data.document_type} onChange={change('document_type')} disabled={form.processing}><option value="">Select Type of Document</option><option value="Final Report">Final Report</option><option value="Progress Report">Progress Report</option></FloatingSelect>{error('document_type')}</div>
         <div className={label}><FloatingSelect id="maintenancereports-quarter" label="Quarter" required value={form.data.quarter} onChange={change('quarter')}><option value="">Select Quarter</option>{[1, 2, 3, 4].map((number) => <option key={number}>Quarter {number}</option>)}</FloatingSelect>{error('quarter')}</div>

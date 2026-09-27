@@ -55,6 +55,8 @@ const FALLBACK = "\u2014";
 const plainDate = (value) => (value ? formatReportDate(value, "") : null);
 const badgeTone = (value) => {
     const normalized = String(value || "").toLowerCase();
+    if (normalized.includes("overdue"))
+        return "bg-red-50 text-red-700 ring-red-200 dark:bg-red-950/40 dark:text-red-200 dark:ring-red-900";
     if (
         normalized.includes("correction") ||
         normalized.includes("reject") ||
@@ -70,6 +72,8 @@ const badgeTone = (value) => {
         normalized.includes("due")
     )
         return "bg-amber-50 text-amber-800 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-200 dark:ring-amber-900";
+    if (normalized.includes("review") || normalized.includes("in progress") || normalized.includes("forwarding") || normalized.includes("in transit"))
+        return "bg-blue-50 text-blue-700 ring-blue-200 dark:bg-blue-950/40 dark:text-blue-200 dark:ring-blue-900";
     if (
         normalized.includes("ready") ||
         normalized.includes("received") ||
@@ -179,6 +183,8 @@ const requiredActionFor = (row) =>
     availableActionsFor(row).join(" / ") || standardActionLabel(currentActionFor(row));
 const compactStatusFor = (row) => {
     if (row?.routing_complete) return "Completed";
+    const canonicalStatus = String(routingStatusFor(row) || "");
+    if (canonicalStatus) return canonicalStatus;
     const actionStatus = compactStatusForAction(currentActionFor(row));
     if (actionStatus) return actionStatus;
     const status = String(routingStatusFor(row) || "");
@@ -233,6 +239,26 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                 </p>
             </div>
             <div className="space-y-4 p-4 text-xs">
+                <div className="rounded-lg border border-green-200 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-green-800 dark:text-green-300">Current Status</p>
+                        <Badge value={routingStatusFor(row) || "In Progress"} />
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Current Holder / Office</p>
+                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{routing.current_location || routing.responsible_office || row.target_office || "Not yet assigned"}</p>
+                        </div>
+                        <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Deadline</p>
+                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{plainDate(row.deadline_submission) || "—"}</p>
+                        </div>
+                        <div className="sm:col-span-2 xl:col-span-1">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Next Expected Action</p>
+                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{nextActionFor(row) || "No action pending"}</p>
+                        </div>
+                    </div>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                     <div>
                         <p className="text-[10px] font-semibold text-gray-500">
@@ -278,14 +304,6 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                         </p>
                     </div>
                 </div>
-                <div className="rounded-lg border border-green-200 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-green-800 dark:text-green-300">
-                        Routing Status
-                    </p>
-                    <p className="mt-1 text-sm font-extrabold text-green-900 dark:text-green-100">
-                        {routingStatusFor(row)}
-                    </p>
-                </div>
                 {row.can_transition && availableActionsFor(row).length > 0 && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -312,14 +330,6 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-1">
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Deadline
-                        </p>
-                        <p className="mt-0.5 text-gray-800 dark:text-gray-200">
-                            {plainDate(row.deadline_submission)}
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
                             Compliance
                         </p>
                         <p className="mt-0.5">
@@ -338,26 +348,21 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                             {responsibleCategoryFor(row)}
                         </p>
                     </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Next Expected Action
-                        </p>
-                        <p className="mt-0.5 text-gray-800 dark:text-gray-200">
-                            {nextActionFor(row)}
-                        </p>
-                    </div>
                 </div>
                 <div>
                     <div className="mb-2 flex items-center justify-between">
                         <p className="text-xs font-extrabold text-gray-900 dark:text-white">
-                            Routing Progress
+                            Processing Progress
                         </p>
                         <span className="text-[10px] font-bold text-green-700 dark:text-green-300">
                             {Number.isFinite(Number(routing.processing_percentage))
                                 ? `${routing.processing_percentage}% processing`
                                 : "Summary"}
-                        </span>
-                    </div>
+                            </span>
+                        </div>
+                        <p className="mb-2 text-[10px] text-gray-500 dark:text-gray-400">
+                            Current processing context: {routing.current_location || routing.current_stage || "Not yet assigned"}
+                        </p>
                     {Number.isFinite(Number(routing.processing_percentage)) && (
                         <div
                             className="mb-3 h-1.5 overflow-hidden rounded-full bg-green-100 dark:bg-green-950"
@@ -423,7 +428,7 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                             ))
                         ) : (
                             <p className="text-xs text-gray-500">
-                                Routing progress will appear as events are
+                                Processing progress will appear as events are
                                 recorded.
                             </p>
                         )}
@@ -479,8 +484,9 @@ export default function Index({
         correction_reason_key: "",
         correction_detail: "",
         attachment: null,
+        official_document: null,
     });
-    const internalForm = useForm({ remarks: "", stage: "", attachment: null });
+    const internalForm = useForm({ remarks: "", stage: "", attachment: null, official_document: null });
     const correctionForm = useForm({
         dates: {},
         release_events: {},
@@ -616,6 +622,17 @@ export default function Index({
             (form.data.stage === "penro_receipt" &&
                 item.key === "receive_at_penro_records"),
     );
+    const canReplaceSelectedDocument = genericAction
+        ? genericAction.can_replace_document === true
+        : selected?.routing?.document_update_capabilities?.[form.data.stage] === true;
+    const archiveCheckpointNotice = form.errors.archive
+        ? {
+              title: "Archive checkpoint unavailable",
+              message: String(form.errors.archive).toLowerCase().includes("disabled")
+                  ? "Google Drive archiving is currently disabled. This submission cannot be forwarded from PENRO Records until the archive checkpoint is available. Contact an administrator."
+                  : "The required archive checkpoint is currently unavailable. This submission cannot be forwarded from PENRO Records until it is available. Contact an administrator.",
+          }
+        : null;
     const selectedActionLabel = standardActionLabel(
         genericAction?.action_label || form.data.stage || action[0],
     );
@@ -636,9 +653,12 @@ export default function Index({
                                           "Submission"}
                                   </p>
                                   <p className="mt-0.5 text-[11px] text-gray-500">
-                                      {row.source
+                                      {row.tracking_number || (row.source
                                           ? row.source + " #" + row.source_id
-                                          : null}
+                                          : null)}
+                                  </p>
+                                  <p className="mt-0.5 truncate text-[11px] text-gray-500">
+                                      {row.activity_name || row.document_type || row.report_type || row.reporting_period || null}
                                   </p>
                               </div>
                           ),
@@ -750,9 +770,12 @@ export default function Index({
                                             "Submission"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] text-gray-500">
-                                        {row.source
+                                        {row.tracking_number || (row.source
                                             ? `${row.source} #${row.source_id}`
-                                            : null}
+                                            : null)}
+                                    </p>
+                                    <p className="mt-0.5 truncate text-[11px] text-gray-500">
+                                        {row.activity_name || row.document_type || row.report_type || row.reporting_period || null}
                                     </p>
                                 </div>
                             ),
@@ -818,16 +841,18 @@ export default function Index({
                         },
                         {
                             key: "destination",
-                            label: "Current Destination",
+                            label: "Next Action / Destination",
                             headerClassName: "min-w-[165px]",
                             cellClassName: "min-w-[165px]",
                             render: (row) => (
-                                <span className="break-words text-xs text-gray-700 dark:text-gray-200">
-                                    {routingFor(row).current_location ||
-                                        routingFor(row).responsible_office ||
-                                        row.target_office ||
-                                        "—"}
-                                </span>
+                                <div className="min-w-0">
+                                    <p className="break-words text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                        {nextActionFor(row) || "Next action not specified"}
+                                    </p>
+                                    <p className="mt-0.5 break-words text-[11px] text-gray-500 dark:text-gray-400">
+                                        {routingFor(row).current_location || routingFor(row).responsible_office || row.target_office || "Destination not assigned"}
+                                    </p>
+                                </div>
                             ),
                         },
                         {
@@ -865,9 +890,12 @@ export default function Index({
                                             "Submission"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] text-gray-500">
-                                        {row.source
+                                    {row.tracking_number || (row.source
                                             ? `${row.source} #${row.source_id}`
-                                            : null}
+                                            : null)}
+                                    </p>
+                                    <p className="mt-0.5 truncate text-[11px] text-gray-500">
+                                        {row.activity_name || row.document_type || row.report_type || row.reporting_period || null}
                                     </p>
                                 </div>
                             ),
@@ -935,9 +963,14 @@ export default function Index({
                             headerClassName: "min-w-[115px]",
                             cellClassName: "min-w-[115px]",
                             render: (row) => (
-                                <span className="whitespace-nowrap text-xs font-semibold text-gray-800 dark:text-gray-200">
-                                    {plainDate(row.deadline_submission) || "—"}
-                                </span>
+                                <div className="min-w-0">
+                                    <p className="whitespace-nowrap text-xs font-semibold text-gray-800 dark:text-gray-200">
+                                        {plainDate(row.deadline_submission) || "—"}
+                                    </p>
+                                    {routingFor(row).compliance_status && (
+                                        <p className="mt-1"><Badge value={routingFor(row).compliance_status} /></p>
+                                    )}
+                                </div>
                             ),
                         },
                         {
@@ -954,6 +987,11 @@ export default function Index({
                     ],
         [tab],
     );
+    const visibleColumnKeys = tab === "history"
+        ? ["submission", "office_area", "completed_action", "completed_date", "status"]
+        : tab === "outgoing"
+          ? ["submission", "office_area", "destination", "status"]
+          : ["submission", "office_area", "status", "required_action", "deadline_submission"];
     useEffect(
         () => setTab(trackingContext.view || "incoming"),
         [trackingContext.view],
@@ -1008,6 +1046,7 @@ export default function Index({
             return details;
         return rows[0] || null;
     }, [rows, details, trackingContext.selected_record]);
+    const statusContext = details?.routing_summary?.status_context;
     useEffect(() => {
         const linked = trackingContext.selected_record;
         const visibleKey =
@@ -1092,6 +1131,7 @@ export default function Index({
         form.transform((data) => {
             const next = { ...data };
             if (!(typeof File !== "undefined" && next.attachment instanceof File)) delete next.attachment;
+            if (!(typeof File !== "undefined" && next.official_document instanceof File)) delete next.official_document;
             return next;
         });
         form.post(
@@ -1412,7 +1452,7 @@ export default function Index({
                                             : "reports"}
                                     </span>
                                 }
-                                columns={columns}
+                                columns={columns.filter((column) => visibleColumnKeys.includes(column.key))}
                                 rows={rows}
                                 rowKey={(row) =>
                                     row.source + "-" + row.source_id
@@ -1444,7 +1484,7 @@ export default function Index({
                                         : ""
                                 }
                                 preserveFrameWhenEmpty
-                                tableClassName="min-w-[760px]"
+                                tableClassName="min-w-[640px]"
                                 tableContainerClassName="max-h-[680px] overflow-y-auto"
                                 tableHeaderClassName="sticky top-0 z-20"
                                 pagination={paginationControls}
@@ -1464,6 +1504,7 @@ export default function Index({
                                         correction_reason_key: "",
                                         correction_detail: "",
                                         attachment: null,
+                                        official_document: null,
                                     });
                                     form.clearErrors();
                                     setSelected(visibleDetails);
@@ -1503,72 +1544,94 @@ export default function Index({
                                     label: "Reporting Period",
                                     value: details.reporting_period,
                                 },
-                                ...(details.pamb_routing_applicable
-                                    ? [
-                                          {
-                                              label: "Submission Status",
-                                              render: () => {
-                                                  const statusContext =
-                                                      details.routing_summary
-                                                          ?.status_context;
-                                                  return (
-                                                      <div>
-                                                          <Badge
-                                                              value={
-                                                                  details.submission_status
-                                                              }
-                                                          />
-                                                          {statusContext && (
-                                                              <p
-                                                                  className="mt-2 text-xs font-medium leading-4 text-indigo-700 dark:text-indigo-300"
-                                                                  aria-label="PENRO internal routing context"
-                                                              >
-                                                                  {statusContext.label}
-                                                                  <br />
-                                                                  Currently with: {statusContext.current_unit}
-                                                              </p>
-                                                          )}
-                                                      </div>
-                                                  );
-                                              },
-                                          },
-                                      ]
-                                    : []),
-                                {
-                                    label: details.mov_processing?.applicable
-                                        ? "Workflow Status"
-                                        : "Routing Status",
-                                    render: () => (
-                                        <Badge
-                                            value={
-                                                details.mov_processing
-                                                    ?.applicable
-                                                    ? details.mov_processing
-                                                          .workflow_status
-                                                    : details.submission_status
-                                            }
-                                        />
-                                    ),
-                                },
-                                {
-                                    label: "Timeliness",
-                                    render: () => (
-                                        <Badge value={details.timeliness} />
-                                    ),
-                                },
-                                ...(details.pamb_routing_applicable
-                                    ? [
-                                          {
-                                              label: "Current Document Location",
-                                              value: details.current_document_location,
-                                          },
-                                      ]
+                                ...(details.mov_processing?.applicable
+                                    ? [{ label: "Workflow Status", value: details.mov_processing.workflow_status }]
                                     : []),
                             ]}
                         />
                     )
                 }
             >
+                {details && (
+                    <section className="rounded-xl border border-green-200 bg-green-50/60 p-4 dark:border-green-900 dark:bg-green-950/20" aria-label="Current routing summary">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Routing</h2>
+                            <div className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">{details.pamb_routing_applicable ? "Submission Status" : "Routing Status"}</span>
+                                <Badge value={details.routing?.current_status || details.routing_summary?.current_status || details.submission_status || "Unknown"} />
+                            </div>
+                        </div>
+                        <dl className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                            <div className="min-w-0">
+                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Current Holder</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.current_location || details.routing_summary?.current_location || details.current_document_location || details.target_office || "Not yet assigned"}</dd>
+                            </div>
+                            <div className="min-w-0">
+                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Office</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.responsible_office || details.target_office || "Not assigned"}</dd>
+                            </div>
+                            <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Deadline</dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "—"}</dd>
+                            </div>
+                            <div>
+                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Next Expected Action</dt>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.next_expected_action || details.routing_summary?.next_expected_action || "No action pending"}</dd>
+                            </div>
+                            {(details.routing?.pending_since || details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined) && (
+                                <div>
+                                    <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Pending Since</dt>
+                                    <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.pending_since ? plainDate(details.routing.pending_since) : "—"}{details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined ? ` · ${details.routing.working_days_pending} working days` : ""}</dd>
+                                </div>
+                            )}
+                            {(details.routing?.compliance_status || details.timeliness) && (
+                                <div>
+                                    <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Timeliness</dt>
+                                    <dd className="mt-1"><Badge value={details.routing?.compliance_status || details.timeliness} /></dd>
+                                </div>
+                            )}
+                            {statusContext && (
+                                <div>
+                                    <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">PENRO Internal Routing</dt>
+                                    <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{statusContext.label}<br />Currently with: {statusContext.current_unit}</dd>
+                                </div>
+                            )}
+                        </dl>
+                    </section>
+                )}
+                {details?.routing && (
+                    <div className="mb-4 rounded-lg border border-green-200 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
+                        <div className="mb-2 flex items-center justify-between">
+                            <p className="text-xs font-extrabold text-gray-900 dark:text-white">Processing Progress</p>
+                            <span className="text-[10px] font-bold text-green-700 dark:text-green-300">
+                                {Number.isFinite(Number(details.routing.processing_percentage))
+                                    ? `${details.routing.processing_percentage}% processing`
+                                    : "Summary"}
+                            </span>
+                        </div>
+                        {Number.isFinite(Number(details.routing.processing_percentage)) && (
+                            <div className="h-1.5 overflow-hidden rounded-full bg-green-100 dark:bg-green-950" role="progressbar" aria-label="Processing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(details.routing.processing_percentage)}>
+                                <div className="h-full rounded-full bg-green-700 dark:bg-green-400" style={{ width: `${Math.max(0, Math.min(100, Number(details.routing.processing_percentage)))}%` }} />
+                            </div>
+                        )}
+                    </div>
+                )}
+                {details?.storage_status && (
+                    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40" aria-label="Document storage">
+                        <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">Document Storage</p>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                            {[
+                                ["Hostinger", details.storage_status.hostinger],
+                                ["Google Drive", details.storage_status.google_drive],
+                            ].map(([label, status]) => (
+                                <div key={label} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950/30">
+                                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">{label}</span>
+                                    <Badge value={status?.label || "Unknown"} />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
                 {details?.mov_processing?.applicable && (
                     <PambMovProgress
                         row={details}
@@ -1631,6 +1694,7 @@ export default function Index({
                                 remarks: "",
                                 stage: stage.stage_key || stage.key,
                                 attachment: null,
+                                official_document: null,
                             });
                             internalForm.clearErrors();
                             setRoutingStage(stage);
@@ -1656,6 +1720,7 @@ export default function Index({
                                 correction_reason_key: "",
                                 correction_detail: "",
                                 attachment: null,
+                                official_document: null,
                             });
                             form.clearErrors();
                             setSelected(details);
@@ -1672,6 +1737,7 @@ export default function Index({
                                 correction_reason_key: "",
                                 correction_detail: "",
                                 attachment: null,
+                                official_document: null,
                             });
                             form.clearErrors();
                             setSelected(details);
@@ -1691,7 +1757,8 @@ export default function Index({
                 onClose={closeSelectedAction}
                 onSubmit={submit}
                 processing={form.processing}
-                errors={form.errors}
+                errors={Object.fromEntries(Object.entries(form.errors).filter(([key]) => key !== "archive"))}
+                systemNotice={archiveCheckpointNotice}
                 saveLabel={selectedActionLabel}
                 maxWidth="max-w-xl"
             >
@@ -1699,14 +1766,14 @@ export default function Index({
                 <CrudSection title="Document copy">
                         <RoutingAttachmentField
                             currentDocument={selected?.current_document}
-                            file={form.data.attachment}
-                            onChange={(value) => form.setData("attachment", value instanceof File ? value : null)}
-                        error={form.errors.attachment}
+                            file={form.data.official_document}
+                            onChange={(value) => form.setData("official_document", value instanceof File ? value : null)}
+                        error={form.errors.official_document}
                         disabled={form.processing}
                         processing={form.processing}
                         uploadProgress={form.progress}
-                            attachmentAllowed={genericAction?.correction_reference_allowed || String(form.data.stage || '').startsWith('return_for_correction_') ? true : genericAction?.attachment_allowed !== false && selected?.routing?.attachment_allowed !== false}
-                            correctionAttachment={Boolean(genericAction?.correction_reference_allowed || String(form.data.stage || '').startsWith('return_for_correction_'))}
+                            officialDocumentMode={true}
+                            canReplaceDocument={canReplaceSelectedDocument}
                     />
                 </CrudSection>
                 <CrudSection
@@ -1867,14 +1934,27 @@ export default function Index({
                 <CrudSection title="Document / MOV">
                     <RoutingAttachmentField
                         currentDocument={details?.current_document}
+                        file={internalForm.data.official_document}
+                        onChange={(value) => internalForm.setData("official_document", value instanceof File ? value : null)}
+                        error={internalForm.errors.official_document}
+                        disabled={internalForm.processing}
+                        processing={internalForm.processing}
+                        uploadProgress={internalForm.progress}
+                        officialDocumentMode={true}
+                        canReplaceDocument={routingStage?.can_replace_document === true}
+                    />
+                    {routingStage?.attachment_allowed !== false && details?.routing?.attachment_allowed !== false && <RoutingAttachmentField
                         file={internalForm.data.attachment}
-                        onChange={internalForm.setData.bind(null, "attachment")}
+                        onChange={(value) => internalForm.setData("attachment", value instanceof File ? value : null)}
                         error={internalForm.errors.attachment}
                         disabled={internalForm.processing}
                         processing={internalForm.processing}
                         uploadProgress={internalForm.progress}
-                        attachmentAllowed={routingStage?.attachment_allowed !== false && details?.routing?.attachment_allowed !== false}
-                    />
+                        attachmentAllowed={true}
+                        hideCurrentDocument={true}
+                        attachmentTitle="Supporting Attachment (Optional)"
+                        attachmentHelperText="Attach a separate routing slip or reference copy. This does not replace the current official document."
+                    />}
                     <div className="mt-2 grid gap-1 text-xs text-gray-500 dark:text-gray-400 sm:grid-cols-2">
                         <p>
                             Current location:{" "}

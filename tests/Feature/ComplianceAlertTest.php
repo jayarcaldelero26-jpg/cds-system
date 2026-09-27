@@ -1951,7 +1951,7 @@ test('report workflows require an attachment at report data entry while routing 
     $area = complianceArea($creator);
     $type = \App\Models\ManagementPlanType::create(['name' => 'MOV Test Plan', 'slug' => 'mov-test-plan', 'created_by' => $creator->id, 'updated_by' => $creator->id]);
     $common = [
-        'protected_area_id' => $area->id, 'target_office' => 'Baganga', 'activity_name' => 'MOV test activity',
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'MOV test activity',
         'document_type' => 'Final Report', 'semester' => '1st Semester', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'reporting_year' => 2026, 'quarter' => 3, 'monitoring_period_start' => '2026-07-01', 'monitoring_period_end' => '2026-07-15',
     ];

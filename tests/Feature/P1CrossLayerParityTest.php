@@ -350,7 +350,7 @@ test('Management Plans preserve one source identity across model tracking dashbo
 
     expect($tracking['source'])->toBe('management-plans')
         ->and($tracking['source_id'])->toBe($plan->id)
-        ->and($tracking['tracking_number'])->toStartWith('EDATS-PA-2026-')
+        ->and($tracking['tracking_number'])->toMatch('/^2026-CDS-\d{6}$/')
         ->and((int) $tracking['protected_area_id'])->toBe($area->id)
         ->and($tracking['target_office'])->toBe('CENRO Baganga')
         ->and($tracking['deadline_submission'])->toBe($sourceDeadline)

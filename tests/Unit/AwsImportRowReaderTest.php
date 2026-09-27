@@ -91,15 +91,115 @@ test('xlsx reader finds a bounded header after title rows and preserves the firs
     try {
         $file = new UploadedFile($path, 'weather.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true);
         $result = app(AwsImportRowReader::class)->read($file);
+        expect($result['rows'])->toBeInstanceOf(Generator::class);
 
+        $rows = iterator_to_array($result['rows'], false);
         expect($result['header'][0])->toBe('Timestamps')
-            ->and($result['rows'])->toHaveCount(1)
-            ->and($result['rows'][0][0])->toBe('2025-12-31 18:00:00')
-            ->and($result['rows'][0][1])->toBe(0.0);
+            ->and($rows)->toHaveCount(1)
+            ->and($rows[0][0])->toBe('2025-12-31 18:00:00')
+            ->and($rows[0][1])->toBe(0.0);
     } finally {
         @unlink($path);
     }
 });
+
+test('CSV reader streams rows through a generator and preserves representative values', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'aws-csv-');
+    file_put_contents($path, "Device metadata\nTimestamps,mm Precipitation,Wind Speed,Air Temperature\n2026-01-01 00:00:00,0,2.5,25.2\n2026-01-01 00:15:00,1.5,3,26\n");
+
+    try {
+        $result = app(AwsImportRowReader::class)->read(new UploadedFile($path, 'weather.csv', 'text/csv', null, true));
+        expect($result['rows'])->toBeInstanceOf(Generator::class);
+        $rows = iterator_to_array($result['rows'], false);
+        expect($result['header'][0])->toBe('Timestamps')
+            ->and($rows)->toHaveCount(2)
+            ->and($rows[0][1])->toBe('0')
+            ->and($rows[1][1])->toBe('1.5');
+    } finally {
+        @unlink($path);
+    }
+});
+
+test('CSV reader rejects malformed files and closes its input handle after iteration', function (): void {
+    $badPath = tempnam(sys_get_temp_dir(), 'aws-csv-');
+    file_put_contents($badPath, "not an AWS header\njust text\n");
+    expect(fn () => app(AwsImportRowReader::class)->read(new UploadedFile($badPath, 'bad.csv', 'text/csv', null, true)))
+        ->toThrow(RuntimeException::class, 'No valid timestamp header');
+    @unlink($badPath);
+
+    $path = tempnam(sys_get_temp_dir(), 'aws-csv-');
+    file_put_contents($path, "Timestamps,mm Precipitation,Wind Speed,Air Temperature\n2026-01-01 00:00:00,0,2.5,25.2\n");
+    try {
+        $result = app(AwsImportRowReader::class)->read(new UploadedFile($path, 'weather.csv', 'text/csv', null, true));
+        $generator = $result['rows'];
+        $generator->rewind();
+        expect($generator->current())->toBeArray();
+        $generator->next();
+        expect($generator->valid())->toBeFalse();
+        @unlink($path);
+        expect(file_exists($path))->toBeFalse();
+    } finally {
+        @unlink($path);
+    }
+});
+
+test('XLSX reader rejects malformed workbook input safely', function (): void {
+    if (! class_exists(ZipArchive::class)) $this->markTestSkipped('ZipArchive is required for XLSX tests.');
+    $path = tempnam(sys_get_temp_dir(), 'aws-xlsx-');
+    file_put_contents($path, 'not a zip workbook');
+
+    try {
+        expect(fn () => app(AwsImportRowReader::class)->read(new UploadedFile($path, 'bad.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', null, true)))
+            ->toThrow(RuntimeException::class, 'could not be opened');
+    } finally {
+        @unlink($path);
+    }
+});
+
+test('CSV reader enforces the documented row byte bound', function (): void {
+    $path = tempnam(sys_get_temp_dir(), 'aws-csv-');
+    $largeValue = str_repeat('1', 900000);
+    file_put_contents($path, "Timestamps,mm Precipitation,Wind Speed,Air Temperature,Relative Humidity,Atmospheric Pressure\n2026-01-01 00:00:00,{$largeValue},{$largeValue},{$largeValue},{$largeValue},{$largeValue}\n");
+
+    try {
+        $result = app(AwsImportRowReader::class)->read(new UploadedFile($path, 'large-row.csv', 'text/csv', null, true));
+        expect(fn () => iterator_to_array($result['rows'], false))
+            ->toThrow(RuntimeException::class, '4 MB row limit');
+    } finally {
+        @unlink($path);
+    }
+});
+
+test('CSV reader enforces the documented row and column counts without materializing rows', function (): void {
+    $widePath = tempnam(sys_get_temp_dir(), 'aws-wide-csv-');
+    $wideHeader = array_merge(['Timestamps', 'mm Precipitation', 'Wind Speed', 'Air Temperature'], array_fill(0, 253, 'extra'));
+    file_put_contents($widePath, implode(',', $wideHeader)."\n");
+
+    try {
+        expect(fn () => app(AwsImportRowReader::class)->read(new UploadedFile($widePath, 'wide.csv', 'text/csv', null, true)))
+            ->toThrow(RuntimeException::class, '256-column limit');
+    } finally {
+        @unlink($widePath);
+    }
+
+    $path = tempnam(sys_get_temp_dir(), 'aws-many-rows-');
+    $line = "2026-01-01 00:00:00,1,2,25\n";
+    file_put_contents($path, "Timestamps,mm Precipitation,Wind Speed,Air Temperature\n".str_repeat($line, 250001));
+
+    try {
+        $result = app(AwsImportRowReader::class)->read(new UploadedFile($path, 'many-rows.csv', 'text/csv', null, true));
+        expect(fn () => consumeAwsRows($result['rows']))
+            ->toThrow(RuntimeException::class, '250,000 data rows');
+    } finally {
+        @unlink($path);
+    }
+});
+
+function consumeAwsRows(iterable $rows): void
+{
+    foreach ($rows as $_row) {
+    }
+}
 
 test('xlsx reader rejects workbooks without a valid AWS sensor header', function () {
     if (! class_exists(ZipArchive::class)) {

@@ -40,6 +40,7 @@ $officeId = DB::table('organizational_offices')->where('code', 'cenro_mati')->va
 
 test('a Conservation report stores an activity name outside the registry', function () {
     Storage::fake('public');
+    Storage::fake('local');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'homestay'), [
         'protected_area_id' => $this->area->id,
@@ -121,6 +122,7 @@ test('CEPA custom activities use the final-report document fallback', function (
 
 test('an official registry activity value continues to save successfully', function () {
     Storage::fake('public');
+    Storage::fake('local');
 
     $this->actingAs($this->user)->post(route('conservation-reports.store', 'regular_pamb'), [
         'protected_area_id' => $this->area->id,

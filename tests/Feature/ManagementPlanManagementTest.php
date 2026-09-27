@@ -2,7 +2,10 @@
 
 use App\Models\ManagementPlan;
 use App\Models\ManagementPlanType;
+use App\Models\DocumentAttachmentHistory;
 use App\Models\ProtectedArea;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
@@ -11,6 +14,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
 beforeEach(function () {
+    Storage::fake('local');
     foreach (['CDS Admin', 'CDS Admin', 'Viewer'] as $role) Role::findOrCreate($role, 'web');
     foreach (['management-plans.view', 'management-plans.create', 'management-plans.update', 'management-plans.delete'] as $permission) Permission::findOrCreate($permission, 'web');
     Role::findByName('CDS Admin')->syncPermissions(['management-plans.view', 'management-plans.create', 'management-plans.update', 'management-plans.delete']);
@@ -20,7 +24,10 @@ beforeEach(function () {
 
 function managementPlanArea(User $user): ProtectedArea
 {
-    return ProtectedArea::create(['name' => 'Mt. Hamiguitan', 'category' => 'Natural Park', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
+    $area = ProtectedArea::create(['name' => 'Mt. Hamiguitan', 'short_name' => 'MPA-TEST', 'category' => 'Natural Park', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active', 'created_by' => $user->id, 'updated_by' => $user->id]);
+    $officeId = OrganizationalOffice::query()->where('name', 'PENRO Davao Oriental')->value('id');
+    ProtectedAreaOfficeAssignment::query()->create(['protected_area_id' => $area->id, 'organizational_office_id' => $officeId, 'assignment_type' => 'supervising', 'assigned_by' => $user->id]);
+    return $area;
 }
 
 function managementPlanReportPayload(int $areaId, array $overrides = []): array
@@ -48,8 +55,21 @@ test('authorized users can create, update, and soft delete reports in a dynamic 
     $this->actingAs($staff)->post(route('management-plans.types.reports.store', $type->slug), managementPlanReportPayload($area->id))->assertRedirect(route('management-plans.types.show', $type->slug));
     $plan = ManagementPlan::firstOrFail();
     expect($plan->management_plan_type_id)->toBe($type->id)->and($plan->protected_area_id)->toBe($area->id)->and($plan->created_by)->toBe($staff->id);
+    $firstSlot = $plan->attachments[0]['path'];
+    expect($firstSlot)->toStartWith('current-documents/management-plan/'.$plan->id.'/0/');
+    Storage::disk('local')->assertExists($firstSlot);
+    $this->assertDatabaseHas('document_attachment_histories', [
+        'source_type' => 'management-plan', 'source_id' => $plan->id, 'logical_slot' => '0', 'action' => 'UPLOAD',
+    ]);
     $this->actingAs($staff)->patch(route('management-plans.types.reports.update', [$type->slug, $plan]), managementPlanReportPayload($area->id, ['activity_name' => 'Updated Implementation']))->assertRedirect(route('management-plans.types.show', $type->slug));
-    expect($plan->fresh()->activity_name)->toBe('Updated Implementation');
+    $plan->refresh();
+    expect($plan->activity_name)->toBe('Updated Implementation')
+        ->and($plan->attachments[0]['path'])->toBe($firstSlot)
+        ->and($plan->attachments[1]['path'])->toStartWith('current-documents/management-plan/'.$plan->id.'/1/');
+    Storage::disk('local')->assertExists($firstSlot);
+    Storage::disk('local')->assertExists($plan->attachments[1]['path']);
+    expect(DocumentAttachmentHistory::query()->where('source_type', 'management-plan')->where('source_id', $plan->id)->count())->toBe(2);
+    $this->assertDatabaseMissing('document_routing_events', ['source_type' => 'management-plans', 'source_id' => $plan->id]);
     $this->actingAs($staff)->delete(route('management-plans.types.reports.destroy', [$type->slug, $plan]))->assertRedirect(route('management-plans.types.show', $type->slug));
     $this->assertSoftDeleted('management_plans', ['id' => $plan->id]);
 });

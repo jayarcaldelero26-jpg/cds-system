@@ -2,11 +2,15 @@
 
 use App\Models\Aws;
 use App\Models\AwsObservation;
+use App\Models\DocumentAttachmentHistory;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
+use App\Models\OrganizationalOffice;
 use App\Models\User;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Spatie\Permission\Models\Role;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 function awsDomainUser(): User
 {
@@ -17,15 +21,19 @@ function awsDomainUser(): User
 
 function awsDomainArea(User $user): ProtectedArea
 {
-    return ProtectedArea::create([
+    $area = ProtectedArea::create([
         'name' => 'AWS Domain Test PA', 'short_name' => 'ADTPA',
         'category' => 'Protected Landscape', 'municipality' => 'Mati',
         'province' => 'Davao Oriental', 'region' => 'Region XI',
         'created_by' => $user->id, 'updated_by' => $user->id,
     ]);
+    $office = OrganizationalOffice::query()->where('name', 'CENRO Mati')->first();
+    if ($office) ProtectedAreaOfficeAssignment::query()->create(['protected_area_id' => $area->id, 'organizational_office_id' => $office->id, 'assignment_type' => 'supervising', 'assigned_by' => $user->id]);
+    return $area;
 }
 
 test('aws report contract stores office and quarter period fields without observation metrics', function () {
+    Storage::fake('local');
     $user = awsDomainUser();
     $area = awsDomainArea($user);
 
@@ -49,6 +57,12 @@ test('aws report contract stores office and quarter period fields without observ
         ->and($report->monitoring_period_start->toDateString())->toBe('2026-01-01')
         ->and($report->monitoring_period_end->toDateString())->toBe('2026-01-15')
         ->and($report->precipitation)->toBeNull();
+    expect($report->report_file_path)->toStartWith('current-documents/aws/'.$report->id.'/report_file/');
+    Storage::disk('local')->assertExists($report->report_file_path);
+    $this->assertDatabaseHas('document_attachment_histories', [
+        'source_type' => 'aws', 'source_id' => $report->id, 'logical_slot' => 'report_file', 'action' => 'UPLOAD',
+    ]);
+    $this->assertDatabaseMissing('document_routing_events', ['source_type' => 'aws', 'source_id' => $report->id]);
 });
 
 test('aws observation rows are separate from report rows and excluded from submission tracking', function () {

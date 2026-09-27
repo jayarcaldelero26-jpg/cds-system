@@ -129,25 +129,66 @@ test('an authenticated user is forced out on the next protected request after de
     $this->assertGuest();
 });
 
-test('legacy privileged accounts are normalized by role and can still access User Management', function () {
-    \Spatie\Permission\Models\Role::findOrCreate('CDS Admin', 'web');
-    $admin = User::factory()->create([
-        'email' => 'renamed-admin@example.com',
-        'is_approved' => false,
-        'is_active' => true,
-    ]);
-    $admin->assignRole('CDS Admin');
+test('unapproved global administrators are denied login without an approval mutation', function () {
+    foreach (['Super Admin', 'CDS Admin'] as $role) {
+        \Spatie\Permission\Models\Role::findOrCreate($role, 'web');
+        $user = User::factory()->create(['is_approved' => false, 'is_active' => true]);
+        $user->assignRole($role);
 
-    $this->post('/login', [
-        'email' => $admin->email,
-        'password' => 'password',
-    ])->assertRedirect(route('dashboard'));
+        $this->post('/login', [
+            'email' => $user->email,
+            'password' => 'password',
+        ])->assertRedirect(route('login'))
+            ->assertSessionHas('pending_approval', true);
 
+        $this->assertGuest();
+        expect($user->fresh()->is_approved)->toBeFalse()
+            ->and($user->fresh()->is_active)->toBeTrue()
+            ->and($user->fresh()->getRoleNames()->all())->toBe([$role]);
+    }
+});
+
+test('an already authenticated global account is logged out if it becomes unapproved', function () {
+    foreach (['Super Admin', 'CDS Admin'] as $role) {
+        \Spatie\Permission\Models\Role::findOrCreate($role, 'web');
+        $user = User::factory()->create(['is_approved' => true, 'is_active' => true]);
+        $user->assignRole($role);
+        $this->actingAs($user)->get(route('dashboard'))->assertOk();
+        $user->update(['is_approved' => false]);
+
+        $this->get(route('dashboard'))
+            ->assertRedirect(route('login'))
+            ->assertSessionHas('pending_approval', true);
+
+        $this->assertGuest();
+        expect($user->fresh()->is_approved)->toBeFalse()
+            ->and($user->fresh()->getRoleNames()->all())->toBe([$role]);
+    }
+});
+
+test('approved active global administrators can still authenticate normally', function () {
+    \Spatie\Permission\Models\Role::findOrCreate('Super Admin', 'web');
+    $admin = User::factory()->create(['is_approved' => true, 'is_active' => true]);
+    $admin->assignRole('Super Admin');
+
+    $this->post('/login', ['email' => $admin->email, 'password' => 'password'])
+        ->assertRedirect(route('dashboard'));
     $this->assertAuthenticatedAs($admin);
-    expect($admin->fresh()->is_approved)->toBeTrue()
-        ->and($admin->fresh()->getRoleNames()->all())->toBe(['CDS Admin']);
+    $this->get(route('dashboard'))->assertOk();
+});
 
-    $this->get(route('admin.users.index'))->assertOk();
+test('inactive global administrators retain the existing inactive-account denial', function () {
+    \Spatie\Permission\Models\Role::findOrCreate('Super Admin', 'web');
+    $admin = User::factory()->create(['is_approved' => true, 'is_active' => false]);
+    $admin->assignRole('Super Admin');
+
+    $this->post('/login', ['email' => $admin->email, 'password' => 'password'])
+        ->assertRedirect(route('login'))
+        ->assertSessionHas('account_inactive', true)
+        ->assertSessionMissing('pending_approval');
+    $this->assertGuest();
+    expect($admin->fresh()->is_active)->toBeFalse()
+        ->and($admin->fresh()->is_approved)->toBeTrue();
 });
 
 test('an ordinary account using the former bootstrap email remains pending and is not an administrator', function () {

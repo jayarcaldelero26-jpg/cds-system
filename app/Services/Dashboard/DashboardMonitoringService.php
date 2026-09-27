@@ -134,25 +134,28 @@ final class DashboardMonitoringService
     public function publicSubmissionTrend(int $months = 12): array
     {
         $months = max(1, min(24, $months));
-        $submittedDates = $this->tracking->records()
-            ->map(fn (array $row): ?CarbonImmutable => $this->date($row['date_received_penro'] ?? null))
-            ->filter()
-            ->values();
-
-        if ($submittedDates->isEmpty()) {
-            return [];
+        $monthCounts = [];
+        $latestDate = null;
+        foreach ($this->tracking->receivedDateValues() as $value) {
+            $date = $this->date($value);
+            if (! $date) continue;
+            $monthKey = $date->format('Y-m');
+            $monthCounts[$monthKey] = ($monthCounts[$monthKey] ?? 0) + 1;
+            if ($latestDate === null || $date->greaterThan($latestDate)) $latestDate = $date;
         }
 
-        $latestMonth = $submittedDates->max()->startOfMonth();
+        if ($latestDate === null) return [];
+
+        $latestMonth = $latestDate->startOfMonth();
         $firstMonth = $latestMonth->subMonths($months - 1);
 
         return collect(range(0, $months - 1))
-            ->map(function (int $offset) use ($firstMonth, $submittedDates): array {
+            ->map(function (int $offset) use ($firstMonth, $monthCounts): array {
                 $month = $firstMonth->addMonths($offset);
 
                 return [
                     'label' => $month->format('M y'),
-                    'count' => $submittedDates->filter(fn (CarbonImmutable $date): bool => $date->year === $month->year && $date->month === $month->month)->count(),
+                    'count' => $monthCounts[$month->format('Y-m')] ?? 0,
                 ];
             })
             ->all();
@@ -171,6 +174,37 @@ final class DashboardMonitoringService
         $today = CarbonImmutable::now(self::TIMEZONE)->startOfDay();
         $rows = $this->tracking->records(['reporting_year' => $today->year], null, false)
             ->map(fn (array $row): array => $this->present($row, $today));
+        return $this->publicSummaryForRows($rows, $today);
+    }
+
+    /** Build the existing public payload from one current-year projection. */
+    public function publicLandingData(): array
+    {
+        $today = CarbonImmutable::now(self::TIMEZONE)->startOfDay();
+        $rows = $this->tracking->records(['reporting_year' => $today->year], null, false)
+            ->map(fn (array $row): array => $this->present($row, $today));
+        $submitted = $rows->where('submitted', true);
+        $overdue = $rows->where('is_overdue', true);
+        $pending = $rows->where('submitted', false)
+            ->filter(fn (array $row): bool => $row['deadline_submission'] !== null && ! $row['is_overdue']);
+
+        return [
+            'overview' => [
+                'tracked_reports' => $rows->count(),
+                'submitted' => $submitted->count(),
+                'overdue' => $overdue->count(),
+                'reports_due' => $pending->count() + $overdue->count(),
+                'compliant' => $submitted->where('is_on_time', true)->count(),
+                'monitoring_sources' => $rows->pluck('source')->filter()->unique()->count(),
+            ],
+            'publicSummary' => $this->publicSummaryForRows($rows, $today),
+            'reportTrend' => $this->publicSubmissionTrend(),
+        ];
+    }
+
+    /** @param Collection<int,array<string,mixed>> $rows */
+    private function publicSummaryForRows(Collection $rows, CarbonImmutable $today): array
+    {
         $programs = collect(['engp' => 'ENGP reports', 'conservation' => 'Protected Area reports'])
             ->map(function (string $label, string $key) use ($rows): array {
                 $items = $rows->where('program_key', $key);
@@ -230,7 +264,8 @@ final class DashboardMonitoringService
         $office = trim((string) ($filters['office'] ?? ''));
         $frequency = trim((string) ($filters['frequency'] ?? ''));
 
-        $rows = $this->tracking->records(['reporting_year' => $year], null, $assignTrackingNumbers)
+        $sourceProgram = $program === 'pa' ? 'conservation' : $program;
+        $rows = $this->tracking->records(['reporting_year' => $year, 'program' => $sourceProgram], null, $assignTrackingNumbers)
             ->map(fn (array $row): array => $this->overviewRow($this->present($row, $today), $today))
             ->when($program !== 'all', fn (Collection $items) => $items->where('program_key', $program === 'pa' ? 'conservation' : $program))
             ->when($office !== '', fn (Collection $items) => $items->where('office_or_pa', $office))

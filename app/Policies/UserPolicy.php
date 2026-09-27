@@ -3,19 +3,13 @@
 namespace App\Policies;
 
 use App\Models\User;
+use App\Services\Authorization\AdministratorPreservationService;
 
 class UserPolicy
 {
     private function isAdministrator(User $user): bool
     {
-        if ($user->hasRole('CDS Admin')) {
-            return true;
-        }
-
-        // Keep compatibility with the policy unit test's lightweight User
-        // mock while granting the real Super Admin the same administration
-        // surface.
-        return get_class($user) === User::class && $user->hasRole('Super Admin');
+        return app(AdministratorPreservationService::class)->isAdministrator($user);
     }
 
     public function viewAny(User $user): bool
@@ -44,16 +38,10 @@ class UserPolicy
             return false;
         }
 
-        if ($managedUser->hasAnyRole(['CDS Admin', 'Super Admin'])) {
-            $activeAdministrators = User::query()
-                ->where('is_active', true)
-                ->whereHas('roles', fn ($query) => $query->whereIn('name', ['CDS Admin', 'Super Admin']))
-                ->distinct('users.id')
-                ->count('users.id');
-
-            if ($activeAdministrators <= 1) {
-                return false;
-            }
+        $administrators = app(AdministratorPreservationService::class);
+        if ($administrators->isAdministrator($managedUser)
+            && ! $administrators->hasOtherUsableAdministrator($managedUser)) {
+            return false;
         }
 
         return true;
@@ -65,12 +53,8 @@ class UserPolicy
             return false;
         }
 
-        if ($managedUser->hasRole('CDS Admin') && User::role('CDS Admin')->count() <= 1) {
-            return false;
-        }
-
-        return ! ($managedUser->hasRole('Super Admin')
-            && User::role('Super Admin')->count() <= 1
-            && ! $user->hasRole('CDS Admin'));
+        $administrators = app(AdministratorPreservationService::class);
+        return ! ($administrators->isAdministrator($managedUser)
+            && ! $administrators->hasOtherUsableAdministrator($managedUser));
     }
 }
