@@ -170,11 +170,30 @@ test('Submission Tracking exposes the stable reference without changing routing 
     ]);
 
     $this->actingAs($user);
-    $row = app(SubmissionTrackingService::class)->records(['program' => 'conservation'])->firstWhere('source_id', $report->id);
+    $row = app(SubmissionTrackingService::class)->records(['program' => 'conservation'], null, true)->firstWhere('source_id', $report->id);
 
     expect($row['tracking_number'])->toBe('2026-CDS-000001')
         ->and($row['submission_status'])->toBe('Pending Submission by CENRO')
         ->and($report->fresh()->date_received_penro)->toBeNull();
+});
+
+test('Submission Tracking page presentation does not allocate missing references', function (): void {
+    $user = User::factory()->create(['section' => 'CDS']);
+    $user->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'homestay',
+        'activity_name' => 'Read-only tracking page report',
+        'date_accomplished' => '2026-08-01',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('submission-tracking.index'))
+        ->assertOk();
+
+    expect(ReportTrackingReference::query()
+        ->where('source_type', 'conservation')
+        ->where('source_id', $report->id)
+        ->exists())->toBeFalse();
 });
 
 test('tracking lookup survives edits and operational routing while authorization remains enforced', function (): void {

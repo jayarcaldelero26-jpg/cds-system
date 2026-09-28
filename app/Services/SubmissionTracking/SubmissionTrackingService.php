@@ -46,7 +46,7 @@ final class SubmissionTrackingService
     public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingAttachmentService $routingAttachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting, private readonly ReportTrackingNumberService $trackingNumbers) {}
 
     /** @return Collection<int, array<string, mixed>> */
-    public function records(array $filters = [], ?int $limitPerSource = null, bool $assignTrackingNumbers = true): Collection
+    public function records(array $filters = [], ?int $limitPerSource = null, bool $assignTrackingNumbers = false): Collection
     {
         $sources = $this->sources();
         if (($filters['program'] ?? null) === 'conservation') {

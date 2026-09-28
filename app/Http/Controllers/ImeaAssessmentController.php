@@ -17,6 +17,10 @@ use App\Services\Authorization\OrganizationalAccessService;
 
 class ImeaAssessmentController extends Controller
 {
+    private const MAX_FACILITY_IMPORT_ROWS = 10000;
+    private const MAX_FACILITY_IMPORT_CELLS = 64;
+    private const MAX_FACILITY_IMPORT_LINE_BYTES = 1000000;
+
     public function __construct(
         private readonly ProtectedAttachmentService $attachments,
         private readonly OrganizationalAccessService $organization,
@@ -473,10 +477,14 @@ class ImeaAssessmentController extends Controller
         $delimiter = array_search(max($delimiterCounts), $delimiterCounts, true);
         rewind($handle);
 
-        $header = fgetcsv($handle, 0, $delimiter, '"', '\\');
+        $header = fgetcsv($handle, self::MAX_FACILITY_IMPORT_LINE_BYTES, $delimiter, '"', '\\');
         if ($header === false) {
             fclose($handle);
             return back()->withErrors(['file' => 'The uploaded CSV file has no header row.']);
+        }
+        if (count($header) > self::MAX_FACILITY_IMPORT_CELLS || collect($header)->contains(fn (mixed $cell): bool => mb_strlen((string) $cell) > self::MAX_FACILITY_IMPORT_LINE_BYTES)) {
+            fclose($handle);
+            return back()->withErrors(['file' => sprintf('Import rejected; the header may contain at most %d cells and each cell must be at most %d bytes.', self::MAX_FACILITY_IMPORT_CELLS, self::MAX_FACILITY_IMPORT_LINE_BYTES)]);
         }
 
         $aliases = [
@@ -537,18 +545,26 @@ class ImeaAssessmentController extends Controller
             return back()->withErrors(['file' => implode(' ', $messages)]);
         }
 
-        $existingHashes = ProtectedAreaFacility::where('protected_area_id', $protectedArea->id)
-            ->get()
-            ->mapWithKeys(fn (ProtectedAreaFacility $facility) => [$this->facilityImportHash($facility->toArray()) => true])
-            ->all();
+        $existingHashes = [];
+        foreach (ProtectedAreaFacility::where('protected_area_id', $protectedArea->id)->cursor() as $facility) {
+            $existingHashes[$this->facilityImportHash($facility->toArray())] = true;
+        }
         $seenHashes = $existingHashes;
         $validRows = [];
         $rowErrors = [];
         $duplicateCount = 0;
         $rowNumber = 1;
 
-        while (($row = fgetcsv($handle, 0, $delimiter, '"', '\\')) !== false) {
+        while (($row = fgetcsv($handle, self::MAX_FACILITY_IMPORT_LINE_BYTES, $delimiter, '"', '\\')) !== false) {
             $rowNumber++;
+            if ($rowNumber - 1 > self::MAX_FACILITY_IMPORT_ROWS) {
+                fclose($handle);
+                return back()->withErrors(['file' => sprintf('Import rejected; maximum %d data rows allowed.', self::MAX_FACILITY_IMPORT_ROWS)]);
+            }
+            if (count($row) > self::MAX_FACILITY_IMPORT_CELLS || collect($row)->contains(fn (mixed $cell): bool => mb_strlen((string) $cell) > self::MAX_FACILITY_IMPORT_LINE_BYTES)) {
+                fclose($handle);
+                return back()->withErrors(['file' => sprintf('Import rejected; each row may contain at most %d cells and each cell must be at most %d bytes.', self::MAX_FACILITY_IMPORT_CELLS, self::MAX_FACILITY_IMPORT_LINE_BYTES)]);
+            }
             if (count(array_filter($row, fn ($value) => trim((string) $value) !== '')) === 0) {
                 continue;
             }
@@ -593,7 +609,7 @@ class ImeaAssessmentController extends Controller
             }
 
             if ($errors !== []) {
-                $rowErrors[] = "Row {$rowNumber}: ".implode('; ', $errors);
+                if (count($rowErrors) < 20) $rowErrors[] = "Row {$rowNumber}: ".implode('; ', $errors);
                 continue;
             }
 

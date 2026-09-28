@@ -51,7 +51,7 @@ class SubmissionTrackingController extends Controller
         $selectedSource = $request->string('source')->toString();
         $selectedId = $request->integer('source_id');
         if (filled($selectedSource) && $selectedId > 0) {
-            $selectedRecord = $this->tracking->records($filters)->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId);
+            $selectedRecord = $this->tracking->records($filters, null, false)->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId);
             if ($selectedRecord && $request->user()?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN)) {
                 $sourceConfig = $this->tracking->source($selectedSource);
                 $selectedModel = $sourceConfig

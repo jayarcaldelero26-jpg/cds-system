@@ -45,10 +45,12 @@ final class RoutingAttachmentService
             });
 
             // Keep event/version metadata, but retain only the current binary
-            // for this logical slot. The new DB reference is persisted before
-            // any previous physical file is removed.
+            // for this logical slot. Defer removal until the surrounding
+            // lifecycle transaction commits; this service may be called from
+            // an outer transaction that can still roll back after this insert.
             if ($previous && $previous->stored_path !== $path) {
-                $this->discard($previous->stored_path);
+                $previousPath = $previous->stored_path;
+                DB::afterCommit(fn (): bool => Storage::disk(self::DISK)->delete($previousPath));
             }
 
             return $attachment;

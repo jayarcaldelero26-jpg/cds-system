@@ -420,6 +420,30 @@ test('failed transition cleans the newly stored routing file and preserves prior
         ->toBe(0);
 });
 
+test('outer routing transaction rollback does not remove the prior current binary', function (): void {
+    Storage::fake('local');
+    $report = attachmentRoutingReport('Outer Transaction Attachment Rollback');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $attachments = app(RoutingAttachmentService::class);
+
+    $priorFile = UploadedFile::fake()->create('prior-current.pdf', 6, 'application/pdf');
+    $prior = $attachments->create('bms', $report->id, $priorFile, $attachments->store($priorFile), $actor, 'prior-stage', 'prior-action');
+    $replacementFile = UploadedFile::fake()->create('replacement-current.pdf', 8, 'application/pdf');
+    $replacementPath = $attachments->store($replacementFile);
+
+    expect(fn () => DB::transaction(function () use ($attachments, $actor, $report, $replacementFile, $replacementPath): never {
+        $attachments->create('bms', $report->id, $replacementFile, $replacementPath, $actor, 'replacement-stage', 'replacement-action');
+        throw new RuntimeException('Forced outer routing transaction rollback');
+    }))->toThrow(RuntimeException::class);
+
+    expect(SubmissionRoutingAttachment::query()->where('source', 'bms')->where('source_id', $report->id)->pluck('id')->all())
+        ->toBe([$prior->id])
+        ->and(Storage::disk('local')->exists($prior->stored_path))->toBeTrue()
+        ->and(Storage::disk('local')->exists($replacementPath))->toBeTrue();
+
+    $attachments->discard($replacementPath);
+});
+
 test('original MOV is the current document when no routed copy exists', function (): void {
     Storage::fake('local');
     $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
