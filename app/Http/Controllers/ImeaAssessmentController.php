@@ -389,7 +389,7 @@ class ImeaAssessmentController extends Controller
             $query->where('inventory_date', $inventoryDate);
         }
 
-        $facilities = $query->orderBy('year_established', 'desc')->get();
+        $query = $query->orderBy('year_established', 'desc');
 
         $filename = "facilities_inventory_" . date('Y-m-d') . ".csv";
 
@@ -401,7 +401,7 @@ class ImeaAssessmentController extends Controller
             "Expires" => "0"
         ];
 
-        $callback = function() use ($facilities) {
+        $callback = function() use ($query) {
             $file = fopen('php://output', 'w');
 
             // CSV Headers
@@ -422,7 +422,8 @@ class ImeaAssessmentController extends Controller
             ]);
 
             // CSV Rows
-            foreach ($facilities as $row) {
+            // lazy() calls get() per bounded batch, honoring protectedArea eager loading.
+            foreach ($query->lazy(500) as $row) {
                 fputcsv($file, [
                     CsvCellSanitizer::text($row->protectedArea?->name ?? 'N/A'),
                     $row->inventory_date ?? '—',
