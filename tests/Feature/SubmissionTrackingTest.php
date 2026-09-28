@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\ModuleDefinition;
 use App\Models\EngpReportSubmission;
 use App\Models\User;
@@ -36,6 +37,47 @@ test('routing status is normalized across each required stage', function () {
     expect($report->fresh()->submission_status)->toBe('Pending Regional Endorsement');
     $report->update(['date_endorsed_regional' => '2026-08-06']);
     expect($report->fresh()->submission_status)->toBe('Completed');
+});
+
+test('Completed filter follows ENGP regional release while preserving Conservation PAMB filtering', function () {
+    $engp = EngpReportSubmission::create([
+        'workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'section_name' => 'NGP',
+        'activity_name' => 'ENGP status filter boundary', 'document_type' => 'Monthly Report',
+        'reporting_year' => 2026, 'period_key' => '2026-01', 'period_label' => 'January 2026',
+        'deadline_submission' => '2026-01-20', 'date_received_penro' => '2026-01-19',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $tracking = app(SubmissionTrackingService::class);
+    $completedEngpFilter = ['program' => 'engp', 'status' => 'Completed'];
+
+    expect($tracking->records($completedEngpFilter)->pluck('source_id'))->not->toContain($engp->id);
+
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'engp', 'source_id' => $engp->id, 'workflow_key' => 'cbep',
+        'event_key' => 'released', 'from_stage' => 'penro_records_final',
+        'to_stage' => 'released_to_regional', 'occurred_at' => '2026-01-20 09:00:00',
+        'recorded_by' => $this->user->id,
+    ]);
+
+    expect($tracking->records($completedEngpFilter)->pluck('source_id'))->toContain($engp->id);
+
+    $completedPamb = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed PAMB',
+        'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03',
+        'date_endorsed_regional' => '2026-08-04', 'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]);
+    $pendingPamb = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Pending PAMB',
+        'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $completedPambIds = $tracking->records(['program' => 'conservation', 'status' => 'Completed'])->pluck('source_id');
+
+    expect($completedPambIds)->toContain($completedPamb->id)
+        ->and($completedPambIds)->not->toContain($pendingPamb->id);
 });
 
 test('submission status overview exposes canonical module and program area metadata', function () {

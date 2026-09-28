@@ -1593,8 +1593,24 @@ final class SubmissionTrackingService
     private function applyStatusFilter($query, string $sourceKey, string $status, string $table, $schema): void
     {
         if ($sourceKey === 'engp') {
-            if ($status === RoutingStatusPresenter::COMPLETED) $query->whereNotNull($table.'.date_received_penro');
-            elseif (in_array($status, [RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO], true)) {
+            if ($status === RoutingStatusPresenter::COMPLETED) {
+                $query->where(static function ($completed) use ($table): void {
+                    $completed->whereExists(static function ($routingEvents) use ($table): void {
+                        $routingEvents->selectRaw('1')
+                            ->from('document_routing_events')
+                            ->where('document_routing_events.source_type', 'engp')
+                            ->whereColumn('document_routing_events.source_id', $table.'.id')
+                            ->where('document_routing_events.to_stage', DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
+                    })->orWhere(static function ($legacy) use ($table): void {
+                        $legacy->whereNotExists(static function ($routingEvents) use ($table): void {
+                            $routingEvents->selectRaw('1')
+                                ->from('document_routing_events')
+                                ->where('document_routing_events.source_type', 'engp')
+                                ->whereColumn('document_routing_events.source_id', $table.'.id');
+                        })->whereNotNull($table.'.date_endorsed_regional');
+                    });
+                });
+            } elseif (in_array($status, [RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO], true)) {
                 $query->whereNull($table.'.date_received_penro')->where(function ($stageQuery) use ($sourceKey, $status): void {
                     $workflows = app(EngpReportWorkflowRegistry::class)->all();
                     foreach ($workflows as $workflow) {

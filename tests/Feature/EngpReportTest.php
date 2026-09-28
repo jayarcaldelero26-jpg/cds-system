@@ -3,7 +3,10 @@
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\DocumentArchive;
+use App\Models\DocumentAttachmentHistory;
+use App\Models\DocumentRoutingEvent;
 use App\Models\NonWorkingDay;
+use App\Models\ReportTrackingReference;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
 use App\Services\Compliance\OverdueReportService;
@@ -390,6 +393,7 @@ test('ENGP store updates an existing submission instead of inserting a duplicate
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
+    $this->user->revokePermissionTo('technical-reports.update');
     $response = $this->actingAs($this->user)->post(route('engp-reports.store', 'site_visit'), [
         'office' => 'CENRO Baganga', 'section_name' => 'Updated Section',
         'reporting_year' => 2026, 'period_key' => 'Q1',
@@ -402,6 +406,143 @@ test('ENGP store updates an existing submission instead of inserting a duplicate
         'id' => $existing->id, 'section_name' => 'Updated Section', 'remarks' => 'Updated remarks',
         'date_received_penro' => '2026-03-11', 'created_by' => $this->user->id,
     ]);
+});
+
+test('ENGP store rejects same-period mutation after regional release using create permission only', function () {
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'period_key' => 'Q1',
+        'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        'section_name' => 'Original Section', 'remarks' => 'Original remarks',
+        'date_received_penro' => '2026-03-11', 'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]));
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'engp', 'source_id' => $report->id, 'workflow_key' => 'site_visit',
+        'event_key' => 'released', 'from_stage' => DocumentRoutingProfileRegistry::PENRO_RECORDS_FINAL,
+        'to_stage' => DocumentRoutingProfileRegistry::RELEASED_REGIONAL,
+        'occurred_at' => '2026-03-12 09:00:00', 'recorded_by' => $this->user->id,
+    ]);
+    $this->user->revokePermissionTo('technical-reports.update');
+
+    expect($this->user->hasPermissionTo('technical-reports.create'))->toBeTrue()
+        ->and($this->user->hasPermissionTo('technical-reports.update'))->toBeFalse();
+
+    $this->actingAs($this->user)
+        ->from(route('engp-reports.index', 'site_visit'))
+        ->post(route('engp-reports.store', 'site_visit'), [
+            'office' => 'CENRO Baganga', 'section_name' => 'Changed Section',
+            'reporting_year' => 2026, 'period_key' => 'Q1', 'remarks' => 'Changed remarks',
+        ])
+        ->assertRedirect(route('engp-reports.index', 'site_visit'))
+        ->assertSessionHasErrors('submission');
+
+    $this->assertDatabaseHas('engp_report_submissions', [
+        'id' => $report->id, 'section_name' => 'Original Section',
+        'remarks' => 'Original remarks', 'date_received_penro' => '2026-03-11',
+    ]);
+});
+
+test('ENGP store cannot replace the MOV of a completed same-period submission', function () {
+    $currentPath = 'engp-report/completed-site-visit-current.pdf';
+    Storage::disk('local')->put($currentPath, "%PDF-1.4\ncurrent document");
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'period_key' => 'Q1',
+        'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        'mov_file_path' => $currentPath, 'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]));
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'engp', 'source_id' => $report->id, 'workflow_key' => 'site_visit',
+        'event_key' => 'released', 'from_stage' => DocumentRoutingProfileRegistry::PENRO_RECORDS_FINAL,
+        'to_stage' => DocumentRoutingProfileRegistry::RELEASED_REGIONAL,
+        'occurred_at' => '2026-03-12 09:00:00', 'recorded_by' => $this->user->id,
+    ]);
+    $this->user->revokePermissionTo('technical-reports.update');
+
+    $this->actingAs($this->user)
+        ->from(route('engp-reports.index', 'site_visit'))
+        ->post(route('engp-reports.store', 'site_visit'), [
+            'office' => 'CENRO Baganga', 'section_name' => 'NGP',
+            'reporting_year' => 2026, 'period_key' => 'Q1',
+            'mov' => UploadedFile::fake()->create('replacement.pdf', 12, 'application/pdf'),
+        ])
+        ->assertRedirect(route('engp-reports.index', 'site_visit'))
+        ->assertSessionHasErrors('submission');
+
+    expect($report->fresh()->mov_file_path)->toBe($currentPath)
+        ->and(Storage::disk('local')->exists($currentPath))->toBeTrue()
+        ->and(Storage::disk('local')->allFiles())->toBe([$currentPath]);
+});
+
+test('ENGP store rejects a same-period POST for a soft-deleted submission without a MOV', function () {
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'period_key' => 'Q1',
+        'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        'section_name' => 'Original Section', 'remarks' => 'Original remarks',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]));
+    $report->delete();
+    $attributesBefore = EngpReportSubmission::withTrashed()->findOrFail($report->id)->getAttributes();
+    $trackingReferencesBefore = ReportTrackingReference::query()
+        ->where('source_type', 'engp')->where('source_id', $report->id)->count();
+    $attachmentHistoryBefore = DocumentAttachmentHistory::query()
+        ->where('source_type', 'engp')->where('source_id', $report->id)->count();
+
+    $this->actingAs($this->user)
+        ->from(route('engp-reports.index', 'site_visit'))
+        ->post(route('engp-reports.store', 'site_visit'), [
+            'office' => 'CENRO Baganga', 'section_name' => 'Changed Section',
+            'reporting_year' => 2026, 'period_key' => 'Q1', 'remarks' => 'Changed remarks',
+        ])
+        ->assertRedirect(route('engp-reports.index', 'site_visit'))
+        ->assertSessionHasErrors(['submission' => 'A previously deleted submission exists for this office and reporting period. Contact an administrator to request recovery.']);
+
+    $unchanged = EngpReportSubmission::withTrashed()->findOrFail($report->id);
+    expect($unchanged->trashed())->toBeTrue()
+        ->and($unchanged->getAttributes())->toBe($attributesBefore)
+        ->and($unchanged->section_name)->toBe('Original Section')
+        ->and($unchanged->remarks)->toBe('Original remarks')
+        ->and(ReportTrackingReference::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe($trackingReferencesBefore)
+        ->and(DocumentAttachmentHistory::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe($attachmentHistoryBefore);
+});
+
+test('ENGP store rejects a same-period POST for a soft-deleted submission with a MOV', function () {
+    $currentPath = 'engp-report/deleted-site-visit-current.pdf';
+    Storage::disk('local')->put($currentPath, "%PDF-1.4\ncurrent document");
+    $report = EngpReportSubmission::create(engpPayload([
+        'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'period_key' => 'Q1',
+        'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        'section_name' => 'Original Section', 'remarks' => 'Original remarks',
+        'mov_file_path' => $currentPath, 'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]));
+    $report->delete();
+    $attributesBefore = EngpReportSubmission::withTrashed()->findOrFail($report->id)->getAttributes();
+    $trackingReferencesBefore = ReportTrackingReference::query()
+        ->where('source_type', 'engp')->where('source_id', $report->id)->count();
+    $attachmentHistoryBefore = DocumentAttachmentHistory::query()
+        ->where('source_type', 'engp')->where('source_id', $report->id)->count();
+
+    $this->actingAs($this->user)
+        ->from(route('engp-reports.index', 'site_visit'))
+        ->post(route('engp-reports.store', 'site_visit'), [
+            'office' => 'CENRO Baganga', 'section_name' => 'Changed Section',
+            'reporting_year' => 2026, 'period_key' => 'Q1', 'remarks' => 'Changed remarks',
+            'mov' => UploadedFile::fake()->create('replacement.pdf', 12, 'application/pdf'),
+        ])
+        ->assertRedirect(route('engp-reports.index', 'site_visit'))
+        ->assertSessionHasErrors(['submission' => 'A previously deleted submission exists for this office and reporting period. Contact an administrator to request recovery.']);
+
+    $unchanged = EngpReportSubmission::withTrashed()->findOrFail($report->id);
+    expect($unchanged->trashed())->toBeTrue()
+        ->and($unchanged->getAttributes())->toBe($attributesBefore)
+        ->and($unchanged->section_name)->toBe('Original Section')
+        ->and($unchanged->remarks)->toBe('Original remarks')
+        ->and($unchanged->mov_file_path)->toBe($currentPath)
+        ->and(Storage::disk('local')->get($currentPath))->toBe("%PDF-1.4\ncurrent document")
+        ->and(Storage::disk('local')->allFiles())->toBe([$currentPath])
+        ->and(ReportTrackingReference::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe($trackingReferencesBefore)
+        ->and(DocumentAttachmentHistory::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe($attachmentHistoryBefore);
 });
 
 test('authorized ENGP users can advance a report to CENRO Chief through Submission Tracking', function () {

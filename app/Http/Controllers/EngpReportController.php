@@ -85,7 +85,13 @@ class EngpReportController extends Controller
         $this->rejectRoutingFields($request);
         $validated = $this->validateData($request, $workflow, $config, false);
         abort_unless($this->organization->canUseDevelopmentOffice($request->user(), $validated['office']), 403);
-        $record = $this->findSubmissionForPeriod($workflow, $validated) ?? new EngpReportSubmission;
+        $record = $this->findSubmissionForPeriod($workflow, $validated);
+        if ($record) {
+            $this->rejectTrashedPeriodMatch($record);
+            $this->tracking->assertMutable($record);
+        }
+
+        $record ??= new EngpReportSubmission;
         return $this->persist($request, $record, $validated, $workflow, $config, 'ENGP report saved.');
     }
 
@@ -165,6 +171,8 @@ class EngpReportController extends Controller
                 if (! $wasNew) throw $exception;
                 $existing = $this->findSubmissionForPeriod($workflow, $validated);
                 if (! $existing) throw ValidationException::withMessages(['period_key' => 'A submission already exists for this office and reporting period. Refresh the page and try again.']);
+                $this->rejectTrashedPeriodMatch($existing);
+                $this->tracking->assertMutable($existing);
                 unset($validated['created_by']);
                 $record = $existing;
             }
@@ -184,6 +192,15 @@ class EngpReportController extends Controller
             $save($record);
         }
         return back()->with('success', $message);
+    }
+
+    private function rejectTrashedPeriodMatch(EngpReportSubmission $record): void
+    {
+        if ($record->trashed()) {
+            throw ValidationException::withMessages([
+                'submission' => 'A previously deleted submission exists for this office and reporting period. Contact an administrator to request recovery.',
+            ]);
+        }
     }
 
     private function rejectRoutingFields(Request $request): void
