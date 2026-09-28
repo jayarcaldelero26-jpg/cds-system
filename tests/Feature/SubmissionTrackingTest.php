@@ -4,12 +4,14 @@ use App\Models\ConservationReportSubmission;
 use App\Models\DocumentRoutingEvent;
 use App\Models\ModuleDefinition;
 use App\Models\EngpReportSubmission;
+use App\Models\PambRoutingEvent;
 use App\Models\User;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use Carbon\CarbonImmutable;
 use Inertia\Testing\AssertableInertia as Assert;
 use Illuminate\Support\Facades\Storage;
@@ -39,7 +41,7 @@ test('routing status is normalized across each required stage', function () {
     expect($report->fresh()->submission_status)->toBe('Completed');
 });
 
-test('Completed filter follows ENGP regional release while preserving Conservation PAMB filtering', function () {
+test('Completed filter follows ENGP and PAMB terminal release while preserving generic Conservation dates', function () {
     $engp = EngpReportSubmission::create([
         'workflow_key' => 'cbep', 'office' => 'CENRO Baganga', 'section_name' => 'NGP',
         'activity_name' => 'ENGP status filter boundary', 'document_type' => 'Monthly Report',
@@ -65,8 +67,14 @@ test('Completed filter follows ENGP regional release while preserving Conservati
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed PAMB',
         'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03',
-        'date_endorsed_regional' => '2026-08-04', 'created_by' => $this->user->id,
-        'updated_by' => $this->user->id,
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    PambRoutingEvent::query()->create([
+        'conservation_report_submission_id' => $completedPamb->id,
+        'workflow_key' => $completedPamb->workflow_key,
+        'stage_key' => \App\Services\SubmissionTracking\PambRoutingTimelineService::RELEASED_TO_REGIONAL,
+        'occurred_at' => '2026-08-04 09:00:00',
+        'recorded_by' => $this->user->id,
     ]);
     $pendingPamb = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Pending PAMB',
@@ -74,10 +82,54 @@ test('Completed filter follows ENGP regional release while preserving Conservati
         'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
+    $legacyRegionalDatePamb = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Legacy regional date only',
+        'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
+        'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-04',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    $incompleteEventsPamb = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'activity_name' => 'Incomplete route with legacy date',
+        'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
+        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03',
+        'date_endorsed_regional' => '2026-08-04', 'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]);
+    PambRoutingEvent::query()->create([
+        'conservation_report_submission_id' => $incompleteEventsPamb->id,
+        'workflow_key' => $incompleteEventsPamb->workflow_key,
+        'stage_key' => \App\Services\SubmissionTracking\PambRoutingTimelineService::RECEIVED_BY_TSD,
+        'occurred_at' => '2026-08-03 09:00:00',
+        'recorded_by' => $this->user->id,
+    ]);
+    $genericCompleted = ConservationReportSubmission::create([
+        'workflow_key' => 'homestay', 'activity_name' => 'Generic Conservation completed by dates',
+        'date_accomplished' => '2026-08-01', 'date_report_released_cenro' => '2026-08-02',
+        'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-04',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
     $completedPambIds = $tracking->records(['program' => 'conservation', 'status' => 'Completed'])->pluck('source_id');
 
     expect($completedPambIds)->toContain($completedPamb->id)
-        ->and($completedPambIds)->not->toContain($pendingPamb->id);
+        ->and($completedPambIds)->toContain($genericCompleted->id)
+        ->and($completedPambIds)->not->toContain($pendingPamb->id, $legacyRegionalDatePamb->id, $incompleteEventsPamb->id);
+
+    $allRows = $tracking->records(['program' => 'conservation']);
+    $legacyRow = $allRows->firstWhere('source_id', $legacyRegionalDatePamb->id);
+    $incompleteRow = $allRows->firstWhere('source_id', $incompleteEventsPamb->id);
+    $completedRow = $allRows->firstWhere('source_id', $completedPamb->id);
+    $history = $tracking->workspaceQueues(['program' => 'conservation'], $allRows)['history'];
+
+    expect($legacyRow['routing_complete'])->toBeFalse()
+        ->and($legacyRow['routing']['current_status'])->not->toBe('Released to Regional Office')
+        ->and(collect($legacyRow['routing_timeline'])->firstWhere('key', \App\Services\SubmissionTracking\PambRoutingTimelineService::RELEASED_TO_REGIONAL)['status'])->toBe('pending')
+        ->and($incompleteRow['routing_complete'])->toBeFalse()
+        ->and($completedRow['routing_complete'])->toBeTrue()
+        ->and(collect($completedRow['routing_timeline'])->firstWhere('key', PambRoutingTimelineService::RELEASED_TO_REGIONAL)['status'])->toBe('completed')
+        ->and($tracking->isRoutingComplete($legacyRegionalDatePamb->fresh()))->toBeFalse()
+        ->and($tracking->isRoutingComplete($completedPamb->fresh()))->toBeTrue()
+        ->and($history->pluck('source_id'))->toContain($completedPamb->id, $genericCompleted->id)
+        ->and($history->pluck('source_id'))->not->toContain($legacyRegionalDatePamb->id, $incompleteEventsPamb->id);
 });
 
 test('submission status overview exposes canonical module and program area metadata', function () {
@@ -251,6 +303,15 @@ test('History contains each completed routing workflow once and excludes interme
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed later', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
         'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
+    foreach ([[$completedEarlier, '2026-08-04'], [$completedLater, '2026-08-05']] as [$completed, $date]) {
+        PambRoutingEvent::query()->create([
+            'conservation_report_submission_id' => $completed->id,
+            'workflow_key' => $completed->workflow_key,
+            'stage_key' => \App\Services\SubmissionTracking\PambRoutingTimelineService::RELEASED_TO_REGIONAL,
+            'occurred_at' => $date.' 09:00:00',
+            'recorded_by' => $this->user->id,
+        ]);
+    }
 
     $queues = app(SubmissionTrackingService::class)->queues();
     $history = $queues['history']->where('source', 'conservation')->values();
@@ -386,6 +447,13 @@ test('history preserves Conservation reporting period, protected area, and accom
         'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'date_report_released_cenro' => '2026-08-04',
         'date_received_penro' => '2026-08-06', 'date_endorsed_regional' => '2026-08-07',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    PambRoutingEvent::query()->create([
+        'conservation_report_submission_id' => $report->id,
+        'workflow_key' => $report->workflow_key,
+        'stage_key' => \App\Services\SubmissionTracking\PambRoutingTimelineService::RELEASED_TO_REGIONAL,
+        'occurred_at' => '2026-08-07 09:00:00',
+        'recorded_by' => $this->user->id,
     ]);
 
     $row = app(SubmissionTrackingService::class)->queues()['history']->firstWhere('source_id', $report->id);

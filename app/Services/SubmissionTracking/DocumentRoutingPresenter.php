@@ -68,6 +68,7 @@ final class DocumentRoutingPresenter
             'final_destination' => 'Regional Office',
             'current_location' => $summary['current_location'] ?? ($pamb['current_document_location'] ?? null),
             'current_status' => $summary['current_status'] ?? null,
+            'processing_percentage' => $this->pambProgressPercentage($record, $pamb, $current),
             'responsible_office' => $this->officeForActor($record, $responsibleActor, $isForwarded ? ($current['destination'] ?? null) : ($summary['responsible_office'] ?? null)),
             'responsible_user_category' => $responsibleCategory,
             'current_stage' => $current['stage_key'] ?? $current['key'] ?? null,
@@ -81,6 +82,13 @@ final class DocumentRoutingPresenter
             'deadline' => $record->getAttribute('deadline_submission'),
             'compliance_status' => $record->getAttribute('timeliness'),
             'actions' => $pamb['actions'] ?? [],
+            // These canonical milestones retain a real-world business date.
+            // Internal and correction routing actions use server timestamps.
+            'business_date_actions' => [
+                SubmissionTrackingService::CENRO_RELEASE,
+                SubmissionTrackingService::PENRO_RECEIPT,
+                SubmissionTrackingService::REGIONAL_ENDORSEMENT,
+            ],
             'document_update_capabilities' => [
                 \App\Services\SubmissionTracking\SubmissionTrackingService::CENRO_RELEASE => true,
                 \App\Services\SubmissionTracking\SubmissionTrackingService::PENRO_RECEIPT => false,
@@ -250,7 +258,7 @@ final class DocumentRoutingPresenter
             DocumentRoutingProfileRegistry::PENRO_ORIGIN => 0,
             DocumentRoutingProfileRegistry::PAMO_ORIGIN => 0,
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF => 20,
-            DocumentRoutingProfileRegistry::CENRO_CHIEF => 35,
+            DocumentRoutingProfileRegistry::CENRO_CHIEF => 20,
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS => 50,
             DocumentRoutingProfileRegistry::CENRO_RECORDS => 50,
             DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS => 80,
@@ -262,13 +270,93 @@ final class DocumentRoutingPresenter
             DocumentRoutingProfileRegistry::TRANSIT_CDS_FOCAL => 92,
             DocumentRoutingProfileRegistry::CDS_FOCAL => 94,
             DocumentRoutingProfileRegistry::TRANSIT_CDS_CHIEF => 96,
-            DocumentRoutingProfileRegistry::CDS_CHIEF => 98,
+            DocumentRoutingProfileRegistry::CDS_CHIEF => 100,
             DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO_RETURN => 100,
             DocumentRoutingProfileRegistry::OFFICE_PENRO_RETURN => 100,
             DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS_FINAL => 100,
             DocumentRoutingProfileRegistry::PENRO_RECORDS_FINAL => 100,
             DocumentRoutingProfileRegistry::RELEASED_REGIONAL => 100,
-        ][$stage] ?? 100;
+        ][$stage] ?? 0;
+    }
+
+    /**
+     * Map the specialized PAMB timeline's held/action stages onto the same
+     * processing milestones used by the canonical routing profile. The
+     * timeline's current stage is cycle-aware, so old completed events do not
+     * advance progress after a correction returns work to an earlier stage.
+     */
+    private function pambProcessingPercentage(string $stage): int
+    {
+        return match ($stage) {
+            SubmissionTrackingService::CENRO_RELEASE => 0,
+            PambRoutingTimelineService::RECORDS_RECEIVED => 80,
+            PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+            PambRoutingTimelineService::RECEIVED_BY_PENRO => 85,
+            PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD => 88,
+            PambRoutingTimelineService::RECEIVED_BY_TSD => 90,
+            PambRoutingTimelineService::FORWARDED_TSD_TO_CDS => 92,
+            PambRoutingTimelineService::RECEIVED_BY_CDS => 94,
+            PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF => 96,
+            PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF,
+            PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO,
+            PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL,
+            PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION,
+            PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL,
+            PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS,
+            PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL,
+            PambRoutingTimelineService::RELEASED_TO_REGIONAL => 100,
+            default => 0,
+        };
+    }
+
+    /** @param array<string,mixed> $pamb @param array<string,mixed>|null $current */
+    private function pambProgressPercentage(Model $record, array $pamb, ?array $current): int
+    {
+        if ((bool) ($pamb['routing_complete'] ?? false)) {
+            return 100;
+        }
+
+        $stage = app(PambRoutingTimelineService::class)->canonicalStageKey(
+            (string) ($current['stage_key'] ?? $current['key'] ?? '')
+        );
+
+        // Before the first CENRO release, the detailed timeline's placeholder
+        // stage is not progress by itself. The authoritative MOV workflow
+        // determines whether the report is prepared, under Chief review, in
+        // correction, ready for Records, or released toward PENRO.
+        if ($stage === SubmissionTrackingService::CENRO_RELEASE) {
+            return $this->pambMovProcessingPercentage(
+                app(PambMovProcessingService::class)->status($record),
+                $this->routingPolicy->isDirectPenro($record),
+            );
+        }
+
+        // A current, cycle-resolved PAMB timeline stage always wins over a
+        // stale MOV status or an event from an earlier correction cycle.
+        return $this->pambProcessingPercentage($stage);
+    }
+
+    private function pambMovProcessingPercentage(string $status, bool $directPenro): int
+    {
+        if ($directPenro) {
+            return in_array($status, [
+                PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+                PambMovProcessingService::RESUBMITTED_FOR_REVIEW,
+                PambMovProcessingService::NEEDS_CORRECTION,
+                PambMovProcessingService::READY_FOR_RELEASE,
+                PambMovProcessingService::RECEIVED_BY_PENRO,
+            ], true) ? 80 : 0;
+        }
+
+        return match ($status) {
+            PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+            PambMovProcessingService::RESUBMITTED_FOR_REVIEW => 20,
+            PambMovProcessingService::READY_FOR_RELEASE => 50,
+            PambMovProcessingService::RELEASED_BY_CENRO => 80,
+            PambMovProcessingService::ACTIVITY_CONDUCTED,
+            PambMovProcessingService::NEEDS_CORRECTION => 0,
+            default => 0,
+        };
     }
 
     /** @param array<string,mixed>|null $action */

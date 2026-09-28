@@ -243,20 +243,69 @@ final class ProtectedAttachmentService
         ];
     }
 
+    /**
+     * Descriptor for an inline-preview decision. Unlike the general download
+     * descriptor, this never infers MIME from a filename/path extension: use
+     * stored MIME metadata or server-side content detection, otherwise leave
+     * the type unknown so the client can offer download without embedding it.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function previewDescriptor(string $source, Model $record, string $key): ?array
+    {
+        $resolved = $this->resolveRecordAttachment($source, $record, $key);
+        if ($resolved === null || $resolved['path'] === null) {
+            return null;
+        }
+
+        $diskPath = $this->resolveDiskPath($resolved['path']);
+        if ($diskPath === null) {
+            return null;
+        }
+
+        $mimeType = is_string($resolved['mime'] ?? null) && trim($resolved['mime']) !== ''
+            ? trim($resolved['mime'])
+            : null;
+        if ($mimeType === null && function_exists('mime_content_type')) {
+            $detected = mime_content_type($diskPath['absolute']);
+            $mimeType = is_string($detected) && trim($detected) !== '' ? trim($detected) : null;
+        }
+
+        $name = $resolved['name'] ?: basename($resolved['path']);
+        $url = $this->url($source, $record, $key);
+        $previewUrl = $url.'?preview=1';
+
+        return [
+            'key' => $key,
+            'name' => $name,
+            'mime_type' => $mimeType,
+            'type' => $mimeType,
+            'size' => is_numeric($resolved['size'] ?? null) ? (int) $resolved['size'] : (int) filesize($diskPath['absolute']),
+            'url' => $url,
+            'preview_url' => $previewUrl,
+            'download_url' => $url.'?download=1',
+            'external' => false,
+        ];
+    }
+
     public function response(string $source, Model $record, string $key): Response
     {
         abort_unless($this->definition($source), 404);
         $resolved = $this->resolveRecordAttachment($source, $record, $key);
         abort_unless($resolved !== null && $resolved['path'] !== null, 404);
+        $currentDocumentPreview = request()->boolean('preview');
 
         $diskPath = $this->resolveDiskPath($resolved['path']);
         if ($diskPath === null) {
+            // Full Details preview is strictly for the selected source record's
+            // current local document. Never fall through to an archived copy.
+            abort_if($currentDocumentPreview, 404);
             return $this->archivedResponse($source, $record, $key, $resolved);
         }
 
-        $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size'], $diskPath);
+        $info = $this->fileInfo($resolved['path'], $resolved['mime'], $resolved['size'], $diskPath, ! $currentDocumentPreview);
         $filename = $this->safeFilename($resolved['name'] ?: basename($resolved['path']));
-        $disposition = request()->boolean('download') || ! $this->isInlineMime($info['mime_type'], $filename) ? 'attachment' : 'inline';
+        $disposition = request()->boolean('download') || ! $this->isInlineMime($info['mime_type'], $filename, ! $currentDocumentPreview) ? 'attachment' : 'inline';
 
         return response()->file($diskPath['absolute'], [
             'Content-Type' => $info['mime_type'],
@@ -444,21 +493,25 @@ final class ProtectedAttachmentService
     }
 
     /** @return array{mime_type:string,size:int|null} @param array{absolute:string,disk:string}|null $diskPath */
-    private function fileInfo(string $path, mixed $mime, mixed $size, ?array $diskPath = null): array
+    private function fileInfo(string $path, mixed $mime, mixed $size, ?array $diskPath = null, bool $allowExtensionMime = true): array
     {
         $diskPath ??= $this->resolveDiskPath($path);
         $absolute = $diskPath['absolute'] ?? null;
         $detected = $absolute && function_exists('mime_content_type') ? mime_content_type($absolute) : false;
-        $mimeType = is_string($mime) && $mime !== '' ? $mime : (is_string($detected) && $detected !== '' ? $detected : $this->mimeFromExtension($path));
+        $mimeType = is_string($mime) && $mime !== '' ? $mime : (is_string($detected) && $detected !== '' ? $detected : ($allowExtensionMime ? $this->mimeFromExtension($path) : null));
         $fileSize = is_numeric($size) ? (int) $size : ($absolute && is_file($absolute) ? filesize($absolute) : null);
 
         return ['mime_type' => $mimeType ?: 'application/octet-stream', 'size' => $fileSize ?: null];
     }
 
-    private function isInlineMime(string $mime, string $filename): bool
+    private function isInlineMime(string $mime, string $filename, bool $allowExtensionFallback = true): bool
     {
-        return in_array(strtolower($mime), ['application/pdf', 'image/jpeg', 'image/png'], true)
-            || in_array(strtolower(pathinfo($filename, PATHINFO_EXTENSION)), ['pdf', 'jpg', 'jpeg', 'png'], true);
+        if (in_array(strtolower($mime), ['application/pdf', 'image/jpeg', 'image/png'], true)) {
+            return true;
+        }
+
+        return $allowExtensionFallback
+            && in_array(strtolower(pathinfo($filename, PATHINFO_EXTENSION)), ['pdf', 'jpg', 'jpeg', 'png'], true);
     }
 
     private function mimeFromExtension(string $path): string

@@ -128,6 +128,25 @@ final class PambRoutingTimelineService
         return $max;
     }
 
+    /**
+     * PAMB completion is established by the terminal regional-release
+     * milestone in the active canonical routing cycle. A source regional
+     * date alone is retained as metadata, not treated as a completed route.
+     *
+     * @param \Illuminate\Support\Collection<int, PambRoutingEvent>|null $events
+     */
+    public function isComplete(ConservationReportSubmission $report, ?\Illuminate\Support\Collection $events = null): bool
+    {
+        if (! $this->applies($report)) return false;
+
+        $events ??= $report->relationLoaded('routingEvents')
+            ? $report->routingEvents->sortBy('id')->values()
+            : $report->routingEvents()->get()->sortBy('id')->values();
+        $cycleEvents = $this->eventsForCycle($events, $this->currentCycle($events));
+
+        return isset($this->milestoneDates($report, $cycleEvents)[self::RELEASED_TO_REGIONAL]);
+    }
+
     public function isAwaitingOfficePenroFinalReceipt(ConservationReportSubmission $report): bool
     {
         $events = $report->routingEvents()->get()->sortBy('id')->values();
@@ -463,6 +482,7 @@ final class PambRoutingTimelineService
 
         return [
             'applicable' => true,
+            'routing_complete' => $hasRegionalEndorsement,
             'workflow_key' => $report->workflow_key,
             'current_document_location' => $currentLocation,
             'current_processing_status' => $currentStatus,
@@ -536,6 +556,8 @@ final class PambRoutingTimelineService
             ];
         }
 
+        $routingComplete = isset($cycleDates[self::RELEASED_TO_REGIONAL]);
+
         foreach ([
             SubmissionTrackingService::CENRO_RELEASE => [$report->date_report_released_cenro, 'Released by CENRO', 'CENRO'],
             self::RECORDS_RECEIVED => [$report->date_received_penro, 'Received by PENRO Records', 'PENRO Records'],
@@ -552,7 +574,7 @@ final class PambRoutingTimelineService
                 'occurred_at' => $this->date($date)->toDateString(),
                 'business_date' => $this->date($date)->toDateString(),
                 'previous_occurred_at' => null,
-                'status' => 'completed',
+                'status' => $key === self::RELEASED_TO_REGIONAL && ! $routingComplete ? 'historical' : 'completed',
                 'elapsed_working_days' => null,
                 'pending_working_days' => null,
                 'delay_type' => null,
@@ -605,10 +627,11 @@ final class PambRoutingTimelineService
         $last = collect($timeline)->filter(fn (array $item): bool => filled($item['occurred_at']))->last();
         $regional = $report->date_endorsed_regional ? $this->date($report->date_endorsed_regional) : null;
         $currentLocation = $this->locationForStage($nextBase, $report);
-        $currentStatus = $this->statusForStage($nextBase, $nextKey === null, $report, $finalReceiptRecorded);
+        $currentStatus = $this->statusForStage($nextBase, $routingComplete, $report, $finalReceiptRecorded);
 
         return [
             'applicable' => true,
+            'routing_complete' => $routingComplete,
             'workflow_key' => $report->workflow_key,
             'current_document_location' => $currentLocation,
             'current_processing_status' => $currentStatus,
@@ -664,7 +687,13 @@ final class PambRoutingTimelineService
             $event = $events instanceof \Illuminate\Support\Collection ? $events->get($key) : null;
             if ($event?->occurred_at) $dates[$key] = $this->date($event->occurred_at);
         }
-        if ($report->date_endorsed_regional && (isset($dates[self::RECEIVED_BY_RECORDS_FINAL]) || ($events instanceof \Illuminate\Support\Collection && $events->has(self::RELEASED_TO_REGIONAL)))) {
+        $regionalReleaseEvent = $events instanceof \Illuminate\Support\Collection ? $events->get(self::RELEASED_TO_REGIONAL) : null;
+        if ($regionalReleaseEvent?->occurred_at) {
+            $dates[self::RELEASED_TO_REGIONAL] = $this->date($regionalReleaseEvent->occurred_at);
+        } elseif ($report->date_endorsed_regional && isset($dates[self::RECEIVED_BY_RECORDS_FINAL])) {
+            // A legacy date may stand for the release only after the canonical
+            // PAMB chain reaches final PENRO Records receipt. By itself it is
+            // historical metadata and cannot complete an incomplete route.
             $dates[self::RELEASED_TO_REGIONAL] = $this->date($report->date_endorsed_regional);
         }
         return $dates;
@@ -1120,6 +1149,7 @@ final class PambRoutingTimelineService
     private function stageDefinition(string $key): array
     {
         return collect([
+            self::RELEASED_TO_REGIONAL => 'Released/Endorsed to Regional Office',
             self::FORWARDED_RECORDS_TO_PENRO => 'Forwarded to Office of the PENRO',
             self::RECEIVED_BY_PENRO => 'Received by Office of the PENRO',
             self::FORWARDED_PENRO_TO_TSD => 'Forwarded to PENRO TSD Chief',

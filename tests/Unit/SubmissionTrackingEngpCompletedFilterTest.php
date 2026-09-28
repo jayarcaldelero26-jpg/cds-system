@@ -55,8 +55,14 @@ final class SubmissionTrackingEngpCompletedFilterTest extends TestCase
         });
         $schema->create('conservation_report_submissions', function (Blueprint $table): void {
             $table->id();
+            $table->string('workflow_key')->nullable();
             $table->date('date_received_penro')->nullable();
             $table->date('date_endorsed_regional')->nullable();
+        });
+        $schema->create('pamb_routing_events', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('conservation_report_submission_id');
+            $table->string('stage_key');
         });
 
         $this->service = (new ReflectionClass(SubmissionTrackingService::class))->newInstanceWithoutConstructor();

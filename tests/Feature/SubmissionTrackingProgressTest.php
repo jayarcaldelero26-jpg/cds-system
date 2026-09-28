@@ -130,7 +130,7 @@ test('processing percentage is profile-aware for ENGP and extended generic routi
     ]);
 
     $extendedEvents = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $extended->id)->get();
-    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(98);
+    expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(100);
     DocumentRoutingEvent::create([
         'source_type' => 'bms', 'source_id' => $extended->id, 'workflow_key' => $extended->workflow_key,
         'event_key' => 'recommended', 'from_stage' => DocumentRoutingProfileRegistry::CDS_CHIEF,
@@ -140,6 +140,95 @@ test('processing percentage is profile-aware for ENGP and extended generic routi
     ]);
     $extendedEvents = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $extended->id)->get();
     expect($presenter->present($extended->fresh(), 'bms', null, $extendedEvents)['processing_percentage'])->toBe(100);
+});
+
+test('PAMB Regular, Special TWG, and TWC Meeting timelines use the shared processing milestones', function (): void {
+    $presenter = app(DocumentRoutingPresenter::class);
+    $report = \App\Models\ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb',
+        'activity_name' => 'Progress mapping regression',
+        'date_report_released_cenro' => '2026-08-03',
+    ]);
+
+    $percentage = fn (string $stage): int => $presenter->presentPamb($report, [
+        'routing_summary' => [],
+        'timeline' => [['key' => $stage, 'stage_key' => $stage, 'status' => 'current', 'held_at' => 'PENRO CDS Chief']],
+    ])['processing_percentage'];
+
+    expect($percentage(\App\Services\SubmissionTracking\SubmissionTrackingService::CENRO_RELEASE))->toBe(80)
+        ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::RECORDS_RECEIVED))->toBe(80)
+        ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBe(85)
+        ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF))->toBe(100)
+        ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO))->toBe(100)
+        ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::RELEASED_TO_REGIONAL))->toBe(100);
+});
+
+test('PAMB terminal completion from the active timeline cycle reaches 100 percent in the shared presenter', function (): void {
+    $timelineService = app(PambRoutingTimelineService::class);
+    $presenter = app(DocumentRoutingPresenter::class);
+    $workflows = ['regular_pamb', 'special_pamb', 'twc_meetings'];
+
+    foreach ($workflows as $workflow) {
+        $report = \App\Models\ConservationReportSubmission::create([
+            'workflow_key' => $workflow,
+            'activity_name' => 'PAMB terminal progress handoff',
+            'date_report_released_cenro' => '2026-08-03',
+        ]);
+        \App\Models\PambRoutingEvent::query()->create([
+            'conservation_report_submission_id' => $report->id,
+            'workflow_key' => $workflow,
+            'stage_key' => PambRoutingTimelineService::RELEASED_TO_REGIONAL,
+            'occurred_at' => '2026-08-10 09:00:00',
+        ]);
+
+        $timeline = $timelineService->present($report->fresh());
+        $routing = $presenter->presentPamb($report->fresh(), $timeline);
+
+        expect($timeline['routing_complete'])->toBeTrue()
+            ->and(collect($timeline['timeline'])->contains(fn (array $stage): bool => ($stage['status'] ?? null) === 'current'))->toBeFalse()
+            ->and($routing['processing_percentage'])->toBe(100);
+    }
+});
+
+test('PAMB terminal event from an earlier cycle does not complete progress in an incomplete active correction cycle', function (): void {
+    $timelineService = app(PambRoutingTimelineService::class);
+    $presenter = app(DocumentRoutingPresenter::class);
+    $workflow = 'regular_pamb';
+    $report = \App\Models\ConservationReportSubmission::create([
+        'workflow_key' => $workflow,
+        'activity_name' => 'PAMB active-cycle progress boundary',
+        'date_report_released_cenro' => '2026-08-03',
+        'date_endorsed_regional' => '2026-08-10',
+    ]);
+    foreach ([
+        [PambRoutingTimelineService::RELEASED_TO_REGIONAL, '2026-08-10 09:00:00'],
+        [PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION, '2026-08-11 09:00:00'],
+    ] as [$stage, $occurredAt]) {
+        \App\Models\PambRoutingEvent::query()->create([
+            'conservation_report_submission_id' => $report->id,
+            'workflow_key' => $workflow,
+            'stage_key' => $stage,
+            'occurred_at' => $occurredAt,
+        ]);
+    }
+
+    $incompleteActiveTimeline = $timelineService->present($report->fresh());
+    $incompleteActiveRouting = $presenter->presentPamb($report->fresh(), $incompleteActiveTimeline);
+
+    expect($incompleteActiveTimeline['routing_complete'])->toBeFalse()
+        ->and($incompleteActiveRouting['processing_percentage'])->not->toBe(100);
+
+    \App\Models\PambRoutingEvent::query()->create([
+        'conservation_report_submission_id' => $report->id,
+        'workflow_key' => $workflow,
+        'stage_key' => PambRoutingTimelineService::RELEASED_TO_REGIONAL.'__cycle_2',
+        'occurred_at' => '2026-08-20 09:00:00',
+    ]);
+    $completedActiveTimeline = $timelineService->present($report->fresh());
+    $completedActiveRouting = $presenter->presentPamb($report->fresh(), $completedActiveTimeline);
+
+    expect($completedActiveTimeline['routing_complete'])->toBeTrue()
+        ->and($completedActiveRouting['processing_percentage'])->toBe(100);
 });
 
 test('tracking detail exposes the profile-aware processing percentage and compact status marker', function (): void {

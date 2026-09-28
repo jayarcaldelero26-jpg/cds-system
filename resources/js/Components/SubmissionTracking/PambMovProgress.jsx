@@ -35,16 +35,14 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
         onSubmit?.(row, { onFinish: () => setSubmitting(false) });
     };
 
-    return <section className="space-y-3 rounded-xl border border-green-100 bg-green-50/60 p-3 dark:border-green-900/60 dark:bg-green-950/20" aria-label="MOV processing progress">
+    return <section className="space-y-3 rounded-xl border border-green-100 bg-green-50/60 p-3 dark:border-green-900/60 dark:bg-green-950/20" aria-label="MOV Review">
         <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
-                <h3 className="text-xs font-bold uppercase tracking-wider text-green-900 dark:text-green-200">MOV Processing Progress</h3>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-green-900 dark:text-green-200">MOV Review</h3>
                 <p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{progress.workflow_status || progress.status_label}</p>
                 {progress.workflow_status && progress.workflow_status !== progress.status_label && <p className="mt-0.5 text-[11px] text-gray-600 dark:text-gray-300">MOV milestone: {progress.status_label}</p>}
             </div>
-            <span className="text-2xl font-black text-green-800 dark:text-green-200">{progress.percent}%</span>
         </div>
-        <div className="h-2 overflow-hidden rounded-full bg-green-100 dark:bg-green-900/60"><div className="h-full rounded-full bg-green-700 transition-all" style={{ width: `${progress.percent}%` }} /></div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             {(progress.milestones || []).map(item => <div key={item.key} className="flex min-w-0 items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300"><MilestoneMarker item={item} /><span className="min-w-0">{item.label}</span></div>)}
         </div>
@@ -61,7 +59,6 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
         </div>}
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span className="font-bold uppercase tracking-wide text-gray-500">Turnaround</span><span className="font-semibold text-gray-900 dark:text-white">{progress.turnaround?.label || FALLBACK}</span><span>Deadline: {formatReportDate(progress.turnaround?.deadline, FALLBACK)}</span></div>
         <div className="flex flex-wrap gap-2">
-            {row.mov_url && <a href={row.mov_url} target="_blank" rel="noreferrer" className="inline-flex rounded-lg border border-green-700 px-2.5 py-1.5 text-xs font-bold text-green-800 hover:bg-green-100 dark:text-green-200 dark:hover:bg-green-900/40">View MOV / Report</a>}
             {correction && row.source_url && <a href={row.source_url} className="inline-flex rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-xs font-bold text-amber-800 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-200">Edit / Correct Submission</a>}
         </div>
         <div className="flex flex-wrap gap-2">

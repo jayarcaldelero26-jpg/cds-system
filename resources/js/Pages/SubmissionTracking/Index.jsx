@@ -29,6 +29,11 @@ import { localDateInputValue } from "@/Utils/dateInput";
 import DatePicker from "@/Components/DatePicker";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 import { localDateTimeInputValue } from "@/Utils/timePicker";
+import {
+    availableIncomingActionTabs,
+    filterIncomingRowsByAction,
+    reconcileIncomingActionTab,
+} from "@/Utils/submissionTrackingQueues";
 import { useEffect, useMemo, useState } from "react";
 
 const operationalViewDescriptions = {
@@ -602,13 +607,11 @@ export default function Index({
     const incomingRows = workspaceQueues.incoming || [];
     const incomingActionTabs = useMemo(() => {
         if (isGlobalMonitoring) return [];
-        return Object.keys(incomingActionLabels).filter((category) =>
-            incomingRows.some((row) => row.incoming_action_category === category),
-        );
+        return availableIncomingActionTabs(incomingRows, Object.keys(incomingActionLabels));
     }, [incomingRows, isGlobalMonitoring]);
     const queueRows = workspaceQueues[tab] || [];
-    const rows = tab === "incoming" && incomingActionTab
-        ? queueRows.filter((row) => row.incoming_action_category === incomingActionTab)
+    const rows = tab === "incoming"
+        ? filterIncomingRowsByAction(queueRows, incomingActionTab)
         : queueRows;
     const action = [
         "Action",
@@ -625,6 +628,7 @@ export default function Index({
     const canReplaceSelectedDocument = genericAction
         ? genericAction.can_replace_document === true
         : selected?.routing?.document_update_capabilities?.[form.data.stage] === true;
+    const requiresBusinessDate = selected?.routing?.business_date_actions?.includes(form.data.stage) === true;
     const archiveCheckpointNotice = form.errors.archive
         ? {
               title: "Archive checkpoint unavailable",
@@ -998,9 +1002,8 @@ export default function Index({
     );
     useEffect(() => {
         if (tab !== "incoming" || isGlobalMonitoring) return;
-        if (!incomingActionTabs.includes(incomingActionTab)) {
-            setIncomingActionTab(incomingActionTabs[0] || null);
-        }
+        const nextActionTab = reconcileIncomingActionTab(incomingActionTab, incomingActionTabs);
+        if (nextActionTab !== incomingActionTab) setIncomingActionTab(nextActionTab);
     }, [tab, incomingActionTab, incomingActionTabs, isGlobalMonitoring]);
     useEffect(() => setSearch(filters.search || ""), [filters.search]);
     useEffect(() => setModule(filters.module || ""), [filters.module]);
@@ -1341,6 +1344,13 @@ export default function Index({
                 <div className="mt-4 space-y-4 sm:mt-5">
                     {tab === "incoming" && incomingActionTabs.length > 0 && (
                         <div className="flex flex-wrap gap-2" aria-label="Incoming action filters">
+                            <button
+                                type="button"
+                                onClick={() => setIncomingActionTab(null)}
+                                className={`rounded-lg px-3 py-2 text-xs font-bold transition ${incomingActionTab === null ? "bg-green-700 text-white" : "border border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
+                            >
+                                All actions
+                            </button>
                             {incomingActionTabs.map((category) => (
                                 <button
                                     key={category}
@@ -1616,6 +1626,25 @@ export default function Index({
                         )}
                     </div>
                 )}
+                {details?.current_document && (
+                    <section className="mb-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Current official document">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                                <h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Official Document</h2>
+                                <p className="mt-1 truncate text-sm font-semibold text-gray-700 dark:text-gray-200" title={details.current_document.name || undefined}>
+                                    {details.current_document.name || "Official document"}
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setPreviewRow(details)}
+                                className="shrink-0 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 dark:border-green-500 dark:text-green-200 dark:hover:bg-green-950/40"
+                            >
+                                Preview Current Document
+                            </button>
+                        </div>
+                    </section>
+                )}
                 {details?.storage_status && (
                     <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40" aria-label="Document storage">
                         <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">Document Storage</p>
@@ -1750,7 +1779,7 @@ export default function Index({
                 mode="edit"
                 title={selectedActionLabel}
                 subtitle={
-                    genericAction
+                    genericAction && !requiresBusinessDate
                         ? "The event timestamp is recorded by the server."
                         : "Record the real-world routing event only. CDS-SMART does not electronically transmit the official document."
                 }
@@ -1792,7 +1821,7 @@ export default function Index({
                             Preview MOV / Report
                         </button>
                     )}
-                    {genericAction ? (
+                    {genericAction && !requiresBusinessDate ? (
                         <>
                         {genericAction.receipt_correction_context && <>
                             <FloatingSelect id="submission-tracking-correction-reason" label="Correction reason" required value={form.data.correction_reason_key} onChange={(event) => form.setData("correction_reason_key", event.target.value)} error={form.errors.correction_reason_key}>
@@ -1829,6 +1858,7 @@ export default function Index({
                             </p>
                             <DatePicker
                                 id="submission-tracking-date"
+                                required
                                 label={action[2]}
                                 value={form.data.date}
                                 onChange={(value) =>

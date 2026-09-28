@@ -963,6 +963,14 @@ final class SubmissionTrackingService
             $yearDate = $record->getAttribute('date_accomplished') ?: $record->getAttribute('date_conducted');
             $reportingYear = $yearDate ? Carbon::parse($yearDate)->year : null;
         }
+        $officialDocumentDefinition = $this->attachments->officialDefinitionForRoutingSource($sourceKey);
+        $officialDocument = $officialDocumentDefinition
+            ? $this->attachments->previewDescriptor(
+                $officialDocumentDefinition['source'],
+                $record,
+                (string) $officialDocumentDefinition['definition']['official_key'],
+            )
+            : null;
         $data = [
             'source' => $sourceKey,
             'source_id' => $record->getKey(),
@@ -1001,9 +1009,7 @@ final class SubmissionTrackingService
             'penro_delay_days' => $record->getAttribute('penro_delay') ?? $record->getAttribute('total_days_delayed_penro'),
             'mov_status' => ($record->getAttribute('mov_file_path') || $record->getAttribute('report_file_path') || $record->getAttribute('mov_external_url') || ! empty($record->getAttribute('attachments'))) ? 'Complete' : ($record->getAttribute('date_received_penro') ? 'MOV Not Yet Submitted' : 'Not Yet Available'),
             'mov_url' => isset($source['mov_url']) ? ($source['mov_url'])($record) : null,
-            'mov_attachment' => $sourceKey === 'conservation'
-                ? $this->attachments->descriptor('conservation-report', $record, 'mov')
-                : null,
+            'mov_attachment' => $officialDocument,
             'mov_external' => isset($source['mov_external']) ? (bool) ($source['mov_external'])($record) : false,
             'source_url' => ($source['url'])($record),
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
@@ -1027,6 +1033,11 @@ final class SubmissionTrackingService
         $pambRouting = $sourceKey === 'conservation'
             ? $this->pambRouting->present($record, null, $pambAttachments, $routingAudits)
             : ['applicable' => false, 'timeline' => [], 'current_document_location' => null, 'routing_summary' => [], 'summary_metrics' => []];
+        if ($pambRouting['applicable']) {
+            $data['routing_complete'] = (bool) ($pambRouting['routing_complete'] ?? false);
+            $regionalRelease = collect($pambRouting['timeline'] ?? [])->first(fn (array $stage): bool => $this->pambRouting->canonicalStageKey((string) ($stage['stage_key'] ?? $stage['key'] ?? '')) === PambRoutingTimelineService::RELEASED_TO_REGIONAL);
+            $data['completed_at'] = $data['routing_complete'] ? ($regionalRelease['occurred_at'] ?? $data['date_endorsed_regional']) : null;
+        }
         $data['pamb_routing_applicable'] = $pambRouting['applicable'];
         $data['routing_timeline'] = $pambRouting['timeline'];
         if ($pambRouting['applicable'] && ($user = auth()->user())) {
@@ -1224,7 +1235,7 @@ final class SubmissionTrackingService
             $sourceKey,
             (int) $record->getKey(),
             $data['mov_attachment'],
-            $data['mov_url'],
+            null,
             data_get($data, 'mov_attachment.name', 'Original MOV / report'),
         );
         return $data;
@@ -1585,7 +1596,11 @@ final class SubmissionTrackingService
         if (($filters['protected_area_id'] ?? '') && (string) $record['protected_area_id'] !== (string) $filters['protected_area_id']) return false;
         if (($filters['target_office'] ?? '') && $record['target_office'] !== $filters['target_office']) return false;
         if (($filters['reporting_period'] ?? '') && $record['reporting_period'] !== $filters['reporting_period']) return false;
-        if (($filters['status'] ?? '') && $record['submission_status'] !== $filters['status']) return false;
+        if (($filters['status'] ?? '') === RoutingStatusPresenter::COMPLETED && ($record['pamb_routing_applicable'] ?? false)) {
+            if (! ($record['routing_complete'] ?? false)) return false;
+        } elseif (($filters['status'] ?? '') && $record['submission_status'] !== $filters['status']) {
+            return false;
+        }
         $search = strtolower(trim((string) ($filters['search'] ?? '')));
         return ! $search || str_contains(strtolower(implode(' ', [$record['tracking_number'] ?? '', $record['module'], $record['target_office'], $record['protected_area'], $record['activity_name'], $record['document_type'], $record['reporting_period']])), $search);
     }
@@ -1625,6 +1640,33 @@ final class SubmissionTrackingService
                     }
                 });
             }
+            return;
+        }
+
+        if ($sourceKey === 'conservation' && $status === RoutingStatusPresenter::COMPLETED) {
+            $pambWorkflows = PambComplianceCalculator::MEETING_WORKFLOWS;
+            $pambCandidates = (clone $query)
+                ->whereIn($table.'.workflow_key', $pambWorkflows)
+                ->where(function ($candidate): void {
+                    $candidate->whereNotNull('date_endorsed_regional')
+                        // Cycle-suffixed event keys are interpreted by the canonical
+                        // active-cycle resolver below; candidate discovery must not
+                        // assume the terminal event is in cycle one.
+                        ->orWhereHas('routingEvents');
+                })
+                ->with('routingEvents')
+                ->get()
+                ->filter(fn (ConservationReportSubmission $record): bool => $this->pambRouting->isComplete($record, $record->routingEvents))
+                ->modelKeys();
+
+            $query->where(function ($completed) use ($table, $pambWorkflows, $pambCandidates): void {
+                $completed->where(function ($generic) use ($table, $pambWorkflows): void {
+                    $generic->where(function ($nonPamb) use ($table, $pambWorkflows): void {
+                        $nonPamb->whereNull($table.'.workflow_key')->orWhereNotIn($table.'.workflow_key', $pambWorkflows);
+                    })->whereNotNull($table.'.date_received_penro')->whereNotNull($table.'.date_endorsed_regional');
+                })->orWhereIn($table.'.id', $pambCandidates);
+            });
+
             return;
         }
 

@@ -72,6 +72,7 @@ class SubmissionTrackingController extends Controller
                 'protectedAreas' => app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
             ],
             'trackingContext' => [
+                'archive_checkpoint_enabled' => (bool) config('services.google_drive_archive.enabled'),
                 'is_cenro_user' => $this->pambAccess->isCenro($request->user())
                     && app(OrganizationalAccessService::class)->canAccessUnit($request->user(), OrganizationalAccessService::CONSERVATION),
                 'is_pamo_user' => $this->pambAccess->isPamo($request->user()),

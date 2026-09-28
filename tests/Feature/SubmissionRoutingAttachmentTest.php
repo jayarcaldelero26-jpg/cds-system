@@ -450,7 +450,8 @@ test('original MOV is the current document when no routed copy exists', function
     $report = attachmentRoutingReport('Original MOV Fallback');
     $actor->update(['protected_area_id' => $report->protected_area_id]);
     $report->update(['mov_file_path' => 'bms-reports/original-mov.pdf', 'mov_file_name' => 'original-mov.pdf']);
-    Storage::disk('local')->put('bms-reports/original-mov.pdf', 'original');
+    Storage::disk('local')->put('bms-reports/original-mov.pdf', "%PDF-1.4\ncurrent official document");
+    $actor->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
 
     $this->actingAs($actor);
     $row = app(SubmissionTrackingService::class)->records([], null)
@@ -460,7 +461,75 @@ test('original MOV is the current document when no routed copy exists', function
         ->and(SubmissionRoutingAttachment::query()->where('source', 'bms')->where('source_id', $report->id)->exists())->toBeFalse()
         ->and($row['current_document']['source'])->toBe('Original MOV / report')
         ->and($row['current_document']['download_url'])->not->toBeEmpty()
+        ->and($row['current_document']['preview_url'])->toBe($row['current_document']['url'].'?preview=1')
+        ->and($row['current_document']['download_url'])->toEndWith('?download=1')
+        ->and($row['current_document']['mime_type'])->toBe('application/pdf')
         ->and($row['current_document']['name'])->not->toBeEmpty();
+
+    $response = $this->get($row['current_document']['preview_url']);
+    expect($response->status())->toBe(200)
+        ->and($response->headers->get('Content-Type'))->toStartWith('application/pdf')
+        ->and($response->headers->get('Content-Disposition'))->toStartWith('inline;')
+        ->and($response->headers->has('X-Inertia'))->toBeFalse();
+});
+
+test('Full Details does not fall back to the source MOV URL when the protected current file is unavailable', function (): void {
+    Storage::fake('local');
+    $actor = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = attachmentRoutingReport('Missing current document');
+    $actor->update(['protected_area_id' => $report->protected_area_id]);
+    $report->update(['mov_file_path' => 'bms-reports/missing-current.pdf', 'mov_file_name' => 'missing-current.pdf']);
+    $this->actingAs($actor);
+
+    $row = app(SubmissionTrackingService::class)->records([], null)
+        ->first(fn (array $item): bool => $item['source'] === 'bms' && (int) $item['source_id'] === $report->id);
+
+    expect($row)->not->toBeNull()
+        ->and($row['mov_url'])->not->toBeEmpty()
+        ->and($row['current_document'])->toBeNull();
+});
+
+test('Submission Tracking resolves current official-document metadata through each active source registry entry', function (): void {
+    $attachments = app(ProtectedAttachmentService::class);
+    Storage::fake('local');
+    $expected = [
+        'conservation' => 'conservation-report',
+        'engp' => 'engp-report',
+        'bms' => 'bms-report',
+        'bams' => 'bams-report',
+        'imea' => 'imea-report',
+        'imea-maintenance' => 'imea-maintenance',
+        'aws' => 'aws',
+        'ipaf-management' => 'ipaf-management',
+        'revenue' => 'ipaf-revenue',
+        'management-plans' => 'management-plan',
+    ];
+
+    $index = 0;
+    foreach ($expected as $routingSource => $attachmentSource) {
+        $official = $attachments->officialDefinitionForRoutingSource($routingSource);
+        expect($official['source'] ?? null)->toBe($attachmentSource);
+
+        $definition = $official['definition'];
+        $modelClass = $definition['model'];
+        $record = new $modelClass;
+        $recordId = 700 + $index++;
+        $record->setAttribute($record->getKeyName(), $recordId);
+        $key = (string) $definition['official_key'];
+        $path = 'preview-regression/'.$routingSource.'.pdf';
+        if ($definition['kind'] === 'scalar') {
+            $record->setAttribute($definition['path'], $path);
+            if (isset($definition['name'])) $record->setAttribute($definition['name'], $routingSource.'.pdf');
+        } else {
+            $record->setAttribute($definition['field'], [(int) $key => ['path' => $path, 'name' => $routingSource.'.pdf']]);
+        }
+        Storage::disk('local')->put($path, "%PDF-1.4\nsynthetic preview fixture");
+
+        $descriptor = $attachments->previewDescriptor($attachmentSource, $record, $key);
+        $protectedUrl = route('attachments.show', ['source' => $attachmentSource, 'record' => $recordId, 'attachment' => $key]);
+        expect($descriptor['url'] ?? null)->toBe($protectedUrl)
+            ->and($descriptor['preview_url'] ?? null)->toBe($protectedUrl.'?preview=1');
+    }
 });
 
 test('routing copies remain event-linked and do not replace the official current document', function (): void {
