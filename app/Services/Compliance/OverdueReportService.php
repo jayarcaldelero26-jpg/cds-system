@@ -447,7 +447,7 @@ class OverdueReportService
      */
     private function scheduledEngpReports(CarbonImmutable $today, string $bucket, int $dueSoonDays = 3): Collection
     {
-        if (! config('compliance_alerts.scheduled_engp_obligations', true)) {
+        if (! config('compliance_alerts.scheduled_engp_obligations', false)) {
             return collect();
         }
 

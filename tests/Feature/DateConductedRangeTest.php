@@ -13,7 +13,7 @@ test('selected workflows support structured conducted-date ranges only', functio
     expect(conductedRanges()->supportsWorkflow('additional_bms_site'))->toBeTrue()
         ->and(conductedRanges()->supportsWorkflow('bdfe_terrestrial'))->toBeTrue()
         ->and(conductedRanges()->supportsWorkflow('maintenance_pamo_ecotourism'))->toBeTrue()
-        ->and(conductedRanges()->supportsWorkflow('homestay'))->toBeFalse()
+        ->and(conductedRanges()->supportsWorkflow('homestay'))->toBeTrue()
         ->and(conductedRanges()->supportsWorkflow('regular_pamb'))->toBeFalse();
 });
 

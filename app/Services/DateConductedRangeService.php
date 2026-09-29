@@ -8,7 +8,7 @@ use Illuminate\Validation\ValidationException;
 final class DateConductedRangeService
 {
     /** @var list<string> */
-    private const SUPPORTED_WORKFLOWS = ['additional_bms_site', 'bdfe_terrestrial', 'maintenance_pamo_ecotourism'];
+    private const SUPPORTED_WORKFLOWS = ['additional_bms_site', 'bdfe_terrestrial', 'maintenance_pamo_ecotourism', 'homestay'];
 
     public function supportsWorkflow(?string $workflow): bool
     {

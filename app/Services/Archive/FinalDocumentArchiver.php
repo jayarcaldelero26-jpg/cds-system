@@ -248,8 +248,12 @@ final class FinalDocumentArchiver
         }
 
         $trackingNumber = $tracking?->tracking_number;
+        $activityName = trim((string) $record->getAttribute('activity_name'));
+        $filenameBase = $activityName !== ''
+            ? $activityName
+            : (string) ($trackingNumber ?: 'Report-'.$record->getKey());
 
-        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, (string) ($trackingNumber ?: 'Report-'.$record->getKey()));
+        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase);
 
         return [
             'year' => (string) ($year ?: now()->format('Y')),

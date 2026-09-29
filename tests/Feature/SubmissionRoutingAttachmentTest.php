@@ -467,8 +467,8 @@ test('original MOV is the current document when no routed copy exists', function
         ->and($row['current_document']['name'])->not->toBeEmpty();
 
     $response = $this->get($row['current_document']['preview_url']);
-    expect($response->status())->toBe(200)
-        ->and($response->headers->get('Content-Type'))->toStartWith('application/pdf')
+    $response->assertOk();
+    expect($response->headers->get('Content-Type'))->toStartWith('application/pdf')
         ->and($response->headers->get('Content-Disposition'))->toStartWith('inline;')
         ->and($response->headers->has('X-Inertia'))->toBeFalse();
 });
@@ -992,7 +992,8 @@ test('Conservation Full Details exposes the official document while routing copi
 
         $this->get(route('submission-tracking.routing-attachments.show', ['conservation', $report->id, $latest->id]))->assertOk();
         $serviceRow = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
-        expect($serviceRow['routing_complete'])->toBeTrue()
+        // Legacy source dates do not establish a complete canonical routing cycle.
+        expect($serviceRow['routing_complete'])->toBeFalse()
             ->and($serviceRow['current_document']['name'])->toBe('module-original.pdf');
     }
 
@@ -1291,7 +1292,8 @@ test('administrative override uses the same archive checkpoint lifecycle and pre
         ->and($override->authentication_method)->toBe('webauthn_passkey')
         ->and($override->passkey_id)->toBe($fixture['passkey']->id)
         ->and($archive->archive_status)->toBe('ARCHIVED')
-        ->and($archive->original_filename)->toBe('Report-'.$fixture['report']->id.'.pdf')
+        ->and($archive->original_filename)->toBe('Routing report.pdf')
+        ->and($fixture['gateway']->objects['workflow-archive-1']['filename'])->toBe('Routing report.pdf')
         ->and($fixture['gateway']->uploads)->toBe(1)
         ->and(\App\Models\AuditLog::query()->where('action', 'Submission Tracking Administrative Override')->where('entity_id', (string) $fixture['report']->id)->exists())->toBeTrue();
 

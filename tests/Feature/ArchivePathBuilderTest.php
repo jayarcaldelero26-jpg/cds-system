@@ -22,6 +22,30 @@ test('archive path uses the canonical unit, actual module name, and tracking fil
         ->toBe(['Development Unit', 'CENRO Baganga', 'Management Plans']);
 });
 
+test('archive filenames preserve readable activity names, sanitize path characters, and add one PDF extension', function (): void {
+    $module = new ModuleDefinition(['name' => 'Activity Reports', 'is_active' => true]);
+    $builder = app(ArchivePathBuilder::class);
+
+    expect($builder->build($module, 'Conservation Unit', 'CENRO Mati', 'International Coastal Cleanup 2026')['filename'])
+        ->toBe('International Coastal Cleanup 2026.pdf')
+        ->and($builder->build($module, 'Conservation Unit', 'CENRO Mati', 'International Coastal Cleanup/2026.PDF.pdf')['filename'])
+        ->toBe('International Coastal Cleanup-2026.pdf')
+        ->and($builder->build($module, 'Conservation Unit', 'CENRO Mati', 'International Coastal Cleanup 2026.PDF. ')['filename'])
+        ->toBe('International Coastal Cleanup 2026.pdf');
+});
+
+test('activity archive filenames fit the 255-character metadata column without splitting Unicode', function (): void {
+    $module = new ModuleDefinition(['name' => 'Activity Reports', 'is_active' => true]);
+    $builder = app(ArchivePathBuilder::class);
+
+    foreach (['A', 'ñ'] as $character) {
+        $filename = $builder->build($module, 'Conservation Unit', 'CENRO Mati', str_repeat($character, 255))['filename'];
+
+        expect(mb_strlen($filename))->toBe(255)
+            ->and($filename)->toBe(str_repeat($character, 251).'.pdf');
+    }
+});
+
 test('all seeded active non-retired modules have a canonical archive unit classification', function (): void {
     $this->seed(ModuleDefinitionSeeder::class);
     $builder = app(ArchivePathBuilder::class);

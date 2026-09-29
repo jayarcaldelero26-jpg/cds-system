@@ -449,8 +449,11 @@ test('Compliance Alerts No Recipient Mapping card counts current candidates and 
         ->where('summary.overdue_reports', 2)
         ->where('summary.unmapped_recipients', 1));
     $jsx = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
-    expect($jsx)->toContain('Card label="No Recipient Mapping" value={activeScope.summary?.unmapped_destinations ?? 0} tone="red" />')
-        ->not->toContain('No Recipient Mapping" value={activeScope.summary?.unmapped_destinations ?? 0} tone="red" help=');
+    preg_match('/<Card label="No Recipient Mapping"[^>]*\/>/', $jsx, $card);
+    expect($card[0] ?? '')
+        ->toContain('value={activeScope.summary?.unmapped_destinations ?? 0}')
+        ->toContain('tone="red"')
+        ->not->toMatch('/\bhelp\s*=/');
 });
 
 
@@ -2027,6 +2030,25 @@ test('one canonical ENGP office mapping serves multiple office-scoped ENGP workf
     expect($plan['deliveries'])->toHaveCount(1)
         ->and($plan['deliveries']->first()['reports'])->toHaveCount(2)
         ->and($plan['deliveries']->first()['recipient']->email)->toBe('shared-engp@example.test');
+});
+
+test('ENGP alerts count saved submissions by default and keep overdue receipt rules when schedules are disabled', function () {
+    config()->set('compliance_alerts.scheduled_engp_obligations', false);
+    $alerts = app(OverdueReportService::class);
+    $today = CarbonImmutable::parse('2026-08-25', 'Asia/Manila');
+
+    expect(EngpReportSubmission::query()->count())->toBe(0)
+        ->and($alerts->dueSoonReports(3, $today)->where('sourceType', EngpReportSubmission::class))->toBeEmpty()
+        ->and($alerts->dueTodayReports($today)->where('sourceType', EngpReportSubmission::class))->toBeEmpty()
+        ->and($alerts->overdueReports($today)->where('sourceType', EngpReportSubmission::class))->toBeEmpty();
+
+    $submission = engpForDeadline(complianceUser(), '2026-08-24');
+    $overdue = $alerts->overdueReports($today)->firstWhere('sourceId', $submission->id);
+
+    expect($overdue)->not->toBeNull()
+        ->and($overdue->submitted)->toBeFalse()
+        ->and($overdue->deadline)->toBe('2026-08-24')
+        ->and($overdue->complianceIssue)->toBe('Report Not Yet Submitted');
 });
 
 test('ENGP scheduled obligations share one alert identity with a later submission and close at PENRO receipt', function () {

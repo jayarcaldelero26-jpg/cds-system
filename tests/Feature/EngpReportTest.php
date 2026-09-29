@@ -237,7 +237,8 @@ test('ENGP routing remains active after PENRO receipt and completes only after f
     }
     $report->refresh();
     $events = app(DocumentRoutingTransitionService::class)->events($report, 'engp');
-    expect($presenter->present($report, 'engp', null, $events)['processing_percentage'])->toBe(98);
+    expect($presenter->present($report, 'engp', null, $events)['processing_percentage'])->toBe(100)
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing_complete'])->toBeFalse();
 
     $tracking->transition('engp', $report->id, 'recommend_to_office_penro', null, $penroChief->id);
     $report->refresh();
@@ -326,7 +327,7 @@ test('ENGP checkpoint uses the shared archive lifecycle and canonical Developmen
     $archive = DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $report->id)->firstOrFail();
     expect($archive->archive_status)->toBe('ARCHIVED')
         ->and($archive->google_drive_file_id)->toStartWith('fake-archive-')
-        ->and($archive->original_filename)->toBe('2026-CDS-000001.pdf')
+        ->and($archive->original_filename)->toBe('Community-Based Employment Program (CBEP).pdf')
         ->and($report->fresh()->mov_file_path)->toBe($path)
         ->and(app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'engp')['stage'])
             ->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO);
