@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { standardActionLabel } from "@/Utils/routingLabels";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 import RoutingAttachmentLink from "@/Components/SubmissionTracking/RoutingAttachmentLink";
@@ -88,7 +89,9 @@ export default function PambRoutingTimeline({
     onRecord,
     onCanonicalAction,
     actions = null,
+    hideCurrentProcessing = false,
 }) {
+    const [showRemainingSteps, setShowRemainingSteps] = useState(false);
     if (!row?.pamb_routing_applicable) return null;
     const metrics = row.routing_summary_metrics || {};
     const summary = row.routing_summary || {};
@@ -99,6 +102,11 @@ export default function PambRoutingTimeline({
     });
     const review = row.mov_processing?.cenro_review;
     const verdictFlags = row.pamb_action_flags || {};
+    const timeline = row.routing_timeline || [];
+    const pendingStages = timeline.filter((stage) => stage.status === "pending");
+    const visibleTimeline = showRemainingSteps
+        ? timeline
+        : timeline.filter((stage) => stage.status !== "pending");
     const metric = (key) => {
         const item = metrics[key];
         if (!item) return FALLBACK;
@@ -111,6 +119,8 @@ export default function PambRoutingTimeline({
     return (
         <div className="space-y-4">
             <section className="space-y-3">
+                {!hideCurrentProcessing && (
+                    <>
                 <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">
                         Current Processing
@@ -191,6 +201,8 @@ export default function PambRoutingTimeline({
                         )}
                         <RoutingAttachmentLink attachment={lastAction.attachment} />
                     </div>
+                )}
+                    </>
                 )}
                 {review?.applicable && (
                     <section
@@ -290,8 +302,9 @@ export default function PambRoutingTimeline({
                     </p>
                 )}
                 <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800">
-                    <ol className="divide-y divide-gray-100 dark:divide-gray-700">
-                        {(row.routing_timeline || []).map((stage) => {
+                    {pendingStages.length > 0 && <div className="mb-2 flex justify-end border-b border-gray-200 pb-2 dark:border-gray-700"><button type="button" aria-expanded={showRemainingSteps} aria-controls="pamb-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show remaining steps (${pendingStages.length})`}</button></div>}
+                    <ol id="pamb-routing-timeline-stages" className="divide-y divide-gray-100 dark:divide-gray-700">
+                        {visibleTimeline.map((stage) => {
                             const current = stage.status === "current";
                             const notApplicable =
                                 stage.status === "not_applicable";
@@ -383,7 +396,7 @@ export default function PambRoutingTimeline({
                                                                           stage,
                                                                       )
                                                             }
-                                                            className="rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800"
+                                                            className="rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
                                                         >
                                                             {standardActionLabel(
                                                                 stage.action_label ||
@@ -403,8 +416,8 @@ export default function PambRoutingTimeline({
                                                                 }
                                                                 className={
                                                                     action.correction
-                                                                        ? "rounded-lg bg-amber-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800"
-                                                                        : "rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800"
+                                                                        ? "rounded-lg bg-amber-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
+                                                                        : "rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
                                                                 }
                                                             >
                                                                 {standardActionLabel(
@@ -430,7 +443,7 @@ export default function PambRoutingTimeline({
                                                                             action.label,
                                                                     })
                                                                 }
-                                                                className="rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800"
+                                                                className="rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
                                                             >
                                                                 {action.label}
                                                             </button>
@@ -454,8 +467,8 @@ export default function PambRoutingTimeline({
                                                   : stage.status ===
                                                       "not_recorded"
                                                     ? "Not recorded"
-                                                    : current
-                                                      ? "Awaiting action"
+                                                : current
+                                                      ? (row.routing?.next_expected_action ? "Current checkpoint · next action shown above" : "Awaiting action")
                                                       : "Not yet reached"}
                                         </p>
                                         {delay && (

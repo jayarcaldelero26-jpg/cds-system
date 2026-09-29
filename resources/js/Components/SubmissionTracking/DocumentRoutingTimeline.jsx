@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { standardActionLabel } from "@/Utils/routingLabels";
 import CrudSection from "@/Components/Crud/CrudSection";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
@@ -53,9 +54,15 @@ function Marker({ status }) {
 }
 
 export default function DocumentRoutingTimeline({ row, onAction }) {
+    const [showRemainingSteps, setShowRemainingSteps] = useState(false);
     const routing = row?.routing;
     if (!routing) return null;
     const actions = row.can_transition ? routing.actions || [] : [];
+    const timeline = routing.timeline || [];
+    const pendingSteps = timeline.filter((event) => event.status === "pending");
+    const visibleTimeline = showRemainingSteps
+        ? timeline
+        : timeline.filter((event) => event.status !== "pending");
 
     return (
         <div className="space-y-4">
@@ -103,8 +110,8 @@ export default function DocumentRoutingTimeline({ row, onAction }) {
                                 onClick={() => onAction?.(action)}
                                 className={
                                     action.correction
-                                        ? "rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800"
-                                        : "rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800"
+                                        ? "rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
+                                        : "rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
                                 }
                             >
                                 {standardActionLabel(
@@ -120,11 +127,13 @@ export default function DocumentRoutingTimeline({ row, onAction }) {
                 title="Canonical Routing Progress"
                 subtitle={`${routing.profile_label}. Canonical routing path showing completed, current, and upcoming stages.`}
             >
+                {pendingSteps.length > 0 && <div className="mb-2 flex justify-end"><button type="button" aria-expanded={showRemainingSteps} aria-controls="document-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show remaining steps (${pendingSteps.length})`}</button></div>}
                 <ol
+                    id="document-routing-timeline-stages"
                     className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800"
                     aria-label="Document routing history"
                 >
-                    {(routing.timeline || []).map((event) => (
+                    {visibleTimeline.map((event) => (
                         <li
                             key={event.key}
                             className="flex items-start gap-3 px-3 py-2.5"
@@ -156,10 +165,10 @@ export default function DocumentRoutingTimeline({ row, onAction }) {
                                         : event.status === "completed"
                                           ? "Completed"
                                           : event.status === "current"
-                                            ? "Awaiting action"
+                                            ? "Current checkpoint; next action shown above"
                                             : "Not yet reached"}
                                 </p>
-                                {event.status !== "completed" &&
+                                {event.status !== "completed" && event.status !== "current" &&
                                     event.action_label && (
                                         <p className="mt-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
                                             Expected action:{" "}

@@ -10,7 +10,6 @@ import {
 import CrudFormModal from "@/Components/Crud/CrudFormModal";
 import CrudDetailsModal from "@/Components/Crud/CrudDetailsModal";
 import CrudSection from "@/Components/Crud/CrudSection";
-import CrudSummaryGrid from "@/Components/Crud/CrudSummaryGrid";
 import CrudTable from "@/Components/Crud/CrudTable";
 import PageHeader from "@/Components/PageHeader";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
@@ -481,6 +480,11 @@ export default function Index({
     const [details, setDetails] = useState(
         trackingContext.selected_record || null,
     );
+    const routingProgressValue = details?.routing?.processing_percentage;
+    const routingProgressNumber = routingProgressValue === null || routingProgressValue === undefined || routingProgressValue === ''
+        ? null
+        : Number(routingProgressValue);
+    const hasRoutingProgress = Number.isFinite(routingProgressNumber) && routingProgressNumber > 0;
     const [showFullDetails, setShowFullDetails] = useState(false);
     const form = useForm({
         date: localDateInputValue(),
@@ -1530,100 +1534,75 @@ export default function Index({
             </div>
             <CrudDetailsModal
                 compact
+                darkTheme
                 open={Boolean(showFullDetails && details)}
-                title="Submission Full Details"
+                title="Submission Details"
                 subtitle={
                     details
-                        ? `${details.module || "Report"} · ${details.protected_area || "Protected area unavailable"}`
+                        ? `${details.activity || details.activity_name || "Activity unavailable"} · ${details.module || "Report"} · ${details.protected_area || "Protected area unavailable"}`
                         : ""
                 }
                 onClose={() => setShowFullDetails(false)}
-                canEdit={canCorrectSubmissionRouting}
-                onEdit={() => openCorrection(details)}
-                editLabel="Correct Routing Record"
-                summary={
-                    details && (
-                        <CrudSummaryGrid
-                            items={[
-                                { label: "Module", value: details.module },
-                                {
-                                    label: "Protected Area",
-                                    value: details.protected_area,
-                                },
-                                {
-                                    label: "Reporting Period",
-                                    value: details.reporting_period,
-                                },
-                                ...(details.mov_processing?.applicable
-                                    ? [{ label: "Workflow Status", value: details.mov_processing.workflow_status }]
-                                    : []),
-                            ]}
-                        />
-                    )
-                }
             >
                 {details && (
-                    <section className="rounded-xl border border-green-200 bg-green-50/60 p-4 dark:border-green-900 dark:bg-green-950/20" aria-label="Current routing summary">
+                    <section className="rounded-xl border border-slate-700 bg-slate-900/80 p-4" aria-label="Current status and processing">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Routing</h2>
+                            <h2 className="text-sm font-bold text-slate-100">Current Status &amp; Processing</h2>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">{details.pamb_routing_applicable ? "Submission Status" : "Routing Status"}</span>
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{details.pamb_routing_applicable ? "Submission Status" : "Routing Status"}</span>
                                 <Badge value={details.routing?.current_status || details.routing_summary?.current_status || details.submission_status || "Unknown"} />
                             </div>
                         </div>
-                        <dl className="mt-3 grid gap-x-5 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                        <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                             <div className="min-w-0">
-                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Current Holder</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.current_location || details.routing_summary?.current_location || details.current_document_location || details.target_office || "Not yet assigned"}</dd>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Current Holder</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-slate-100">{details.routing?.current_location || details.routing_summary?.current_location || details.current_document_location || details.target_office || "Not yet assigned"}</dd>
                             </div>
                             <div className="min-w-0">
-                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Office</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.responsible_office || details.target_office || "Not assigned"}</dd>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Office</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-slate-100">{details.routing?.responsible_office || details.target_office || "Not assigned"}</dd>
                             </div>
                             <div>
                                 <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Deadline</dt>
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "—"}</dd>
                             </div>
+                            {details.reporting_period && <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Reporting Period</dt><dd className="mt-0.5 text-sm font-semibold text-slate-100">{details.reporting_period}</dd></div>}
                             <div>
-                                <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Next Expected Action</dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.next_expected_action || details.routing_summary?.next_expected_action || "No action pending"}</dd>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Next Expected Action</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-white">{details.routing?.next_expected_action || "No action pending"}</dd>
                             </div>
                             {(details.routing?.pending_since || details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined) && (
                                 <div>
-                                    <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Pending Since</dt>
+                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Pending Since</dt>
                                     <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.pending_since ? plainDate(details.routing.pending_since) : "—"}{details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined ? ` · ${details.routing.working_days_pending} working days` : ""}</dd>
                                 </div>
                             )}
                             {(details.routing?.compliance_status || details.timeliness) && (
                                 <div>
-                                    <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Timeliness</dt>
+                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Timeliness</dt>
                                     <dd className="mt-1"><Badge value={details.routing?.compliance_status || details.timeliness} /></dd>
                                 </div>
                             )}
                             {statusContext && (
                                 <div>
-                                    <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">PENRO Internal Routing</dt>
-                                    <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{statusContext.label}<br />Currently with: {statusContext.current_unit}</dd>
+                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">PENRO Internal Routing</dt>
+                                    <dd className="mt-0.5 text-sm font-semibold text-slate-100">{statusContext.label}<br />Currently with: {statusContext.current_unit}</dd>
                                 </div>
                             )}
                         </dl>
                     </section>
                 )}
-                {details?.routing && (
-                    <div className="mb-4 rounded-lg border border-green-200 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
+                {details?.routing && hasRoutingProgress && (
+                    <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
                         <div className="mb-2 flex items-center justify-between">
-                            <p className="text-xs font-extrabold text-gray-900 dark:text-white">Processing Progress</p>
-                            <span className="text-[10px] font-bold text-green-700 dark:text-green-300">
-                                {Number.isFinite(Number(details.routing.processing_percentage))
-                                    ? `${details.routing.processing_percentage}% processing`
-                                    : "Summary"}
+                            <p className="text-xs font-bold text-slate-200">Routing Progress</p>
+                            <span className="text-[10px] font-semibold text-green-300">
+                                {routingProgressNumber}%
                             </span>
                         </div>
-                        {Number.isFinite(Number(details.routing.processing_percentage)) && (
-                            <div className="h-1.5 overflow-hidden rounded-full bg-green-100 dark:bg-green-950" role="progressbar" aria-label="Processing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Number(details.routing.processing_percentage)}>
-                                <div className="h-full rounded-full bg-green-700 dark:bg-green-400" style={{ width: `${Math.max(0, Math.min(100, Number(details.routing.processing_percentage)))}%` }} />
-                            </div>
-                        )}
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-label="Routing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={routingProgressNumber}>
+                            <div className="h-full rounded-full bg-green-500" style={{ width: `${Math.max(0, Math.min(100, routingProgressNumber))}%` }} />
+                        </div>
                     </div>
                 )}
                 {details?.current_document && (
@@ -1638,7 +1617,7 @@ export default function Index({
                             <button
                                 type="button"
                                 onClick={() => setPreviewRow(details)}
-                                className="shrink-0 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 dark:border-green-500 dark:text-green-200 dark:hover:bg-green-950/40"
+                                className="shrink-0 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 dark:border-green-500 dark:text-green-200 dark:hover:bg-green-950/40"
                             >
                                 Preview Current Document
                             </button>
@@ -1690,34 +1669,21 @@ export default function Index({
                         }}
                     />
                 )}
-                {canAdminRoutingOverride && details && (
-                    <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/30">
-                        <p className="text-xs font-extrabold uppercase tracking-wide text-amber-900 dark:text-amber-200">
-                            Administrative emergency control
-                        </p>
-                        <p className="mt-1 text-xs text-amber-800 dark:text-amber-300">
-                            This separate override requires a fresh passkey and
-                            records your account, reason, and accountable
-                            category. It does not impersonate another user.
-                        </p>
-                        <button
-                            type="button"
-                            onClick={() => openAdminOverride(details)}
-                            className="mt-3 rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800"
-                        >
-                            Admin Override
-                        </button>
-                        {overrideError && !override && (
-                            <p className="mt-2 text-xs font-semibold text-red-700">
-                                {overrideError}
-                            </p>
-                        )}
-                    </div>
+                {(canCorrectSubmissionRouting || canAdminRoutingOverride) && details && (
+                    <details className="rounded-xl border border-amber-800 bg-slate-900/80 p-3 text-slate-100">
+                        <summary className="cursor-pointer rounded-md text-xs font-bold text-amber-200 outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Admin actions</summary>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {canCorrectSubmissionRouting && <button type="button" onClick={() => openCorrection(details)} className="rounded-lg border border-amber-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Correct Routing Record</button>}
+                            {canAdminRoutingOverride && <button type="button" onClick={() => openAdminOverride(details)} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Admin Override</button>}
+                        </div>
+                        {canAdminRoutingOverride && <div className="mt-3 border-t border-slate-700 pt-3"><p className="text-xs text-slate-300">Administrative override requires a fresh passkey and records your account, reason, and accountable category. It does not impersonate another user.</p>{overrideError && !override && <p className="mt-2 text-xs font-semibold text-red-300">{overrideError}</p>}</div>}
+                    </details>
                 )}
                 {details?.pamb_routing_applicable ? (
                     <PambRoutingTimeline
                         row={details}
                         actions={details.routing?.actions || []}
+                        hideCurrentProcessing
                         onRecord={(stage) => {
                             internalForm.setData({
                                 remarks: "",
