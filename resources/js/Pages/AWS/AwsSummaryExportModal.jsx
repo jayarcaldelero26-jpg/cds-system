@@ -1,6 +1,7 @@
 import { Icon } from '@iconify/react';
 import { useEffect, useRef, useState } from 'react';
 import CrudModalFooter from '@/Components/Crud/CrudModalFooter';
+import Button from '@/Components/Button';
 import CrudModalHeader from '@/Components/Crud/CrudModalHeader';
 
 const formats = [
@@ -133,8 +134,8 @@ export default function AwsSummaryExportModal({ open, onClose, onExport, returnF
                 {error && <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300" role="alert">{error}</p>}
             </div>
             <CrudModalFooter>
-                <button type="button" onClick={close} disabled={Boolean(generating)} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">Cancel</button>
-                <button type="button" onClick={exportFile} disabled={!selectedFormat || Boolean(generating)} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50">{generating ? generatingLabel : 'Export File'}</button>
+                <Button type="button" size="compact" variant="cancel" onClick={close} disabled={Boolean(generating)} className="rounded-xl px-4 py-2.5 text-xs">Cancel</Button>
+                <Button type="button" size="compact" variant="primary" onClick={exportFile} disabled={!selectedFormat || Boolean(generating)} className="rounded-xl px-5 py-2.5 text-xs">{generating ? generatingLabel : 'Export File'}</Button>
             </CrudModalFooter>
         </div>
     </div>;

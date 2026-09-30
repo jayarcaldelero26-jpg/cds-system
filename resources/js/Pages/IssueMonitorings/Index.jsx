@@ -67,7 +67,7 @@ export default function Index({ issues, filters, protectedAreas, statuses }) {
 
                         {/* 🛡️ SECURITY WRAPPER: CDS Admin ra gyud ang makakita sa Delete button */}
                         {auth?.canDeleteIssueMonitoring &&
-          <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)}>Delete</button>
+          <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)} data-cds-action="true" data-cds-action-variant="danger">Delete</button>
           }
                     </div>);
 
@@ -82,7 +82,7 @@ export default function Index({ issues, filters, protectedAreas, statuses }) {
         title="Issues Monitoring"
         description="Track, assess, and monitor findings, recommendations, and actions taken on environmental and administrative issues."
         actions={
-        <Link href="/issue-monitorings/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
+        <Link href="/issue-monitorings/create" data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition">
                         Record new issue
                     </Link>
         } />
@@ -109,7 +109,7 @@ export default function Index({ issues, filters, protectedAreas, statuses }) {
                         </FloatingSelect>
                     </div>
                     <div className="flex items-end md:col-span-4">
-                        <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900">Search Filter</button>
+                        <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">Search Filter</button>
                     </div>
                 </form>
 

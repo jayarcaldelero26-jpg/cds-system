@@ -26,7 +26,7 @@ export default function WaitingApproval() {
                         onClick={handleLogout}
                         disabled={processing}
                         className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
+                     data-cds-action="true" data-cds-action-variant="danger">
                         <Icon icon="lucide:log-out" width="17" height="17" aria-hidden="true" />
                         {processing ? 'Signing out...' : 'Log out'}
                     </button>

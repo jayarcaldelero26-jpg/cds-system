@@ -89,7 +89,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
       event.stopPropagation();
       sortBy(key);
     }}
-    className="inline-flex items-center gap-1 font-semibold transition hover:text-green-100">
+    className="inline-flex items-center gap-1 font-semibold transition hover:text-green-100" data-cds-action="true" data-cds-action-variant="primary">
 
             {label}
             <span aria-hidden="true">
@@ -306,7 +306,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
         <button
           type="button"
           onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center justify-center rounded-xl bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-700 focus:ring-offset-2">
+          className="inline-flex items-center justify-center rounded-xl bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-700 focus:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">
 
                             Add protected area
                         </button>
@@ -422,7 +422,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
               type="button"
               onClick={closeDetails}
               className="ml-4 rounded-lg p-2 text-xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-              aria-label="Close details">
+              aria-label="Close details" data-cds-action="true" data-cds-action-variant="primary">
 
                                 ×
                             </button>
@@ -628,7 +628,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                 onClick={() =>
                 setProtectedAreaToDelete(selectedArea)
                 }
-                className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+                className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300" data-cds-action="true" data-cds-action-variant="danger">
 
                                         🗑️ Delete
                                     </button>
@@ -638,7 +638,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                             <button
               type="button"
               onClick={closeDetails}
-              className="inline-flex items-center justify-center rounded-xl bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-green-900">
+              className="inline-flex items-center justify-center rounded-xl bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">
 
                                 Close Details
                             </button>

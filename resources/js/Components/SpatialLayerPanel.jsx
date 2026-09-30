@@ -4,6 +4,7 @@ import L from 'leaflet';
 import { useState } from 'react';
 import ConfirmDialog from '@/Components/ConfirmDialog';
 import Tooltip from '@/Components/Tooltip';
+import Button from '@/Components/Button';
 
 export default function SpatialLayerPanel({ layers = [], visibleLayers, onToggle, deleteRoute, onAdd, canDelete = false }) {
     const map = useMap();
@@ -20,11 +21,11 @@ export default function SpatialLayerPanel({ layers = [], visibleLayers, onToggle
                 {layers.map(layer => <div key={layer.id} className="flex items-center gap-2 rounded-xl px-1 py-2 hover:bg-gray-50 dark:hover:bg-gray-800">
                     <Tooltip content={visibleLayers[layer.id] ? 'Hide layer' : 'Show layer'}><input type="checkbox" checked={visibleLayers[layer.id] !== false} onChange={() => onToggle(layer.id)} aria-label={`${visibleLayers[layer.id] === false ? 'Show' : 'Hide'} ${layer.name}`} className="rounded border-gray-300 text-green-600 focus:ring-green-500" /></Tooltip>
                     <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold text-gray-800 dark:text-gray-100">{layer.name}</p><p className="text-[10px] text-gray-500">{layer.geometry_type || layer.layer_type || 'Spatial'} • {(layer.source_format || 'geojson').toUpperCase()}</p></div>
-                    <Tooltip content="Zoom to layer"><button type="button" onClick={() => zoomTo(layer)} className="rounded-lg px-1.5 py-1 text-xs text-green-700 hover:bg-green-50 dark:text-green-400" aria-label={`Zoom to ${layer.name}`}>⌖</button></Tooltip>
-                    {canDelete && <Tooltip content="Delete layer"><button type="button" onClick={() => setLayerToDelete(layer)} className="rounded-lg px-1.5 py-1 text-xs text-red-600 hover:bg-red-50" aria-label={`Delete ${layer.name}`}>×</button></Tooltip>}
+                    <Tooltip content="Zoom to layer"><Button type="button" size="compact" onClick={() => zoomTo(layer)} className="rounded-lg px-1.5 py-1 text-xs" aria-label={`Zoom to ${layer.name}`}>⌖</Button></Tooltip>
+                    {canDelete && <Tooltip content="Delete layer"><Button type="button" size="compact" variant="danger" onClick={() => setLayerToDelete(layer)} className="rounded-lg px-1.5 py-1 text-xs" aria-label={`Delete ${layer.name}`}>×</Button></Tooltip>}
                 </div>)}
             </div>
-            {onAdd && <Tooltip content="Add a new spatial layer"><button type="button" onClick={onAdd} className="mt-2 w-full rounded-xl bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800">＋ Add Spatial Layer</button></Tooltip>}
+            {onAdd && <Tooltip content="Add a new spatial layer"><Button type="button" size="compact" onClick={onAdd} className="mt-2 w-full rounded-xl px-3 py-2 text-xs">＋ Add Spatial Layer</Button></Tooltip>}
         </div>
         <ConfirmDialog open={Boolean(layerToDelete)} title="Delete spatial layer?" message={`This will remove “${layerToDelete?.name || ''}” from the map. Other layers will remain untouched.`} confirmLabel="Delete" variant="danger" onCancel={() => setLayerToDelete(null)} onConfirm={() => { const id = layerToDelete.id; setLayerToDelete(null); router.delete(route(deleteRoute, id), { preserveScroll: true }); }} />
     </>;

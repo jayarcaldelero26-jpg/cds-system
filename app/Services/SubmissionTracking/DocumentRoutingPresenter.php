@@ -352,7 +352,11 @@ final class DocumentRoutingPresenter
             PambMovProcessingService::SUBMITTED_FOR_REVIEW,
             PambMovProcessingService::RESUBMITTED_FOR_REVIEW => 20,
             PambMovProcessingService::READY_FOR_RELEASE => 50,
-            PambMovProcessingService::RELEASED_BY_CENRO => 80,
+            // CENRO Records release completes the separate MOV milestone,
+            // but does not complete overall routing. Keep the report at the
+            // user-confirmed CENRO Records routing milestone until it reaches
+            // PENRO's CDS Chief stage.
+            PambMovProcessingService::RELEASED_BY_CENRO => 35,
             PambMovProcessingService::ACTIVITY_CONDUCTED,
             PambMovProcessingService::NEEDS_CORRECTION => 0,
             default => 0,

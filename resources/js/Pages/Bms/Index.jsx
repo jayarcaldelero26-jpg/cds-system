@@ -689,7 +689,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
   { key: 'date_location', label: 'Date / Location', render: (record) => <><div className="font-semibold">{record.monitoring_date || 'N/A'}</div><SharedTooltip content={record.location}><div tabIndex={0} className="max-w-[150px] truncate text-[11px] text-gray-500 outline-none">{record.location || 'No location'}</div></SharedTooltip></> },
   { key: 'station_time', label: 'Station / Time', render: (record) => <><div className="font-bold text-green-700 dark:text-green-400">{record.station || '-'}</div><div className="text-[11px] text-gray-500">{record.time || '-'}</div></> },
   { key: 'category_group', label: 'Category / Group', render: (record) => <><span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="mt-1 text-[11px] capitalize text-gray-500">{record.taxonomic_group || '-'}</div></> },
-  { key: 'species', label: 'Species (Scientific / Common Name)', render: (record) => {const isNew = checkIsNewSpeciesRecord(record);const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700">✓ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{record.species_common_name || ''}</div></>;} },
+  { key: 'species', label: 'Species (Scientific / Common Name)', render: (record) => {const isNew = checkIsNewSpeciesRecord(record);const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700" data-cds-action="true" data-cds-action-variant="primary">✓ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{record.species_common_name || ''}</div></>;} },
   { key: 'count', label: 'Count', cellClassName: 'text-center font-bold', headerClassName: 'text-center', render: (record) => record.count ?? '—' },
   { key: 'mode_of_observation', label: 'Mode', cellClassName: 'text-center', headerClassName: 'text-center', render: (record) => <span className="rounded-lg bg-gray-100 px-2 py-0.5 text-[11px] font-medium dark:bg-gray-700">{record.mode_of_observation || 'Seen'}</span> },
   { key: 'coordinates', label: 'GPS Coordinates', cellClassName: 'font-mono text-[11px]', render: (record) => record.latitude && record.longitude && Number.isFinite(Number.parseFloat(record.latitude)) && Number.isFinite(Number.parseFloat(record.longitude)) ? `${Number.parseFloat(record.latitude).toFixed(4)}, ${Number.parseFloat(record.longitude).toFixed(4)}` : <span className="italic text-gray-400">No GPS</span> }];
@@ -747,25 +747,25 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
 {activeTab !== 'report-tracker' && (
                     <div className="no-print flex flex-col gap-2 border-b border-gray-200 pb-3 dark:border-gray-700 xl:flex-row xl:items-center xl:justify-between">
                         <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 xl:pb-0">
-                        <button onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
                             📄 Species Records
                         </button>
-                        <button onClick={() => setActiveTab('semestral')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('semestral')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
                             📊 Semestral Population Trends
                         </button>
-                        <button onClick={() => setActiveTab('threats')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'bg-red-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('threats')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'bg-red-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="danger">
                             ⚠️ Threats
                         </button>
-                        <button onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        <button onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
                             🗺️ Map View
                         </button>
 
                         </div>
                         {(canCreateBms || canManageBmsSpatial) && <div className="flex shrink-0 items-center gap-2 overflow-x-auto xl:justify-end">
-                        {canCreateBms && <button onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        {canCreateBms && <button onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
                             📁 Excel / CSV Bulk Import
                         </button>}
-                        {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
+                        {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
                             🗺️📁 Import GeoJSON Spatial File
                         </button>}
                         </div>}
@@ -782,8 +782,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs font-bold text-gray-600 dark:text-gray-400 pl-1">📋 View Layout:</span>
                                     <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 p-1 rounded-xl border border-gray-200 dark:border-gray-700">
-                                        <button onClick={() => setViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>Species Database</button>
-                                        <button onClick={() => setViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>PDF Annex Simulator</button>
+                                        <button onClick={() => setViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">Species Database</button>
+                                        <button onClick={() => setViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">PDF Annex Simulator</button>
                                     </div>
                                 </div>
                                 {viewMode === 'pdf' &&
@@ -804,9 +804,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     observer: annexHeaderMetadata?.observer || ''
                   });
                   setShowEditHeaderModal(true);
-                }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">✏️ Edit Header Details</button>}
-                                        {canExportBms && <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export CSV</button>}
-                                        {canExportBms && <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">🖨️ Save as PDF / Print</button>}
+                }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">✏️ Edit Header Details</button>}
+                                        {canExportBms && <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">📥 Export CSV</button>}
+                                        {canExportBms && <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">🖨️ Save as PDF / Print</button>}
                                     </div>
               }
                             </div>
@@ -833,11 +833,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 {viewMode === 'table' && canDeleteBms &&
               <div className="flex items-center gap-2 self-end md:self-auto">
                                         {!isSelectionMode ?
-                <button onClick={() => setIsSelectionMode(true)} className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs h-[38px] flex items-center">☑️ Enable Select to Delete</button> :
+                <button onClick={() => setIsSelectionMode(true)} className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="danger">☑️ Enable Select to Delete</button> :
 
                 <div className="flex items-center gap-2">
-                                                {selectedIds.length > 0 && <button onClick={() => setShowBulkDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm animate-pop-in h-[38px] flex items-center">🗑️ Delete ({selectedIds.length})</button>}
-                                                <button onClick={() => {setIsSelectionMode(false);setSelectedIds([]);}} className="bg-gray-500 hover:bg-gray-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm h-[38px] flex items-center">✕ Cancel</button>
+                                                {selectedIds.length > 0 && <button onClick={() => setShowBulkDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm animate-pop-in h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="danger">🗑️ Delete ({selectedIds.length})</button>}
+                                                <button onClick={() => {setIsSelectionMode(false);setSelectedIds([]);}} className="bg-gray-500 hover:bg-gray-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="cancel">✕ Cancel</button>
                                             </div>
                 }
                                     </div>
@@ -846,7 +846,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
 
                             <div>
                                 {viewMode === 'table' &&
-              <CrudTable title="BMS Species Observations" subtitle={`${bmsRecords.length} record${bmsRecords.length === 1 ? '' : 's'} in the current filter`} helperText="Click any row to view complete details" headerActions={canCreateBms ? <button type="button" onClick={() => setActiveTab('add')} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 dark:focus:ring-offset-gray-900">+ Add Field Observation</button> : null} columns={speciesColumns} rows={bmsRecords} onRowClick={openRecordDetails} isRowDisabled={() => isSelectionMode} selectable={isSelectionMode} selectedKeys={selectedIds} onSelectRow={(id, checked) => setSelectedIds((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))} onSelectAll={(checked, rows) => setSelectedIds(checked ? rows.map((record) => record.id) : [])} emptyTitle="No BMS species records found" emptyDescription="Add or import an observation to populate the species table." caption="BMS species observations" />
+              <CrudTable title="BMS Species Observations" subtitle={`${bmsRecords.length} record${bmsRecords.length === 1 ? '' : 's'} in the current filter`} helperText="Click any row to view complete details" headerActions={canCreateBms ? <button type="button" onClick={() => setActiveTab('add')} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-2 dark:focus:ring-offset-gray-900" data-cds-action="true" data-cds-action-variant="primary">+ Add Field Observation</button> : null} columns={speciesColumns} rows={bmsRecords} onRowClick={openRecordDetails} isRowDisabled={() => isSelectionMode} selectable={isSelectionMode} selectedKeys={selectedIds} onSelectRow={(id, checked) => setSelectedIds((current) => checked ? [...new Set([...current, id])] : current.filter((item) => item !== id))} onSelectAll={(checked, rows) => setSelectedIds(checked ? rows.map((record) => record.id) : [])} emptyTitle="No BMS species records found" emptyDescription="Add or import an observation to populate the species table." caption="BMS species observations" />
               }
 
                                 {viewMode === 'pdf' &&
@@ -938,19 +938,19 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 <div className="flex items-center gap-2">
                                     <span className="text-xs font-bold text-gray-600 dark:text-gray-400 pl-1">📊 Trend Layout:</span>
                                     <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 p-1 rounded-xl border border-gray-200 dark:border-gray-700">
-                                        <button onClick={() => setSemestralViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>Trend Table</button>
-                                        <button onClick={() => setSemestralViewMode('graph')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'graph' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>Visual Graph</button>
-                                        {canExportBms && <button onClick={() => setSemestralViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`}>PDF Report Simulator</button>}
+                                        <button onClick={() => setSemestralViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">Trend Table</button>
+                                        <button onClick={() => setSemestralViewMode('graph')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'graph' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">Visual Graph</button>
+                                        {canExportBms && <button onClick={() => setSemestralViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">PDF Report Simulator</button>}
                                     </div>
                                 </div>
                                 {canExportBms && <div className="flex items-center gap-2">
                                     {semestralViewMode === 'pdf' ?
                 <>
-                                            <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export CSV</button>
-                                            <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">🖨️ Save as PDF / Print</button>
+                                            <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">📥 Export CSV</button>
+                                            <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">🖨️ Save as PDF / Print</button>
                                         </> :
 
-                <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5">📥 Export to Excel / CSV</button>
+                <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">📥 Export to Excel / CSV</button>
                 }
                                 </div>}
                             </div>
@@ -1002,7 +1002,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                                                             {item.isNewSpecies && !isAcknowledged && canUpdateBms &&
                                 <div className="flex items-center gap-1.5">
                                                                                     <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">✨ New Species</span>
-                                                                                    <SharedTooltip content="Click to acknowledge and remove highlight"><button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition">✓ Acknowledge</button></SharedTooltip>
+                                                                                    <SharedTooltip content="Click to acknowledge and remove highlight"><button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" data-cds-action="true" data-cds-action-variant="primary">✓ Acknowledge</button></SharedTooltip>
                                                                                 </div>
                                 }
                                                                         </div>
@@ -1271,7 +1271,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                     <FileInput id="index-csv-excel-file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} required />
                                     {importForm.errors.file && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{importForm.errors.file}</p>}
                                 </div>
-                                <button type="submit" disabled={importForm.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm">🚀 Upload and Process Data</button>
+                                <button type="submit" disabled={importForm.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">🚀 Upload and Process Data</button>
                             </form>
                         </div>
           }
@@ -1297,7 +1297,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                     <FileInput id="index-geojson-json-spatial-file" type="file" accept=".geojson, .json, .zip" onChange={(e) => geoJsonForm.setData('file', e.target.files[0])} required />
                                     {(geoJsonForm.errors.file || geoJsonForm.errors.spatial_file) && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{geoJsonForm.errors.file || geoJsonForm.errors.spatial_file}</p>}
                                 </div>
-                                <button type="submit" disabled={geoJsonForm.processing} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm">🚀 Upload and Map Spatial Boundaries</button>
+                                <button type="submit" disabled={geoJsonForm.processing} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">🚀 Upload and Map Spatial Boundaries</button>
                             </form>
                         </div>
           }
@@ -1310,7 +1310,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 animate-pop-in max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
                             <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">✏️ Edit Annex Header Details</h3><p className="text-xs text-gray-500">Update the summary metadata at the top of the Annex report.</p></div>
-                            <button onClick={() => setShowEditHeaderModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <button onClick={() => setShowEditHeaderModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">✕</button>
                         </div>
                         <form onSubmit={submitHeaderEdit} className="space-y-4 text-sm">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1335,8 +1335,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 <div><FloatingInput id="index-observer" label="Observer" type="text" value={annexHeaderForm.data.observer} onChange={(e) => annexHeaderForm.setData('observer', e.target.value)} /></div>
                             </div>
                             <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
-                                <button type="button" onClick={() => setShowEditHeaderModal(false)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                                <button type="submit" disabled={annexHeaderForm.processing} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-sm font-semibold shadow-sm transition">💾 Save Header Changes</button>
+                                <button type="button" onClick={() => setShowEditHeaderModal(false)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
+                                <button type="submit" disabled={annexHeaderForm.processing} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="primary">💾 Save Header Changes</button>
                             </div>
                         </form>
                     </div>

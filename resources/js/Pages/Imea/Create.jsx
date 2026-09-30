@@ -364,7 +364,7 @@ export default function ImeaCreate({ protectedAreas }) {
                         'text-white hover:bg-green-800' :
                         'text-red-500 hover:bg-red-50 dark:hover:bg-red-950/50'}`
                         }
-                        aria-label="Tangtangon ang file">
+                        aria-label="Tangtangon ang file" data-cds-action="true" data-cds-action-variant="danger">
 
                                                         <Tooltip content="Tangtangon ang file">✕</Tooltip>
                                                     </button>
@@ -386,7 +386,7 @@ export default function ImeaCreate({ protectedAreas }) {
                                 <button
                   type="submit"
                   disabled={processing}
-                  className="rounded-xl bg-green-700 hover:bg-green-800 px-6 py-2.5 text-xs font-bold text-white shadow-md transition">
+                  className="rounded-xl bg-green-700 hover:bg-green-800 px-6 py-2.5 text-xs font-bold text-white shadow-md transition" data-cds-action="true" data-cds-action-variant="primary">
 
                                     💾 Save Assessment Record
                                 </button>

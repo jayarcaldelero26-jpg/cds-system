@@ -96,7 +96,7 @@ export default function PremiumTimePicker({ id, label = 'Time', value = '', onCh
                 <div className="premium-time-selection-band" aria-hidden="true" />
             </div></div>
             <p className="premium-time-current" aria-live="polite">{formatTimeDisplay(draft)}</p>
-            <div className="premium-time-actions"><button type="button" onClick={() => setOpen(false)} className="premium-time-cancel">Cancel</button><button type="button" onClick={commit} className="premium-time-done">Done</button></div>
+            <div className="premium-time-actions"><button type="button" onClick={() => setOpen(false)} className="premium-time-cancel" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button><button type="button" onClick={commit} className="premium-time-done" data-cds-action="true" data-cds-action-variant="primary">Done</button></div>
         </div>}
     </div>;
 }

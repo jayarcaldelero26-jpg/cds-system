@@ -138,7 +138,7 @@ export default function Edit({ user, passkeys = [], canManagePasskeys = false, p
                         {passkeys.length > 0 ? passkeys.map((item) => <div key={item.id} className="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
                             <span>{item.name}</span>
                             <span className="text-xs text-gray-500">Registered {item.created_at ? new Date(item.created_at).toLocaleDateString() : '—'}</span>
-                            <button type="button" className="ml-3 rounded text-xs font-bold text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 dark:text-red-300" onClick={() => revokePasskey(item.id, item.name)} disabled={passkeyProcessing}>Revoke</button>
+                            <button type="button" className="ml-3 rounded text-xs font-bold text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 dark:text-red-300" onClick={() => revokePasskey(item.id, item.name)} disabled={passkeyProcessing} data-cds-action="true" data-cds-action-variant="danger">Revoke</button>
                         </div>) : <p className="text-sm text-gray-600 dark:text-gray-300">No passkeys registered. Super Admin emergency override remains unavailable until one is added.</p>}
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                             <div className="min-w-0 flex-1"><FormField id="passkey-name" label="Passkey name" value={passkeyName} onChange={(event) => setPasskeyName(event.target.value)} required /></div>

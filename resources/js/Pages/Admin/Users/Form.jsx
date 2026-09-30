@@ -97,7 +97,7 @@ export default function Form({ title, user, operationalGroups = [], protectedAre
                     </div>
                     <div className="flex flex-wrap items-center gap-3 border-t border-gray-200 pt-5 dark:border-gray-700">
                         <PrimaryButton type="submit" disabled={form.processing}>{form.processing ? 'Saving...' : isEdit ? 'Save changes' : 'Create user'}</PrimaryButton>
-                        <Link href="/admin/users" className="rounded-ui px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-800">Cancel</Link>
+                        <Link href="/admin/users" data-cds-action="true" data-cds-action-variant="cancel" className="cds-button-interaction rounded-ui px-4 py-2 text-sm font-semibold">Cancel</Link>
                     </div>
                 </form>
             </Card>

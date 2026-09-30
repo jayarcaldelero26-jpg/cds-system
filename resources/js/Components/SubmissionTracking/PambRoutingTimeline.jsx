@@ -2,6 +2,8 @@ import { useState } from "react";
 import { standardActionLabel } from "@/Utils/routingLabels";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 import RoutingAttachmentLink from "@/Components/SubmissionTracking/RoutingAttachmentLink";
+import { timelinePresentation } from "@/Utils/submissionTrackingPresentation";
+import Button from "@/Components/Button";
 
 const FALLBACK = "\u2014";
 
@@ -90,8 +92,13 @@ export default function PambRoutingTimeline({
     onCanonicalAction,
     actions = null,
     hideCurrentProcessing = false,
+    onReviewHistory,
+    expandAll,
+    onExpandAllChange,
 }) {
-    const [showRemainingSteps, setShowRemainingSteps] = useState(false);
+    const [localExpanded, setLocalExpanded] = useState(false);
+    const showRemainingSteps = expandAll ?? localExpanded;
+    const setShowRemainingSteps = onExpandAllChange ?? setLocalExpanded;
     if (!row?.pamb_routing_applicable) return null;
     const metrics = row.routing_summary_metrics || {};
     const summary = row.routing_summary || {};
@@ -103,10 +110,8 @@ export default function PambRoutingTimeline({
     const review = row.mov_processing?.cenro_review;
     const verdictFlags = row.pamb_action_flags || {};
     const timeline = row.routing_timeline || [];
-    const pendingStages = timeline.filter((stage) => stage.status === "pending");
-    const visibleTimeline = showRemainingSteps
-        ? timeline
-        : timeline.filter((stage) => stage.status !== "pending");
+    const { pendingSteps: pendingStages, hiddenSteps, visibleSteps: visibleTimeline, hasToggle } =
+        timelinePresentation(timeline, showRemainingSteps);
     const metric = (key) => {
         const item = metrics[key];
         if (!item) return FALLBACK;
@@ -275,12 +280,15 @@ export default function PambRoutingTimeline({
                                     "Reason recorded in history."}
                             </p>
                         )}
-                        <a
-                            href="#pamb-cenro-review-history"
-                            className="mt-2 inline-flex font-bold text-blue-800 hover:underline dark:text-blue-200"
+                        <Button
+                            size="compact"
+                            variant="primary"
+                            type="button"
+                            onClick={() => onReviewHistory?.(row)}
+                            className="mt-2 rounded-lg px-2.5 py-1.5 text-xs"
                         >
                             View Review History
-                        </a>
+                        </Button>
                     </section>
                 )}
             </section>
@@ -302,7 +310,7 @@ export default function PambRoutingTimeline({
                     </p>
                 )}
                 <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800">
-                    {pendingStages.length > 0 && <div className="mb-2 flex justify-end border-b border-gray-200 pb-2 dark:border-gray-700"><button type="button" aria-expanded={showRemainingSteps} aria-controls="pamb-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show remaining steps (${pendingStages.length})`}</button></div>}
+                    {hasToggle && <div className="mb-2 flex justify-end border-b border-gray-200 pb-2 dark:border-gray-700"><button type="button" aria-expanded={showRemainingSteps} aria-controls="pamb-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show ${hiddenSteps.length} more steps`}</button></div>}
                     <ol id="pamb-routing-timeline-stages" className="divide-y divide-gray-100 dark:divide-gray-700">
                         {visibleTimeline.map((stage) => {
                             const current = stage.status === "current";
@@ -385,7 +393,9 @@ export default function PambRoutingTimeline({
                                                     {(stage.can_record ||
                                                         canonicalAction) &&
                                                         currentActions.length === 0 && (
-                                                        <button
+                                                        <Button
+                                                            size="compact"
+                                                            variant="primary"
                                                             type="button"
                                                             onClick={() =>
                                                                 canonicalAction
@@ -396,17 +406,19 @@ export default function PambRoutingTimeline({
                                                                           stage,
                                                                       )
                                                             }
-                                                            className="rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
+                                                            className="rounded-lg px-2.5 py-1.5 text-[11px]"
                                                         >
                                                             {standardActionLabel(
                                                                 stage.action_label ||
                                                                     stage.key,
                                                             )}
-                                                        </button>
+                                                        </Button>
                                                     )}
                                                     {currentActions.map(
                                                         (action) => (
-                                                            <button
+                                                            <Button
+                                                                size="compact"
+                                                                variant={action.correction ? "danger" : "primary"}
                                                                 key={action.key}
                                                                 type="button"
                                                                 onClick={() =>
@@ -414,23 +426,21 @@ export default function PambRoutingTimeline({
                                                                         action,
                                                                     )
                                                                 }
-                                                                className={
-                                                                    action.correction
-                                                                        ? "rounded-lg bg-amber-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
-                                                                        : "rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
-                                                                }
+                                                                className="rounded-lg px-2.5 py-1.5 text-[11px]"
                                                             >
                                                                 {standardActionLabel(
                                                                     action.action_label ||
                                                                         action.label ||
                                                                         action.key,
                                                                 )}
-                                                            </button>
+                                                            </Button>
                                                         ),
                                                     )}
                                                     {verdictActions.map(
                                                         (action) => (
-                                                            <button
+                                                            <Button
+                                                                size="compact"
+                                                                variant="primary"
                                                                 key={action.key}
                                                                 type="button"
                                                                 onClick={() =>
@@ -443,10 +453,10 @@ export default function PambRoutingTimeline({
                                                                             action.label,
                                                                     })
                                                                 }
-                                                                className="rounded-lg bg-green-700 px-2.5 py-1.5 text-[11px] font-bold text-white hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-300 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800"
+                                                                className="rounded-lg px-2.5 py-1.5 text-[11px]"
                                                             >
                                                                 {action.label}
-                                                            </button>
+                                                            </Button>
                                                         ),
                                                     )}
                                                 </div>

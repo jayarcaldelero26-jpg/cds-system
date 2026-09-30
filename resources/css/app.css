@@ -305,6 +305,138 @@ textarea:-webkit-autofill {
     min-height: 190px;
 }
 
+.cds-button-interaction {
+    box-shadow: 0 3px 0 rgb(15 23 42 / 0.22);
+    transition: transform 160ms ease, box-shadow 160ms ease, background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+/* Native action controls opt in explicitly; picker options and disclosures do not. */
+[data-cds-action="true"] {
+    min-height: 36px;
+    background-color: #14532d;
+    background-image: linear-gradient(180deg, #166534 0%, #052e16 100%);
+    border-color: #14532d;
+    color: #fff;
+    box-shadow: 0 3px 0 rgb(15 23 42 / 0.22);
+    transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+}
+
+[data-cds-action="true"]:not(:disabled):not([aria-disabled="true"]):hover {
+    filter: brightness(1.08);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 0 rgb(15 23 42 / 0.24);
+}
+
+[data-cds-action="true"]:not(:disabled):not([aria-disabled="true"]):active {
+    filter: brightness(0.98);
+    transform: translateY(1px);
+    box-shadow: 0 1px 0 rgb(15 23 42 / 0.2);
+}
+
+[data-cds-action="true"][data-cds-action-variant="danger"] {
+    background-color: #b91c1c;
+    background-image: linear-gradient(180deg, #b91c1c 0%, #f87171 100%);
+    border-color: #991b1b;
+}
+
+[data-cds-action="true"][data-cds-action-variant="cancel"],
+[data-cds-action="true"][data-cds-action-variant="back"] {
+    background-color: #fff;
+    background-image: none;
+    border: 1px solid #d1d5db;
+    color: #374151;
+}
+
+.dark [data-cds-action="true"][data-cds-action-variant="cancel"],
+.dark [data-cds-action="true"][data-cds-action-variant="back"] {
+    background-color: #1f2937;
+    border-color: #4b5563;
+    color: #f3f4f6;
+}
+
+[data-cds-action="true"]:disabled,
+[data-cds-action="true"][aria-disabled="true"] {
+    filter: none;
+    transform: none;
+    box-shadow: 0 3px 0 rgb(15 23 42 / 0.16);
+    transition: none;
+}
+
+/* Application tabs opt in through their native ARIA tab semantics only. */
+button[role="tab"][aria-selected="true"] {
+    background-image: linear-gradient(105deg, #15803d 0%, #bbf7d0 100%);
+    border-color: #15803d;
+    color: #052e16;
+}
+
+.cds-tab-active,
+nav[aria-label="Dashboard program tabs"] button[aria-current="page"] {
+    background-image: linear-gradient(105deg, #15803d 0%, #bbf7d0 100%);
+    border-color: #15803d;
+    color: #052e16;
+}
+
+[data-cds-action="true"]:focus-visible,
+button[role="tab"]:focus-visible {
+    outline: 2px solid #16a34a;
+    outline-offset: 2px;
+}
+
+.cds-button-interaction:not(:disabled):not([aria-disabled="true"]):hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 0 rgb(15 23 42 / 0.24);
+}
+
+.cds-button-interaction:not(:disabled):not([aria-disabled="true"]):active {
+    transform: translateY(1px);
+    box-shadow: 0 1px 0 rgb(15 23 42 / 0.2);
+}
+
+.cds-button-interaction:disabled,
+.cds-button-interaction[aria-disabled="true"] {
+    transform: none;
+    box-shadow: 0 3px 0 rgb(15 23 42 / 0.16);
+    transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cds-button-interaction,
+    [data-cds-action="true"] {
+        transform: none !important;
+        transition: none !important;
+    }
+
+    [data-cds-action="true"]:hover,
+    [data-cds-action="true"]:active {
+        transform: none !important;
+        filter: none;
+    }
+}
+
+@keyframes submission-tracking-progress-sweep {
+    from { transform: translateX(-140%); }
+    to { transform: translateX(420%); }
+}
+
+.submission-tracking-progress__sweep {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 24%;
+    pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.48), transparent);
+    animation: submission-tracking-progress-sweep 2.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .submission-tracking-progress__sweep {
+        animation: none;
+        left: 42%;
+        width: 16%;
+        opacity: 0.45;
+    }
+}
+
 @media (max-width: 639px) {
     .submission-tracking-empty-state {
         min-height: 180px;

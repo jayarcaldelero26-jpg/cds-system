@@ -11,10 +11,13 @@ import CrudFormModal from "@/Components/Crud/CrudFormModal";
 import CrudDetailsModal from "@/Components/Crud/CrudDetailsModal";
 import CrudSection from "@/Components/Crud/CrudSection";
 import CrudTable from "@/Components/Crud/CrudTable";
+import Button from "@/Components/Button";
 import PageHeader from "@/Components/PageHeader";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import PambRoutingTimeline from "@/Components/SubmissionTracking/PambRoutingTimeline";
 import PambMovProgress from "@/Components/SubmissionTracking/PambMovProgress";
+import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
+import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
 import DocumentRoutingTimeline from "@/Components/SubmissionTracking/DocumentRoutingTimeline";
 import DocumentPreviewDialog from "@/Components/SubmissionTracking/DocumentPreviewDialog";
 import RoutingAttachmentField from "@/Components/SubmissionTracking/RoutingAttachmentField";
@@ -315,18 +318,16 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                         </p>
                         <div className="mt-2 flex flex-wrap gap-2">
                             {(routing.actions || []).map((action) => (
-                                <button
-                                    key={action.key}
+                                <Button
                                     type="button"
+                                    size="compact"
+                                    variant={action.correction ? "danger" : "primary"}
+                                    key={action.key}
                                     onClick={() => onAction?.(action)}
-                                    className={
-                                        action.correction
-                                            ? "rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800"
-                                            : "rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white hover:bg-green-800"
-                                    }
+                                    className="rounded-lg px-3 py-2 text-xs"
                                 >
                                     {standardActionLabel(action.action_label || action.label)}
-                                </button>
+                                </Button>
                             ))}
                         </div>
                     </div>
@@ -354,34 +355,10 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                     </div>
                 </div>
                 <div>
-                    <div className="mb-2 flex items-center justify-between">
-                        <p className="text-xs font-extrabold text-gray-900 dark:text-white">
-                            Processing Progress
-                        </p>
-                        <span className="text-[10px] font-bold text-green-700 dark:text-green-300">
-                            {Number.isFinite(Number(routing.processing_percentage))
-                                ? `${routing.processing_percentage}% processing`
-                                : "Summary"}
-                            </span>
-                        </div>
-                        <p className="mb-2 text-[10px] text-gray-500 dark:text-gray-400">
-                            Current processing context: {routing.current_location || routing.current_stage || "Not yet assigned"}
-                        </p>
-                    {Number.isFinite(Number(routing.processing_percentage)) && (
-                        <div
-                            className="mb-3 h-1.5 overflow-hidden rounded-full bg-green-100 dark:bg-green-950"
-                            role="progressbar"
-                            aria-label="Processing progress"
-                            aria-valuemin="0"
-                            aria-valuemax="100"
-                            aria-valuenow={Number(routing.processing_percentage)}
-                        >
-                            <div
-                                className="h-full rounded-full bg-green-700 transition-[width] dark:bg-green-400"
-                                style={{ width: `${Math.max(0, Math.min(100, Number(routing.processing_percentage)))}%` }}
-                            />
-                        </div>
-                    )}
+                    <p className="mb-2 text-[10px] text-gray-500 dark:text-gray-400">
+                        Current processing context: {routing.current_location || routing.current_stage || "Not yet assigned"}
+                    </p>
+                    <SubmissionTrackingProgress row={row} />
                     <div className="space-y-2">
                         {progress.length ? (
                             progress.map((item, index) => (
@@ -440,13 +417,14 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                 </div>
             </div>
             <div className="mt-auto border-t border-gray-200 p-4 dark:border-gray-800">
-                <button
+                <Button
+                    size="compact"
                     type="button"
                     onClick={onViewFullDetails}
-                    className="inline-flex w-full items-center justify-center rounded-lg bg-green-700 px-3 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-green-800"
+                    className="inline-flex w-full rounded-lg px-3 py-2.5 text-xs"
                 >
                     View Full Details
-                </button>
+                </Button>
             </div>
         </aside>
     );
@@ -480,12 +458,17 @@ export default function Index({
     const [details, setDetails] = useState(
         trackingContext.selected_record || null,
     );
-    const routingProgressValue = details?.routing?.processing_percentage;
-    const routingProgressNumber = routingProgressValue === null || routingProgressValue === undefined || routingProgressValue === ''
-        ? null
-        : Number(routingProgressValue);
-    const hasRoutingProgress = Number.isFinite(routingProgressNumber) && routingProgressNumber > 0;
+    const [reviewHistoryRecord, setReviewHistoryRecord] = useState(null);
     const [showFullDetails, setShowFullDetails] = useState(false);
+    const [expandFullTimeline, setExpandFullTimeline] = useState(false);
+    useEffect(() => {
+        setExpandFullTimeline(false);
+        setReviewHistoryRecord(null);
+    }, [showFullDetails, details?.source, details?.source_id]);
+    const scrollDetailsTo = (selector, expandTimeline = false) => {
+        if (expandTimeline) setExpandFullTimeline(true);
+        requestAnimationFrame(() => document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+    };
     const form = useForm({
         date: localDateInputValue(),
         stage: "",
@@ -1299,7 +1282,7 @@ export default function Index({
                     disabled={currentPage <= 1}
                     className="rounded-lg border border-gray-200 p-1.5 text-gray-600 transition hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                     onClick={() => navigateFilters({ page: currentPage - 1 })}
-                >
+                 data-cds-action="true" data-cds-action-variant="primary">
                     <svg
                         viewBox="0 0 20 20"
                         fill="none"
@@ -1321,7 +1304,7 @@ export default function Index({
                     disabled={!pagination.has_more}
                     className="rounded-lg border border-gray-200 p-1.5 text-gray-600 transition hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                     onClick={() => navigateFilters({ page: currentPage + 1 })}
-                >
+                 data-cds-action="true" data-cds-action-variant="primary">
                     <svg
                         viewBox="0 0 20 20"
                         fill="none"
@@ -1352,7 +1335,7 @@ export default function Index({
                                 type="button"
                                 onClick={() => setIncomingActionTab(null)}
                                 className={`rounded-lg px-3 py-2 text-xs font-bold transition ${incomingActionTab === null ? "bg-green-700 text-white" : "border border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
-                            >
+                             data-cds-action="true" data-cds-action-variant="primary">
                                 All actions
                             </button>
                             {incomingActionTabs.map((category) => (
@@ -1361,7 +1344,7 @@ export default function Index({
                                     type="button"
                                     onClick={() => setIncomingActionTab(category)}
                                     className={`rounded-lg px-3 py-2 text-xs font-bold transition ${incomingActionTab === category ? "bg-green-700 text-white" : "border border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
-                                >
+                                 data-cds-action="true" data-cds-action-variant="primary">
                                     {incomingActionLabels[category]}
                                 </button>
                             ))}
@@ -1448,7 +1431,7 @@ export default function Index({
                             onClick={resetFilters}
                             disabled={!filtersActive}
                             className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 transition hover:border-green-300 hover:bg-green-50 hover:text-green-800 disabled:cursor-not-allowed disabled:opacity-45 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                        >
+                         data-cds-action="true" data-cds-action-variant="primary">
                             Clear
                         </button>
                     </div>
@@ -1534,7 +1517,6 @@ export default function Index({
             </div>
             <CrudDetailsModal
                 compact
-                darkTheme
                 open={Boolean(showFullDetails && details)}
                 title="Submission Details"
                 subtitle={
@@ -1543,66 +1525,64 @@ export default function Index({
                         : ""
                 }
                 onClose={() => setShowFullDetails(false)}
+                closeOnEscape={!reviewHistoryRecord}
+                footerActions={<>
+                    {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="secondary" onClick={() => openCorrection(details)} className="rounded-xl border-amber-300 px-3 py-2 text-xs text-amber-900 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-slate-800">Correct routing</Button>}
+                    <Button type="button" size="compact" variant="secondary" onClick={() => setReviewHistoryRecord(details)} className="rounded-xl px-3 py-2 text-xs">Review history</Button>
+                    <Button type="button" size="compact" variant="secondary" onClick={() => scrollDetailsTo(details?.pamb_routing_applicable ? "#pamb-routing-timeline-stages" : "#document-routing-timeline-stages", true)} className="rounded-xl px-3 py-2 text-xs">Full timeline</Button>
+                </>}
             >
                 {details && (
-                    <section className="rounded-xl border border-slate-700 bg-slate-900/80 p-4" aria-label="Current status and processing">
+                    <section className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900/80" aria-label="Current status and processing">
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                            <h2 className="text-sm font-bold text-slate-100">Current Status &amp; Processing</h2>
+                            <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100">Current Status &amp; Processing</h2>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{details.pamb_routing_applicable ? "Submission Status" : "Routing Status"}</span>
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{details.pamb_routing_applicable ? "Submission Status" : "Routing Status"}</span>
                                 <Badge value={details.routing?.current_status || details.routing_summary?.current_status || details.submission_status || "Unknown"} />
                             </div>
                         </div>
                         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                             <div className="min-w-0">
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Current Holder</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-slate-100">{details.routing?.current_location || details.routing_summary?.current_location || details.current_document_location || details.target_office || "Not yet assigned"}</dd>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Current Holder</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{details.routing?.current_location || details.routing_summary?.current_location || details.current_document_location || details.target_office || "Not yet assigned"}</dd>
                             </div>
                             <div className="min-w-0">
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Office</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-slate-100">{details.routing?.responsible_office || details.target_office || "Not assigned"}</dd>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Office</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{details.routing?.responsible_office || details.target_office || "Not assigned"}</dd>
                             </div>
                             <div>
                                 <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Deadline</dt>
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "—"}</dd>
                             </div>
-                            {details.reporting_period && <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Reporting Period</dt><dd className="mt-0.5 text-sm font-semibold text-slate-100">{details.reporting_period}</dd></div>}
+                            {details.reporting_period && <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Reporting Period</dt><dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-slate-100">{details.reporting_period}</dd></div>}
                             <div>
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Next Expected Action</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-white">{details.routing?.next_expected_action || "No action pending"}</dd>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Next Expected Action</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.next_expected_action || "No action pending"}</dd>
                             </div>
                             {(details.routing?.pending_since || details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined) && (
                                 <div>
-                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Pending Since</dt>
+                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Pending Since</dt>
                                     <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.pending_since ? plainDate(details.routing.pending_since) : "—"}{details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined ? ` · ${details.routing.working_days_pending} working days` : ""}</dd>
                                 </div>
                             )}
                             {(details.routing?.compliance_status || details.timeliness) && (
                                 <div>
-                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Timeliness</dt>
+                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Timeliness</dt>
                                     <dd className="mt-1"><Badge value={details.routing?.compliance_status || details.timeliness} /></dd>
                                 </div>
                             )}
                             {statusContext && (
                                 <div>
-                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">PENRO Internal Routing</dt>
-                                    <dd className="mt-0.5 text-sm font-semibold text-slate-100">{statusContext.label}<br />Currently with: {statusContext.current_unit}</dd>
+                                    <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">PENRO Internal Routing</dt>
+                                    <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-slate-100">{statusContext.label}<br />Currently with: {statusContext.current_unit}</dd>
                                 </div>
                             )}
                         </dl>
                     </section>
                 )}
-                {details?.routing && hasRoutingProgress && (
-                    <div className="rounded-lg border border-slate-700 bg-slate-900/70 p-3">
-                        <div className="mb-2 flex items-center justify-between">
-                            <p className="text-xs font-bold text-slate-200">Routing Progress</p>
-                            <span className="text-[10px] font-semibold text-green-300">
-                                {routingProgressNumber}%
-                            </span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-700" role="progressbar" aria-label="Routing progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={routingProgressNumber}>
-                            <div className="h-full rounded-full bg-green-500" style={{ width: `${Math.max(0, Math.min(100, routingProgressNumber))}%` }} />
-                        </div>
+                {details?.routing && (
+                    <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                        <SubmissionTrackingProgress row={details} />
                     </div>
                 )}
                 {details?.current_document && (
@@ -1614,13 +1594,15 @@ export default function Index({
                                     {details.current_document.name || "Official document"}
                                 </p>
                             </div>
-                            <button
+                            <Button
+                                size="compact"
+                                variant="primary"
                                 type="button"
                                 onClick={() => setPreviewRow(details)}
-                                className="shrink-0 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900 dark:border-green-500 dark:text-green-200 dark:hover:bg-green-950/40"
+                                className="shrink-0 rounded-lg px-3 py-2 text-xs"
                             >
                                 Preview Current Document
-                            </button>
+                            </Button>
                         </div>
                     </section>
                 )}
@@ -1670,13 +1652,13 @@ export default function Index({
                     />
                 )}
                 {(canCorrectSubmissionRouting || canAdminRoutingOverride) && details && (
-                    <details className="rounded-xl border border-amber-800 bg-slate-900/80 p-3 text-slate-100">
-                        <summary className="cursor-pointer rounded-md text-xs font-bold text-amber-200 outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Admin actions</summary>
+                    <details className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-800 dark:bg-slate-900/80 dark:text-slate-100">
+                        <summary className="cursor-pointer rounded-md text-xs font-bold text-amber-900 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 dark:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-slate-900">Admin actions</summary>
                         <div className="mt-3 flex flex-wrap gap-2">
-                            {canCorrectSubmissionRouting && <button type="button" onClick={() => openCorrection(details)} className="rounded-lg border border-amber-700 bg-slate-800 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Correct Routing Record</button>}
-                            {canAdminRoutingOverride && <button type="button" onClick={() => openAdminOverride(details)} className="rounded-lg bg-amber-700 px-3 py-2 text-xs font-bold text-white hover:bg-amber-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900">Admin Override</button>}
+                            {canCorrectSubmissionRouting && <Button type="button" size="compact" variant="secondary" onClick={() => openCorrection(details)} className="rounded-lg border-amber-400 px-3 py-2 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-800 dark:text-amber-100 dark:hover:bg-slate-700 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-slate-900">Correct Routing Record</Button>}
+                            {canAdminRoutingOverride && <Button type="button" size="compact" variant="warning" onClick={() => openAdminOverride(details)} className="rounded-lg px-3 py-2 text-xs dark:focus-visible:ring-amber-300 dark:focus-visible:ring-offset-slate-900">Admin Override</Button>}
                         </div>
-                        {canAdminRoutingOverride && <div className="mt-3 border-t border-slate-700 pt-3"><p className="text-xs text-slate-300">Administrative override requires a fresh passkey and records your account, reason, and accountable category. It does not impersonate another user.</p>{overrideError && !override && <p className="mt-2 text-xs font-semibold text-red-300">{overrideError}</p>}</div>}
+                        {canAdminRoutingOverride && <div className="mt-3 border-t border-amber-200 pt-3 dark:border-slate-700"><p className="text-xs text-amber-900 dark:text-slate-300">Administrative override requires a fresh passkey and records your account, reason, and accountable category. It does not impersonate another user.</p>{overrideError && !override && <p className="mt-2 text-xs font-semibold text-red-700 dark:text-red-300">{overrideError}</p>}</div>}
                     </details>
                 )}
                 {details?.pamb_routing_applicable ? (
@@ -1684,6 +1666,9 @@ export default function Index({
                         row={details}
                         actions={details.routing?.actions || []}
                         hideCurrentProcessing
+                        onReviewHistory={() => setReviewHistoryRecord(details)}
+                        expandAll={expandFullTimeline}
+                        onExpandAllChange={setExpandFullTimeline}
                         onRecord={(stage) => {
                             internalForm.setData({
                                 remarks: "",
@@ -1724,6 +1709,9 @@ export default function Index({
                 ) : (
                     <DocumentRoutingTimeline
                         row={details}
+                        expandAll={expandFullTimeline}
+                        onExpandAllChange={setExpandFullTimeline}
+                        hideRoutingHistory
                         onAction={(nextAction) => {
                             form.setData({
                                 date: "",
@@ -1739,6 +1727,15 @@ export default function Index({
                         }}
                     />
                 )}
+            </CrudDetailsModal>
+            <CrudDetailsModal
+                compact
+                open={Boolean(reviewHistoryRecord)}
+                title="Review History"
+                subtitle={reviewHistoryRecord ? `${reviewHistoryRecord.activity || reviewHistoryRecord.activity_name || "Activity unavailable"} · ${reviewHistoryRecord.module || "Report"} · ${reviewHistoryRecord.protected_area || "Protected area unavailable"}` : ""}
+                onClose={() => setReviewHistoryRecord(null)}
+            >
+                {reviewHistoryRecord && <SubmissionReviewHistory row={reviewHistoryRecord} />}
             </CrudDetailsModal>
             <CrudFormModal
                 open={Boolean(selected)}
@@ -1783,7 +1780,7 @@ export default function Index({
                             type="button"
                             onClick={() => setPreviewRow(selected)}
                             className="mb-3 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 dark:text-green-200"
-                        >
+                         data-cds-action="true" data-cds-action-variant="primary">
                             Preview MOV / Report
                         </button>
                     )}

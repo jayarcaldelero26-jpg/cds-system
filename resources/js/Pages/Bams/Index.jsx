@@ -135,7 +135,7 @@ export default function BamsIndex({
                                     <button
                   type="button"
                   onClick={() => setShowBulkDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">
+                  className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="danger">
 
                                         Cancel
                                     </button>
@@ -143,7 +143,7 @@ export default function BamsIndex({
                                     <button
                   type="button"
                   onClick={confirmBulkDelete}
-                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">
+                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">
 
                                         Yes, Delete All
                                     </button>
@@ -173,7 +173,7 @@ export default function BamsIndex({
                                     <button
                   type="button"
                   onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">
+                  className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="danger">
 
                                         Cancel
                                     </button>
@@ -181,7 +181,7 @@ export default function BamsIndex({
                                     <button
                   type="button"
                   onClick={confirmDelete}
-                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">
+                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">
 
                                         Yes, Delete
                                     </button>
@@ -210,7 +210,7 @@ export default function BamsIndex({
               activeTab === 'list' ?
               'bg-green-700 text-white shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              }>
+              } data-cds-action="true" data-cds-action-variant="primary">
 
                             📄 Database Records
                         </button>
@@ -221,7 +221,7 @@ export default function BamsIndex({
               activeTab === 'add' ?
               'bg-green-700 text-white shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              }>
+              } data-cds-action="true" data-cds-action-variant="primary">
 
                             ➕ Encode Field Sheet
                         </button>}
@@ -232,7 +232,7 @@ export default function BamsIndex({
               activeTab === 'map' ?
               'bg-green-700 text-white shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              }>
+              } data-cds-action="true" data-cds-action-variant="primary">
 
                             🗺️ Map View
                         </button>
@@ -243,7 +243,7 @@ export default function BamsIndex({
               activeTab === 'excel-import' ?
               'bg-green-700 text-white shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              }>
+              } data-cds-action="true" data-cds-action-variant="primary">
 
                             📊 Excel / CSV Import
                         </button>}
@@ -254,7 +254,7 @@ export default function BamsIndex({
               activeTab === 'spatial-import' ?
               'bg-green-700 text-white shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              }>
+              } data-cds-action="true" data-cds-action-variant="primary">
 
                             🌐 Spatial File Import
                         </button>}
@@ -274,7 +274,7 @@ export default function BamsIndex({
                 type="button"
                 onClick={() => setShowBulkDeleteConfirm(true)}
                 disabled={selectedIds.length === 0}
-                className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50">
+                className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50" data-cds-action="true" data-cds-action-variant="danger">
 
                                         🗑️ Delete Selected ({selectedIds.length})
                                     </button>
@@ -829,7 +829,7 @@ export default function BamsIndex({
                                 <button
                 type="submit"
                 disabled={form.processing}
-                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl shadow-sm transition text-sm">
+                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl shadow-sm transition text-sm" data-cds-action="true" data-cds-action-variant="primary">
 
                                     💾 Save Record
                                 </button>
@@ -933,7 +933,7 @@ export default function BamsIndex({
                                 <button
                 type="submit"
                 disabled={excelForm.processing}
-                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm">
+                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">
 
                                     🚀 Upload and Process Excel Data
                                 </button>
@@ -1034,7 +1034,7 @@ export default function BamsIndex({
                                 <button
                 type="submit"
                 disabled={spatialForm.processing}
-                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm">
+                className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">
 
                                     🌐 Upload and Render Spatial Data
                                 </button>

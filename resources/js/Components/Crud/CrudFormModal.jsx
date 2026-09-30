@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import CrudModalHeader from './CrudModalHeader';
 import CrudModalFooter from './CrudModalFooter';
 import SaveProgressIndicator from '@/Components/Attachments/SaveProgressIndicator';
+import Button from '@/Components/Button';
 
 export default function CrudFormModal({ open, mode = 'create', icon, title, subtitle, onClose, onSubmit, processing = false, progress = null, errors = {}, systemNotice = null, children, preview, canDelete = false, onDelete, canSave = true, backLabel, saveLabel, deleteLabel = 'Delete Record', maxWidth = 'max-w-7xl' }) {
     useEffect(() => { if (!open || processing) return; const onKey = event => event.key === 'Escape' && onClose?.(); document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }, [open, processing, onClose]);
@@ -17,9 +18,9 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
                 {systemNotice && <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100" role="alert"><p className="font-bold">{systemNotice.title}</p><p className="mt-1">{systemNotice.message}</p></div>}
                 <div className={displayPreview ? 'grid grid-cols-1 gap-6 lg:grid-cols-12' : ''}><div className={displayPreview ? 'space-y-5 lg:col-span-6' : 'space-y-5'}>{children}</div>{displayPreview && <div className="lg:col-span-6"><div className="sticky top-4">{preview}</div></div>}</div>
             </div>
-            <CrudModalFooter left={canDelete && onDelete ? <button type="button" onClick={onDelete} disabled={processing} className="rounded-xl bg-red-600 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50">{deleteLabel}</button> : null}>
-                <button type="button" onClick={onClose} disabled={processing} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800">{backLabel || (mode === 'edit' ? '← Back' : 'Cancel')}</button>
-                {canSave && <button type="submit" disabled={processing} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800 disabled:opacity-50">{processing ? (mode === 'edit' ? 'Updating…' : 'Saving…') : resolvedSaveLabel}</button>}
+            <CrudModalFooter left={canDelete && onDelete ? <Button type="button" size="compact" variant="danger" onClick={onDelete} disabled={processing} className="rounded-xl px-4 py-2.5 text-xs">{deleteLabel}</Button> : null}>
+                <Button type="button" size="compact" variant={backLabel?.toLowerCase().includes('back') || mode === 'edit' ? 'back' : 'cancel'} onClick={onClose} disabled={processing} className="rounded-xl px-4 py-2.5 text-xs">{backLabel || (mode === 'edit' ? '← Back' : 'Cancel')}</Button>
+                {canSave && <Button type="submit" size="compact" variant="primary" disabled={processing} className="rounded-xl px-5 py-2.5 text-xs">{processing ? (mode === 'edit' ? 'Updating…' : 'Saving…') : resolvedSaveLabel}</Button>}
             </CrudModalFooter>
         </form>
     </div>;

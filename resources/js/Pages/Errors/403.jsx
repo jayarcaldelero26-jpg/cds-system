@@ -15,10 +15,10 @@ export default function Error403() {
                         Your account does not currently have permission to access this area.
                     </p>
                     <div className="mt-6 flex flex-wrap justify-center gap-3">
-                        <button type="button" onClick={() => window.history.back()} className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200">
+                        <button type="button" onClick={() => window.history.back()} className="rounded-xl bg-gray-100 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-200" data-cds-action="true" data-cds-action-variant="cancel">
                             Back
                         </button>
-                        <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-xl bg-green-700 px-4 py-2 text-sm font-semibold text-white hover:bg-green-800">
+                        <Link href="/dashboard" data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold">
                             <Icon icon="lucide:layout-dashboard" width="17" height="17" aria-hidden="true" />
                             Dashboard
                         </Link>

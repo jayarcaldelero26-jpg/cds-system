@@ -3,6 +3,7 @@
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\DocumentRoutingPresenter;
 use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
+use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Models\DocumentRoutingEvent;
 use App\Models\BmsReportSubmission;
 use App\Models\EngpReportSubmission;
@@ -155,7 +156,7 @@ test('PAMB Regular, Special TWG, and TWC Meeting timelines use the shared proces
         'timeline' => [['key' => $stage, 'stage_key' => $stage, 'status' => 'current', 'held_at' => 'PENRO CDS Chief']],
     ])['processing_percentage'];
 
-    expect($percentage(\App\Services\SubmissionTracking\SubmissionTrackingService::CENRO_RELEASE))->toBe(80)
+    expect($percentage(\App\Services\SubmissionTracking\SubmissionTrackingService::CENRO_RELEASE))->toBe(35)
         ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::RECORDS_RECEIVED))->toBe(80)
         ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO))->toBe(85)
         ->and($percentage(\App\Services\SubmissionTracking\PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF))->toBe(100)
@@ -233,15 +234,27 @@ test('PAMB terminal event from an earlier cycle does not complete progress in an
 
 test('tracking detail exposes the profile-aware processing percentage and compact status marker', function (): void {
     $tracking = file_get_contents(base_path('resources/js/Pages/SubmissionTracking/Index.jsx'));
+    $progress = file_get_contents(base_path('resources/js/Components/SubmissionTracking/SubmissionTrackingProgress.jsx'));
+    $presentation = file_get_contents(base_path('resources/js/Utils/submissionTrackingPresentation.js'));
     $css = file_get_contents(base_path('resources/css/app.css'));
 
     expect($tracking)
-        ->toContain('Processing Progress')
-        ->toContain('aria-label="Processing progress"')
+        ->toContain('<SubmissionTrackingProgress row={row} />')
+        ->toContain('<SubmissionTrackingProgress row={details} />')
         ->toContain('edats-tracking-current-marker__pulse')
-        ->toContain('processing_percentage')
         ->not->toContain('official-report-document-update')
         ->not->toContain('Official report document update')
+        ->and($progress)
+        ->toContain('h-3 w-full')
+        ->toContain('bg-gradient-to-r from-green-800 via-emerald-700 to-blue-800')
+        ->toContain('submission-tracking-progress__sweep')
+        ->toContain('bg-slate-200')
+        ->toContain('bg-slate-700')
+        ->and($presentation)
+        ->toContain('Routing Progress')
+        ->not->toContain('MOV Review Progress')
+        ->toContain('const value = Number(routing.processing_percentage)')
+        ->toContain('routing_summary')
         ->and($css)
         ->toContain('@keyframes edats-tracking-status-pulse')
         ->toContain('2.1s ease-out infinite')

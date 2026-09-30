@@ -75,7 +75,7 @@ export default function Index({ monitorings = { data: [] }, filters = {} }) {
     render: (item) =>
     <div className="flex justify-end gap-3">
                     <Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/cds-lawin/${item?.id}/edit`}>Edit</Link>
-                    <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)}>Delete</button>
+                    <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)} data-cds-action="true" data-cds-action-variant="danger">Delete</button>
                 </div>
 
   }];
@@ -89,7 +89,7 @@ export default function Index({ monitorings = { data: [] }, filters = {} }) {
         title="CDS LAWIN Monitoring (Protected Area)"
         description="Manage and track patrol activities and threats detected within protected areas."
         actions={
-        <Link href={route('cds-lawin.create')} className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
+        <Link href={route('cds-lawin.create')} data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition">
                         Record patrol activity
                     </Link>
         } />
@@ -102,7 +102,7 @@ export default function Index({ monitorings = { data: [] }, filters = {} }) {
             <FloatingInput variant="legacy" id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search area, ecoregion, team leader, or threats..." size="sm" />
                     </div>
                     <div className="flex items-end">
-                        <button type="submit" className="w-full rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900">Search Filter</button>
+                        <button type="submit" className="w-full rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">Search Filter</button>
                     </div>
                 </form>
 

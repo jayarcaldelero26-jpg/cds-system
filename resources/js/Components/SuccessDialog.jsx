@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Button from '@/Components/Button';
 
 export default function SuccessDialog({ open, message, title = 'Success', onClose }) {
     const buttonRef = useRef(null);
@@ -116,7 +117,7 @@ export default function SuccessDialog({ open, message, title = 'Success', onClos
             </div>
             <h2 id="success-dialog-title" className="mt-3.5 text-2xl font-medium leading-tight text-gray-800 dark:text-gray-100">{title}</h2>
             <p id="success-dialog-message" className="mx-auto mt-2 max-w-xs break-words text-[15px] font-normal leading-6 text-gray-500 dark:text-gray-400">{message}</p>
-            <button ref={buttonRef} type="button" onClick={onClose} className="mt-5 min-w-20 rounded-md bg-green-600 px-5 py-2 text-[13px] font-medium leading-4 text-white shadow-sm transition-colors hover:bg-green-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 dark:bg-green-600 dark:hover:bg-green-500 dark:focus-visible:ring-offset-gray-900">OK</button>
+            <Button ref={buttonRef} type="button" onClick={onClose} className="mt-5 min-w-20 rounded-md px-5 py-2 text-[13px] font-medium leading-4">OK</Button>
         </div>
     </div>;
 }

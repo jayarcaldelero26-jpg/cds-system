@@ -5,6 +5,7 @@ import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 import Tooltip from '../Components/Tooltip';
 import NotificationBell from '../Components/Notifications/NotificationBell';
+import Button from '../Components/Button';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
 import { withGenericModuleNavigation } from './navigation.mjs';
 
@@ -320,7 +321,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         }
 
         const childCommon = `${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
-            isChildActive ? 'border-l-2 border-green-200 bg-green-600 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white'
+            isChildActive ? 'border-l-2 border-green-200 bg-gradient-to-r from-green-700 to-blue-900 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
         }`;
         const href = child.externalConfig === 'engpIacGeneratorUrl' ? engpIacGeneratorUrl : child.href;
 
@@ -362,9 +363,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         <>
             <button type="button" className={`fixed inset-0 z-30 bg-gray-950/40 lg:hidden ${open ? '' : 'hidden'}`} onClick={onClose} aria-label="Close navigation" />
             <aside
-                className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-green-950/20 bg-green-950 text-white transition-transform duration-200 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
+                className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-green-950/20 bg-gradient-to-b from-green-950 via-green-950 to-blue-950 text-white transition-transform duration-200 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
                 style={{
-                    backgroundImage: `linear-gradient(to bottom, rgba(3, 39, 38, 0.97) 0%, rgba(3, 44, 42, 0.95) 48%, rgba(3, 49, 45, 0.88) 100%), url(${monitoringMountainForest})`,
+                    backgroundImage: `linear-gradient(to bottom, rgba(3, 39, 38, 0.97) 0%, rgba(3, 44, 42, 0.94) 48%, rgba(23, 37, 84, 0.94) 100%), url(${monitoringMountainForest})`,
                     backgroundSize: 'cover',
                     backgroundPosition: 'center bottom',
                     backgroundRepeat: 'no-repeat',
@@ -377,7 +378,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                         <p className="mt-1 text-[10px] font-medium leading-4 text-green-100">{systemSubtitle}</p>
                         <p className="text-[9px] font-medium leading-3 text-green-200">Conservation and Development Section</p>
                     </div>
-                    <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-green-100 hover:bg-white/10 lg:hidden">x</button>
+                    <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-green-100 hover:bg-white/10 lg:hidden" data-cds-action="true" data-cds-action-variant="primary">x</button>
                 </div>
                 <nav ref={navigationRef} className="flex-1 overflow-y-auto px-3 py-5 space-y-1.5" aria-label="Main navigation">
                     {filteredNavigation.map((item) => {
@@ -413,10 +414,10 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
                         const active = matchesNavigationItem(item, url);
 
-                        const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
+                        const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-transform duration-150 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
                             active
-                                ? 'bg-white/14 text-white font-semibold'
-                                : 'text-green-100/85 hover:bg-white/8 hover:text-white'
+                                ? 'bg-gradient-to-r from-green-700 to-blue-900 text-white font-semibold ring-1 ring-inset ring-white/25'
+                                : 'text-green-100/85 hover:bg-white/8 hover:text-white hover:-translate-y-px'
                         }`;
 
                         if (item.comingSoon) return (
@@ -488,17 +489,17 @@ export function AuthenticatedShell({ children }) {
                 <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
-                        <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation">
+                        <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" data-cds-action="true" data-cds-action-variant="primary">
                             <IconifyIcon icon="solar:hamburger-menu-linear" width="22" height="22" aria-hidden="true" />
                         </button>
 
                         <div className="hidden flex-1 md:block"><GlobalSearch /></div>
 
                         <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
-                            <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search CDS-SMART" title="Search CDS-SMART">
+                            <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search CDS-SMART" title="Search CDS-SMART" data-cds-action="true" data-cds-action-variant="primary">
                                 <IconifyIcon icon="solar:magnifer-linear" width="20" height="20" aria-hidden="true" />
                             </button>
-                            <button type="button" onClick={toggleTheme} className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
+                            <button type="button" onClick={toggleTheme} className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} data-cds-action="true" data-cds-action-variant="primary">
                                 <IconifyIcon icon={darkMode ? 'solar:sun-2-linear' : 'solar:moon-linear'} width="19" height="19" aria-hidden="true" />
                             </button>
                             <NotificationBell initial={notificationBell} />
@@ -513,9 +514,9 @@ export function AuthenticatedShell({ children }) {
                                 {profileOpen && (
                                     <div className="absolute right-0 z-50 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="menu">
                                         <Link href="/profile" className="block rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">Profile settings</Link>
-                                        <button type="button" onClick={() => router.post('/logout')} className="block w-full rounded-md px-3 py-2 text-left text-sm text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950">
+                                        <Button type="button" size="compact" onClick={() => router.post('/logout')} className="block w-full rounded-md px-3 py-2 text-left text-sm">
                                                 Log out
-                                        </button>
+                                        </Button>
                                     </div>
                                 )}
                             </div>

@@ -230,7 +230,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
           actions={
           isReportContext && activeTab === 'reports' ?
           null : activeTab === 'form' ?
-          <button type="button" onClick={() => { handleTabChange('reports'); reset(); setPreviewUrl(null); setSelectedRecord(null); }} className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-white transition">
+          <button type="button" onClick={() => { handleTabChange('reports'); reset(); setPreviewUrl(null); setSelectedRecord(null); }} className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-800 px-4 py-2 rounded-xl text-xs font-bold text-white transition" data-cds-action="true" data-cds-action-variant="cancel">
                                 Back to AWS Report
           </button> : null
           } />
@@ -332,7 +332,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
               'bg-white text-gray-700 hover:bg-green-50' :
               'cursor-not-allowed text-gray-400'}`
               }
-              dangerouslySetInnerHTML={{ __html: link.label }} />
+              dangerouslySetInnerHTML={{ __html: link.label }} data-cds-action="true" data-cds-action-variant="primary" />
 
             )}
                             </nav>
@@ -357,14 +357,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Daily/source observation records used by the monitoring summary.</p>
                             </div>
                             <div className="flex flex-wrap gap-2">
-                                {auth.canCreateAws && <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700">Import AWS Data</button>}
+                                {auth.canCreateAws && <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-blue-700" data-cds-action="true" data-cds-action-variant="primary">Import AWS Data</button>}
                                 <button type="button" onClick={() => setShowObservationRecords((visible) => !visible)} aria-expanded={showObservationRecords} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-bold text-gray-700 transition hover:border-green-500 hover:text-green-700 dark:border-gray-700 dark:text-gray-200">{showObservationRecords ? 'Hide Records' : 'Show Records'}</button>
                             </div>
                         </div>
                         {showObservationRecords && <div className="space-y-4 border-t border-gray-200 p-4 dark:border-gray-800">
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <p className="text-xs text-gray-500 dark:text-gray-400">Technical source records matching the active summary period and Protected Area filter.</p>
-                                {auth.canDeleteAws && rawDataList.length > 0 && selectedIds.length > 0 && <button type="button" onClick={() => setShowBulkDeleteConfirm(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-red-700">Delete Selected ({selectedIds.length})</button>}
+                                {auth.canDeleteAws && rawDataList.length > 0 && selectedIds.length > 0 && <button type="button" onClick={() => setShowBulkDeleteConfirm(true)} className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-red-700" data-cds-action="true" data-cds-action-variant="danger">Delete Selected ({selectedIds.length})</button>}
                             </div>
                             <AwsTable
                               records={rawDataList}
@@ -530,7 +530,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                             {data.report_file &&
                     <div className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-xs w-fit">
                                                     <span> {data.report_file.name}</span>
-                                                    <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1"></button>
+                                                    <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1" data-cds-action="true" data-cds-action-variant="danger"></button>
                                                 </div>
                     }
                                         </div>
@@ -540,14 +540,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                         <button
                     type="button"
                     onClick={() => {handleTabChange('reports');reset();setPreviewUrl(null);}}
-                    className="rounded-xl border border-gray-300 px-5 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xs">
+                    className="rounded-xl border border-gray-300 px-5 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-xs" data-cds-action="true" data-cds-action-variant="cancel">
 
                                             Cancel
                                         </button>
                                         <button
                     type="submit"
                     disabled={processing}
-                    className="rounded-xl bg-green-700 hover:bg-green-800 px-6 py-2.5 text-xs font-bold text-white shadow-md transition flex items-center gap-1.5">
+                    className="rounded-xl bg-green-700 hover:bg-green-800 px-6 py-2.5 text-xs font-bold text-white shadow-md transition flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">
 
                                              Save Report
                                         </button>
@@ -595,7 +595,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
                                 <span></span> Import AWS Data
                             </h3>
-                            <button type="button" onClick={() => setIsImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg"></button>
+                            <button type="button" onClick={() => setIsImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary"></button>
                         </div>
 
                         <form onSubmit={handleImportSubmit} className="space-y-4">
@@ -638,14 +638,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                 <button
                 type="button"
                 onClick={() => setIsImportModalOpen(false)}
-                className="px-5 py-2.5 rounded-xl border text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition">
+                className="px-5 py-2.5 rounded-xl border text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition" data-cds-action="true" data-cds-action-variant="cancel">
 
                                     Cancel
                                 </button>
                                 <button
                 type="submit"
                 disabled={importForm.processing}
-                className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5">
+                className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">
 
                                 Import AWS Data
                                 </button>
@@ -664,7 +664,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">AWS Monitoring Full Details</h3>
                                 <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'N/A'}  Station: {selectedRecord.station_name}</p>
                             </div>
-                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg"></button>
+                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary"></button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -715,9 +715,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
                             {auth.canUpdateAws ?
-            <button type="button" onClick={() => openEditModalFromView(selectedRecord)} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition"> Edit This Record</button> :
+            <button type="button" onClick={() => openEditModalFromView(selectedRecord)} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition" data-cds-action="true" data-cds-action-variant="primary"> Edit This Record</button> :
             <div></div>}
-                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">Close Details</button>
+                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition" data-cds-action="true" data-cds-action-variant="primary">Close Details</button>
                         </div>
                     </div>
                 </div>
@@ -735,7 +735,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                     <p className="text-xs text-gray-500">Update weather station details and review attached files side-by-side.</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 font-bold text-lg"></button>
+                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary"></button>
                         </div>
 
                         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto custom-table-scrollbar">
@@ -805,14 +805,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                         {existingFile && !data.report_file &&
                   <div className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs w-fit">
                                                 <span> {existingFile}</span>
-                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1"></button>
+                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1" data-cds-action="true" data-cds-action-variant="danger"></button>
                                             </div>
                   }
 
                                         {data.report_file &&
                   <div className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs w-fit">
                                                 <span> {data.report_file.name}</span>
-                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1"></button>
+                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1" data-cds-action="true" data-cds-action-variant="danger"></button>
                                             </div>
                   }
                                     </div>
@@ -834,11 +834,11 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             {auth.canDeleteAws ?
-            <button type="button" onClick={() => promptDelete(selectedRecord.id)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition"> Delete Record</button> :
+            <button type="button" onClick={() => promptDelete(selectedRecord.id)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition" data-cds-action="true" data-cds-action-variant="danger"> Delete Record</button> :
             <div></div>}
                             <div className="flex gap-2">
-                                <button type="button" onClick={() => {setIsEditModalOpen(false);openViewModal(selectedRecord);}} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition"> Back</button>
-                                <button type="submit" form="edit-aws-form" disabled={processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-md transition"> Save Changes</button>
+                                <button type="button" onClick={() => {setIsEditModalOpen(false);openViewModal(selectedRecord);}} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition" data-cds-action="true" data-cds-action-variant="cancel"> Back</button>
+                                <button type="submit" form="edit-aws-form" disabled={processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-md transition" data-cds-action="true" data-cds-action-variant="primary"> Save Changes</button>
                             </div>
                         </div>
                     </div>
@@ -866,8 +866,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected Records?</h3>
                         <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to Delete this report? This cannot be undone.</p>
                         <div className="flex gap-3">
-                            <button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                            <button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">Yes, Delete All</button>
+                            <button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
+                            <button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">Yes, Delete All</button>
                         </div>
                     </div>
                 </div>
@@ -881,8 +881,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3>
                         <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record? This process cannot be undone.</p>
                         <div className="flex gap-3">
-                            <button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition">Cancel</button>
-                            <button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition">Yes, Delete</button>
+                            <button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
+                            <button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">Yes, Delete</button>
                         </div>
                     </div>
                 </div>

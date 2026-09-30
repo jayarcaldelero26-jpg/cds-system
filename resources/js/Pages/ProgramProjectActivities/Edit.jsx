@@ -143,7 +143,7 @@ export default function Edit({ ppa, protectedAreas, categories, statuses }) {
                             <Link href="/program-project-activities" className="inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200">
                                 Cancel
                             </Link>
-                            <button type="submit" disabled={processing} className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-900 transition">
+                            <button type="submit" disabled={processing} className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-green-900 transition" data-cds-action="true" data-cds-action-variant="primary">
                                 {processing ? 'Updating...' : 'Update PPA'}
                             </button>
                         </div>

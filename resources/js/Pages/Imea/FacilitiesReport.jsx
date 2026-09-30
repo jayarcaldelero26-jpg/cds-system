@@ -148,7 +148,7 @@ export default function FacilitiesReport({
                                     Export to CSV
                                 </a>
               }
-                            <button onClick={handlePrint} className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition">
+                            <button onClick={handlePrint} className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition" data-cds-action="true" data-cds-action-variant="primary">
                                 🖨️ Print / Save PDF
                             </button>
                             <Link href="/imea" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition backdrop-blur-xs">
@@ -186,7 +186,7 @@ export default function FacilitiesReport({
                                 </FloatingSelect>
                             </div>
                             <div>
-                                <button type="button" onClick={resetFilters} className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition">
+                                <button type="button" onClick={resetFilters} className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition" data-cds-action="true" data-cds-action-variant="primary">
                                     Reset Filters
                                 </button>
                             </div>
@@ -291,7 +291,7 @@ export default function FacilitiesReport({
                                     <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} — {selectedFacility.facility_type}</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-lg">✕</button>
+                            <button type="button" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">✕</button>
                         </div>
 
                         <div className="mt-4 space-y-6 text-sm">
@@ -351,7 +351,7 @@ export default function FacilitiesReport({
                                 <button
                 type="button"
                 onClick={closeFacilityModal}
-                className="rounded-lg bg-green-800 hover:bg-green-900 text-white font-semibold py-2 px-5 text-xs transition">
+                className="rounded-lg bg-green-800 hover:bg-green-900 text-white font-semibold py-2 px-5 text-xs transition" data-cds-action="true" data-cds-action-variant="primary">
 
                                     Close Details
                                 </button>

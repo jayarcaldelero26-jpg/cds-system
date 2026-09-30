@@ -1165,13 +1165,13 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
 
 {!scoped && rangePreset === 'custom' && <div className="mt-3 grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                             <DateRangePicker id="awsgraph-custom-range" label="Date Range" value={{ from: graphStartDate, to: graphEndDate }} onChange={({ from, to }) => { setRangePreset('custom'); setGraphStartDate(from); setGraphEndDate(to); triggerUpdate(undefined, from, to, 'custom'); }} />
-                            <button type="button" onClick={clearGraphRange} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-xs font-semibold text-gray-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">Clear Date Filter</button>
+                            <button type="button" onClick={clearGraphRange} className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-xs font-semibold text-gray-700 transition hover:border-emerald-400 hover:text-emerald-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200" data-cds-action="true" data-cds-action-variant="primary">Clear Date Filter</button>
                         </div>}                        {!scoped && rangePreset !== 'custom' && (graphStartDate || graphEndDate) &&
             <div className="mt-3 flex justify-end">
                                 <button
                 type="button"
                 onClick={clearGraphRange}
-                className="rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-5 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:border-emerald-400 hover:text-emerald-700 transition whitespace-nowrap">
+                className="rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-5 py-2.5 text-xs font-semibold text-gray-700 dark:text-gray-200 hover:border-emerald-400 hover:text-emerald-700 transition whitespace-nowrap" data-cds-action="true" data-cds-action-variant="primary">
 
                                     Clear Date Filter
                                 </button>
@@ -1323,7 +1323,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                 analysisView === 'overall' ?
                 'bg-emerald-600 text-white' :
                 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'}`
-                }>
+                } data-cds-action="true" data-cds-action-variant="primary">
 
                                     Overall
                                 </button>
@@ -1334,7 +1334,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                 analysisView === 'compare' ?
                 'bg-emerald-600 text-white' :
                 'text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800'}`
-                }>
+                } data-cds-action="true" data-cds-action-variant="primary">
 
                                     Compare PAs
                                 </button>

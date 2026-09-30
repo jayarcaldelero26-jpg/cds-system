@@ -78,7 +78,7 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
                     onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })}
                     className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${link.active ? 'bg-green-700 text-white' : link.url ? 'bg-white text-gray-700 hover:bg-green-50 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800' : 'cursor-not-allowed text-gray-400'}`}
                     dangerouslySetInnerHTML={{ __html: link.label }}
-                />
+                data-cds-action="true" data-cds-action-variant="primary" />
             ))}
         </nav>
     ) : null;

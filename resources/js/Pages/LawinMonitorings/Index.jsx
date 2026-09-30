@@ -81,7 +81,7 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
                         <Link className="font-medium text-green-800 hover:text-green-950 dark:text-green-400" href={`/lawin-monitorings/${item?.id}/edit`}>Edit</Link>
 
                         {auth?.canDeleteLawinMonitoring &&
-          <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)}>Delete</button>
+          <button type="button" className="font-medium text-red-700 hover:text-red-900 dark:text-red-300" onClick={() => setDeleting(item)} data-cds-action="true" data-cds-action-variant="danger">Delete</button>
           }
                     </div>);
 
@@ -107,7 +107,7 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
         title="LAWIN Monitoring System"
         description="Manage and track patrol activities, distances covered, hours rendered, and threats detected by forest patrollers."
         actions={
-        <Link href="/lawin-monitorings/create" className="inline-flex items-center justify-center rounded-lg bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
+        <Link href="/lawin-monitorings/create" data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold shadow-sm transition">
                         Record patrol activity
                     </Link>
         } />
@@ -134,7 +134,7 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
                         </FloatingSelect>
                     </div>
                     <div className="flex items-end md:col-span-4">
-                        <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900">Search Filter</button>
+                        <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">Search Filter</button>
                     </div>
                 </form>
 

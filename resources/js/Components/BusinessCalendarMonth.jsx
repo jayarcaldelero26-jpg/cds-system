@@ -124,7 +124,7 @@ function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, c
             </span>
         </label>
         {canManage && <div className="mt-6 border-t border-emerald-100/90 pt-4 sm:col-span-2 xl:mt-auto">
-            <button type="button" onClick={() => onAdd('')} title="Add Non-Working Day" aria-label="Add Non-Working Day" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-md transition hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2">
+            <button type="button" onClick={() => onAdd('')} title="Add Non-Working Day" aria-label="Add Non-Working Day" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-md transition hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">
                 <PlusIcon />
             </button>
             <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-900/65 dark:text-emerald-300/70">Non-Working Day</span>
@@ -146,14 +146,14 @@ function CalendarToolbar({ view, month, year, shiftMonth, shiftYear, goToday, se
 
     return <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
         <div className="flex items-center gap-2">
-            <button type="button" onClick={() => monthMode ? shiftMonth(-1) : shiftYear(-1)} className={navClass} aria-label={monthMode ? 'Previous month' : 'Previous year'}><Chevron direction="left" /></button>
+            <button type="button" onClick={() => monthMode ? shiftMonth(-1) : shiftYear(-1)} className={navClass} aria-label={monthMode ? 'Previous month' : 'Previous year'} data-cds-action="true" data-cds-action-variant="primary"><Chevron direction="left" /></button>
             <h2 className="min-w-[175px] text-center text-xl font-bold tracking-wide text-slate-800 dark:text-white sm:text-2xl">{monthMode ? monthLabel(month) : year}</h2>
-            <button type="button" onClick={() => monthMode ? shiftMonth(1) : shiftYear(1)} className={navClass} aria-label={monthMode ? 'Next month' : 'Next year'}><Chevron direction="right" /></button>
+            <button type="button" onClick={() => monthMode ? shiftMonth(1) : shiftYear(1)} className={navClass} aria-label={monthMode ? 'Next month' : 'Next year'} data-cds-action="true" data-cds-action-variant="primary"><Chevron direction="right" /></button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={goToday} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${neutralViewClass}`}>Today</button>
-            <button type="button" onClick={() => setView('month')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${monthMode ? 'bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Month</button>
-            <button type="button" onClick={() => setView('year')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${!monthMode ? 'bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Year</button>
+            <button type="button" onClick={goToday} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${neutralViewClass}`} data-cds-action="true" data-cds-action-variant="primary">Today</button>
+            <button type="button" onClick={() => setView('month')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${monthMode ? 'cds-tab-active border border-green-700 bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Month</button>
+            <button type="button" onClick={() => setView('year')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${!monthMode ? 'cds-tab-active border border-green-700 bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Year</button>
         </div>
     </header>;
 }
@@ -182,7 +182,7 @@ function CalendarDay({ day, today, movEvents, holidays, canManage, onAdd, onSele
     return <div className={`group relative min-h-[118px] rounded-xl border p-2.5 backdrop-blur-sm transition duration-150 ${surface} ${today ? 'border-emerald-400 bg-emerald-50/75 shadow-[0_0_0_1px_rgba(16,185,129,0.12)] dark:border-emerald-700 dark:bg-emerald-950/20' : ''}`}>
         <div className="mb-2 flex items-center justify-between">
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold ${today ? 'bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-sm' : day.inMonth ? 'text-slate-800 dark:text-gray-100' : 'text-slate-400 dark:text-gray-600'}`}>{day.number}</span>
-            {canManage && day.inMonth && <button type="button" onClick={() => onAdd(day.key)} className="invisible rounded-md px-1.5 text-sm leading-5 text-emerald-700 transition hover:bg-emerald-50 group-hover:visible focus:visible dark:text-emerald-300 dark:hover:bg-emerald-950/40" aria-label={`Add non-working day on ${formatReportDate(day.key)}`}>+</button>}
+            {canManage && day.inMonth && <button type="button" onClick={() => onAdd(day.key)} className="invisible rounded-md px-1.5 text-sm leading-5 text-emerald-700 transition hover:bg-emerald-50 group-hover:visible focus:visible dark:text-emerald-300 dark:hover:bg-emerald-950/40" aria-label={`Add non-working day on ${formatReportDate(day.key)}`} data-cds-action="true" data-cds-action-variant="primary">+</button>}
         </div>
         <div className="space-y-1">
             {holidays.map(holiday => <HolidayChip key={holiday.id} holiday={holiday} onSelect={onSelectHoliday} />)}
@@ -229,7 +229,7 @@ function YearMiniCalendar({ year, month, eventDays, holidayDays, showMovs, onOpe
     const title = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date(year, month - 1, 1)).toUpperCase();
 
     return <article className="rounded-xl border border-slate-200/80 bg-white/80 p-3 shadow-sm backdrop-blur-sm transition hover:border-emerald-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-900/85 dark:hover:border-emerald-800">
-        <button type="button" onClick={() => onOpenMonth(month)} className="mb-2 block w-full text-left text-xs font-bold tracking-wide text-slate-800 transition hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-white dark:hover:text-emerald-300">{title}</button>
+        <button type="button" onClick={() => onOpenMonth(month)} className="cds-button-interaction mb-2 block min-h-9 w-full rounded-md px-2 text-left text-xs font-bold tracking-wide" data-cds-action="true" data-cds-action-variant="primary">{title}</button>
         <div className="mb-1 grid grid-cols-7 text-center text-[8px] font-semibold tracking-[0.08em] text-slate-400 dark:text-gray-500">
             {WEEKDAYS.map(day => <span key={day}>{day.slice(0, 1)}</span>)}
         </div>
@@ -273,10 +273,10 @@ function DateEventsModal({ date, events, onClose, onSelect }) {
         <section role="dialog" aria-modal="true" aria-label={`Submitted reports for ${formatReportDate(date)}`} className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <header className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                 <div><h3 className="text-sm font-bold text-gray-900 dark:text-white">Submitted reports</h3><p className="mt-0.5 text-xs text-gray-500">{formatReportDate(date)} · {events.length} events</p></div>
-                <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close">&times;</button>
+                <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close" data-cds-action="true" data-cds-action-variant="primary">&times;</button>
             </header>
             <div className="max-h-[60vh] space-y-2 overflow-y-auto p-4">
-                {events.map(event => <button key={event.source_key} type="button" onClick={() => onSelect(event)} className="w-full rounded-lg border border-gray-200 p-3 text-left hover:border-green-300 hover:bg-green-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:hover:border-green-800 dark:hover:bg-green-950/20"><span className="block text-xs font-bold text-gray-900 dark:text-white">{event.module} • {event.source_name || event.office || 'Office'}</span><span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">{event.title}{event.reporting_period ? ` · ${event.reporting_period}` : ''}</span></button>)}
+                {events.map(event => <button key={event.source_key} type="button" onClick={() => onSelect(event)} className="w-full rounded-lg border border-gray-200 p-3 text-left hover:border-green-300 hover:bg-green-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:hover:border-green-800 dark:hover:bg-green-950/20" data-cds-action="true" data-cds-action-variant="primary"><span className="block text-xs font-bold text-gray-900 dark:text-white">{event.module} • {event.source_name || event.office || 'Office'}</span><span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">{event.title}{event.reporting_period ? ` · ${event.reporting_period}` : ''}</span></button>)}
             </div>
         </section>
     </div>;

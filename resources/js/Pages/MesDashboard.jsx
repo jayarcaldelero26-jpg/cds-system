@@ -78,10 +78,10 @@ export default function MesDashboard({
                         <h2 className="font-bold text-gray-950 dark:text-white">Quick Tasks</h2>
                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Frequently used enforcement tasks.</p>
                         <div className="mt-4 grid gap-2.5">
-                            <Link href="/lawin-monitorings/create" className="rounded-lg bg-green-800 px-4 py-2.5 text-center text-sm font-semibold text-white shadow-sm transition hover:bg-green-900">
+                            <Link href="/lawin-monitorings/create" data-cds-action="true" data-cds-action-variant="primary" className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold shadow-sm transition">
                                 + Record Lawin Patrol
                             </Link>
-                            <Link href="/issue-monitorings/create" className="rounded-lg border border-green-700 dark:border-green-800 text-green-800 dark:text-green-400 px-4 py-2.5 text-center text-sm font-semibold hover:bg-green-50/50 dark:hover:bg-green-950/20 transition">
+                            <Link href="/issue-monitorings/create" data-cds-action="true" data-cds-action-variant="primary" className="rounded-lg px-4 py-2.5 text-center text-sm font-semibold transition">
                                 ⚠️ Log New Threat/Issue
                             </Link>
                         </div>

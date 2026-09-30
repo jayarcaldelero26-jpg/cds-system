@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { downloadWithProgress } from "@/Utils/downloadWithProgress";
+import Button from "@/Components/Button";
 
 const size = (value) =>
     !Number.isFinite(Number(value))
@@ -51,14 +52,15 @@ export default function RoutingAttachmentLink({ attachment }) {
                         Preview
                     </a>
                 )}
-                <button
+                <Button
+                    size="compact"
                     type="button"
                     disabled={Boolean(progress)}
                     onClick={download}
-                    className="font-bold text-green-800 hover:underline disabled:opacity-50"
+                    className="rounded px-2 py-1 text-xs"
                 >
                     {progress ? "Downloading…" : "Download"}
-                </button>
+                </Button>
             </div>
             {progress && (
                 <>

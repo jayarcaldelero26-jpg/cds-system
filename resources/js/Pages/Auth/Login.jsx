@@ -75,7 +75,7 @@ export default function Login() {
                                 onClick={() => setShowPassword((visible) => !visible)}
                                 className="inline-flex rounded-lg p-1.5 text-emerald-800 transition hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-950"
                                 aria-label={showPassword ? 'Hide password' : 'Show password'}
-                            >
+                             data-cds-action="true" data-cds-action-variant="primary">
                                 <Icon icon={showPassword ? 'lucide:eye-off' : 'lucide:eye'} width="18" height="18" aria-hidden="true" />
                             </button>
                         </AuthField>
@@ -100,7 +100,7 @@ export default function Login() {
                         className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-emerald-800 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 disabled:cursor-not-allowed disabled:opacity-70 dark:bg-emerald-700 dark:hover:bg-emerald-600"
                         type="submit"
                         disabled={processing}
-                    >
+                     data-cds-action="true" data-cds-action-variant="primary">
                         <span>{processing ? 'Signing in...' : 'Sign in'}</span>
                         {!processing && <Icon icon="lucide:log-in" width="17" height="17" aria-hidden="true" />}
                     </button>

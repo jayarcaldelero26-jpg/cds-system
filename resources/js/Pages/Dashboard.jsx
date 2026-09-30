@@ -20,7 +20,7 @@ function Filters({ filters = {}, filterOptions = {}, tab }) {
 }
 
 function Tabs({ active, filters = {} }) {
-    return <nav aria-label="Dashboard program tabs" className="grid grid-cols-2 overflow-hidden rounded-xl border border-emerald-800 bg-white shadow-sm dark:border-emerald-700 dark:bg-slate-900">{[['conservation', 'Conservation'], ['development', 'Development']].map(([tab, label]) => <button key={tab} type="button" aria-current={active === tab ? 'page' : undefined} onClick={() => router.get(route('dashboard'), { ...filters, tab }, { preserveScroll: true, preserveState: true, replace: true })} className={`px-4 py-3 text-sm font-semibold transition ${active === tab ? 'bg-emerald-800 text-white' : 'text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40'}`}>{label}</button>)}</nav>;
+    return <nav aria-label="Dashboard program tabs" className="grid grid-cols-2 overflow-hidden rounded-xl border border-emerald-800 bg-white shadow-sm dark:border-emerald-700 dark:bg-slate-900">{[['conservation', 'Conservation'], ['development', 'Development']].map(([tab, label]) => <button key={tab} type="button" aria-current={active === tab ? 'page' : undefined} onClick={() => router.get(route('dashboard'), { ...filters, tab }, { preserveScroll: true, preserveState: true, replace: true })} className={`px-4 py-3 text-sm font-semibold transition ${active === tab ? 'cds-tab-active bg-emerald-800 text-white' : 'text-emerald-800 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40'}`}>{label}</button>)}</nav>;
 }
 
 function Metric({ label, value, hint, tone = 'slate' }) {

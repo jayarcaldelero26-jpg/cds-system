@@ -6,6 +6,7 @@ import StatusBadge from '@/Components/StatusBadge';
 import PageHeader from '@/Components/PageHeader';
 import Tooltip from '@/Components/Tooltip';
 import WorkflowTabs from './WorkflowTabs';
+import Button from '@/Components/Button';
 
 export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
   const { props } = usePage();
@@ -337,9 +338,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
             {activeTab === 'facilities' &&
       <>
                     <div className="mt-3 mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-                        <Link href="/imea/facilities-report" className="inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 shadow-sm transition hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">📊 View Facilities Summary Report</Link>
-                        {canImport && <button type="button" onClick={() => setIsImportModalOpen(true)} className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 shadow-sm transition hover:bg-blue-100 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-300">📥 Import CSV</button>}
-                        {canCreate && <button type="button" onClick={() => openFacilityModal()} className="inline-flex items-center justify-center rounded-lg bg-green-700 px-3 py-2 text-xs font-bold text-white shadow-sm transition hover:bg-green-800">+ Add Facility / Infrastructure</button>}
+                        <Link href="/imea/facilities-report" data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-bold">📊 View Facilities Summary Report</Link>
+                        {canImport && <Button type="button" size="compact" onClick={() => setIsImportModalOpen(true)} className="rounded-lg px-3 py-2 text-xs">📥 Import CSV</Button>}
+                        {canCreate && <Button type="button" size="compact" onClick={() => openFacilityModal()} className="rounded-lg px-3 py-2 text-xs">+ Add Facility / Infrastructure</Button>}
                     </div>
                     <div className="mb-4">
                         <Card className="border border-gray-100 dark:border-gray-800 shadow-md rounded-2xl bg-white dark:bg-gray-900 p-4">
@@ -363,13 +364,14 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 </div>
 
                                 {selectedFacilityPA &&
-              <button
+              <Button
+                size="compact"
                 type="button"
                 onClick={() => handleFacilityPAFilter('')}
-                className="rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition">
+                className="rounded-lg py-2.5 px-4 text-sm">
 
                                         Reset Filter
-                                    </button>
+              </Button>
               }
                             </div>
                         </Card>
@@ -379,7 +381,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                     {canDelete && selectedFacilityIds.length > 0 &&
           <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900 flex items-center justify-between">
                             <span className="text-xs font-bold text-red-700 dark:text-red-300">{selectedFacilityIds.length} item(s) selected</span>
-                            <button onClick={handleBulkDelete} className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-sm transition">🗑️ Delete Selected Items</button>
+                            <Button type="button" size="compact" variant="danger" onClick={handleBulkDelete} className="rounded-lg px-3 py-1.5 text-xs">🗑️ Delete Selected Items</Button>
                         </div>
           }
                     {facilities?.data?.length > 0 ?
@@ -441,7 +443,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">IMEA Assessment Full Details</h3>
                                 <p className="text-xs text-gray-500">{selectedAssessment.protected_area?.name || 'N/A'} — PAMO: {selectedAssessment.pamo_name}</p>
                             </div>
-                            <button type="button" onClick={() => setIsViewAssessmentModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment details">✕</Button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -491,8 +493,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
-                            {canUpdate && <button type="button" onClick={() => {setIsViewAssessmentModalOpen(false);openAssessmentEditModal(selectedAssessment);}} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Assessment</button>}
-                            <button type="button" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">Close Details</button>
+                            {canUpdate && <Button type="button" size="compact" onClick={() => {setIsViewAssessmentModalOpen(false);openAssessmentEditModal(selectedAssessment);}} className="rounded-xl px-4 py-2 text-xs">✏️ Edit This Assessment</Button>}
+                            <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-xl px-5 py-2 text-xs">Close Details</Button>
                         </div>
                     </div>
                 </div>
@@ -510,7 +512,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     <p className="text-xs text-gray-500">Update monitoring indicators and review attached documents side-by-side.</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={closeAssessmentModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 font-bold text-lg">✕</button>
+                            <Button type="button" size="compact" onClick={closeAssessmentModal} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment">✕</Button>
                         </div>
 
                         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto custom-table-scrollbar">
@@ -641,20 +643,20 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                                 <div className="flex flex-wrap gap-2">
                                                     {existingFiles.map((file, idx) =>
                       <div key={idx} className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
-                                                            <Tooltip content={file.name}><button type="button" onClick={() => setActivePreview(file)} className="truncate max-w-[180px] hover:underline text-left">
+                                                            <Tooltip content={file.name}><Button type="button" size="compact" onClick={() => setActivePreview(file)} className="max-w-[180px] truncate rounded px-1 text-left text-xs">
                                                                 📄 {file.name}
-                                                            </button></Tooltip>
-                                                            <button
+                                                            </Button></Tooltip>
+                                                            <Button size="compact" variant="danger"
                           type="button"
                           onClick={() => {
                             setExistingFiles(existingFiles.filter((_, i) => i !== idx));
                             setData('removed_attachments', [...data.removed_attachments, file.key]);
                             if (activePreview?.url === file.url) setActivePreview(null);
                           }}
-                          className="text-white/80 hover:text-white font-bold ml-1" aria-label={`Remove ${file.name}`}>
+                          className="ml-1 rounded px-1 text-xs" aria-label={`Remove ${file.name}`}>
 
                                                                 ✕
-                                                            </button>
+                                                            </Button>
                                                         </div>
                       )}
                                                 </div>
@@ -668,13 +670,13 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                                     {attachedFiles.map((item, idx) =>
                       <div key={idx} className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
                                                             <Tooltip content={item.name}><span tabIndex={0} className="truncate max-w-[180px] outline-none">📄 {item.name}</span></Tooltip>
-                                                            <button
+                                                            <Button size="compact" variant="danger"
                           type="button"
                           onClick={() => setAttachedFiles(attachedFiles.filter((_, i) => i !== idx))}
-                          className="text-white/80 hover:text-white font-bold ml-1" aria-label={`Remove ${item.name}`}>
+                          className="ml-1 rounded px-1 text-xs" aria-label={`Remove ${item.name}`}>
 
                                                                 ✕
-                                                            </button>
+                                                            </Button>
                                                         </div>
                       )}
                                                 </div>
@@ -704,10 +706,10 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
-                            {canDelete && <button type="button" onClick={() => setShowDeleteConfirm(true)} className="rounded-xl bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition">🗑️ Delete Record</button>}
+                            {canDelete && <Button type="button" size="compact" variant="danger" onClick={() => setShowDeleteConfirm(true)} className="rounded-xl px-4 py-2.5 text-xs">🗑️ Delete Record</Button>}
                             <div className="flex gap-2">
-                                <button type="button" onClick={() => {closeAssessmentModal();openViewAssessmentModal(selectedAssessment);}} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
-                                <button type="submit" form="edit-imea-form" disabled={processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2.5 text-xs font-bold text-white shadow-md transition">💾 Save Changes</button>
+                                <Button type="button" size="compact" variant="back" onClick={() => {closeAssessmentModal();openViewAssessmentModal(selectedAssessment);}} className="rounded-xl px-4 py-2.5 text-xs">← Back</Button>
+                                <Button type="submit" size="compact" form="edit-imea-form" disabled={processing} className="rounded-xl px-5 py-2.5 text-xs">💾 Save Changes</Button>
                             </div>
                         </div>
                     </div>
@@ -722,7 +724,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">
                                 {selectedFacility ? 'Edit Facility / Infrastructure Record' : 'Add Facility / Infrastructure Record'}
                             </h3>
-                            <button type="button" onClick={closeFacilityModal} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <Button type="button" size="compact" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-lg" aria-label="Close facility form">✕</Button>
                         </div>
 
                         <form onSubmit={handleFacilitySubmit} className="flex flex-col flex-1 overflow-hidden">
@@ -821,15 +823,15 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
                                 <div className="flex items-center gap-2">
                                     {canDelete && selectedFacility &&
-                <button type="button" onClick={() => setShowFacilityDeleteConfirm(true)} className="rounded-xl bg-red-50 px-4 py-2 text-xs font-semibold text-red-700 hover:bg-red-100 border border-red-200 transition">Delete Record</button>
+                <Button type="button" size="compact" variant="danger" onClick={() => setShowFacilityDeleteConfirm(true)} className="rounded-xl px-4 py-2 text-xs">Delete Record</Button>
                 }
-                                    <button type="button" onClick={() => {closeFacilityModal();openViewFacilityModal(selectedFacility);}} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">← Back</button>
+                                    <Button type="button" size="compact" variant="back" onClick={() => {closeFacilityModal();openViewFacilityModal(selectedFacility);}} className="rounded-xl px-4 py-2 text-xs">← Back</Button>
                                 </div>
                                 <div className="flex gap-2">
-                                    <button type="button" onClick={closeFacilityModal} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">Cancel</button>
-                                    <button type="submit" disabled={facilityForm.processing} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">
+                                    <Button type="button" size="compact" variant="cancel" onClick={closeFacilityModal} className="rounded-xl px-4 py-2 text-xs">Cancel</Button>
+                                    <Button type="submit" size="compact" disabled={facilityForm.processing} className="rounded-xl px-5 py-2 text-xs">
                                         {facilityForm.processing ? 'Saving...' : 'Save Facility'}
-                                    </button>
+                                    </Button>
                                 </div>
                             </div>
                         </form>
@@ -846,7 +848,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">Facility Full Details</h3>
                                 <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} — {selectedFacility.facility_type}</p>
                             </div>
-                            <button type="button" onClick={() => setIsViewFacilityModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close facility details">✕</Button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -898,8 +900,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
-                            {canUpdate && <button type="button" onClick={() => {setIsViewFacilityModalOpen(false);openFacilityModal(selectedFacility);}} className="rounded-xl bg-green-50 px-4 py-2 text-xs font-semibold text-green-700 hover:bg-green-100 border border-green-200 transition">✏️ Edit This Facility</button>}
-                            <button type="button" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition">Close Details</button>
+                            {canUpdate && <Button type="button" size="compact" onClick={() => {setIsViewFacilityModalOpen(false);openFacilityModal(selectedFacility);}} className="rounded-xl px-4 py-2 text-xs">✏️ Edit This Facility</Button>}
+                            <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-xl px-5 py-2 text-xs">Close Details</Button>
                         </div>
                     </div>
                 </div>
@@ -911,7 +913,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                     <div className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">📥 Import Facilities via CSV/Excel</h3>
-                            <button type="button" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="text-gray-400 hover:text-gray-600 font-bold text-lg">✕</button>
+                            <Button type="button" size="compact" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="rounded-lg p-1.5 text-lg" aria-label="Close import dialog">✕</Button>
                         </div>
                         <form onSubmit={handleImportSubmit} className="flex flex-col p-6 space-y-4">
                             <div>
@@ -927,8 +929,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 <p className="mt-1 text-xs text-gray-500">CSV/TXT only. Use the exported facilities CSV headers without metadata rows.</p>
                             </div>
                             <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 dark:border-gray-800">
-                                <button type="button" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="rounded-xl border border-gray-300 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition">Cancel</button>
-                                <button type="submit" disabled={importForm.processing} className="rounded-xl bg-blue-600 hover:bg-blue-700 px-5 py-2 text-xs font-bold text-white shadow-md transition">{importForm.processing ? 'Importing...' : 'Upload & Import'}</button>
+                                <Button type="button" size="compact" variant="cancel" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="rounded-xl px-4 py-2 text-xs">Cancel</Button>
+                                <Button type="submit" size="compact" disabled={importForm.processing} className="rounded-xl px-5 py-2 text-xs">{importForm.processing ? 'Importing...' : 'Upload & Import'}</Button>
                             </div>
                         </form>
                     </div>
@@ -936,9 +938,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* DELETE ALERTS */}
-            {canDelete && showDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>}
-            {canDelete && showFacilityDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><button type="button" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmFacilityDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>}
-            {canDelete && showBulkDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-xl text-sm font-semibold">Cancel</button><button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold">Yes, Delete</button></div></div></div>}
+            {canDelete && showDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
+            {canDelete && showFacilityDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmFacilityDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
+            {canDelete && showBulkDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmBulkDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
 
         </AuthenticatedLayout>);
 

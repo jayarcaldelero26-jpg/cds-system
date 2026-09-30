@@ -9,6 +9,7 @@ use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
+use App\Services\SubmissionTracking\DocumentRoutingPresenter;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -452,10 +453,12 @@ test('For Review status presents the Chief as the next action owner', function (
 
     expect($component)->toContain('Review Status')
         ->toContain('Awaiting Review by CENRO CDS Chief')
-        ->toContain('Next Action: CENRO CDS Chief must review this MOV/report.')
+        ->not->toContain('Next Action:')
         ->toContain('Edit / Correct Submission')
+        ->and(preg_replace('/\\s+/', ' ', $component))->toContain('workflow_status')
         ->and(preg_replace('/\\s+/', ' ', $page))->toContain('mov_processing')
-        ->toContain('workflow_status')->toContain('submission_status')->toContain('Workflow Status')->toContain('Routing Status');
+        ->toContain('details.routing?.next_expected_action')
+        ->toContain('submission_status')->toContain('Submission Status')->toContain('Routing Status');
 
 });
 test('needs correction requires remarks and returns the record to the focal queue', function (): void {
@@ -483,6 +486,46 @@ test('records release uses the canonical CENRO release date and reaches one hund
     expect($released->date_report_released_cenro->toDateString())->toBe('2026-08-10')
         ->and(app(PambMovProcessingService::class)->present($released)['percent'])->toBe(100)
         ->and(app(PambMovProcessingService::class)->present($released)['status_label'])->toBe('Released by CENRO to PENRO');
+});
+
+test('CENRO Records PAMB routing stays at 35 percent across authorized viewer contexts while MOV remains complete', function (): void {
+    $superAdmin = pambRoleUser('Super Admin', 'SUPER_ADMIN', 'PENRO Davao Oriental');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Baganga');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Baganga');
+    $records = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Baganga');
+    $report = pambReport($focal, [
+        'target_office' => 'CENRO Baganga',
+        'mov_processing_status' => PambMovProcessingService::READY_FOR_RELEASE,
+        'date_report_released_cenro' => '2026-08-04',
+    ]);
+    $presenter = app(DocumentRoutingPresenter::class);
+    $pamb = [
+        'routing_complete' => false,
+        'routing_summary' => [],
+        'timeline' => [[
+            'key' => SubmissionTrackingService::CENRO_RELEASE,
+            'stage_key' => SubmissionTrackingService::CENRO_RELEASE,
+            'status' => 'current',
+            'held_at' => 'CENRO Records Unit',
+            'occurred_at' => '2026-08-04T09:00:00+08:00',
+        ]],
+    ];
+
+    $percentages = collect([$superAdmin, $focal, $chief, $records])->map(function (User $viewer) use ($presenter, $report, $pamb): int {
+        $this->actingAs($viewer);
+        return $presenter->presentPamb($report->fresh(), $pamb)['processing_percentage'];
+    });
+
+    expect($percentages->all())->toBe([35, 35, 35, 35])
+        ->and(app(PambMovProcessingService::class)->present($report->fresh())['percent'])->toBe(100);
+
+    $pamb['timeline'][0]['stage_key'] = PambRoutingTimelineService::RECORDS_RECEIVED;
+    $pamb['timeline'][0]['key'] = PambRoutingTimelineService::RECORDS_RECEIVED;
+    expect($presenter->presentPamb($report->fresh(), $pamb)['processing_percentage'])->toBeLessThan(100);
+
+    $pamb['timeline'][0]['stage_key'] = PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF;
+    $pamb['timeline'][0]['key'] = PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF;
+    expect($presenter->presentPamb($report->fresh(), $pamb)['processing_percentage'])->toBe(100);
 });
 
 test('CENRO office scope and PAMO protected-area scope are enforced on tracking and attachments', function (): void {
@@ -514,8 +557,8 @@ test('Submission Tracking serves original Conservation MOVs through the protecte
 
     expect($row['mov_url'])->toBe($protectedUrl)
         ->and($row['mov_attachment']['url'])->toBe($protectedUrl)
-        ->and($row['current_document']['preview_url'])->toBe($protectedUrl)
-        ->and($row['current_document']['download_url'])->toBe($protectedUrl)
+        ->and($row['current_document']['preview_url'])->toBe($protectedUrl.'?preview=1')
+        ->and($row['current_document']['download_url'])->toBe($protectedUrl.'?download=1')
         ->and($row['current_document']['source'])->toBe('Original MOV / report');
 
     $this->get($row['current_document']['preview_url'])

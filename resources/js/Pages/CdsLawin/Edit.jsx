@@ -107,7 +107,7 @@ export default function Edit({ auth, lawin }) {
                                     type="submit"
                                     disabled={processing}
                                     className="bg-green-700 hover:bg-green-800 text-white px-4 py-2 rounded-md text-sm font-medium shadow"
-                                >
+                                 data-cds-action="true" data-cds-action-variant="primary">
                                     Update Record
                                 </button>
                             </div>

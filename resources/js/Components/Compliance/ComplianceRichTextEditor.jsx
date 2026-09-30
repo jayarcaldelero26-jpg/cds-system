@@ -173,6 +173,8 @@ export default function ComplianceRichTextEditor({ id, label, value = '', onChan
         onMouseDown={event => event.preventDefault()}
         onClick={onClick}
         className={`rounded px-2 py-1 text-xs font-bold transition ${active ? 'bg-green-700 text-white' : 'text-gray-700 hover:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-700'} disabled:cursor-not-allowed disabled:opacity-50`}
+        data-cds-action="true"
+        data-cds-action-variant="primary"
     >{text}</button>;
 
     return <div className="min-w-0 space-y-1.5">

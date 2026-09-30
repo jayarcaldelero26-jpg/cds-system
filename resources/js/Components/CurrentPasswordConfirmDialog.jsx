@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import Button from '@/Components/Button';
 
 export default function CurrentPasswordConfirmDialog({ open, onCancel, onConfirmed, message = 'Confirm your current password to continue.', confirmLabel = 'Confirm and continue' }) {
     const [password, setPassword] = useState('');
@@ -116,8 +117,8 @@ export default function CurrentPasswordConfirmDialog({ open, onCancel, onConfirm
                     {error && <p id="current-password-error" className="mt-2 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
                 </div>
                 <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-                    <button type="button" onClick={cancel} disabled={processing} className="h-11 rounded-lg border border-gray-300 px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800">Cancel</button>
-                    <button type="submit" disabled={processing || !password} className="h-11 rounded-lg bg-green-700 px-4 text-sm font-semibold text-white transition hover:bg-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus-visible:ring-offset-gray-900">{processing ? 'Confirming…' : confirmLabel}</button>
+                    <Button type="button" size="compact" variant="cancel" onClick={cancel} disabled={processing} className="h-11 rounded-lg px-4 text-sm">Cancel</Button>
+                    <Button type="submit" size="compact" variant="primary" disabled={processing || !password} className="h-11 rounded-lg px-4 text-sm">{processing ? 'Confirming…' : confirmLabel}</Button>
                 </div>
             </form>
         </section>
