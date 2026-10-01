@@ -17,7 +17,7 @@ test("shared buttons preserve variant semantics and apply restrained interaction
         "primary: actionGradient",
         "secondary: `border border-green-950 ${actionGradient}`",
         "danger: `border border-red-800 ${dangerGradient}`",
-        "warning: `border border-green-950 ${actionGradient}`",
+        "warning: 'border border-orange-800 bg-gradient-to-b from-orange-600 to-orange-900 text-white hover:from-orange-500 hover:to-orange-800'",
         "ghost: actionGradient",
         "cancel: neutralAction",
         "back: neutralAction",
@@ -33,7 +33,8 @@ test("shared buttons preserve variant semantics and apply restrained interaction
     assert.match(styles, /prefers-reduced-motion: reduce\)[\s\S]*?\.cds-button-interaction,[\s\S]*?\[data-cds-action="true"\]\s*\{\s*transform: none !important;\s*transition: none !important;/);
     assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="danger"\][\s\S]*?linear-gradient\(180deg, #b91c1c 0%, #f87171 100%\)/);
     assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="cancel"\]/);
-    assert.match(styles, /button\[role="tab"\]\[aria-selected="true"\][\s\S]*?linear-gradient\(105deg, #15803d 0%, #bbf7d0 100%\)/);
+    assert.match(styles, /--cds-selected-tab-gradient:\s*linear-gradient\(105deg, #16a34a 0%, #86efac 100%\)/);
+    assert.match(styles, /button\[role="tab"\]\[aria-selected="true"\][\s\S]*?background-image: var\(--cds-selected-tab-gradient\)/);
     assert.match(styles, /nav\[aria-label="Dashboard program tabs"\] button\[aria-current="page"\]/);
 });
 
@@ -79,8 +80,11 @@ test("shared modal, confirmation, export, and PAMB action controls retain their 
     assert.match(awsExport, /onClick=\{exportFile\} disabled=\{!selectedFormat \|\| Boolean\(generating\)\}/);
     assert.match(spatialLayers, /<Button[^>]*onClick=\{\(\) => zoomTo\(layer\)\}/);
     assert.match(spatialLayers, /variant="danger" onClick=\{\(\) => setLayerToDelete\(layer\)\}/);
-    assert.match(notifications, /<Button[^>]*onClick=\{\(\) => request\('\/notifications\/clear', 'POST'\)\}/);
-    assert.match(notifications, /<Button[^>]*onClick=\{\(\) => openNotification\(notification\)\}/);
+    assert.ok(notifications.includes('<UtilityIconButton'));
+    assert.ok(notifications.includes('aria-label="Notifications"'));
+    assert.match(notifications, /onClick=\{\(\) => request\('\/notifications\/clear', 'POST'\)\}/);
+    assert.doesNotMatch(notifications, /<Button[^>]*Clear Notifications/);
+    assert.match(notifications, /onClick=\{\(\) => openNotification\(notification\)\}/);
     assert.doesNotMatch(imea, /<button\b/);
     assert.match(diagnostics, /<Button[^>]*onClick=\{run\}/);
     assert.match(diagnostics, /<Button[^>]*onClick=\{copy\}/);

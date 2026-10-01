@@ -28,7 +28,7 @@ import SharedTooltip from '@/Components/Tooltip';
 
 const floraIcon = L.divIcon({
   className: 'custom-marker',
-  html: `<div style="background-color: #16a34a; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">🌱</div>`,
+  html: `<div style="background-color: #16a34a; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">ðŸŒ±</div>`,
   iconSize: [30, 30],
   iconAnchor: [15, 15],
   popupAnchor: [0, -15]
@@ -36,7 +36,7 @@ const floraIcon = L.divIcon({
 
 const faunaIcon = L.divIcon({
   className: 'custom-marker',
-  html: `<div style="background-color: #d97706; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">🐾</div>`,
+  html: `<div style="background-color: #d97706; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">ðŸ¾</div>`,
   iconSize: [30, 30],
   iconAnchor: [15, 15],
   popupAnchor: [0, -15]
@@ -44,7 +44,7 @@ const faunaIcon = L.divIcon({
 
 const threatIcon = L.divIcon({
   className: 'custom-marker',
-  html: `<div style="background-color: #dc2626; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">⚠️</div>`,
+  html: `<div style="background-color: #dc2626; width: 30px; height: 30px; border-radius: 50%; border: 3px solid white; box-shadow: 0 3px 6px rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; color: white; font-size: 14px;">âš ï¸</div>`,
   iconSize: [30, 30],
   iconAnchor: [15, 15],
   popupAnchor: [0, -15]
@@ -75,7 +75,7 @@ const formatStationDisplay = (stationStr) => {
 
 const calculateTrendStatus = (points) => {
   const n = points.length;
-  if (n < 2) return { slope: 0, status: '➡️ Insufficient Data (Requires 2+ Semesters)' };
+  if (n < 2) return { slope: 0, status: 'âž¡ï¸ Insufficient Data (Requires 2+ Semesters)' };
 
   let sumX = 0,sumY = 0,sumXY = 0,sumXX = 0;
   points.forEach((p, index) => {
@@ -88,15 +88,15 @@ const calculateTrendStatus = (points) => {
   });
 
   const denominator = n * sumXX - sumX * sumX;
-  if (denominator === 0) return { slope: 0, status: '➡️ Stable (No Fluctuation)' };
+  if (denominator === 0) return { slope: 0, status: 'âž¡ï¸ Stable (No Fluctuation)' };
 
   const slope = (n * sumXY - sumX * sumY) / denominator;
 
-  let status = '➡️ Stable (No Significant Change)';
+  let status = 'âž¡ï¸ Stable (No Significant Change)';
   if (slope > 0.05) {
-    status = '📈 Increasing (Growing Population)';
+    status = 'ðŸ“ˆ Increasing (Growing Population)';
   } else if (slope < -0.05) {
-    status = '📉 Decreasing (Declining Population)';
+    status = 'ðŸ“‰ Decreasing (Declining Population)';
   }
 
   return { slope, status };
@@ -689,8 +689,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
   { key: 'date_location', label: 'Date / Location', render: (record) => <><div className="font-semibold">{record.monitoring_date || 'N/A'}</div><SharedTooltip content={record.location}><div tabIndex={0} className="max-w-[150px] truncate text-[11px] text-gray-500 outline-none">{record.location || 'No location'}</div></SharedTooltip></> },
   { key: 'station_time', label: 'Station / Time', render: (record) => <><div className="font-bold text-green-700 dark:text-green-400">{record.station || '-'}</div><div className="text-[11px] text-gray-500">{record.time || '-'}</div></> },
   { key: 'category_group', label: 'Category / Group', render: (record) => <><span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="mt-1 text-[11px] capitalize text-gray-500">{record.taxonomic_group || '-'}</div></> },
-  { key: 'species', label: 'Species (Scientific / Common Name)', render: (record) => {const isNew = checkIsNewSpeciesRecord(record);const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700" data-cds-action="true" data-cds-action-variant="primary">✓ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{record.species_common_name || ''}</div></>;} },
-  { key: 'count', label: 'Count', cellClassName: 'text-center font-bold', headerClassName: 'text-center', render: (record) => record.count ?? '—' },
+  { key: 'species', label: 'Species (Scientific / Common Name)', render: (record) => {const isNew = checkIsNewSpeciesRecord(record);const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">âœ¨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700" data-cds-action="true" data-cds-action-variant="primary">âœ“ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{record.species_common_name || ''}</div></>;} },
+  { key: 'count', label: 'Count', cellClassName: 'text-center font-bold', headerClassName: 'text-center', render: (record) => record.count ?? 'â€”' },
   { key: 'mode_of_observation', label: 'Mode', cellClassName: 'text-center', headerClassName: 'text-center', render: (record) => <span className="rounded-lg bg-gray-100 px-2 py-0.5 text-[11px] font-medium dark:bg-gray-700">{record.mode_of_observation || 'Seen'}</span> },
   { key: 'coordinates', label: 'GPS Coordinates', cellClassName: 'font-mono text-[11px]', render: (record) => record.latitude && record.longitude && Number.isFinite(Number.parseFloat(record.latitude)) && Number.isFinite(Number.parseFloat(record.longitude)) ? `${Number.parseFloat(record.latitude).toFixed(4)}, ${Number.parseFloat(record.longitude).toFixed(4)}` : <span className="italic text-gray-400">No GPS</span> }];
 
@@ -748,25 +748,25 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     <div className="no-print flex flex-col gap-2 border-b border-gray-200 pb-3 dark:border-gray-700 xl:flex-row xl:items-center xl:justify-between">
                         <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 xl:pb-0">
                         <button onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
-                            📄 Species Records
+                            ðŸ“„ Species Records
                         </button>
                         <button onClick={() => setActiveTab('semestral')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
-                            📊 Semestral Population Trends
+                            ðŸ“Š Semestral Population Trends
                         </button>
                         <button onClick={() => setActiveTab('threats')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'bg-red-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="danger">
-                            ⚠️ Threats
+                            âš ï¸ Threats
                         </button>
                         <button onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
-                            🗺️ Map View
+                            ðŸ—ºï¸ Map View
                         </button>
 
                         </div>
                         {(canCreateBms || canManageBmsSpatial) && <div className="flex shrink-0 items-center gap-2 overflow-x-auto xl:justify-end">
                         {canCreateBms && <button onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
-                            📁 Excel / CSV Bulk Import
+                            ðŸ“ Excel / CSV Bulk Import
                         </button>}
                         {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
-                            🗺️📁 Import GeoJSON Spatial File
+                            ðŸ—ºï¸ðŸ“ Import GeoJSON Spatial File
                         </button>}
                         </div>}
                     </div>                    )}
@@ -778,9 +778,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     {/* TAB 1: SPECIES RECORDS VIEW */}
                     {activeTab === 'list' &&
           <div className={viewMode === 'pdf' ? "w-full space-y-4 bg-white border-0 p-0 shadow-none" : "w-full space-y-4"}>
-                            <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm no-print">
+                            <div className="cds-card-surface flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm no-print">
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-gray-600 dark:text-gray-400 pl-1">📋 View Layout:</span>
+                                    <span className="text-xs font-bold text-gray-600 dark:text-gray-400 pl-1">ðŸ“‹ View Layout:</span>
                                     <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 p-1 rounded-xl border border-gray-200 dark:border-gray-700">
                                         <button onClick={() => setViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">Species Database</button>
                                         <button onClick={() => setViewMode('pdf')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${viewMode === 'pdf' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">PDF Annex Simulator</button>
@@ -804,26 +804,26 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     observer: annexHeaderMetadata?.observer || ''
                   });
                   setShowEditHeaderModal(true);
-                }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">✏️ Edit Header Details</button>}
-                                        {canExportBms && <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">📥 Export CSV</button>}
-                                        {canExportBms && <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">🖨️ Save as PDF / Print</button>}
+                }} className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">âœï¸ Edit Header Details</button>}
+                                        {canExportBms && <button onClick={exportAnnexToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">ðŸ“¥ Export CSV</button>}
+                                        {canExportBms && <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">ðŸ–¨ï¸ Save as PDF / Print</button>}
                                     </div>
               }
                             </div>
 
-                            <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col md:flex-row justify-between items-center gap-4 no-print">
+                            <div className="cds-card-surface bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 flex flex-col md:flex-row justify-between items-center gap-4 no-print">
                                 <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
                                     <div className="w-52">
 
                                         <FloatingSelect id="index-protected-area" label="Protected Area" value={filters?.protected_area_id || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, protected_area_id: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}}>
-                                            <option value="">🌐 All Protected Areas</option>
+                                            <option value="">ðŸŒ All Protected Areas</option>
                                             {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                         </FloatingSelect>
                                     </div>
                                     <div className="w-36">
 
                                         <FloatingSelect id="index-category" label="Category" value={filters?.category || ''} onChange={(e) => {router.get(route('bms.index'), { ...filters, category: e.target.value || undefined }, { preserveState: true, preserveScroll: true, replace: true });}}>
-                                            <option value="">🌿 All Categories</option>
+                                            <option value="">ðŸŒ¿ All Categories</option>
                                             <option value="Flora">Flora</option>
                                             <option value="Fauna">Fauna</option>
                                         </FloatingSelect>
@@ -833,11 +833,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 {viewMode === 'table' && canDeleteBms &&
               <div className="flex items-center gap-2 self-end md:self-auto">
                                         {!isSelectionMode ?
-                <button onClick={() => setIsSelectionMode(true)} className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="danger">☑️ Enable Select to Delete</button> :
+                <button onClick={() => setIsSelectionMode(true)} className="bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border border-gray-300 dark:border-gray-600 px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-xs h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="danger">â˜‘ï¸ Enable Select to Delete</button> :
 
                 <div className="flex items-center gap-2">
-                                                {selectedIds.length > 0 && <button onClick={() => setShowBulkDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm animate-pop-in h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="danger">🗑️ Delete ({selectedIds.length})</button>}
-                                                <button onClick={() => {setIsSelectionMode(false);setSelectedIds([]);}} className="bg-gray-500 hover:bg-gray-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="cancel">✕ Cancel</button>
+                                                {selectedIds.length > 0 && <button onClick={() => setShowBulkDeleteConfirm(true)} className="bg-red-600 hover:bg-red-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm animate-pop-in h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="danger">ðŸ—‘ï¸ Delete ({selectedIds.length})</button>}
+                                                <button onClick={() => {setIsSelectionMode(false);setSelectedIds([]);}} className="bg-gray-500 hover:bg-gray-600 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm h-[38px] flex items-center" data-cds-action="true" data-cds-action-variant="cancel">âœ• Cancel</button>
                                             </div>
                 }
                                     </div>
@@ -865,7 +865,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                             </div>
                                             <div className="text-center space-y-0.5 pt-1 pb-1">
                                                 <h4 style={{ fontSize: '11pt' }} className="font-bold tracking-wider text-black uppercase">CONSERVATION AND DEVELOPMENT DIVISION</h4>
-                                                <h2 style={{ fontSize: '12pt' }} className="font-extrabold uppercase tracking-wide text-black">{filters?.category === 'Fauna' ? 'ANNEX 1-A.2 – SUMMARY OF TRANSECT DATA' : filters?.category === 'Flora' ? 'ANNEX 1-A.1 – SUMMARY OF TRANSECT DATA' : 'ANNEX 1-A.1 & 1-A.2 – SUMMARY OF TRANSECT DATA'}</h2>
+                                                <h2 style={{ fontSize: '12pt' }} className="font-extrabold uppercase tracking-wide text-black">{filters?.category === 'Fauna' ? 'ANNEX 1-A.2 â€“ SUMMARY OF TRANSECT DATA' : filters?.category === 'Flora' ? 'ANNEX 1-A.1 â€“ SUMMARY OF TRANSECT DATA' : 'ANNEX 1-A.1 & 1-A.2 â€“ SUMMARY OF TRANSECT DATA'}</h2>
                                             </div>
                                             <div style={{ fontSize: '12pt' }} className="leading-snug pt-1">
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
@@ -934,9 +934,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     {/* TAB 2: SEMESTRAL POPULATION MONITORING & TRENDS VIEW */}
                     {activeTab === 'semestral' &&
           <div className={semestralViewMode === 'pdf' ? "w-full space-y-4 bg-white border-0 p-0 shadow-none" : "w-full space-y-4"}>
-                            <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm no-print">
+                            <div className="cds-card-surface flex justify-between items-center bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-sm no-print">
                                 <div className="flex items-center gap-2">
-                                    <span className="text-xs font-bold text-gray-600 dark:text-gray-400 pl-1">📊 Trend Layout:</span>
+                                    <span className="text-xs font-bold text-gray-600 dark:text-gray-400 pl-1">ðŸ“Š Trend Layout:</span>
                                     <div className="flex items-center gap-1 bg-gray-50 dark:bg-gray-900 p-1 rounded-xl border border-gray-200 dark:border-gray-700">
                                         <button onClick={() => setSemestralViewMode('table')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'table' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">Trend Table</button>
                                         <button onClick={() => setSemestralViewMode('graph')} className={`px-4 py-1.5 rounded-lg text-xs font-bold transition ${semestralViewMode === 'graph' ? 'bg-green-700 text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800'}`} data-cds-action="true" data-cds-action-variant="primary">Visual Graph</button>
@@ -946,11 +946,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 {canExportBms && <div className="flex items-center gap-2">
                                     {semestralViewMode === 'pdf' ?
                 <>
-                                            <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">📥 Export CSV</button>
-                                            <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">🖨️ Save as PDF / Print</button>
+                                            <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">ðŸ“¥ Export CSV</button>
+                                            <button onClick={() => window.print()} className="bg-green-700 hover:bg-green-800 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">ðŸ–¨ï¸ Save as PDF / Print</button>
                                         </> :
 
-                <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">📥 Export to Excel / CSV</button>
+                <button onClick={exportSemestralToCSV} className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-sm flex items-center gap-1.5" data-cds-action="true" data-cds-action-variant="primary">ðŸ“¥ Export to Excel / CSV</button>
                 }
                                 </div>}
                             </div>
@@ -959,14 +959,14 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 <div className="w-64">
 
                                     <FloatingSelect id="index-protected-area-filter" label="Protected Area Filter" value={semestralPaFilter} onChange={(e) => setSemestralPaFilter(e.target.value)} size="sm">
-                                        <option value="All">🌐 All Protected Areas</option>
+                                        <option value="All">ðŸŒ All Protected Areas</option>
                                         {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                     </FloatingSelect>
                                 </div>
                                 <div className="w-48">
 
                                     <FloatingSelect id="index-year-filter" label="Year Filter" value={graphYearFilter} onChange={(e) => setGraphYearFilter(e.target.value)} size="sm">
-                                        <option value="All">📅 All Years</option>
+                                        <option value="All">ðŸ“… All Years</option>
                                         {getAvailableYears().map((yr) => <option key={yr} value={yr}>{yr}</option>)}
                                     </FloatingSelect>
                                 </div>
@@ -976,11 +976,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 {semestralViewMode === 'table' &&
               <div>
                                         <div className="mb-4">
-                                            <h3 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">📊 Semestral Population Trend Analysis</h3>
+                                            <h3 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">ðŸ“Š Semestral Population Trend Analysis</h3>
                                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Evaluating population patterns across historical semesters to identify growth, decline, or stability.</p>
                                         </div>
                                         <div className="overflow-x-auto custom-table-scrollbar">
-                                            <table className="w-full text-left border-collapse border border-gray-200 dark:border-gray-700 text-xs">
+                                            <table className="cds-data-table w-full text-left border-collapse border border-gray-200 dark:border-gray-700 text-xs">
                                                 <thead className="bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300 uppercase font-bold">
                                                     <tr>
                                                         <th className="border border-gray-200 dark:border-gray-700 p-3">Species Name</th>
@@ -1001,8 +1001,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                                                             <span className="italic font-bold text-gray-900 dark:text-white">{item.species}</span>
                                                                             {item.isNewSpecies && !isAcknowledged && canUpdateBms &&
                                 <div className="flex items-center gap-1.5">
-                                                                                    <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">✨ New Species</span>
-                                                                                    <SharedTooltip content="Click to acknowledge and remove highlight"><button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" data-cds-action="true" data-cds-action-variant="primary">✓ Acknowledge</button></SharedTooltip>
+                                                                                    <span className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300 px-2 py-0.5 rounded-lg text-[10px] font-extrabold uppercase animate-pulse">âœ¨ New Species</span>
+                                                                                    <SharedTooltip content="Click to acknowledge and remove highlight"><button onClick={() => handleAcknowledge(speciesKey)} className="text-[10px] bg-gray-200 dark:bg-gray-700 hover:bg-green-600 hover:text-white px-2 py-0.5 rounded-lg font-semibold transition" data-cds-action="true" data-cds-action-variant="primary">âœ“ Acknowledge</button></SharedTooltip>
                                                                                 </div>
                                 }
                                                                         </div>
@@ -1028,7 +1028,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 {semestralViewMode === 'graph' &&
               <div>
                                         <div className="mb-4">
-                                            <h3 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">📈 Species Population Trend Visual Graph</h3>
+                                            <h3 className="text-xl font-extrabold text-gray-900 dark:text-white tracking-tight">ðŸ“ˆ Species Population Trend Visual Graph</h3>
                                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Line chart showing population counts across monitored semesters ({graphYearFilter === 'All' ? 'All Years' : `Year ${graphYearFilter}`}).</p>
                                         </div>
                                         <div className="bg-gray-50 dark:bg-gray-900/50 p-4 rounded-2xl border border-gray-200 dark:border-gray-700">
@@ -1130,7 +1130,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
 
                     {/* TAB 5: ADD SINGLE FORM */}
                     {activeTab === 'add' &&
-          <CrudFormModal open mode="create" icon="🌿" title="Add Field Observation Data" subtitle="Create a BMS species observation from the Transect Data Summary." onClose={closeAddForm} onSubmit={submitRecord} processing={form.processing} errors={form.errors} saveLabel="Save Field Record" maxWidth="max-w-4xl">
+          <CrudFormModal open mode="create" icon="ðŸŒ¿" title="Add Field Observation Data" subtitle="Create a BMS species observation from the Transect Data Summary." onClose={closeAddForm} onSubmit={submitRecord} processing={form.processing} errors={form.errors} saveLabel="Save Field Record" maxWidth="max-w-4xl">
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
                                     <div>
 
@@ -1147,7 +1147,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                    <div className="md:col-span-4"><h4 className="font-bold text-green-700 dark:text-green-400 border-b border-gray-200 dark:border-gray-700 pb-2">🔍 Observation Details (Table Entry)</h4></div>
+                                    <div className="md:col-span-4"><h4 className="font-bold text-green-700 dark:text-green-400 border-b border-gray-200 dark:border-gray-700 pb-2">ðŸ” Observation Details (Table Entry)</h4></div>
                                     <div>
 
                                         <FloatingInput id="index-station" label="Station" type="text" placeholder="e.g. 0, 1, 2 or 0-1" value={form.data.station} onChange={(e) => form.setData('station', e.target.value)} />
@@ -1198,7 +1198,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-4">
                                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
 
-                                        <FloatingSelect id="index-coordinate-format-input" label="🌍 Coordinate Format Input" value={coordType} onChange={(e) => setCoordType(e.target.value)}>
+                                        <FloatingSelect id="index-coordinate-format-input" label="ðŸŒ Coordinate Format Input" value={coordType} onChange={(e) => setCoordType(e.target.value)}>
                                             <option value="DD">Decimal Degrees (DD)</option>
                                             <option value="DMS">Degrees, Minutes, Seconds (DMS)</option>
                                             <option value="UTM">UTM Zone</option>
@@ -1271,7 +1271,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                     <FileInput id="index-csv-excel-file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} required />
                                     {importForm.errors.file && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{importForm.errors.file}</p>}
                                 </div>
-                                <button type="submit" disabled={importForm.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">🚀 Upload and Process Data</button>
+                                <button type="submit" disabled={importForm.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">ðŸš€ Upload and Process Data</button>
                             </form>
                         </div>
           }
@@ -1279,7 +1279,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     {/* TAB 7: GEOJSON SPATIAL FILE IMPORT */}
                     {canManageBmsSpatial && activeTab === 'geojson-import' &&
           <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">🗺️📁 Import Spatial Boundaries / Transects (GeoJSON)</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">ðŸ—ºï¸ðŸ“ Import Spatial Boundaries / Transects (GeoJSON)</h3>
                             <p className="text-sm text-gray-500 mb-6">Upload a `.geojson` or `.json` spatial file to render park boundaries, zones, or transect lines directly on the map.</p>
                             <form onSubmit={submitGeoJsonImport} className="space-y-5">
                                 <div>
@@ -1297,7 +1297,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                     <FileInput id="index-geojson-json-spatial-file" type="file" accept=".geojson, .json, .zip" onChange={(e) => geoJsonForm.setData('file', e.target.files[0])} required />
                                     {(geoJsonForm.errors.file || geoJsonForm.errors.spatial_file) && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{geoJsonForm.errors.file || geoJsonForm.errors.spatial_file}</p>}
                                 </div>
-                                <button type="submit" disabled={geoJsonForm.processing} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">🚀 Upload and Map Spatial Boundaries</button>
+                                <button type="submit" disabled={geoJsonForm.processing} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">ðŸš€ Upload and Map Spatial Boundaries</button>
                             </form>
                         </div>
           }
@@ -1309,8 +1309,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
                     <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 animate-pop-in max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
-                            <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">✏️ Edit Annex Header Details</h3><p className="text-xs text-gray-500">Update the summary metadata at the top of the Annex report.</p></div>
-                            <button onClick={() => setShowEditHeaderModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">✕</button>
+                            <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">âœï¸ Edit Annex Header Details</h3><p className="text-xs text-gray-500">Update the summary metadata at the top of the Annex report.</p></div>
+                            <button onClick={() => setShowEditHeaderModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">âœ•</button>
                         </div>
                         <form onSubmit={submitHeaderEdit} className="space-y-4 text-sm">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1336,24 +1336,24 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                             </div>
                             <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
                                 <button type="button" onClick={() => setShowEditHeaderModal(false)} className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
-                                <button type="submit" disabled={annexHeaderForm.processing} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="primary">💾 Save Header Changes</button>
+                                <button type="submit" disabled={annexHeaderForm.processing} className="px-5 py-2 bg-green-700 hover:bg-green-800 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="primary">ðŸ’¾ Save Header Changes</button>
                             </div>
                         </form>
                     </div>
                 </div>
       }
 
-            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || '—' }, { label: 'Category', value: editingRecord.category || '—' }, { label: 'Station', value: editingRecord.station || '—' }, { label: 'Count', value: editingRecord.count ?? '—' }]} />}>
+            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="ðŸŒ¿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} Â· ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || 'â€”' }, { label: 'Category', value: editingRecord.category || 'â€”' }, { label: 'Station', value: editingRecord.station || 'â€”' }, { label: 'Count', value: editingRecord.count ?? 'â€”' }]} />}>
                 {editingRecord && <div className="space-y-4">
-                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || '—'}</dd></div>)}</dl></CrudSection>
-                    <CrudSection title="GPS Coordinates"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl></CrudSection>
-                    <CrudSection title="Additional Observation Notes"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Observer', editingRecord.observer_name], ['Elevation', editingRecord.elevation]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl><p className="mt-4 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
+                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || 'â€”'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="GPS Coordinates"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || 'â€”'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="Additional Observation Notes"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Observer', editingRecord.observer_name], ['Elevation', editingRecord.elevation]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || 'â€”'}</dd></div>)}</dl><p className="mt-4 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
                 </div>}
             </CrudDetailsModal>
 
             {/* SPECIES EDIT MODAL */}
             {editingRecord && isEditingRecord &&
-      <CrudFormModal open mode="edit" icon="✏️" title="Edit Species Record" subtitle={editingRecord.species_scientific_name} onClose={() => {editForm.clearErrors();setActionError('');setIsEditingRecord(false);}} onSubmit={submitEdit} processing={editForm.processing} errors={editForm.errors} canDelete={canDeleteBms} onDelete={() => setShowDeleteConfirm(true)} maxWidth="max-w-4xl">
+      <CrudFormModal open mode="edit" icon="âœï¸" title="Edit Species Record" subtitle={editingRecord.species_scientific_name} onClose={() => {editForm.clearErrors();setActionError('');setIsEditingRecord(false);}} onSubmit={submitEdit} processing={editForm.processing} errors={editForm.errors} canDelete={canDeleteBms} onDelete={() => setShowDeleteConfirm(true)} maxWidth="max-w-4xl">
                             {actionError && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert">{actionError}</div>}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-2xl border border-green-100 bg-green-50/50 p-4 dark:border-green-900 dark:bg-green-950/20">
                                 <div><FloatingSelect id="index-protected-area" label="Protected Area" value={editForm.data.protected_area_id} onChange={(e) => editForm.setData('protected_area_id', e.target.value)} required><option value="">Select Protected Area</option>{protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</FloatingSelect>{fieldError(editForm.errors, 'protected_area_id')}</div>
@@ -1382,7 +1382,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                             <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-4">
                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
 
-                                    <FloatingSelect id="index-coordinate-format-input" label="🌍 Coordinate Format Input" value={editCoordType} onChange={(e) => setEditCoordType(e.target.value)}>
+                                    <FloatingSelect id="index-coordinate-format-input" label="ðŸŒ Coordinate Format Input" value={editCoordType} onChange={(e) => setEditCoordType(e.target.value)}>
                                         <option value="DD">Decimal Degrees (DD)</option>
                                         <option value="DMS">Degrees, Minutes, Seconds (DMS)</option>
                                         <option value="UTM">UTM Zone</option>

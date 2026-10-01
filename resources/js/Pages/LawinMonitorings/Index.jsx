@@ -7,6 +7,7 @@ import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
 import Tooltip from '../../Components/Tooltip';
+import FilterToolbar from '../../Components/Form/FilterToolbar';
 
 const statusVariants = {
   'Approved': 'active',
@@ -21,6 +22,12 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
 
 
   const visit = (params) => router.get('/lawin-monitorings', { ...filters, search, ...params }, { preserveState: true, replace: true });
+  const appliedFilters = [
+    ...(filters?.search ? [{ key: 'search', label: 'Search', value: filters.search, onRemove: () => { setSearch(''); visit({ search: undefined }); } }] : []),
+    ...(filters?.cenro ? [{ key: 'cenro', label: 'CENRO / Station', value: filters.cenro, onRemove: () => visit({ cenro: undefined, page: 1 }) }] : []),
+    ...(filters?.status ? [{ key: 'status', label: 'Status', value: filters.status, onRemove: () => visit({ status: undefined, page: 1 }) }] : []),
+  ];
+  const clearFilters = () => { setSearch(''); visit({ search: undefined, cenro: undefined, status: undefined, page: 1 }); };
   const remove = () => router.delete(`/lawin-monitorings/${deleting.id}`, { onFinish: () => setDeleting(null) });
 
   const columns = [
@@ -119,20 +126,16 @@ export default function Index({ monitorings = { data: [] }, filters = {}, cenroL
 
             <FloatingInput variant="legacy" id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search threats, remarks, or CENRO..." size="sm" />
                     </div>
-                    <div>
-
-            <FloatingSelect variant="legacy" id="index-cenro-station" label="CENRO / Station" value={filters?.cenro || ''} onChange={(e) => visit({ cenro: e.target.value, page: 1 })}>
+                    <div className="md:col-span-2"><FilterToolbar chips={appliedFilters} onClear={clearFilters}>
+            <div className="grid gap-3 sm:grid-cols-2"><FloatingSelect variant="legacy" id="index-cenro-station" label="CENRO / Station" value={filters?.cenro || ''} onChange={(e) => visit({ cenro: e.target.value, page: 1 })}>
                             <option value="">All CENRO / Stations</option>
                             {safeCenroList.map((cenro) => <option key={cenro} value={cenro}>{cenro}</option>)}
                         </FloatingSelect>
-                    </div>
-                    <div>
-
             <FloatingSelect variant="legacy" id="index-status" label="Status" value={filters?.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {safeStatuses.map((st) => <option key={st} value={st}>{st}</option>)}
                         </FloatingSelect>
-                    </div>
+            </div></FilterToolbar></div>
                     <div className="flex items-end md:col-span-4">
                         <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">Search Filter</button>
                     </div>

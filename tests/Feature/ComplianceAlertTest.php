@@ -2,12 +2,14 @@
 
 use App\Mail\OverdueComplianceMemorandum;
 use App\Models\BmsReportSubmission;
+use App\Models\BamsReportSubmission;
 use App\Models\ComplianceAlertRecipient;
 use App\Models\ComplianceAlertSetting;
 use App\Models\ComplianceDeliveryClaim;
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\ComplianceNotificationRun;
+use App\Models\DocumentRoutingEvent;
 use App\Models\ProtectedArea;
 use App\Models\ReportComplianceConfirmation;
 use App\Models\TechnicalReport;
@@ -315,24 +317,21 @@ test('multiple tracker models normalize into the same overdue DTO', function () 
         ->and($reports->pluck('module')->all())->not->toContain('Technical Reports');
 });
 
-test('authoritative PENRO receipt closes the active alert immediately and sends the report to Records verification', function () {
+test('authoritative PENRO receipt closes the active alert without creating a separate verification state', function () {
     $user = complianceUser(); $area = complianceArea($user);
     $report = bmsForDeadline($area, $user, '2026-08-24', ['date_received_penro' => '2026-08-25']);
     $service = app(OverdueReportService::class);
     expect($service->overdueReports())->toBeEmpty()
-        ->and($service->pendingRecordsVerification())->toHaveCount(1)
-        ->and($service->pendingRecordsVerification()->first()['source_id'])->toBe($report->id)
-        ->and($service->pendingRecordsVerification()->first()['submission_date'])->toBe('2026-08-25')
-        ->and($service->pendingRecordsVerification()->first()['submission_status'])->toBe('Pending Submission by CENRO');
+        ->and($service->sourceIsSubmitted($report))->toBeTrue();
 
     app(ComplianceConfirmationService::class)->confirm($report, $user, 'Received by Records');
 
     expect($service->overdueReports())->toBeEmpty()
-        ->and($service->pendingRecordsVerification())->toBeEmpty()
+        ->and($service->sourceIsSubmitted($report))->toBeTrue()
         ->and($service->confirmationHistory())->toHaveCount(1);
 });
 
-test('confirmed reports leave active Overview but remain in Records Confirmation History', function () {
+test('Compliance Alerts does not expose manual confirmation history while retaining its audit record', function () {
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
     $report = bmsForDeadline($area, $manager, '2026-08-24', ['date_received_penro' => '2026-08-25']);
@@ -340,20 +339,18 @@ test('confirmed reports leave active Overview but remain in Records Confirmation
 
     expect(app(OverdueReportService::class)->overdueReports())->toBeEmpty();
 
+    expect(ReportComplianceConfirmation::query()->where('source_type', BmsReportSubmission::class)->where('source_id', $report->id)->count())->toBe(1);
+
     $this->actingAs($manager)->get(route('compliance-alerts.index'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
             ->where('groups', [])
-            ->has('confirmationHistory', 1)
-            ->where('confirmationHistory.0.source_id', $report->id)
-            ->where('confirmationHistory.0.protected_area_name', 'Pujada Bay Protected Landscape')
-            ->where('confirmationHistory.0.target_office', 'PAMO Pujada Bay')
-            ->where('confirmationHistory.0.confirmed_by', $manager->name)
-            ->where('confirmationHistory.0.remarks', 'Received and stamped by Records.')
-            ->where('confirmationHistory.0.status', 'confirmed'));
+            ->missing('confirmationHistory')
+            ->missing('pendingRecordsVerification')
+            ->missing('runs'));
 });
 
-test('submitted but unconfirmed reports are visible in Pending Records Verification, not the active Overview', function () {
+test('submitted reports no longer appear in a duplicate pending verification panel', function () {
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
     $report = bmsForDeadline($area, $manager, '2026-08-24', ['date_received_penro' => '2026-08-25']);
@@ -363,10 +360,7 @@ test('submitted but unconfirmed reports are visible in Pending Records Verificat
         ->assertInertia(fn (Assert $page) => $page
             ->where('summary.overdue_reports', 0)
             ->where('groups', [])
-            ->has('pendingRecordsVerification', 1)
-            ->where('pendingRecordsVerification.0.source_id', $report->id)
-            ->where('pendingRecordsVerification.0.submission_date', '2026-08-25')
-            ->where('pendingRecordsVerification.0.records_confirmed', false));
+            ->missing('pendingRecordsVerification'));
 });
 
 test('successful Records confirmation returns the success flash and refreshed pending/history datasets', function () {
@@ -378,15 +372,133 @@ test('successful Records confirmation returns the success flash and refreshed pe
         'source_type' => BmsReportSubmission::class,
         'source_id' => $report->id,
         'remarks' => 'Verified by Records.',
-    ])->assertRedirect()->assertSessionHas('success', 'Records confirmation saved. The report has moved to Records Confirmation History.');
+    ])->assertRedirect()->assertSessionHas('success', 'Legacy Records confirmation audit event saved. Current receipt is determined by Submission Tracking.');
+
+    expect(ReportComplianceConfirmation::query()->where('source_type', BmsReportSubmission::class)->where('source_id', $report->id)->count())->toBe(1);
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->missing('pendingRecordsVerification')
+            ->missing('confirmationHistory'));
+});
+
+test('receipt state is source-specific and independent of the legacy confirmation ledger', function () {
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    $bms = bmsForDeadline($area, $manager, '2026-08-24', [
+        'date_received_penro' => '2026-08-25',
+        'mov_file_path' => null,
+    ]);
+    $bams = BamsReportSubmission::create([
+        'protected_area_id' => $area->id,
+        'target_office' => 'PAMO Pujada Bay',
+        'activity_name' => 'BAMS field report',
+        'document_type' => 'Final Report',
+        'semester' => '1st Semester',
+        'date_accomplished' => $bms->date_accomplished->toDateString(),
+        'date_received_penro' => null,
+        'mov_file_path' => null,
+        'created_by' => $manager->id,
+        'updated_by' => $manager->id,
+    ]);
+    expect($bams->id)->toBe($bms->id);
+
+    $service = app(OverdueReportService::class);
+    $initial = $service->overdueReports(CarbonImmutable::parse('2026-09-01', 'Asia/Manila'));
+    expect($initial->keyBy('sourceType')->get(BmsReportSubmission::class)->recordsConfirmed)->toBeTrue()
+        ->and($initial->keyBy('sourceType')->get(BamsReportSubmission::class)->recordsConfirmed)->toBeFalse()
+        ->and($service->sourceIsSubmitted($bms))->toBeTrue()
+        ->and($service->sourceIsSubmitted($bams))->toBeFalse();
+
+    $confirmations = app(ComplianceConfirmationService::class);
+    $confirmations->confirm($bms, $manager, 'Received by Records.');
+    $confirmed = $service->overdueReports(CarbonImmutable::parse('2026-09-01', 'Asia/Manila'))->keyBy('sourceType');
+    expect($confirmed->get(BmsReportSubmission::class)->recordsConfirmed)->toBeTrue()
+        ->and($confirmed->get(BmsReportSubmission::class)->recordsConfirmedBy)->toBe('PENRO Records')
+        ->and($confirmed->get(BamsReportSubmission::class)->recordsConfirmed)->toBeFalse();
+
+    $confirmations->unconfirm($bms, $manager, 'Correcting the receipt.');
+    expect($service->overdueReports(CarbonImmutable::parse('2026-09-01', 'Asia/Manila'))->keyBy('sourceType')->get(BmsReportSubmission::class)->recordsConfirmed)->toBeTrue();
+
+    $confirmations->confirm($bms, $manager, 'Reconfirmed by Records.');
+    expect($service->overdueReports(CarbonImmutable::parse('2026-09-01', 'Asia/Manila'))->keyBy('sourceType')->get(BmsReportSubmission::class)->recordsConfirmed)->toBeTrue();
+});
+
+test('PENRO receipt milestone is authoritative while CENRO release and later correction events do not substitute or erase it', function () {
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    $report = bmsForDeadline($area, $manager, '2026-08-24', ['mov_file_path' => null]);
+    $service = app(OverdueReportService::class);
+    $today = CarbonImmutable::parse('2026-09-01', 'Asia/Manila');
+
+    expect($service->overdueReports($today)->firstWhere('sourceId', $report->id)->recordsConfirmed)->toBeFalse();
+
+    $report->update(['date_report_released_cenro' => '2026-08-25']);
+    expect($service->overdueReports($today)->firstWhere('sourceId', $report->id)->recordsConfirmed)->toBeFalse();
+
+    $report->update(['date_received_penro' => '2026-08-26']);
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'bms', 'source_id' => $report->id, 'workflow_key' => null,
+        'event_key' => 'forwarded', 'from_stage' => 'penro_records', 'to_stage' => 'office_of_penro',
+        'occurred_at' => '2026-08-27 09:00:00', 'recorded_by' => $manager->id,
+    ]);
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'bms', 'source_id' => $report->id, 'workflow_key' => null,
+        'event_key' => 'returned_for_correction', 'from_stage' => 'office_of_penro', 'to_stage' => 'penro_records',
+        'occurred_at' => '2026-08-28 09:00:00', 'recorded_by' => $manager->id,
+    ]);
+
+    expect($service->overdueReports($today)->firstWhere('sourceId', $report->id)->recordsConfirmed)->toBeTrue();
+});
+
+test('PAMB and direct-PENRO submission receipt uses its PENRO receipt milestone', function () {
+    $user = complianceManager(complianceUser());
+    $area = complianceArea($user);
+    $pamb = ConservationReportSubmission::create([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'Hamiguitan',
+        'activity_name' => 'Direct PENRO PAMB', 'document_type' => 'MOV', 'date_conducted' => '2026-08-10',
+        'date_accomplished' => '2026-08-10', 'created_by' => $user->id, 'updated_by' => $user->id,
+    ]);
+    $service = app(OverdueReportService::class);
+
+    expect($service->sourceIsSubmitted($pamb))->toBeFalse();
+
+    $pamb->update(['date_received_penro' => '2026-08-12']);
+    \App\Models\PambRoutingEvent::query()->create([
+        'conservation_report_submission_id' => $pamb->id, 'workflow_key' => 'regular_pamb',
+        'stage_key' => \App\Services\SubmissionTracking\PambRoutingTimelineService::RECORDS_RECEIVED,
+        'occurred_at' => '2026-08-12 09:00:00', 'recorded_by' => $user->id,
+    ]);
+
+    expect($service->sourceIsSubmitted($pamb->fresh()))->toBeTrue();
+});
+
+test('operational report props reflect Submission Tracking receipt without pending verification props', function () {
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    $report = bmsForDeadline($area, $manager, '2026-08-24', [
+        'date_received_penro' => '2026-08-25',
+        'mov_file_path' => null,
+    ]);
+    app(ComplianceConfirmationService::class)->confirm($report, $manager, 'Received by Records.');
 
     $this->actingAs($manager)->get(route('compliance-alerts.index'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->where('pendingRecordsVerification', [])
-            ->has('confirmationHistory', 1)
-            ->where('confirmationHistory.0.source_id', $report->id)
-            ->where('confirmationHistory.0.remarks', 'Verified by Records.'));
+            ->where('groups', fn ($groups): bool => collect($groups)->flatMap(fn (array $group) => $group['reports'])->contains(fn (array $row): bool => $row['source_type'] === BmsReportSubmission::class && $row['source_id'] === $report->id && $row['records_confirmed'] === true))
+            ->missing('pendingRecordsVerification'));
+});
+
+test('a second sequential Records confirmation remains rejected without adding an event', function () {
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    $report = bmsForDeadline($area, $manager, '2026-08-24', ['date_received_penro' => '2026-08-25']);
+    $confirmations = app(ComplianceConfirmationService::class);
+    $confirmations->confirm($report, $manager, 'First receipt.');
+
+    expect(fn () => $confirmations->confirm($report, $manager, 'Duplicate receipt.'))
+        ->toThrow(\Illuminate\Validation\ValidationException::class);
+    expect(ReportComplianceConfirmation::query()->where('source_type', BmsReportSubmission::class)->where('source_id', $report->id)->count())->toBe(1);
 });
 
 test('confirmation history safely labels a missing source record', function () {
@@ -1011,19 +1123,19 @@ test('the compliance source registry covers every legitimate report submission t
         ->and($definitions[\App\Models\IpafRevenueCollection::class]['submitted'])->toBe('date_received_penro');
 });
 
-test('submitted reports are excluded from preview, manual, and automatic memorandum delivery while Records is pending', function () {
+test('reports with PENRO receipt remain excluded from preview and alert delivery', function () {
     Mail::fake();
     config()->set('compliance_alerts.enabled', true);
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
-    bmsForDeadline($area, $manager, '2026-08-24', ['date_received_penro' => '2026-08-25']);
+    $report = bmsForDeadline($area, $manager, '2026-08-24', ['date_received_penro' => '2026-08-25']);
     ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'pa@example.test', 'is_active' => true]);
     enabledComplianceSettings();
     $reports = app(OverdueReportService::class)->overdueReports();
 
     expect($reports)->toBeEmpty()
         ->and(app(ComplianceAlertDeliveryService::class)->deliveryPlan($reports)['deliveries'])->toBeEmpty()
-        ->and(app(OverdueReportService::class)->pendingRecordsVerification())->toHaveCount(1);
+        ->and(app(OverdueReportService::class)->sourceIsSubmitted($report))->toBeTrue();
 
     $this->actingAs($manager)->get(route('compliance-alerts.preview', ['destination_key' => 'pa:999999', 'alert_type' => ComplianceNotificationRun::ALERT_OVERDUE]))
         ->assertRedirect(route('compliance-alerts.index'))
@@ -1035,7 +1147,7 @@ test('submitted reports are excluded from preview, manual, and automatic memoran
     Mail::assertNothingSent();
 });
 
-test('IPAF Revenue Collection with a PENRO receipt is excluded from alerts and remains pending only for Records verification', function () {
+test('IPAF Revenue Collection receipt controls alert state while legacy confirmation events remain audit only', function () {
     $manager = complianceManager(complianceUser());
     $area = ProtectedArea::create([
         'name' => 'Aliwagwag Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Baganga',
@@ -1060,28 +1172,22 @@ test('IPAF Revenue Collection with a PENRO receipt is excluded from alerts and r
     ]);
 
     $service = app(OverdueReportService::class);
-    $pending = $service->pendingRecordsVerification()->firstWhere('source_id', $revenue->id);
     $plan = app(ComplianceAlertDeliveryService::class)->deliveryPlan($service->overdueReports());
 
     expect($service->overdueReports())->toBeEmpty()
         ->and($plan['deliveries'])->toBeEmpty()
-        ->and($pending)->not->toBeNull()
-        ->and($pending['module'])->toBe('IPAF Revenue Collection Report Submission Tracker')
-        ->and($pending['deadline'])->toBe('2026-07-20')
-        ->and($pending['submission_date'])->toBe('2026-07-29')
-        ->and($pending['submission_status'])->toBe('Pending Regional Endorsement')
-        ->and($pending['reporting_period'])->toBe('July 2026')
+        ->and($service->sourceIsSubmitted($revenue))->toBeTrue()
         ->and($revenue->timeliness)->toBe('Poor');
 
     app(ComplianceConfirmationService::class)->confirm($revenue, $manager, 'Revenue report received by Records.');
 
     expect($service->overdueReports())->toBeEmpty()
-        ->and($service->pendingRecordsVerification()->firstWhere('source_id', $revenue->id))->toBeNull()
+        ->and($service->sourceIsSubmitted($revenue->fresh()))->toBeTrue()
         ->and($service->confirmationHistory()->firstWhere('source_id', $revenue->id)['module'])->toBe('IPAF Revenue Collection Report Submission Tracker')
         ->and($revenue->fresh()->timeliness)->toBe('Poor');
 });
 
-test('every registered source follows receipt-based alert eligibility and independent Records verification', function () {
+test('every registered source uses receipt for current status independent of manual ledger events', function () {
     $manager = complianceManager(complianceUser());
     $area = ProtectedArea::create([
         'name' => 'Aliwagwag Protected Landscape', 'category' => 'Protected Landscape', 'municipality' => 'Baganga',
@@ -1105,22 +1211,19 @@ test('every registered source follows receipt-based alert eligibility and indepe
     foreach ($records as $sourceType => $record) {
         $record->update([$definitions[$sourceType]['submitted'] => '2026-08-25']);
     }
-    $pending = $service->pendingRecordsVerification();
     expect($service->overdueReports())->toBeEmpty()
-        ->and($pending->map(fn (array $report) => $report['source_type'])->sort()->values()->all())->toBe(collect(array_keys($definitions))->sort()->values()->all())
-        ->and($pending->every(fn (array $report) => $report['submission_status'] === 'Pending Submission by CENRO' && $report['records_confirmed'] === false));
+        ->and(collect($records)->every(fn ($record) => $service->sourceIsSubmitted($record)))->toBeTrue();
 
     foreach ($records as $record) {
         app(ComplianceConfirmationService::class)->confirm($record, $manager, 'Received by Records.');
     }
     expect($service->overdueReports())->toBeEmpty()
-        ->and($service->pendingRecordsVerification())->toBeEmpty()
+        ->and(collect($records)->every(fn ($record) => $service->sourceIsSubmitted($record)))->toBeTrue()
         ->and($service->confirmationHistory()->pluck('source_type')->sort()->values()->all())->toBe(collect(array_keys($definitions))->sort()->values()->all());
 
     $firstSource = reset($records);
     app(ComplianceConfirmationService::class)->unconfirm($firstSource, $manager, 'Confirmation was attached to the wrong source document.');
-    expect($service->pendingRecordsVerification())->toHaveCount(1)
-        ->and($service->pendingRecordsVerification()->first()['source_id'])->toBe($firstSource->id)
+    expect($service->sourceIsSubmitted($firstSource->fresh()))->toBeTrue()
         ->and($service->overdueReports())->toBeEmpty();
 
     recordsForEveryComplianceSource($area, $manager, '2026-09-01');
@@ -1517,7 +1620,7 @@ test('Records confirmation and revocation are append-only immutable snapshot eve
         ->and($revocation->original_confirmation_id)->toBe($confirmation->id)
         ->and(ReportComplianceConfirmation::query()->count())->toBe(2)
         ->and($confirmation->fresh()->remarks)->toBe('Original Records evidence.')
-        ->and(app(OverdueReportService::class)->pendingRecordsVerification()->firstWhere('source_id', $report->id))->not->toBeNull()
+        ->and(app(OverdueReportService::class)->sourceIsSubmitted($report->fresh()))->toBeTrue()
         ->and(app(OverdueReportService::class)->overdueReports())->toBeEmpty();
 
     $events = app(OverdueReportService::class)->confirmationHistory();
@@ -1530,7 +1633,7 @@ test('Records confirmation and revocation are append-only immutable snapshot eve
         ->and($confirmation->fresh()->remarks)->toBe('Original Records evidence.');
 });
 
-test('authorized Records revocation returns the item to pending while preserving both lifecycle events', function () {
+test('legacy Records revocation preserves audit events but does not override Submission Tracking receipt', function () {
     $manager = complianceManager(complianceUser());
     $area = complianceArea($manager);
     $report = bmsForDeadline($area, $manager, '2026-08-24', ['date_received_penro' => '2026-08-25']);
@@ -1545,11 +1648,13 @@ test('authorized Records revocation returns the item to pending while preserving
     $this->actingAs($manager)->get(route('compliance-alerts.index'))
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->has('pendingRecordsVerification', 1)
-            ->has('confirmationHistory', 2)
-            ->where('confirmationHistory.0.event_type', 'revoked')
-            ->where('confirmationHistory.0.revocation_reason', 'Stamped copy was matched to the wrong report.')
+            ->missing('pendingRecordsVerification')
+            ->missing('confirmationHistory')
             ->where('summary.overdue_reports', 0));
+
+    expect(app(OverdueReportService::class)->overdueReports()->firstWhere('sourceId', $report->id))->toBeNull()
+        ->and(app(OverdueReportService::class)->confirmationHistory()->pluck('event_type')->all())->toBe(['revoked', 'confirmed'])
+        ->and(app(OverdueReportService::class)->confirmationHistory()->first()['revocation_reason'])->toBe('Stamped copy was matched to the wrong report.');
 });
 
 test('database constraints enforce snapshot uniqueness active recipient scope and settings singleton', function () {

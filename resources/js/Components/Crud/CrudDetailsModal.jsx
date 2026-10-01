@@ -6,6 +6,7 @@ import CrudSection from './CrudSection';
 import { ReportDetailsContext } from './ReportDetailsContext';
 import TimelinessBadge from '../TimelinessBadge';
 import Button from '@/Components/Button';
+import CrudModalCardContext from './CrudModalCardContext';
 
 function standardizedReportSummary(summary, reportData = null) {
     const items = summary?.props?.items;
@@ -44,8 +45,8 @@ export default function CrudDetailsModal({ open, icon, title, subtitle, onClose,
         : attachmentContent;
     return <div className={`fixed inset-0 z-50 flex items-center justify-center overflow-y-auto ${darkTheme ? 'bg-gray-950/70 p-2 sm:p-4' : 'bg-gray-950/60 p-4'} backdrop-blur-xs`} role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose?.()}>
         <div role="dialog" aria-modal="true" aria-label={title} className={`relative flex ${darkTheme ? 'dark max-h-[calc(100dvh-1rem)] border-slate-700 bg-slate-950 sm:max-h-[90vh]' : 'max-h-[90vh] border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'} w-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${maxWidth}`}>
-            <CrudModalHeader icon={icon} report={isReport} title={title} subtitle={subtitle} onClose={onClose} />
-            <ReportDetailsContext.Provider value={isReport ? (reportData || {}) : null}><div className={`custom-table-scrollbar min-h-0 flex-1 overflow-y-auto text-sm ${darkTheme ? 'bg-slate-950 text-slate-100' : ''} ${compact ? (darkTheme ? 'space-y-4 p-3 sm:p-4' : 'space-y-4 p-4') : 'space-y-6 p-6'}`}>{displaySummary}{children}{displayAttachments}</div></ReportDetailsContext.Provider>
+            <CrudModalHeader icon={icon} report={isReport} title={title} subtitle={subtitle} onClose={onClose} showClose={false} />
+            <CrudModalCardContext.Provider value><ReportDetailsContext.Provider value={isReport ? (reportData || {}) : null}><div className={`custom-table-scrollbar min-h-0 flex-1 overflow-y-auto text-sm ${darkTheme ? 'bg-slate-950 text-slate-100' : ''} ${compact ? (darkTheme ? 'space-y-4 p-4 sm:p-5' : 'space-y-4 p-4 sm:p-5') : 'space-y-6 p-6'}`}>{displaySummary}{children}{displayAttachments}</div></ReportDetailsContext.Provider></CrudModalCardContext.Provider>
             <CrudModalFooter left={<>{canEdit && !terminalReport && onEdit && <Button type="button" size="compact" variant="primary" onClick={onEdit} className="rounded-xl px-4 py-2 text-xs">✏️ {editLabel}</Button>}{canDelete && !terminalReport && onDelete && <Button type="button" size="compact" variant="danger" onClick={onDelete} className="rounded-xl px-4 py-2 text-xs">{deleteLabel}</Button>}</>}>
                 {footerActions}
                 <Button type="button" size="compact" variant="primary" onClick={onClose} className="rounded-xl px-5 py-2 text-xs">{closeLabel}</Button>

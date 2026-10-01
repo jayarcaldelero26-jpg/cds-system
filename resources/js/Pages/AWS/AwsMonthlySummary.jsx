@@ -94,7 +94,7 @@ export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filt
     const reportingPeriod = confirmedForm.mode === 'one_month'
         ? monthName(confirmedForm.month) + ' ' + confirmedForm.year
         : dateLabel(confirmedForm.date_from) + String.fromCharCode(8211) + dateLabel(confirmedForm.date_to);
-    const summaryType = confirmedForm.mode === 'one_month' ? '1 Month — Daily Breakdown' : 'Custom Range — Monthly Breakdown';
+    const summaryType = confirmedForm.mode === 'one_month' ? '1 Month â€” Daily Breakdown' : 'Custom Range â€” Monthly Breakdown';
     const selectedProtectedArea = confirmedForm.protected_area_id
         ? protectedAreas.find((area) => String(area.id) === String(confirmedForm.protected_area_id))?.name || 'Selected Protected Area'
         : 'All Protected Areas';
@@ -114,7 +114,7 @@ export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filt
     const interpretableDays = rows.filter((row) => row.remarks && !['No Data', 'Weather Condition Unavailable'].includes(row.remarks)).length;
 
     return <div className="space-y-4">
-        <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <div className="cds-card-surface rounded-2xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Summary Range">
                 {[['one_month', '1 Month'], ['custom_range', 'Custom Range']].map(([value, label]) => <button key={value} type="button" onClick={() => setForm((current) => ({ ...current, mode: value }))} aria-pressed={form.mode === value} className={form.mode === value ? 'cds-tab-active rounded-xl border px-4 py-2.5 text-xs font-bold' : 'rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-bold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200'}>{label}</button>)}
             </div>
@@ -128,14 +128,14 @@ export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filt
             <div className="mt-3 flex flex-wrap gap-2"><button ref={exportButtonRef} type="button" onClick={() => setExportModalOpen(true)} aria-haspopup="dialog" aria-expanded={exportModalOpen} data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2">Export</button></div>
             </div>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {[['Observations', observationCount.toLocaleString()], ['Data Completeness', completeness], ['Total Precipitation', totalPrecipitation === 0 && rows.every((row) => row.total_precipitation === null || row.total_precipitation === undefined) ? emptyMark : totalPrecipitation.toFixed(2) + ' mm'], ['Interpretable Weather Days', interpretableDays.toLocaleString()]].map(([label, value]) => <div key={label} className="rounded-2xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"><span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</span><span className="mt-1 block text-lg font-bold text-green-900 dark:text-green-300">{value}</span></div>)}
+                {[['Observations', observationCount.toLocaleString()], ['Data Completeness', completeness], ['Total Precipitation', totalPrecipitation === 0 && rows.every((row) => row.total_precipitation === null || row.total_precipitation === undefined) ? emptyMark : totalPrecipitation.toFixed(2) + ' mm'], ['Interpretable Weather Days', interpretableDays.toLocaleString()]].map(([label, value]) => <div key={label} className="cds-card-surface rounded-2xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"><span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</span><span className="mt-1 block text-lg font-bold text-green-900 dark:text-green-300">{value}</span></div>)}
             </div>
 
-        {groupEntries.map((group) => <section key={String(group.name || 'unknown')} className="overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        {groupEntries.map((group) => <section key={String(group.name || 'unknown')} className="cds-card-surface overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <h3 className="border-b border-gray-100 px-4 py-3 text-sm font-bold text-green-900 dark:border-gray-800 dark:text-green-300">{blank(group.name)}</h3>
-            <table className="min-w-[1700px] w-full text-left text-xs"><thead className="bg-green-900 text-white"><tr>{headers.map((heading, index) => <th key={heading} className="px-3 py-3 font-bold">{index === 0 ? (form.mode === 'one_month' ? 'Reporting Date' : 'Reporting Period') : heading}</th>)}</tr></thead><tbody className="divide-y divide-gray-200 dark:divide-gray-800">{group.rows.map((row) => <tr key={String(row.protected_area_id) + '-' + row.period} className="align-top hover:bg-green-50/60 dark:hover:bg-green-950/30">{rowValues(row).map((value, index) => <td key={row.period + '-' + index} className={'px-3 py-3 ' + (index === rowValues(row).length - 1 ? 'min-w-[220px]' : '')}>{index === rowValues(row).length - 1 ? <AwsWeatherRemarkBadge remark={row.remarks} /> : value}</td>)}</tr>)}</tbody></table>
+            <table className="cds-data-table min-w-[1700px] w-full text-left text-xs"><thead className="bg-green-900 text-white"><tr>{headers.map((heading, index) => <th key={heading} className="px-3 py-3 font-bold">{index === 0 ? (form.mode === 'one_month' ? 'Reporting Date' : 'Reporting Period') : heading}</th>)}</tr></thead><tbody className="divide-y divide-gray-200 dark:divide-gray-800">{group.rows.map((row) => <tr key={String(row.protected_area_id) + '-' + row.period} className="align-top hover:bg-green-50/60 dark:hover:bg-green-950/30">{rowValues(row).map((value, index) => <td key={row.period + '-' + index} className={'px-3 py-3 ' + (index === rowValues(row).length - 1 ? 'min-w-[220px]' : '')}>{index === rowValues(row).length - 1 ? <AwsWeatherRemarkBadge remark={row.remarks} /> : value}</td>)}</tr>)}</tbody></table>
         </section>)}
-        {groupEntries.length === 0 && <div className="rounded-2xl border border-gray-100 bg-white px-6 py-16 text-center text-sm text-gray-500 shadow-sm dark:border-gray-800 dark:bg-gray-900">No AWS observations found for the selected period.</div>}
+        {groupEntries.length === 0 && <div className="cds-card-surface rounded-2xl border border-gray-100 bg-white px-6 py-16 text-center text-sm text-gray-500 shadow-sm dark:border-gray-800 dark:bg-gray-900">No AWS observations found for the selected period.</div>}
         <AwsSummaryExportModal open={exportModalOpen} onClose={() => setExportModalOpen(false)} onExport={exportFile} returnFocusRef={exportButtonRef} summaryType={summaryType} reportingPeriod={reportingPeriod} protectedArea={selectedProtectedArea} />
     </div>;
 }

@@ -7,7 +7,7 @@ const variants = {
     primary: actionGradient,
     secondary: `border border-green-950 ${actionGradient}`,
     danger: `border border-red-800 ${dangerGradient}`,
-    warning: `border border-green-950 ${actionGradient}`,
+    warning: 'border border-orange-800 bg-gradient-to-b from-orange-600 to-orange-900 text-white hover:from-orange-500 hover:to-orange-800',
     ghost: actionGradient,
     cancel: neutralAction,
     back: neutralAction,

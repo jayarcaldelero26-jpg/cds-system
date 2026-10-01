@@ -1,7 +1,7 @@
 import { Icon } from '@iconify/react';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
 
-const primaryOverlay = 'linear-gradient(105deg, rgba(5, 78, 42, 0.96) 0%, rgba(5, 78, 42, 0.92) 46%, rgba(23, 37, 84, 0.94) 100%)';
+const primaryOverlay = 'linear-gradient(105deg, rgba(5, 78, 42, 0.91) 0%, rgba(5, 78, 42, 0.87) 46%, rgba(23, 37, 84, 0.89) 100%)';
 const depthOverlay = 'linear-gradient(to top, rgba(2, 25, 24, 0.42) 0%, rgba(2, 25, 24, 0.08) 45%, transparent 70%)';
 
 export default function PageHeader({

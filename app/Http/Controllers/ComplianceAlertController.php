@@ -64,9 +64,6 @@ class ComplianceAlertController extends Controller
             ->values()
             ->all();
         $groups = $decorateGroups($groups);
-        $runs = ComplianceNotificationRun::query()->with(['createdBy:id,name', 'reports'])->latest('id')->limit(100)->get();
-        $pendingRecordsVerification = $reports->pendingRecordsVerification();
-        $confirmationHistory = $reports->confirmationHistory();
         $lastRun = $todayRuns->first();
         $requestUser = request()->user()?->can('compliance-alerts.manage');
         $oldestDeadline = $overdue->min('deadline');
@@ -143,12 +140,9 @@ class ComplianceAlertController extends Controller
                 'production_delivery' => $automaticState['effective'],
                 'next_automatic_run' => $nextRun->toIso8601String(),
             ],
-            'runs' => $runs->map(fn (ComplianceNotificationRun $run) => $this->runPayload($run)),
-            'pendingRecordsVerification' => $pendingRecordsVerification,
             'pendingMovReports' => $pendingMov->map->toArray()->values(),
             'dueSoonReports' => $dueSoon->map->toArray()->values(),
             'dueTodayReports' => $dueToday->map->toArray()->values(),
-            'confirmationHistory' => $confirmationHistory,
             'recipients' => $requestUser ? ComplianceAlertRecipient::query()->with('protectedArea:id,name')->latest('id')->get()->map(fn (ComplianceAlertRecipient $recipient) => $this->recipientPayload($recipient)) : [],
             'protectedAreas' => $requestUser ? ProtectedArea::query()->orderBy('name')->get(['id', 'name'])->map->only(['id', 'name']) : [],
             'settings' => $requestUser ? $effectiveSettings : null,
@@ -474,7 +468,7 @@ class ComplianceAlertController extends Controller
         abort_unless($source, 404);
         $confirmations->confirm($source, $request->user(), $data['remarks'] ?? null);
 
-        return back()->with('success', 'Records confirmation saved. The report has moved to Records Confirmation History.');
+        return back()->with('success', 'Legacy Records confirmation audit event saved. Current receipt is determined by Submission Tracking.');
     }
 
     public function unconfirm(Request $request, OverdueReportService $reports, ComplianceConfirmationService $confirmations): RedirectResponse
@@ -488,7 +482,7 @@ class ComplianceAlertController extends Controller
         abort_unless($source, 404);
         $confirmations->unconfirm($source, $request->user(), $data['reason']);
 
-        return back()->with('success', 'Records confirmation revoked. The report returned to Pending Records Verification and the audit history was preserved.');
+        return back()->with('success', 'Legacy Records confirmation audit event revoked. Submission Tracking receipt was not changed.');
     }
 
     /** @return array{protected_area_id:?int,target_office:?string,target_office_key:?string} */
@@ -668,12 +662,4 @@ class ComplianceAlertController extends Controller
             'created_at' => $recipient->created_at?->toIso8601String(), 'updated_at' => $recipient->updated_at?->toIso8601String()];
     }
 
-    /** @return array<string,mixed> */
-    private function runPayload(ComplianceNotificationRun $run): array
-    {
-        return ['id' => $run->id, 'run_date' => $run->run_date?->toDateString(), 'run_type' => $run->run_type,
-            'status' => $run->status, 'idempotency_key' => $run->idempotency_key, 'report_count' => $run->report_count, 'recipients' => $run->recipients, 'cc_recipients' => $run->cc_recipients,
-            'sent_at' => $run->sent_at?->toIso8601String(), 'error_message' => $run->error_message, 'created_by' => $run->createdBy?->name,
-            'payload' => $run->payload, 'scope' => data_get($run->payload, 'presentation.family'), 'reports' => $run->reports->map(fn ($report) => $report->snapshot)->filter()->values()];
-    }
 }

@@ -61,9 +61,10 @@ final class CompletedReportArchiveHook
     /** PAMB keeps its existing historical checkpoint behavior, independent of generic route actions. */
     public function afterPambTransition(string $source, int $recordId, string $actionKey, ?User $actor): array
     {
-        if (! $actor || $this->checkpointAction($source, $actionKey) !== PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO) {
+        if ($this->checkpointAction($source, $actionKey) !== PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO) {
             return ['status' => 'not_records_checkpoint'];
         }
+        if (! $actor) throw ValidationException::withMessages(['archive' => 'The archive checkpoint requires an authenticated routing actor.']);
         $this->checkpointPolicy->assertEnabledAndConfigured();
 
         try {

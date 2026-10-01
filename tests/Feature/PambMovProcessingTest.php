@@ -190,13 +190,18 @@ test('a direct-PENRO Regular PAMB report does not enter a CENRO Incoming workspa
 });
 
 test('PENRO Records receipt has no upload and hands off directly to Office of the PENRO', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
     Storage::fake('local');
     $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
     $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
     $report = pambReport($records, [
         'target_office' => 'CENRO Mati',
         'date_report_released_cenro' => '2026-08-04',
+        'mov_file_path' => 'conservation-report-movs/receipt-current.pdf',
     ]);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\nreceipt checkpoint");
+    app()->instance(\App\Services\Archive\GoogleDriveArchiveGateway::class, new PambMovArchiveGateway());
     $tracking = app(SubmissionTrackingService::class);
 
     $this->actingAs($records);
@@ -800,6 +805,7 @@ test('PAMB review uses the correct Chief for the routing context', function (): 
 });
 
 test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
     Storage::fake('local');
     $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
@@ -855,10 +861,6 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
         [PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, $office],
         [PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS, $office],
     ];
-
-    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), [
-        'stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-    ])->assertSessionHasNoErrors();
 
     foreach ($actorStages as [$stage, $expectedActor]) {
         foreach ([$penroFocal, $penroChief, $penroRecords, $office, $tsd] as $wrongActor) {

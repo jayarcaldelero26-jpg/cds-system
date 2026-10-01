@@ -31,7 +31,7 @@ export default {
                 ui: '0.625rem',
             },
             boxShadow: {
-                card: '0 1px 2px 0 rgb(15 23 42 / 0.05)',
+                card: '0 10px 26px -12px rgb(15 23 42 / 0.20), 0 3px 8px -4px rgb(15 23 42 / 0.10)',
             },
             spacing: {
                 18: '4.5rem',

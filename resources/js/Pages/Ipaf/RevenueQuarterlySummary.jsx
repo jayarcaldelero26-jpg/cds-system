@@ -4,6 +4,7 @@ import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import CrudTable from '@/Components/Crud/CrudTable';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { formatMoney } from '@/Utils/moneyFormatters';
 import AnnualRevenueAccounting from './AnnualRevenueAccounting';
 import FloatingInput from '@/Components/Form/FloatingInput';
@@ -80,13 +81,20 @@ export default function RevenueQuarterlySummary({ summary = {}, targets = {}, an
         { key: 'total_collected', label: 'Total Collected', render: row => <span className={row.is_total ? 'font-extrabold' : ''}>{money(row.total_collected)}</span> },
         { key: 'percentage_accomplishment', label: '% Accomplishment', render: row => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${row.percentage_accomplishment === null || row.percentage_accomplishment === undefined ? 'bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300' : 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300'}`}>{percent(row.percentage_accomplishment)}</span> },
     ];
-    const filtersUi = <div className="flex flex-col gap-4">
+    const appliedFilters = [
+        ...(summary.year ? [{ key: 'summary_year', label: 'Reporting Year', value: summary.year, onRemove: () => apply({ summary_year: undefined }) }] : []),
+        ...(filters.summary_protected_area_id ? [{ key: 'summary_protected_area_id', label: 'Protected Area', value: protectedAreas.find(area => String(area.id) === String(filters.summary_protected_area_id))?.name || filters.summary_protected_area_id, onRemove: () => apply({ summary_protected_area_id: undefined }) }] : []),
+        ...(summary.quarter ? [{ key: 'summary_quarter', label: 'Quarter', value: `Q${summary.quarter}`, onRemove: () => apply({ summary_quarter: undefined }) }] : []),
+    ];
+    const filtersUi = <FilterToolbar chips={appliedFilters} onClear={() => apply({ summary_year: undefined, summary_protected_area_id: undefined, summary_quarter: undefined })}>
+      <div className="flex flex-col gap-4">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <FloatingSelect id="summary-year" label="Reporting Year" size="sm" value={summary.year || ''} onChange={event => apply({ summary_year: event.target.value })}>{(summary.years || []).map(year => <option key={year} value={year}>{year}</option>)}</FloatingSelect>
             <FloatingSelect id="summary-pa" label="Protected Area" size="sm" value={filters.summary_protected_area_id || ''} onChange={event => apply({ summary_protected_area_id: event.target.value })}><option value="">All Protected Areas</option>{protectedAreas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}</FloatingSelect>
         </div>
         <div className="flex flex-wrap gap-2" aria-label="Quarter selector">{[1, 2, 3, 4].map(quarter => <button key={quarter} type="button" onClick={() => apply({ summary_quarter: quarter })} className={`rounded-xl border px-4 py-2 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${Number(summary.quarter) === quarter ? 'border-green-700 bg-green-700 text-white shadow-sm' : 'border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'}`} data-cds-action="true" data-cds-action-variant="primary">Q{quarter}<span className="ml-2 hidden font-medium opacity-80 sm:inline">{quarterMonths[quarter]}</span></button>)}</div>
-    </div>;
+      </div>
+    </FilterToolbar>;
 
     return <section className="mt-5 space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-widest text-green-700 dark:text-green-400">Quarterly Performance</p><h2 className="mt-1 text-xl font-extrabold text-gray-900 dark:text-white">Revenue Collection Target and Accomplishment</h2><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Q{summary.quarter} {summary.year} · Aggregated from all monthly collections for {quarterMonths[summary.quarter]}.</p></div>{canUpdate && <button type="button" onClick={() => openTargets(filters.summary_protected_area_id || '')} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:opacity-50" data-cds-action="true" data-cds-action-variant="primary">Set Quarterly Targets</button>}</div>

@@ -1,11 +1,16 @@
 import { FloatingSelect, FloatingTextarea } from "@/Components/Form";import { Link, router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Icon } from '@iconify/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import FormField from '../../Components/FormField';
 import FormSection from '../../Components/FormSection';
 import PageHeader from '../../Components/PageHeader';
 import PrimaryButton from '../../Components/PrimaryButton';
+import Button from '../../Components/Button';
+import ConfirmDialog from '../../Components/ConfirmDialog';
+
+export const protectedAreaCreateCardSurface = isEdit => !isEdit;
 
 
 export default function Form({ title, protectedArea, officeOptions = [], modal = false, onClose }) {
@@ -46,6 +51,9 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
   });
 
   const [submitting, setSubmitting] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletingRecord, setDeletingRecord] = useState(false);
+  const deleteRequestInFlight = useRef(false);
 
   const PSGC_REGION_NAME = 'Region XI (Davao Region)';
   const PSGC_BASE_URL = 'https://psgc.cloud/api/v2';
@@ -160,14 +168,20 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
 
   const deleteRecord = () => {
     if (!protectedArea || !auth?.canDeleteProtectedAreas) return;
+    setDeleteDialogOpen(true);
+  };
 
-    const confirmed = window.confirm(
-      `Delete ${protectedArea.name || 'this protected area'}? This action will remove the record from the active registry.`
-    );
-
-    if (!confirmed) return;
-
-    router.delete(`/protected-areas/${protectedArea.id}`);
+  const confirmDeleteRecord = () => {
+    if (!protectedArea || !auth?.canDeleteProtectedAreas || deleteRequestInFlight.current) return;
+    deleteRequestInFlight.current = true;
+    setDeletingRecord(true);
+    router.delete(`/protected-areas/${protectedArea.id}`, {
+      onFinish: () => {
+        deleteRequestInFlight.current = false;
+        setDeletingRecord(false);
+        setDeleteDialogOpen(false);
+      },
+    });
   };
 
   const submit = (event) => {
@@ -203,7 +217,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
   const select = (id, label, options, required = false) =>
   <div className="block text-sm font-medium text-gray-700 dark:text-gray-200">
 
-    <FloatingSelect label={label} id={id} value={form.data[id]} onChange={(event) => form.setData(id, event.target.value)} required={required}>
+    <FloatingSelect size="sm" label={label} id={id} value={form.data[id]} onChange={(event) => form.setData(id, event.target.value)} required={required}>
                 {options}
             </FloatingSelect>
             {form.errors[id] && <p className="mt-1.5 text-sm font-normal text-red-700 dark:text-red-300">{form.errors[id]}</p>}
@@ -212,11 +226,11 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
 
   const formFields =
   <>
-                    <FormSection title="Protected Area Details" description="Enter the official identity, category, and geographic coverage of the protected area.">
-                        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                    <FormSection title="Protected Area Details" description="Enter the official identity, category, and geographic coverage of the protected area." cardSurface={protectedAreaCreateCardSurface(isEdit)}>
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 
                             {/* Protected Area Name */}
-                            <FormField
+                            <FormField size="sm"
           id="name"
           label="Protected Area Name"
           value={form.data.name}
@@ -226,7 +240,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
           className="sm:col-span-2" />
 
 
-                            <FormField
+                            <FormField size="sm"
           id="short_name"
           label="Short Name / Acronym"
           value={form.data.short_name}
@@ -243,7 +257,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
 
                             {/* Geographic coverage */}
                             <div className="sm:col-span-2 lg:col-span-3">
-                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                                <div className="cds-card-surface rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
                                     <div className="mb-4">
                                         <div className="flex items-start justify-between gap-4">
                                             <div>
@@ -264,7 +278,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                         </div>
             }
 
-                                    <div className="grid gap-5 lg:grid-cols-2">
+                                    <div className="grid gap-3 lg:grid-cols-2">
                                         {/* Provinces */}
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-200">
@@ -272,7 +286,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                             </label>
 
                                             <div className="mt-1.5 flex gap-2">
-                                                <FloatingSelect id="protected-area-province" label="Province"
+                                                <FloatingSelect size="sm" id="protected-area-province" label="Province"
 
                   value={selectedProvince}
                   onChange={(e) => setSelectedProvince(e.target.value)}
@@ -292,14 +306,16 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                     )}
                                                 </FloatingSelect>
 
-                                                <button
+                                                <Button
                     type="button"
+                    size="compact"
+                    variant="primary"
                     onClick={addProvince}
                     disabled={!selectedProvince || geoLoading}
-                    className="shrink-0 rounded-ui bg-green-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50" data-cds-action="true" data-cds-action-variant="primary">
+                    className="h-10 shrink-0 self-end rounded-lg px-3 py-0 text-xs">
 
                                                     Add
-                                                </button>
+                                                </Button>
                                             </div>
 
                                             {form.data.province.length > 0 &&
@@ -313,10 +329,10 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                                             <button
                       type="button"
                       onClick={() => removeFromList('province', index)}
-                      className="font-bold text-green-600 hover:text-red-600"
-                      aria-label={`Remove ${province}`} data-cds-action="true" data-cds-action-variant="danger">
+                      className="cds-chip-remove text-green-700 hover:text-red-700 dark:text-green-300 dark:hover:text-red-300"
+                      aria-label={`Remove ${province}`}>
 
-                                                                ×
+                                                                <Icon icon="lucide:x" width="14" height="14" aria-hidden="true" />
                                                             </button>
                                                         </span>
                   )}
@@ -343,7 +359,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                             </label>
 
                                             <div className="mt-1.5 flex gap-2">
-                                                <FloatingSelect id="protected-area-municipality" label="Municipality / City"
+                                                <FloatingSelect size="sm" id="protected-area-municipality" label="Municipality / City"
 
                   value={selectedMunicipality}
                   onChange={(e) => setSelectedMunicipality(e.target.value)}
@@ -367,19 +383,21 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                       value={municipality.code}
                       disabled={form.data.municipality.includes(municipality.name)}>
 
-                                                                {municipality.name} — {municipality.province}
+                                                                {municipality.name}{' \u00b7 '}{municipality.province}
                                                             </option>
                     )}
                                                 </FloatingSelect>
 
-                                                <button
+                                                <Button
                     type="button"
+                    size="compact"
+                    variant="primary"
                     onClick={addMunicipality}
                     disabled={!selectedMunicipality || geoLoading}
-                    className="shrink-0 rounded-ui bg-green-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-green-800 disabled:cursor-not-allowed disabled:opacity-50" data-cds-action="true" data-cds-action-variant="primary">
+                    className="h-10 shrink-0 self-end rounded-lg px-3 py-0 text-xs">
 
                                                     Add
-                                                </button>
+                                                </Button>
                                             </div>
 
                                             {form.data.municipality.length > 0 &&
@@ -401,10 +419,10 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                                                 <button
                           type="button"
                           onClick={() => removeFromList('municipality', index)}
-                          className="font-bold text-blue-600 hover:text-red-600"
-                          aria-label={`Remove ${municipality}`} data-cds-action="true" data-cds-action-variant="danger">
+                          className="cds-chip-remove text-blue-700 hover:text-red-700 dark:text-blue-300 dark:hover:text-red-300"
+                          aria-label={`Remove ${municipality}`}>
 
-                                                                    ×
+                                                                    <Icon icon="lucide:x" width="14" height="14" aria-hidden="true" />
                                                                 </button>
                                                             </span>);
 
@@ -429,10 +447,10 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                         </div>
                     </FormSection>
 
-                    <FormSection title="Management and Legal Information">
-                        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                    <FormSection title="Management and Legal Information" description="Record zonation, administration, and the legal basis for the protected area." cardSurface={protectedAreaCreateCardSurface(isEdit)}>
+                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                             <div className="sm:col-span-2 lg:col-span-3">
-                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                                <div className={`${isEdit ? 'cds-card-surface ' : ''}rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800`}>
                                     <div className="mb-4">
                                         <h3 className="text-sm font-bold text-gray-900 dark:text-white">Protected Area Zonation</h3>
                                         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
@@ -440,8 +458,8 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                         </p>
                                     </div>
 
-                                    <div className="grid gap-5 sm:grid-cols-3">
-                                        <FormField
+                                    <div className="grid gap-3 sm:grid-cols-3">
+                                        <FormField size="sm"
                 id="area_hectares"
                 label="Total Area (Hectares)"
                 type="number"
@@ -452,7 +470,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                 error={form.errors.area_hectares} />
 
 
-                                        <FormField
+                                        <FormField size="sm"
                 id="core_zone_hectares"
                 label="Core Zone (Hectares)"
                 type="number"
@@ -463,7 +481,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                 error={form.errors.core_zone_hectares} />
 
 
-                                        <FormField
+                                        <FormField size="sm"
                 id="buffer_zone_hectares"
                 label="Buffer Zone (Hectares)"
                 type="number"
@@ -476,13 +494,13 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                     </div>
                                 </div>
                             </div>
-                            <FormField id="pamo" label="PAMO" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} />
-                            <FormField id="pasu" label="PASu" value={form.data.pasu} onChange={(event) => form.setData('pasu', event.target.value)} error={form.errors.pasu} />
+                            <FormField size="sm" id="pamo" label="PAMO" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} />
+                            <FormField size="sm" id="pasu" label="PASu" value={form.data.pasu} onChange={(event) => form.setData('pasu', event.target.value)} error={form.errors.pasu} />
                             {select('supervising_office_id', 'Supervising Office',
                                 <><option value="">Select the authoritative office</option>{officeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}{office.office_type === 'penro' ? ' (PENRO-managed)' : ''}</option>)}</>
                             , true)}
-                            <FormField id="year_established" label="Year Established" type="number" min="1800" max={new Date().getFullYear() + 10} value={form.data.year_established} onChange={(event) => form.setData('year_established', event.target.value)} error={form.errors.year_established} />
-                            <FormField id="legal_basis" label="Legal Basis" value={form.data.legal_basis} onChange={(event) => form.setData('legal_basis', event.target.value)} error={form.errors.legal_basis} className="sm:col-span-2" />
+                            <FormField size="sm" id="year_established" label="Year Established" type="number" min="1800" max={new Date().getFullYear() + 10} value={form.data.year_established} onChange={(event) => form.setData('year_established', event.target.value)} error={form.errors.year_established} />
+                            <FormField size="sm" id="legal_basis" label="Legal Basis" value={form.data.legal_basis} onChange={(event) => form.setData('legal_basis', event.target.value)} error={form.errors.legal_basis} className="sm:col-span-2" />
 
                             {/* Status Dropdown */}
                             {select('status', 'Status',
@@ -491,8 +509,8 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                         </div>
                     </FormSection>
 
-                    <FormSection title="Additional Notes">
-                        <div className="grid gap-5">
+                    <FormSection title="Additional Notes" cardSurface={protectedAreaCreateCardSurface(isEdit)}>
+                        <div className="grid gap-3">
                             <div className="block text-sm font-medium text-gray-700 dark:text-gray-200">
 
           <FloatingTextarea label="Description" id="description" rows="4" value={form.data.description} onChange={(event) => form.setData('description', event.target.value)} />
@@ -516,14 +534,16 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
       onClick={deleteRecord}
       className="inline-flex items-center rounded-xl border border-red-200 bg-red-50 px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300 dark:hover:bg-red-950/50" data-cds-action="true" data-cds-action-variant="danger">
 
-                    🗑️ Delete Record
+                    <Icon icon="lucide:trash-2" width="16" height="16" aria-hidden="true" />
+                    Delete Record
                 </button> :
 
     <Link
       href="/protected-areas"
       className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200">
 
-                    ← Back
+                    <Icon icon="lucide:arrow-left" width="16" height="16" aria-hidden="true" />
+                    Back
                 </Link>
     }
 
@@ -550,11 +570,11 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
               <h1 id="create-protected-area-title" className="text-base font-bold text-gray-900 dark:text-white sm:text-lg">Add Protected Area</h1>
               <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Add a protected area to the PENRO Davao Oriental master database.</p>
             </div>
-            <button type="button" onClick={onClose} className="rounded-lg p-1 text-2xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="Close create form" data-cds-action="true" data-cds-action-variant="primary">×</button>
+            <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Close create form"><Icon icon="lucide:x" width="18" height="18" aria-hidden="true" /></button>
           </div>
           {form.hasErrors && <div className="mx-5 mt-4 shrink-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:mx-6">Please review the highlighted fields before saving.</div>}
           <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-            <div className="protected-area-scrollbar min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">{formFields}</div>
+            <div className="protected-area-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">{formFields}</div>
             <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-gray-50 px-5 py-3 dark:border-gray-700 dark:bg-gray-800/50 sm:px-6">
               <button type="button" onClick={onClose} className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
               <PrimaryButton type="submit" disabled={submitting}>{form.processing ? 'Saving...' : 'Create protected area'}</PrimaryButton>
@@ -568,6 +588,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
   if (isEdit) {
     return (
       <AuthenticatedLayout title={title}>
+        <>
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-3 backdrop-blur-sm sm:p-4">
                     <div className="relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
                         <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-6">
@@ -579,13 +600,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                     {protectedArea?.name || 'Protected Area'}
                                 </p>
                             </div>
-                            <Link
-                href="/protected-areas"
-                className="rounded-lg p-1 text-2xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-                aria-label="Close edit form">
-
-                                ×
-                            </Link>
+                            <Link href="/protected-areas" className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Close edit form"><Icon icon="lucide:x" width="18" height="18" aria-hidden="true" /></Link>
                         </div>
 
                         {form.hasErrors &&
@@ -595,13 +610,15 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
             }
 
                         <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-                            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-5 sm:px-6">
+                            <div className="custom-table-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">
                                 {formFields}
                             </div>
                             {editFooter}
                         </form>
                     </div>
                 </div>
+                <ConfirmDialog open={deleteDialogOpen} variant="danger" title={`Delete ${protectedArea?.name || 'this protected area'}?`} message="This action will remove the record from the active registry." confirmLabel="Delete" processing={deletingRecord} onConfirm={confirmDeleteRecord} onCancel={() => !deletingRecord && setDeleteDialogOpen(false)} />
+        </>
             </AuthenticatedLayout>);
 
   }
@@ -613,7 +630,8 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
         description="Add a protected area to the PENRO Davao Oriental master database."
         actions={
         <Link href="/protected-areas" className="text-sm font-semibold text-white hover:text-green-200 transition">
-                        ← Back to protected areas
+                        <Icon icon="lucide:arrow-left" width="16" height="16" aria-hidden="true" />
+                        Back to protected areas
                     </Link>
         } />
 

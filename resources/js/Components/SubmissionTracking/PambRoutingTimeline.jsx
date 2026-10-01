@@ -92,7 +92,6 @@ export default function PambRoutingTimeline({
     onCanonicalAction,
     actions = null,
     hideCurrentProcessing = false,
-    onReviewHistory,
     expandAll,
     onExpandAllChange,
 }) {
@@ -280,15 +279,6 @@ export default function PambRoutingTimeline({
                                     "Reason recorded in history."}
                             </p>
                         )}
-                        <Button
-                            size="compact"
-                            variant="primary"
-                            type="button"
-                            onClick={() => onReviewHistory?.(row)}
-                            className="mt-2 rounded-lg px-2.5 py-1.5 text-xs"
-                        >
-                            View Review History
-                        </Button>
                     </section>
                 )}
             </section>
@@ -309,7 +299,7 @@ export default function PambRoutingTimeline({
                         timeline begins at the first legitimate PENRO stage.
                     </p>
                 )}
-                <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800">
+                <div className="cds-card-surface rounded-xl border border-gray-200 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-800">
                     {hasToggle && <div className="mb-2 flex justify-end border-b border-gray-200 pb-2 dark:border-gray-700"><button type="button" aria-expanded={showRemainingSteps} aria-controls="pamb-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show ${hiddenSteps.length} more steps`}</button></div>}
                     <ol id="pamb-routing-timeline-stages" className="divide-y divide-gray-100 dark:divide-gray-700">
                         {visibleTimeline.map((stage) => {

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import PageHeader from '@/Components/PageHeader';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { ResponsiveContainer, BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, Legend, CartesianGrid } from 'recharts';
 
 export default function ImeaReport({
@@ -214,7 +215,12 @@ export default function ImeaReport({
                 {/* Filter Section */}
                 <div className="no-print">
                     <Card className="border border-gray-100 dark:border-gray-800 shadow-lg rounded-2xl bg-white dark:bg-gray-900 p-4 sm:p-6 mb-6">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
+                        <FilterToolbar chips={[
+                          ...(selectedYear ? [{ key: 'year', label: 'Year', value: selectedYear, onRemove: () => handleFilterChange('year', '') }] : []),
+                          ...(selectedPeriod ? [{ key: 'period', label: 'Period', value: selectedPeriod, onRemove: () => handleFilterChange('period', '') }] : []),
+                          ...(selectedPA ? [{ key: 'pa', label: 'Protected Area', value: protectedAreas.find(pa => String(pa.id) === String(selectedPA))?.name || selectedPA, onRemove: () => handleFilterChange('pa', '') }] : []),
+                        ]} onClear={resetFilters}>
+                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 items-end">
                             <div>
 
                                 <FloatingSelect id="report-filter-by-protected-area" label="Filter by Protected Area"
@@ -267,16 +273,8 @@ export default function ImeaReport({
                                     <option value="Q4">Q4</option>
                                 </FloatingSelect>
                             </div>
-                            <div>
-                                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition" data-cds-action="true" data-cds-action-variant="primary">
-
-                                    Reset Filters
-                                </button>
-                            </div>
                         </div>
+                        </FilterToolbar>
                     </Card>
                 </div>
 

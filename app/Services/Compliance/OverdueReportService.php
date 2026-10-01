@@ -113,10 +113,10 @@ class OverdueReportService
     {
         $today = $today ? $today->setTimezone(self::TIMEZONE)->startOfDay() : $this->evaluationClock->date();
         $records = collect();
-
-        foreach ($this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
+        $sources = $this->loadSourceModels(function ($query, array $definition, string $modelClass): void {
             $this->scopeDeadlineCandidates($query, $definition, $modelClass);
-        }) as $source) {
+        });
+        foreach ($sources as $source) {
             $normalized = $this->normalize($source['model'], $source['definition'], $today);
             if ($normalized !== null) {
                 $records->push($normalized);
@@ -237,34 +237,6 @@ class OverdueReportService
 
         return $records
             ->sortBy([['targetOffice', 'asc'], ['protectedAreaName', 'asc'], ['deadline', 'asc']])
-            ->values();
-    }
-
-    /** @return Collection<int, array<string, mixed>> */
-    public function pendingRecordsVerification(): Collection
-    {
-        $records = collect();
-        $latestEventIds = ReportComplianceConfirmation::query()
-            ->selectRaw('MAX(id) AS id')
-            ->groupBy('source_type', 'source_id')
-            ->pluck('id');
-        $confirmedSourceIds = ReportComplianceConfirmation::query()
-            ->whereIn('id', $latestEventIds)
-            ->where('event_type', ReportComplianceConfirmation::EVENT_CONFIRMED)
-            ->get(['source_type', 'source_id'])
-            ->groupBy('source_type')
-            ->map(fn (Collection $events): array => $events->pluck('source_id')->map(fn ($id): int => (int) $id)->all());
-
-        $sources = $this->loadSourceModels(function ($query, array $definition, string $modelClass) use ($confirmedSourceIds): void {
-            $query->whereNotNull($definition['submitted'])
-                ->when($confirmedSourceIds->get($modelClass), fn ($query, array $ids) => $query->whereNotIn($query->getModel()->getKeyName(), $ids));
-        });
-
-        foreach ($sources as $source) {
-            $records->push($this->recordsVerificationPayload($source['model'], $source['definition']));
-        }
-
-        return $records->sortBy([['target_office', 'asc'], ['protected_area_name', 'asc'], ['deadline', 'asc']])
             ->values();
     }
 
@@ -414,7 +386,15 @@ class OverdueReportService
             documentType: $document !== '' ? $document : 'Report',
             deadline: $deadline->toDateString(),
             submitted: $submitted,
-            recordsConfirmed: false,
+            // Submission Tracking writes this compatibility milestone when
+            // PENRO Records receives the document. It remains set through
+            // later routing and correction cycles unless an authorized
+            // routing-date correction changes it. Manual compliance-ledger
+            // events are retained for audit but are not current receipt state.
+            recordsConfirmed: $submitted,
+            recordsConfirmedAt: $submitted ? $submittedAt : null,
+            recordsConfirmedBy: $submitted ? 'PENRO Records' : null,
+            recordsConfirmationRemarks: null,
             daysOverdue: $deadline->lessThan($today) ? $deadline->diffInDays($today) : 0,
             movRequired: $movRequired,
             movPresent: $movPresent,

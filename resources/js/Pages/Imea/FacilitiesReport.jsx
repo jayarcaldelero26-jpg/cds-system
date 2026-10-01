@@ -4,6 +4,7 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import Tooltip from '@/Components/Tooltip';
 import PageHeader from '@/Components/PageHeader';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 export default function FacilitiesReport({
   totalFacilities,
@@ -60,6 +61,11 @@ export default function FacilitiesReport({
     setSelectedInventoryDate('');
     router.get('/imea/facilities-report', {}, { preserveState: true, preserveScroll: true, replace: true });
   };
+  const appliedFilters = [
+    ...(selectedPA ? [{ key: 'protected_area_id', label: 'Protected Area', value: protectedAreas.find(area => String(area.id) === String(selectedPA))?.name || selectedPA, onRemove: () => { setSelectedPA(''); handleFilterChange('pa', ''); } }] : []),
+    ...(selectedZone ? [{ key: 'zone', label: 'Management Zone', value: selectedZone, onRemove: () => { setSelectedZone(''); handleFilterChange('zone', ''); } }] : []),
+    ...(selectedInventoryDate ? [{ key: 'inventory_date', label: 'Inventory Date', value: selectedInventoryDate, onRemove: () => { setSelectedInventoryDate(''); handleFilterChange('date', ''); } }] : []),
+  ];
 
   const handlePrint = () => {
     window.print();
@@ -149,10 +155,10 @@ export default function FacilitiesReport({
                                 </a>
               }
                             <button onClick={handlePrint} className="inline-flex items-center justify-center rounded-xl bg-white text-green-900 hover:bg-green-50 px-4 py-2.5 text-xs sm:text-sm font-bold shadow-sm transition" data-cds-action="true" data-cds-action-variant="primary">
-                                🖨️ Print / Save PDF
+                                ðŸ–¨ï¸ Print / Save PDF
                             </button>
                             <Link href="/imea" className="inline-flex items-center justify-center rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm transition backdrop-blur-xs">
-                                ← Back to List
+                                â† Back to List
                             </Link>
                         </div>}
                 />
@@ -160,24 +166,18 @@ export default function FacilitiesReport({
                 {/* 4-COLUMN FILTER SECTION (GI-APIL ANG DATE CONDUCTED DROPDOWN) */}
                 <div className="no-print mb-6">
                     <Card className="border border-gray-100 dark:border-gray-800 shadow-lg rounded-2xl bg-white dark:bg-gray-900 p-4">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4 items-end">
-                            <div>
-
+                        <div className="flex flex-wrap items-end justify-between gap-3">
+                          <FilterToolbar className="min-w-0 flex-1" chips={appliedFilters}>
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 items-end">
                                 <FloatingSelect id="facilitiesreport-filter-by-protected-area" label="Filter by Protected Area" value={selectedPA} onChange={(e) => {setSelectedPA(e.target.value);handleFilterChange('pa', e.target.value);}} size="sm">
                                     <option value="">All Protected Areas</option>
                                     {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                 </FloatingSelect>
-                            </div>
-                            <div>
-
                                 <FloatingSelect id="facilitiesreport-filter-by-management-zone" label="Filter by Management Zone" value={selectedZone} onChange={(e) => {setSelectedZone(e.target.value);handleFilterChange('zone', e.target.value);}} size="sm">
                                     <option value="">All Zones</option>
                                     <option value="MUZ">MUZ (Multiple Use Zone)</option>
                                     <option value="SPZ">SPZ (Strict Protection Zone)</option>
                                 </FloatingSelect>
-                            </div>
-                            <div>
-
                                 <FloatingSelect id="facilitiesreport-date-conducted-as-of" label="Date Conducted (As Of)" value={selectedInventoryDate} onChange={(e) => {setSelectedInventoryDate(e.target.value);handleFilterChange('date', e.target.value);}}>
                                     <option value="">All Inventory Dates</option>
                                     {inventoryDates.map((dateVal, index) =>
@@ -185,8 +185,9 @@ export default function FacilitiesReport({
                   )}
                                 </FloatingSelect>
                             </div>
-                            <div>
-                                <button type="button" onClick={resetFilters} className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition" data-cds-action="true" data-cds-action-variant="primary">
+                          </FilterToolbar>
+                            <div className="min-w-[130px]">
+                                <button type="button" onClick={resetFilters} className="w-full rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold py-2.5 px-4 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600">
                                     Reset Filters
                                 </button>
                             </div>
@@ -224,13 +225,13 @@ export default function FacilitiesReport({
                         <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                             <div>
                                 <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Detailed Facilities & Infrastructures Inventory List</h3>
-                                <p className="text-xs text-green-700 dark:text-green-400 font-semibold mt-0.5">📅 {currentInventoryDateDisplay}</p>
+                                <p className="text-xs text-green-700 dark:text-green-400 font-semibold mt-0.5">ðŸ“… {currentInventoryDateDisplay}</p>
                             </div>
-                            <span className="text-xs text-gray-500 italic no-print">💡 Click any row to view full details</span>
+                            <span className="text-xs text-gray-500 italic no-print">ðŸ’¡ Click any row to view full details</span>
                         </div>
                         {facilitiesList && facilitiesList.length > 0 ?
             <div className="overflow-x-auto custom-table-scrollbar">
-                                <table className="w-full text-left border-collapse text-xs">
+                                <table className="cds-data-table w-full text-left border-collapse text-xs">
                                     <thead>
                                         <tr className="border-b border-gray-200 bg-green-900 text-white uppercase tracking-wider dark:border-gray-700">
                                             <th className="px-4 py-3.5 font-semibold">Protected Area</th>
@@ -254,8 +255,8 @@ export default function FacilitiesReport({
                                                 <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
                                                 <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">{row.facility_type}</td>
                                                 <td className="px-4 py-3">{row.unit_no}</td>
-                                                <td className="px-4 py-3">{row.year_established || '—'}</td>
-                                                <td className="px-4 py-3">{row.location_brgy_muni || '—'}</td>
+                                                <td className="px-4 py-3">{row.year_established || 'â€”'}</td>
+                                                <td className="px-4 py-3">{row.location_brgy_muni || 'â€”'}</td>
                                                 <td className="px-4 py-3 font-semibold">{row.management_zone}</td>
                                                 <td className="px-4 py-3">{row.within_easement_zone}</td>
                                                 <td className="px-4 py-3">
@@ -263,7 +264,7 @@ export default function FacilitiesReport({
                                                         {row.status}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 py-3 truncate max-w-xs">{row.recommendations ? <Tooltip content={row.recommendations}><span tabIndex={0} className="outline-none">{row.recommendations}</span></Tooltip> : '—'}</td>
+                                                <td className="px-4 py-3 truncate max-w-xs">{row.recommendations ? <Tooltip content={row.recommendations}><span tabIndex={0} className="outline-none">{row.recommendations}</span></Tooltip> : 'â€”'}</td>
                                             </tr>
                   )}
                                     </tbody>
@@ -285,13 +286,13 @@ export default function FacilitiesReport({
                     <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto animate-pop-in custom-table-scrollbar border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-4 dark:border-gray-800">
                             <div className="flex items-center gap-2">
-                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">🏗️</span>
+                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">ðŸ—ï¸</span>
                                 <div>
                                     <h3 className="font-bold text-gray-900 dark:text-white">Facility Full Details</h3>
-                                    <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} — {selectedFacility.facility_type}</p>
+                                    <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} â€” {selectedFacility.facility_type}</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">✕</button>
+                            <button type="button" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">âœ•</button>
                         </div>
 
                         <div className="mt-4 space-y-6 text-sm">
@@ -302,7 +303,7 @@ export default function FacilitiesReport({
                                 </div>
                                 <div>
                                     <span className="text-xs text-gray-500 block">Year Established</span>
-                                    <span className="font-semibold text-gray-900 dark:text-white">{selectedFacility.year_established || '—'}</span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">{selectedFacility.year_established || 'â€”'}</span>
                                 </div>
                                 <div>
                                     <span className="text-xs text-gray-500 block">Status</span>
@@ -319,13 +320,13 @@ export default function FacilitiesReport({
                             <div>
                                 <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 mb-2">Location & Zoning Indicators</h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-gray-50 dark:bg-gray-800/30 p-4 rounded-xl">
-                                    <div className="sm:col-span-2"><strong className="text-gray-900 dark:text-white">Inventory As-Of Date / Period:</strong> <span className="text-green-700 font-bold">{selectedFacility.inventory_date || '—'}</span></div>
-                                    <div><strong className="text-gray-900 dark:text-white">Location (Brgy/Muni):</strong> {selectedFacility.location_brgy_muni || '—'}</div>
+                                    <div className="sm:col-span-2"><strong className="text-gray-900 dark:text-white">Inventory As-Of Date / Period:</strong> <span className="text-green-700 font-bold">{selectedFacility.inventory_date || 'â€”'}</span></div>
+                                    <div><strong className="text-gray-900 dark:text-white">Location (Brgy/Muni):</strong> {selectedFacility.location_brgy_muni || 'â€”'}</div>
                                     <div><strong className="text-gray-900 dark:text-white">Management Zone:</strong> <span className="text-green-700 font-bold">{selectedFacility.management_zone}</span></div>
                                     <div><strong className="text-gray-900 dark:text-white">Within Easement Zone:</strong> {selectedFacility.within_easement_zone}</div>
-                                    <div><strong className="text-gray-900 dark:text-white">Coordinates:</strong> <span className="font-mono">{selectedFacility.coordinates || '—'}</span></div>
-                                    <div className="sm:col-span-2"><strong className="text-gray-900 dark:text-white">Source of Fund:</strong> {selectedFacility.source_of_fund || '—'}</div>
-                                    <div className="sm:col-span-2"><strong className="text-gray-900 dark:text-white">Tenurial Instrument / Permits:</strong> {selectedFacility.tenurial_instrument || '—'}</div>
+                                    <div><strong className="text-gray-900 dark:text-white">Coordinates:</strong> <span className="font-mono">{selectedFacility.coordinates || 'â€”'}</span></div>
+                                    <div className="sm:col-span-2"><strong className="text-gray-900 dark:text-white">Source of Fund:</strong> {selectedFacility.source_of_fund || 'â€”'}</div>
+                                    <div className="sm:col-span-2"><strong className="text-gray-900 dark:text-white">Tenurial Instrument / Permits:</strong> {selectedFacility.tenurial_instrument || 'â€”'}</div>
                                 </div>
                             </div>
 

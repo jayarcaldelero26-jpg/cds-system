@@ -8,6 +8,7 @@ import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import ConfirmDialog from '@/Components/ConfirmDialog';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 const emptyThreat = { protected_area_id: '', date: '', location: '', threat_type: '', threat_detail: '', extent: '', severity: '', coord_format: 'DD', latitude: '', longitude: '', lat_deg: '', lat_min: '', lat_sec: '', long_deg: '', long_min: '', long_sec: '', utm_zone: '', easting: '', northing: '', actions_taken: '', remarks: '' };
 const display = (value) => value === null || value === undefined || value === '' ? '—' : String(value);
@@ -34,6 +35,10 @@ export default function Threats({ threats = [], protectedAreas = [] }) {
 
   const threatTypes = useMemo(() => [...new Set(threats.map((threat) => threat.threat_type).filter(Boolean))].sort(), [threats]);
   const filteredThreats = useMemo(() => threats.filter((threat) => (areaFilter === 'all' || String(threat.protected_area_id) === areaFilter) && (typeFilter === 'all' || threat.threat_type === typeFilter)), [threats, areaFilter, typeFilter]);
+  const appliedFilters = [
+    ...(areaFilter !== 'all' ? [{ key: 'area', label: 'Protected Area', value: protectedAreas.find(area => String(area.id) === areaFilter)?.name || areaFilter, onRemove: () => setAreaFilter('all') }] : []),
+    ...(typeFilter !== 'all' ? [{ key: 'type', label: 'Threat Category', value: typeFilter, onRemove: () => setTypeFilter('all') }] : []),
+  ];
 
   const closeAll = () => {setModal(null);setSelectedThreat(null);form.reset();form.clearErrors();};
   const openDetails = (threat) => {setSelectedThreat(threat);setModal('details');};
@@ -67,8 +72,8 @@ export default function Threats({ threats = [], protectedAreas = [] }) {
 
 
   return <div className="space-y-4">
-        <div className="flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900">
-            <div className="flex flex-wrap gap-3"><div className={label}><FloatingSelect id="threats-protected-area" label="Protected Area" value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}><option value="all">All Protected Areas</option>{protectedAreas.map((area) => <option key={area.id} value={String(area.id)}>{area.name}</option>)}</FloatingSelect></div><div className={label}><FloatingSelect id="threats-threat-category" label="Threat Category" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">All Threat Types</option>{threatTypes.map((type) => <option key={type}>{type}</option>)}</FloatingSelect></div></div>
+        <div className="cds-card-surface flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900">
+            <FilterToolbar chips={appliedFilters} onClear={() => { setAreaFilter('all'); setTypeFilter('all'); }}><div className="grid gap-3 sm:grid-cols-2"><div className={label}><FloatingSelect id="threats-protected-area" label="Protected Area" value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)}><option value="all">All Protected Areas</option>{protectedAreas.map((area) => <option key={area.id} value={String(area.id)}>{area.name}</option>)}</FloatingSelect></div><div className={label}><FloatingSelect id="threats-threat-category" label="Threat Category" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value)}><option value="all">All Threat Types</option>{threatTypes.map((type) => <option key={type}>{type}</option>)}</FloatingSelect></div></div></FilterToolbar>
             {canCreate && <button type="button" onClick={openCreate} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">+ Add Threat Record</button>}
         </div>
 

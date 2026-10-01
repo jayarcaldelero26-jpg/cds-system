@@ -173,14 +173,12 @@ export default function ComplianceRichTextEditor({ id, label, value = '', onChan
         onMouseDown={event => event.preventDefault()}
         onClick={onClick}
         className={`rounded px-2 py-1 text-xs font-bold transition ${active ? 'bg-green-700 text-white' : 'text-gray-700 hover:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-700'} disabled:cursor-not-allowed disabled:opacity-50`}
-        data-cds-action="true"
-        data-cds-action-variant="primary"
     >{text}</button>;
 
     return <div className="min-w-0 space-y-1.5">
         <label htmlFor={editorId} className="block min-w-0 break-words text-xs font-semibold leading-4 text-gray-700 dark:text-gray-300">{label}</label>
         <div className="overflow-visible rounded-xl border border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950">
-            <div className="flex flex-wrap items-center gap-1 border-b border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900">
+            <div className="compliance-rich-text-toolbar flex flex-wrap items-center gap-1 border-b border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900">
                 {toolbarButton('Regular', 'Remove formatting', regular)}
                 {toolbarButton('B', 'Bold', () => command('bold'), selectionState.bold)}
                 {toolbarButton('I', 'Italic', () => command('italic'), selectionState.italic)}

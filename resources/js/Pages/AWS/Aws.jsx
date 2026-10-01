@@ -1,5 +1,6 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";
-import DatePicker from "@/Components/DatePicker";import { useState, useEffect } from 'react';
+import DatePicker from "@/Components/DatePicker";import { useState, useEffect, useRef } from 'react';
+import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
 import { useForm, router, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
@@ -37,6 +38,10 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const importDropRef = useRef(null);
+  const editDropRef = useRef(null);
+  const importDropMessage = useModalFileDrop(importDropRef, isImportModalOpen);
+  const editDropMessage = useModalFileDrop(editDropRef, isEditModalOpen);
 
   const [previewUrl, setPreviewUrl] = useState(null);
   const [existingFile, setExistingFile] = useState(null);
@@ -250,7 +255,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                 </div>
 
                                 <div className="overflow-x-auto custom-table-scrollbar">
-                                    <table className="w-full text-left border-collapse text-xs">
+                                    <table className="cds-data-table w-full text-left border-collapse text-xs">
                                         <thead>
                                             <tr className="border-b border-gray-200 bg-green-900 text-white uppercase tracking-wider dark:border-gray-700">
                                                 <th className="px-3 py-3.5 w-10 text-center">
@@ -350,7 +355,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                       canImport={Boolean(auth.canCreateAws)}
                       onImport={() => setIsImportModalOpen(true)} />
 
-                    <section aria-labelledby="aws-daily-observations-heading" className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                    <section aria-labelledby="aws-daily-observations-heading" className="cds-card-surface rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
                         <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <h2 id="aws-daily-observations-heading" className="text-lg font-bold text-green-900 dark:text-green-300">AWS Observation Records</h2>
@@ -530,7 +535,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                             {data.report_file &&
                     <div className="flex items-center gap-2 bg-blue-600 text-white px-3.5 py-2 rounded-xl text-xs font-medium shadow-xs w-fit">
                                                     <span> {data.report_file.name}</span>
-                                                    <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1" data-cds-action="true" data-cds-action-variant="danger"></button>
+                                                    <button type="button" onClick={removeFile} className="cds-file-remove ml-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600" aria-label="Remove selected file">Ã—</button>
                                                 </div>
                     }
                                         </div>
@@ -590,12 +595,13 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
             {isImportModalOpen &&
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 animate-pop-in space-y-6">
+                    <div ref={importDropRef} data-cds-modal-drop-panel className="relative bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 animate-pop-in space-y-6">
+                        {importDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{importDropMessage}</div>}
                         <div className="flex items-center justify-between border-b pb-4 dark:border-gray-800">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
                                 <span></span> Import AWS Data
                             </h3>
-                            <button type="button" onClick={() => setIsImportModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary"></button>
+                            <button type="button" onClick={() => setIsImportModalOpen(false)} className="rounded-lg p-1.5 text-xl text-gray-400 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:hover:bg-gray-800" aria-label="Close import modal">Ã—</button>
                         </div>
 
                         <form onSubmit={handleImportSubmit} className="space-y-4">
@@ -664,7 +670,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">AWS Monitoring Full Details</h3>
                                 <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'N/A'}  Station: {selectedRecord.station_name}</p>
                             </div>
-                            <button type="button" onClick={() => setIsViewModalOpen(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary"></button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -726,7 +731,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             {/* EDIT MODAL */}
             {isEditModalOpen && selectedRecord &&
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs">
-                    <div className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+                    <div ref={editDropRef} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+                        {editDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{editDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div className="flex items-center gap-2">
                                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400"></span>
@@ -735,7 +741,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                     <p className="text-xs text-gray-500">Update weather station details and review attached files side-by-side.</p>
                                 </div>
                             </div>
-                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary"></button>
+                            <button type="button" onClick={() => setIsEditModalOpen(false)} className="rounded-lg p-1.5 text-xl text-gray-400 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:hover:bg-gray-800" aria-label="Close edit modal">Ã—</button>
                         </div>
 
                         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto custom-table-scrollbar">
@@ -805,14 +811,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                                         {existingFile && !data.report_file &&
                   <div className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs w-fit">
                                                 <span> {existingFile}</span>
-                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1" data-cds-action="true" data-cds-action-variant="danger"></button>
+                                                <button type="button" onClick={removeFile} className="cds-file-remove ml-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600" aria-label="Remove selected file">Ã—</button>
                                             </div>
                   }
 
                                         {data.report_file &&
                   <div className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs w-fit">
                                                 <span> {data.report_file.name}</span>
-                                                <button type="button" onClick={removeFile} className="text-white/80 hover:text-white font-bold ml-1" data-cds-action="true" data-cds-action-variant="danger"></button>
+                                                <button type="button" onClick={removeFile} className="cds-file-remove ml-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600" aria-label="Remove selected file">Ã—</button>
                                             </div>
                   }
                                     </div>

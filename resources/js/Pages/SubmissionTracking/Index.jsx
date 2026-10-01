@@ -7,6 +7,7 @@ import {
     FloatingSelect,
     FloatingTextarea,
 } from "@/Components/Form";
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 import CrudFormModal from "@/Components/Crud/CrudFormModal";
 import CrudDetailsModal from "@/Components/Crud/CrudDetailsModal";
 import CrudSection from "@/Components/Crud/CrudSection";
@@ -236,7 +237,7 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
             : routing.timeline) || [];
     const progress = compactProgressFor(row);
     return (
-        <aside className="flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <aside className="cds-card-surface flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <p className="text-sm font-extrabold text-gray-900 dark:text-white">
                     Submission Details
@@ -1261,6 +1262,12 @@ export default function Index({
             page: undefined,
         });
     };
+    const appliedFilterChips = [
+        ...(filters.search ? [{ key: 'search', label: 'Search', value: filters.search, onRemove: () => { setSearch(''); navigateFilters({ search: undefined }); } }] : []),
+        ...(filters.module ? [{ key: 'module', label: 'Module', value: filters.module, onRemove: () => { setModule(''); navigateFilters({ module: undefined }); } }] : []),
+        ...(filters.protected_area_id ? [{ key: 'protected_area_id', label: 'Protected Area', value: filterOptions.protectedAreas?.find(area => String(area.id) === String(filters.protected_area_id))?.name || filters.protected_area_id, onRemove: () => { setProtectedAreaId(''); navigateFilters({ protected_area_id: undefined }); } }] : []),
+        ...(filters.status ? [{ key: 'status', label: 'Status', value: filters.status, onRemove: () => { setStatus(''); navigateFilters({ status: undefined }); } }] : []),
+    ];
     const paginationControls = (
         <div className="flex flex-col gap-2 text-xs text-gray-500 dark:text-gray-400 sm:flex-row sm:items-center sm:justify-between">
             <span>
@@ -1280,9 +1287,9 @@ export default function Index({
                     type="button"
                     aria-label="Previous page"
                     disabled={currentPage <= 1}
-                    className="rounded-lg border border-gray-200 p-1.5 text-gray-600 transition hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
+                    className="cds-pagination-control rounded-lg border border-gray-200 p-1.5 text-gray-600 transition hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                     onClick={() => navigateFilters({ page: currentPage - 1 })}
-                 data-cds-action="true" data-cds-action-variant="primary">
+                >
                     <svg
                         viewBox="0 0 20 20"
                         fill="none"
@@ -1302,9 +1309,9 @@ export default function Index({
                     type="button"
                     aria-label="Next page"
                     disabled={!pagination.has_more}
-                    className="rounded-lg border border-gray-200 p-1.5 text-gray-600 transition hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
+                    className="cds-pagination-control rounded-lg border border-gray-200 p-1.5 text-gray-600 transition hover:border-green-300 hover:text-green-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:text-gray-300"
                     onClick={() => navigateFilters({ page: currentPage + 1 })}
-                 data-cds-action="true" data-cds-action-variant="primary">
+                >
                     <svg
                         viewBox="0 0 20 20"
                         fill="none"
@@ -1350,7 +1357,7 @@ export default function Index({
                             ))}
                         </div>
                     )}
-                    <div className="submission-tracking-filterbar flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:flex-row lg:items-center">
+                    <div className="submission-tracking-filterbar cds-card-surface flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:flex-row lg:items-center">
                         <div className="min-w-0 flex-1">
                             <FloatingInput
                                 id="submission-tracking-search"
@@ -1362,7 +1369,8 @@ export default function Index({
                                 size="sm"
                             />
                         </div>
-                        <div className="w-full lg:w-40">
+                        <div className="min-w-0 flex-1"><FilterToolbar chips={appliedFilterChips}><div className="grid gap-3 sm:grid-cols-3">
+                        <div className="w-full">
                             <FloatingSelect
                                 id="submission-tracking-module"
                                 label="Module"
@@ -1382,7 +1390,7 @@ export default function Index({
                                 ))}
                             </FloatingSelect>
                         </div>
-                        <div className="w-full lg:w-52">
+                        <div className="w-full">
                             <FloatingSelect
                                 id="submission-tracking-area"
                                 label="Protected Area"
@@ -1406,7 +1414,7 @@ export default function Index({
                                 )}
                             </FloatingSelect>
                         </div>
-                        <div className="w-full lg:w-40">
+                        <div className="w-full">
                             <FloatingSelect
                                 id="submission-tracking-status"
                                 label="Status"
@@ -1426,13 +1434,13 @@ export default function Index({
                                 ))}
                             </FloatingSelect>
                         </div>
+                        </div></FilterToolbar></div>
                         <button
                             type="button"
                             onClick={resetFilters}
                             disabled={!filtersActive}
-                            className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 transition hover:border-green-300 hover:bg-green-50 hover:text-green-800 disabled:cursor-not-allowed disabled:opacity-45 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-                         data-cds-action="true" data-cds-action-variant="primary">
-                            Clear
+                            className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 transition hover:border-green-300 hover:bg-green-50 hover:text-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-45 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
+                            Clear all
                         </button>
                     </div>
                     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -1527,13 +1535,13 @@ export default function Index({
                 onClose={() => setShowFullDetails(false)}
                 closeOnEscape={!reviewHistoryRecord}
                 footerActions={<>
-                    {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="secondary" onClick={() => openCorrection(details)} className="rounded-xl border-amber-300 px-3 py-2 text-xs text-amber-900 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-slate-800">Correct routing</Button>}
-                    <Button type="button" size="compact" variant="secondary" onClick={() => setReviewHistoryRecord(details)} className="rounded-xl px-3 py-2 text-xs">Review history</Button>
-                    <Button type="button" size="compact" variant="secondary" onClick={() => scrollDetailsTo(details?.pamb_routing_applicable ? "#pamb-routing-timeline-stages" : "#document-routing-timeline-stages", true)} className="rounded-xl px-3 py-2 text-xs">Full timeline</Button>
+                    {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="warning" onClick={() => openCorrection(details)} className="rounded-xl px-3 py-2 text-xs">Correct routing</Button>}
+                    <Button type="button" size="compact" variant="cancel" onClick={() => setReviewHistoryRecord(details)} className="rounded-xl px-3 py-2 text-xs">Review history</Button>
+                    <Button type="button" size="compact" variant="cancel" onClick={() => scrollDetailsTo(details?.pamb_routing_applicable ? "#pamb-routing-timeline-stages" : "#document-routing-timeline-stages", true)} className="rounded-xl px-3 py-2 text-xs">Full timeline</Button>
                 </>}
             >
                 {details && (
-                    <section className="rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900/80" aria-label="Current status and processing">
+                    <section className="cds-card-surface rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900/80" aria-label="Current status and processing">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100">Current Status &amp; Processing</h2>
                             <div className="flex items-center gap-2">
@@ -1580,34 +1588,19 @@ export default function Index({
                         </dl>
                     </section>
                 )}
-                {details?.routing && (
-                    <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                        <SubmissionTrackingProgress row={details} />
-                    </div>
-                )}
-                {details?.current_document && (
-                    <section className="mb-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Current official document">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="min-w-0">
-                                <h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Official Document</h2>
-                                <p className="mt-1 truncate text-sm font-semibold text-gray-700 dark:text-gray-200" title={details.current_document.name || undefined}>
-                                    {details.current_document.name || "Official document"}
-                                </p>
+                {(details?.routing || details?.current_document) && (
+                    <section className="cds-card-surface space-y-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Routing progress and current official document">
+                        {details?.routing && <div><h2 className="mb-3 text-sm font-extrabold text-gray-900 dark:text-white">Routing Progress</h2><SubmissionTrackingProgress row={details} /></div>}
+                        {details?.current_document && <div className={`${details?.routing ? 'border-t border-gray-200 pt-4 dark:border-gray-700' : ''}`}>
+                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="min-w-0"><h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Official Document</h2><p className="mt-1 truncate text-sm font-semibold text-gray-700 dark:text-gray-200" title={details.current_document.name || undefined}>{details.current_document.name || "Official document"}</p></div>
+                                <Button size="compact" variant="primary" type="button" onClick={() => setPreviewRow(details)} className="shrink-0 rounded-lg px-3 py-2 text-xs">Preview Current Document</Button>
                             </div>
-                            <Button
-                                size="compact"
-                                variant="primary"
-                                type="button"
-                                onClick={() => setPreviewRow(details)}
-                                className="shrink-0 rounded-lg px-3 py-2 text-xs"
-                            >
-                                Preview Current Document
-                            </Button>
-                        </div>
+                        </div>}
                     </section>
                 )}
                 {details?.storage_status && (
-                    <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40" aria-label="Document storage">
+                    <div className="cds-card-surface mb-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40" aria-label="Document storage">
                         <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">Document Storage</p>
                         <div className="grid gap-2 sm:grid-cols-2">
                             {[
@@ -1651,11 +1644,10 @@ export default function Index({
                         }}
                     />
                 )}
-                {(canCorrectSubmissionRouting || canAdminRoutingOverride) && details && (
+                {canAdminRoutingOverride && details && (
                     <details className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-800 dark:bg-slate-900/80 dark:text-slate-100">
                         <summary className="cursor-pointer rounded-md text-xs font-bold text-amber-900 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 dark:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-slate-900">Admin actions</summary>
                         <div className="mt-3 flex flex-wrap gap-2">
-                            {canCorrectSubmissionRouting && <Button type="button" size="compact" variant="secondary" onClick={() => openCorrection(details)} className="rounded-lg border-amber-400 px-3 py-2 text-xs text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-slate-800 dark:text-amber-100 dark:hover:bg-slate-700 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-slate-900">Correct Routing Record</Button>}
                             {canAdminRoutingOverride && <Button type="button" size="compact" variant="warning" onClick={() => openAdminOverride(details)} className="rounded-lg px-3 py-2 text-xs dark:focus-visible:ring-amber-300 dark:focus-visible:ring-offset-slate-900">Admin Override</Button>}
                         </div>
                         {canAdminRoutingOverride && <div className="mt-3 border-t border-amber-200 pt-3 dark:border-slate-700"><p className="text-xs text-amber-900 dark:text-slate-300">Administrative override requires a fresh passkey and records your account, reason, and accountable category. It does not impersonate another user.</p>{overrideError && !override && <p className="mt-2 text-xs font-semibold text-red-700 dark:text-red-300">{overrideError}</p>}</div>}
@@ -1666,7 +1658,6 @@ export default function Index({
                         row={details}
                         actions={details.routing?.actions || []}
                         hideCurrentProcessing
-                        onReviewHistory={() => setReviewHistoryRecord(details)}
                         expandAll={expandFullTimeline}
                         onExpandAllChange={setExpandFullTimeline}
                         onRecord={(stage) => {

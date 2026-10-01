@@ -116,11 +116,13 @@ test("shared modal footer and timeline controls keep existing guarded action han
     assert.match(page, /canAdminRoutingOverride && <Button/);
     assert.doesNotMatch(page, /\bdarkTheme\s*\n\s*open=\{Boolean\(showFullDetails/);
     assert.match(page, /bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900\/80/);
-    assert.match(page, /dark:border-slate-700 dark:bg-slate-900\/70/);
+    assert.match(page, /aria-label="Routing progress and current official document"/);
+    assert.match(page, /Routing Progress/);
+    assert.match(page, /Current Official Document/);
     assert.match(page, /hideRoutingHistory/);
     assert.match(pambTimeline, /Show \$\{hiddenSteps\.length\} more steps/);
     assert.match(genericTimeline, /Show \$\{hiddenSteps\.length\} more steps/);
-    assert.match(pambTimeline, /onReviewHistory/);
+    assert.doesNotMatch(pambTimeline, /onReviewHistory|View Review History/);
     assert.match(pambTimeline, /onClick=\{\(\) => setShowRemainingSteps\(\(shown\) => !shown\)\}/);
     assert.match(genericTimeline, /onClick=\{\(\) => setShowRemainingSteps\(\(shown\) => !shown\)\}/);
     assert.match(history, /row\?\.mov_processing\?\.applicable/);

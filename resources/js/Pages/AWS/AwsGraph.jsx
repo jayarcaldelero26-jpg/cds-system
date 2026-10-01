@@ -1,5 +1,6 @@
 import { FloatingSelect } from "@/Components/Form";
 import DateRangePicker from "@/Components/DateRangePicker";import { useEffect, useState } from 'react';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { router } from '@inertiajs/react';
 import Card from '../../Components/Card';
 import { dateOnlyTimestamp, parseDateOnly } from '@/Utils/dateFormatters';
@@ -1123,6 +1124,10 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                 {/* FILTERS + GRAPH HEADER */}
                 <div className="flex flex-col gap-4">
                     <div className="rounded-2xl border border-gray-200/60 bg-gray-50/80 p-4 backdrop-blur-sm dark:border-gray-700/60 dark:bg-gray-800/40">
+                        <FilterToolbar label="Graph filters" chips={[
+                          ...(!scoped && selectedPaId ? [{ key: 'protected_area_id', label: 'Protected Area', value: protectedAreas.find(pa => String(pa.id) === String(selectedPaId))?.name || selectedPaId, onRemove: () => handleProtectedAreaChange({ target: { value: '' } }) }] : []),
+                          ...(!scoped ? [{ key: 'graph_range', label: 'Date Range', value: rangePreset === 'custom' ? `${graphStartDate || 'Start'} – ${graphEndDate || 'End'}` : ({ '7': 'Last 7 Days', '30': 'Last 30 Days', '90': 'Last 90 Days', '365': 'Last 12 Months' }[rangePreset] || rangePreset), onRemove: clearGraphRange }] : []),
+                        ]}>
                         <div className={`grid grid-cols-1 gap-3 ${scoped ? 'max-w-md' : 'lg:grid-cols-3'}`}>
                             {!scoped && <div>
                                 <FloatingSelect id="awsgraph-protected-area" label="Protected Area"
@@ -1177,6 +1182,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                 </button>
                             </div>
             }
+                        </FilterToolbar>
                     </div>
 
                     {allPaMode &&

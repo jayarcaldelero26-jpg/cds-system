@@ -24,7 +24,7 @@ export default function CalendarPopover({ open, anchorRef, popoverRef, children,
     }, [anchorRef, open, wide]);
 
     if (!open || typeof document === 'undefined') return null;
-    return createPortal(<div ref={popoverRef} role='dialog' aria-label='Calendar date picker' style={{ top: position.top, left: position.left }} className={wide ? 'fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(680px,calc(100vw-16px))]' : 'fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(340px,calc(100vw-16px))]'}>
+    return createPortal(<div ref={popoverRef} role='dialog' aria-label='Calendar date picker' style={{ top: position.top, left: position.left }} className={wide ? 'cds-menu-panel fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(680px,calc(100vw-16px))]' : 'cds-menu-panel fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(340px,calc(100vw-16px))]'}>
         {children}
     </div>, document.body);
 }

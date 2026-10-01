@@ -36,7 +36,7 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
         onSubmit?.(row, { onFinish: () => setSubmitting(false) });
     };
 
-    return <section className="space-y-3 rounded-xl border border-green-100 bg-green-50/60 p-3 dark:border-green-900/60 dark:bg-green-950/20" aria-label="MOV Review">
+    return <section className="cds-card-surface space-y-3 rounded-xl border border-green-100 bg-green-50/60 p-3 dark:border-green-900/60 dark:bg-green-950/20" aria-label="MOV Review">
         <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-green-900 dark:text-green-200">MOV Review Milestones</h3>

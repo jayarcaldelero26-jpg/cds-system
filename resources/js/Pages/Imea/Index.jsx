@@ -1,5 +1,6 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { Link, useForm, usePage, router } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import StatusBadge from '@/Components/StatusBadge';
@@ -7,8 +8,11 @@ import PageHeader from '@/Components/PageHeader';
 import Tooltip from '@/Components/Tooltip';
 import WorkflowTabs from './WorkflowTabs';
 import Button from '@/Components/Button';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
+  const importDropRef = useRef(null);
+  const assessmentDropRef = useRef(null);
   const { props } = usePage();
   const canCreate = Boolean(props.auth?.canCreateImea);
   const canUpdate = Boolean(props.auth?.canUpdateImea);
@@ -23,12 +27,14 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
   const [selectedAssessment, setSelectedAssessment] = useState(null);
   const [isViewAssessmentModalOpen, setIsViewAssessmentModalOpen] = useState(false);
   const [isAssessmentModalOpen, setIsAssessmentModalOpen] = useState(false);
+  const assessmentDropMessage = useModalFileDrop(assessmentDropRef, isAssessmentModalOpen);
 
   // Facility Modal States
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
   const [isViewFacilityModalOpen, setIsViewFacilityModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const importDropMessage = useModalFileDrop(importDropRef, isImportModalOpen);
 
   const [selectedFacilityIds, setSelectedFacilityIds] = useState([]);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -298,7 +304,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       <Card padding="p-0" className="border border-gray-100 dark:border-gray-800 overflow-hidden shadow-xl rounded-2xl">
                     {assessments?.data?.length > 0 ?
         <div className="overflow-x-auto custom-table-scrollbar">
-                            <table className="w-full text-left border-collapse">
+                            <table className="cds-data-table w-full text-left border-collapse">
                                 <thead>
                                     <tr className="border-b border-gray-200 bg-green-900 text-white text-xs uppercase tracking-wider dark:border-gray-700">
                                         <th className="px-6 py-3.5 font-semibold">Protected Area</th>
@@ -327,7 +333,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div> :
 
         <div className="p-12 text-center">
-                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-400 mb-3 text-xl">🌿</div>
+                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-400 mb-3 text-xl">ðŸŒ¿</div>
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">No IMEA assessments recorded yet</h3>
                         </div>
         }
@@ -337,13 +343,14 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
             {/* TAB 2: FACILITIES & INFRASTRUCTURES INVENTORY */}
             {activeTab === 'facilities' &&
       <>
-                    <div className="mt-3 mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-                        <Link href="/imea/facilities-report" data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-bold">📊 View Facilities Summary Report</Link>
-                        {canImport && <Button type="button" size="compact" onClick={() => setIsImportModalOpen(true)} className="rounded-lg px-3 py-2 text-xs">📥 Import CSV</Button>}
+                    <div className="cds-card-surface mt-3 mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                        <Link href="/imea/facilities-report" data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-bold">ðŸ“Š View Facilities Summary Report</Link>
+                        {canImport && <Button type="button" size="compact" onClick={() => setIsImportModalOpen(true)} className="rounded-lg px-3 py-2 text-xs">ðŸ“¥ Import CSV</Button>}
                         {canCreate && <Button type="button" size="compact" onClick={() => openFacilityModal()} className="rounded-lg px-3 py-2 text-xs">+ Add Facility / Infrastructure</Button>}
                     </div>
                     <div className="mb-4">
                         <Card className="border border-gray-100 dark:border-gray-800 shadow-md rounded-2xl bg-white dark:bg-gray-900 p-4">
+                            <FilterToolbar chips={selectedFacilityPA ? [{ key: 'protected_area_id', label: 'Protected Area', value: protectedAreas?.find(pa => String(pa.id) === String(selectedFacilityPA))?.name || selectedFacilityPA, onRemove: () => handleFacilityPAFilter('') }] : []} onClear={() => handleFacilityPAFilter('')}>
                             <div className="flex flex-col sm:flex-row sm:items-end gap-3">
                                 <div className="w-full sm:max-w-md">
 
@@ -363,17 +370,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     </FloatingSelect>
                                 </div>
 
-                                {selectedFacilityPA &&
-              <Button
-                size="compact"
-                type="button"
-                onClick={() => handleFacilityPAFilter('')}
-                className="rounded-lg py-2.5 px-4 text-sm">
-
-                                        Reset Filter
-              </Button>
-              }
                             </div>
+                            </FilterToolbar>
                         </Card>
                     </div>
 
@@ -381,12 +379,12 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                     {canDelete && selectedFacilityIds.length > 0 &&
           <div className="p-3 bg-red-50 dark:bg-red-950/40 border-b border-red-200 dark:border-red-900 flex items-center justify-between">
                             <span className="text-xs font-bold text-red-700 dark:text-red-300">{selectedFacilityIds.length} item(s) selected</span>
-                            <Button type="button" size="compact" variant="danger" onClick={handleBulkDelete} className="rounded-lg px-3 py-1.5 text-xs">🗑️ Delete Selected Items</Button>
+                            <Button type="button" size="compact" variant="danger" onClick={handleBulkDelete} className="rounded-lg px-3 py-1.5 text-xs">ðŸ—‘ï¸ Delete Selected Items</Button>
                         </div>
           }
                     {facilities?.data?.length > 0 ?
           <div className="overflow-x-auto custom-table-scrollbar">
-                            <table className="w-full text-left border-collapse text-xs">
+                            <table className="cds-data-table w-full text-left border-collapse text-xs">
                                 <thead>
                                     <tr className="border-b border-gray-200 bg-green-900 text-white uppercase tracking-wider dark:border-gray-700">
                                         <th className="px-4 py-3.5 w-10 text-center">
@@ -411,8 +409,8 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                             <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
                                             <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">{row.facility_type}</td>
                                             <td className="px-4 py-3">{row.unit_no}</td>
-                                            <td className="px-4 py-3">{row.year_established || '—'}</td>
-                                            <td className="px-4 py-3">{row.location_brgy_muni || '—'}</td>
+                                            <td className="px-4 py-3">{row.year_established || 'â€”'}</td>
+                                            <td className="px-4 py-3">{row.location_brgy_muni || 'â€”'}</td>
                                             <td className="px-4 py-3 font-semibold">{row.management_zone}</td>
                                             <td className="px-4 py-3">{row.within_easement_zone}</td>
                                             <td className="px-4 py-3">
@@ -425,9 +423,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div> :
 
           <div className="p-12 text-center">
-                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-400 mb-3 text-xl">🏗️</div>
+                            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/50 text-green-700 dark:text-green-400 mb-3 text-xl">ðŸ—ï¸</div>
                             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">No facilities or infrastructures recorded yet</h3>
-                            <p className="text-xs text-gray-500 mt-1">Click "+ Add Facility / Infrastructure" or "📥 Import CSV" to populate records.</p>
+                            <p className="text-xs text-gray-500 mt-1">Click "+ Add Facility / Infrastructure" or "ðŸ“¥ Import CSV" to populate records.</p>
                         </div>
           }
                     </Card>
@@ -441,9 +439,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">IMEA Assessment Full Details</h3>
-                                <p className="text-xs text-gray-500">{selectedAssessment.protected_area?.name || 'N/A'} — PAMO: {selectedAssessment.pamo_name}</p>
+                                <p className="text-xs text-gray-500">{selectedAssessment.protected_area?.name || 'N/A'} â€” PAMO: {selectedAssessment.pamo_name}</p>
                             </div>
-                            <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment details">✕</Button>
+                            <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment details">âœ•</Button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -467,21 +465,21 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             </div>
 
                             <div className="space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">🔍 Impact Assessment Indicators</h4>
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ” Impact Assessment Indicators</h4>
                                 <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                                        <div><span className="text-gray-500 block">Trail Condition:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.trail_condition || '—'}</span></div>
-                                        <div><span className="text-gray-500 block">Wildlife Disturbance:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.wildlife_disturbance || '—'}</span></div>
-                                        <div><span className="text-gray-500 block">Vegetation Damage:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.vegetation_damage || '—'}</span></div>
-                                        <div><span className="text-gray-500 block">Water Quality:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.water_quality || '—'}</span></div>
-                                        <div><span className="text-gray-500 block">Solid Waste Generation:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.solid_waste_generation_kg ? `${selectedAssessment.solid_waste_generation_kg} kg` : '—'}</span></div>
+                                        <div><span className="text-gray-500 block">Trail Condition:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.trail_condition || 'â€”'}</span></div>
+                                        <div><span className="text-gray-500 block">Wildlife Disturbance:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.wildlife_disturbance || 'â€”'}</span></div>
+                                        <div><span className="text-gray-500 block">Vegetation Damage:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.vegetation_damage || 'â€”'}</span></div>
+                                        <div><span className="text-gray-500 block">Water Quality:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.water_quality || 'â€”'}</span></div>
+                                        <div><span className="text-gray-500 block">Solid Waste Generation:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedAssessment.solid_waste_generation_kg ? `${selectedAssessment.solid_waste_generation_kg} kg` : 'â€”'}</span></div>
                                         <div><span className="text-gray-500 block">Carrying Capacity Compliance:</span><span className="font-semibold text-green-700 dark:text-green-400">{selectedAssessment.carrying_capacity_compliance ? 'Compliant' : 'Exceeded'}</span></div>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📝 Detailed Impact Notes & Remarks</h4>
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ“ Detailed Impact Notes & Remarks</h4>
                                 <div className="space-y-3 text-xs">
                                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700"><span className="block font-semibold text-gray-500 mb-1">Biodiversity Impact Notes:</span><p className="text-gray-800 dark:text-gray-200">{selectedAssessment.biodiversity_impact_notes || 'None.'}</p></div>
                                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700"><span className="block font-semibold text-gray-500 mb-1">Environment Impact Notes:</span><p className="text-gray-800 dark:text-gray-200">{selectedAssessment.environment_impact_notes || 'None.'}</p></div>
@@ -493,7 +491,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
-                            {canUpdate && <Button type="button" size="compact" onClick={() => {setIsViewAssessmentModalOpen(false);openAssessmentEditModal(selectedAssessment);}} className="rounded-xl px-4 py-2 text-xs">✏️ Edit This Assessment</Button>}
+                            {canUpdate && <Button type="button" size="compact" onClick={() => {setIsViewAssessmentModalOpen(false);openAssessmentEditModal(selectedAssessment);}} className="rounded-xl px-4 py-2 text-xs">âœï¸ Edit This Assessment</Button>}
                             <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-xl px-5 py-2 text-xs">Close Details</Button>
                         </div>
                     </div>
@@ -503,16 +501,17 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
             {/* EDIT MODAL FOR IMEA ASSESSMENTS */}
             {isAssessmentModalOpen &&
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs">
-                    <div className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+                    <div ref={assessmentDropRef} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+                        {assessmentDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{assessmentDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div className="flex items-center gap-2">
-                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">📊</span>
+                                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">ðŸ“Š</span>
                                 <div>
                                     <h3 className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">Edit IMEA Assessment & Document Preview</h3>
                                     <p className="text-xs text-gray-500">Update monitoring indicators and review attached documents side-by-side.</p>
                                 </div>
                             </div>
-                            <Button type="button" size="compact" onClick={closeAssessmentModal} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment">✕</Button>
+                            <Button type="button" size="compact" onClick={closeAssessmentModal} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment">âœ•</Button>
                         </div>
 
                         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto custom-table-scrollbar">
@@ -576,7 +575,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
                                     {/* IMPACT ASSESSMENT INDICATORS */}
                                     <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-3">
-                                        <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">🔍 Impact Assessment Indicators</h4>
+                                        <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ” Impact Assessment Indicators</h4>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div>
 
@@ -599,7 +598,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
                                     {/* DETAILED IMPACT NOTES */}
                                     <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-3">
-                                        <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📝 Detailed Impact Notes</h4>
+                                        <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ“ Detailed Impact Notes</h4>
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                             <div>
 
@@ -622,7 +621,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
                                     {/* ATTACHMENTS & REMARKS SECTION */}
                                     <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-3">
-                                        <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📎 Attachments & Remarks</h4>
+                                        <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ“Ž Attachments & Remarks</h4>
                                         <div>
 
                                             <FileInput id="index-upload-additional-files-pdf"
@@ -644,7 +643,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                                     {existingFiles.map((file, idx) =>
                       <div key={idx} className="flex items-center gap-2 bg-green-700 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
                                                             <Tooltip content={file.name}><Button type="button" size="compact" onClick={() => setActivePreview(file)} className="max-w-[180px] truncate rounded px-1 text-left text-xs">
-                                                                📄 {file.name}
+                                                                ðŸ“„ {file.name}
                                                             </Button></Tooltip>
                                                             <Button size="compact" variant="danger"
                           type="button"
@@ -655,7 +654,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                           }}
                           className="ml-1 rounded px-1 text-xs" aria-label={`Remove ${file.name}`}>
 
-                                                                ✕
+                                                                âœ•
                                                             </Button>
                                                         </div>
                       )}
@@ -669,13 +668,13 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                                 <div className="flex flex-wrap gap-2">
                                                     {attachedFiles.map((item, idx) =>
                       <div key={idx} className="flex items-center gap-2 bg-blue-600 text-white px-3 py-1.5 rounded-xl text-xs font-medium shadow-xs">
-                                                            <Tooltip content={item.name}><span tabIndex={0} className="truncate max-w-[180px] outline-none">📄 {item.name}</span></Tooltip>
+                                                            <Tooltip content={item.name}><span tabIndex={0} className="truncate max-w-[180px] outline-none">ðŸ“„ {item.name}</span></Tooltip>
                                                             <Button size="compact" variant="danger"
                           type="button"
                           onClick={() => setAttachedFiles(attachedFiles.filter((_, i) => i !== idx))}
                           className="ml-1 rounded px-1 text-xs" aria-label={`Remove ${item.name}`}>
 
-                                                                ✕
+                                                                âœ•
                                                             </Button>
                                                         </div>
                       )}
@@ -695,21 +694,21 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <div className="lg:col-span-6 flex flex-col bg-gray-50 dark:bg-gray-950 p-4 rounded-2xl border border-gray-200 dark:border-gray-800 h-[650px] sticky top-4">
                                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-gray-200 dark:border-gray-800">
                                     <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">
-                                        👁️ LIVE DOCUMENT PREVIEW {activePreview && <span className="normal-case text-gray-500 text-[11px] font-normal ml-1">({activePreview.name})</span>}
+                                        ðŸ‘ï¸ LIVE DOCUMENT PREVIEW {activePreview && <span className="normal-case text-gray-500 text-[11px] font-normal ml-1">({activePreview.name})</span>}
                                     </h4>
-                                    {activePreview && <a href={activePreview.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 hover:underline">Fullscreen ↗</a>}
+                                    {activePreview && <a href={activePreview.url} target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-green-700 hover:underline">Fullscreen â†—</a>}
                                 </div>
                                 <div className="flex-1 w-full bg-white dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-300 dark:border-gray-800 flex items-center justify-center">
-                                    {activePreview ? <iframe src={activePreview.url} title={activePreview.name} className="w-full h-full border-0" /> : <div className="text-center p-6 text-gray-400 text-xs">📁 No file selected or available for preview</div>}
+                                    {activePreview ? <iframe src={activePreview.url} title={activePreview.name} className="w-full h-full border-0" /> : <div className="text-center p-6 text-gray-400 text-xs">ðŸ“ No file selected or available for preview</div>}
                                 </div>
                             </div>
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
-                            {canDelete && <Button type="button" size="compact" variant="danger" onClick={() => setShowDeleteConfirm(true)} className="rounded-xl px-4 py-2.5 text-xs">🗑️ Delete Record</Button>}
+                            {canDelete && <Button type="button" size="compact" variant="danger" onClick={() => setShowDeleteConfirm(true)} className="rounded-xl px-4 py-2.5 text-xs">ðŸ—‘ï¸ Delete Record</Button>}
                             <div className="flex gap-2">
-                                <Button type="button" size="compact" variant="back" onClick={() => {closeAssessmentModal();openViewAssessmentModal(selectedAssessment);}} className="rounded-xl px-4 py-2.5 text-xs">← Back</Button>
-                                <Button type="submit" size="compact" form="edit-imea-form" disabled={processing} className="rounded-xl px-5 py-2.5 text-xs">💾 Save Changes</Button>
+                                <Button type="button" size="compact" variant="back" onClick={() => {closeAssessmentModal();openViewAssessmentModal(selectedAssessment);}} className="rounded-xl px-4 py-2.5 text-xs">â† Back</Button>
+                                <Button type="submit" size="compact" form="edit-imea-form" disabled={processing} className="rounded-xl px-5 py-2.5 text-xs">ðŸ’¾ Save Changes</Button>
                             </div>
                         </div>
                     </div>
@@ -724,7 +723,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">
                                 {selectedFacility ? 'Edit Facility / Infrastructure Record' : 'Add Facility / Infrastructure Record'}
                             </h3>
-                            <Button type="button" size="compact" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-lg" aria-label="Close facility form">✕</Button>
+                            <Button type="button" size="compact" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-lg" aria-label="Close facility form">âœ•</Button>
                         </div>
 
                         <form onSubmit={handleFacilitySubmit} className="flex flex-col flex-1 overflow-hidden">
@@ -785,7 +784,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     </div>
                                     <div>
 
-                                        <FloatingInput id="index-coordinates" label="Coordinates" type="text" value={facilityForm.data.coordinates} onChange={(e) => facilityForm.setData('coordinates', e.target.value)} placeholder="6°44'9.54N, 126°8'31E" />
+                                        <FloatingInput id="index-coordinates" label="Coordinates" type="text" value={facilityForm.data.coordinates} onChange={(e) => facilityForm.setData('coordinates', e.target.value)} placeholder="6Â°44'9.54N, 126Â°8'31E" />
                                     </div>
                                     <div>
 
@@ -825,7 +824,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                     {canDelete && selectedFacility &&
                 <Button type="button" size="compact" variant="danger" onClick={() => setShowFacilityDeleteConfirm(true)} className="rounded-xl px-4 py-2 text-xs">Delete Record</Button>
                 }
-                                    <Button type="button" size="compact" variant="back" onClick={() => {closeFacilityModal();openViewFacilityModal(selectedFacility);}} className="rounded-xl px-4 py-2 text-xs">← Back</Button>
+                                    <Button type="button" size="compact" variant="back" onClick={() => {closeFacilityModal();openViewFacilityModal(selectedFacility);}} className="rounded-xl px-4 py-2 text-xs">â† Back</Button>
                                 </div>
                                 <div className="flex gap-2">
                                     <Button type="button" size="compact" variant="cancel" onClick={closeFacilityModal} className="rounded-xl px-4 py-2 text-xs">Cancel</Button>
@@ -846,9 +845,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">Facility Full Details</h3>
-                                <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} — {selectedFacility.facility_type}</p>
+                                <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} â€” {selectedFacility.facility_type}</p>
                             </div>
-                            <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close facility details">✕</Button>
+                            <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close facility details">âœ•</Button>
                         </div>
 
                         <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm">
@@ -859,7 +858,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 </div>
                                 <div>
                                     <span className="block text-[11px] font-semibold text-gray-500 uppercase">Year Established</span>
-                                    <span className="text-base font-bold text-gray-900 dark:text-white">{selectedFacility.year_established || '—'}</span>
+                                    <span className="text-base font-bold text-gray-900 dark:text-white">{selectedFacility.year_established || 'â€”'}</span>
                                 </div>
                                 <div>
                                     <span className="block text-[11px] font-semibold text-gray-500 uppercase">Status</span>
@@ -872,25 +871,25 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             </div>
 
                             <div className="space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📍 Location & Zoning Indicators</h4>
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ“ Location & Zoning Indicators</h4>
                                 <div className="bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
                                     <div className="bg-green-50/70 dark:bg-green-950/40 p-3 rounded-lg border border-green-200 dark:border-green-800">
                                         <span className="block text-xs font-semibold text-green-800 dark:text-green-400">Inventory As-Of Date / Period:</span>
-                                        <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedFacility.inventory_date || '—'}</p>
+                                        <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedFacility.inventory_date || 'â€”'}</p>
                                     </div>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                                        <div><span className="text-gray-500 block">Location (Brgy/Muni):</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.location_brgy_muni || '—'}</span></div>
+                                        <div><span className="text-gray-500 block">Location (Brgy/Muni):</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.location_brgy_muni || 'â€”'}</span></div>
                                         <div><span className="text-gray-500 block">Management Zone:</span><span className="font-semibold text-green-700 dark:text-green-400">{selectedFacility.management_zone}</span></div>
                                         <div><span className="text-gray-500 block">Within Easement Zone?:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.within_easement_zone}</span></div>
-                                        <div><span className="text-gray-500 block">Coordinates:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.coordinates || '—'}</span></div>
-                                        <div><span className="text-gray-500 block">Source of Fund:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.source_of_fund || '—'}</span></div>
+                                        <div><span className="text-gray-500 block">Coordinates:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.coordinates || 'â€”'}</span></div>
+                                        <div><span className="text-gray-500 block">Source of Fund:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.source_of_fund || 'â€”'}</span></div>
                                         <div><span className="text-gray-500 block">Tenurial Instrument / Permits:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{selectedFacility.tenurial_instrument || 'None'}</span></div>
                                     </div>
                                 </div>
                             </div>
 
                             <div className="space-y-3">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">📝 Description, Recommendations & Remarks</h4>
+                                <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">ðŸ“ Description, Recommendations & Remarks</h4>
                                 <div className="space-y-3 text-xs">
                                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700"><span className="block font-semibold text-gray-500 mb-1">Description (Function / Objective):</span><p className="text-gray-800 dark:text-gray-200">{selectedFacility.description || 'No description provided.'}</p></div>
                                     <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700"><span className="block font-semibold text-gray-500 mb-1">Appropriate Recommendations:</span><p className="text-gray-800 dark:text-gray-200">{selectedFacility.recommendations || 'No recommendations.'}</p></div>
@@ -900,7 +899,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         </div>
 
                         <div className="flex items-center justify-between px-6 py-4 bg-gray-50 dark:bg-gray-800/40 border-t border-gray-100 dark:border-gray-800">
-                            {canUpdate && <Button type="button" size="compact" onClick={() => {setIsViewFacilityModalOpen(false);openFacilityModal(selectedFacility);}} className="rounded-xl px-4 py-2 text-xs">✏️ Edit This Facility</Button>}
+                            {canUpdate && <Button type="button" size="compact" onClick={() => {setIsViewFacilityModalOpen(false);openFacilityModal(selectedFacility);}} className="rounded-xl px-4 py-2 text-xs">âœï¸ Edit This Facility</Button>}
                             <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-xl px-5 py-2 text-xs">Close Details</Button>
                         </div>
                     </div>
@@ -910,10 +909,11 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
             {/* IMPORT EXCEL/CSV MODAL */}
             {canImport && isImportModalOpen &&
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+                    <div ref={importDropRef} data-cds-modal-drop-panel className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+                        {importDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{importDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
-                            <h3 className="font-bold text-gray-900 dark:text-white text-base">📥 Import Facilities via CSV/Excel</h3>
-                            <Button type="button" size="compact" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="rounded-lg p-1.5 text-lg" aria-label="Close import dialog">✕</Button>
+                            <h3 className="font-bold text-gray-900 dark:text-white text-base">ðŸ“¥ Import Facilities via CSV/Excel</h3>
+                            <Button type="button" size="compact" onClick={() => {setIsImportModalOpen(false);importForm.reset();}} className="rounded-lg p-1.5 text-lg" aria-label="Close import dialog">âœ•</Button>
                         </div>
                         <form onSubmit={handleImportSubmit} className="flex flex-col p-6 space-y-4">
                             <div>
@@ -938,9 +938,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* DELETE ALERTS */}
-            {canDelete && showDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
-            {canDelete && showFacilityDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmFacilityDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
-            {canDelete && showBulkDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">⚠️</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmBulkDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
+            {canDelete && showDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">âš ï¸</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
+            {canDelete && showFacilityDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">âš ï¸</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmFacilityDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
+            {canDelete && showBulkDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">âš ï¸</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmBulkDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
 
         </AuthenticatedLayout>);
 

@@ -120,7 +120,7 @@ export default function BamsIndex({
                             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
 
                                 <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">
-                                    ⚠️
+                                    âš ï¸
                                 </div>
 
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
@@ -158,7 +158,7 @@ export default function BamsIndex({
                             <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
 
                                 <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">
-                                    ⚠️
+                                    âš ï¸
                                 </div>
 
                                 <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
@@ -212,7 +212,7 @@ export default function BamsIndex({
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
               } data-cds-action="true" data-cds-action-variant="primary">
 
-                            📄 Database Records
+                            ðŸ“„ Database Records
                         </button>
 
                         {canCreate && <button
@@ -223,7 +223,7 @@ export default function BamsIndex({
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
               } data-cds-action="true" data-cds-action-variant="primary">
 
-                            ➕ Encode Field Sheet
+                            âž• Encode Field Sheet
                         </button>}
 
                         <button
@@ -234,7 +234,7 @@ export default function BamsIndex({
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
               } data-cds-action="true" data-cds-action-variant="primary">
 
-                            🗺️ Map View
+                            ðŸ—ºï¸ Map View
                         </button>
 
                         {canCreate && <button
@@ -245,7 +245,7 @@ export default function BamsIndex({
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
               } data-cds-action="true" data-cds-action-variant="primary">
 
-                            📊 Excel / CSV Import
+                            ðŸ“Š Excel / CSV Import
                         </button>}
 
                         {canManageSpatial && <button
@@ -256,13 +256,13 @@ export default function BamsIndex({
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
               } data-cds-action="true" data-cds-action-variant="primary">
 
-                            🌐 Spatial File Import
+                            ðŸŒ Spatial File Import
                         </button>}
                     </div>
 
                     {/* TAB 1: RECORDS VIEW */}
                     {activeTab === 'list' &&
-          <div className="bg-white dark:bg-gray-800 shadow-xl rounded-2xl overflow-hidden p-6 border border-gray-100 dark:border-gray-700 space-y-4">
+          <div className="cds-card-surface bg-white dark:bg-gray-800 shadow-xl rounded-2xl overflow-hidden p-6 border border-gray-100 dark:border-gray-700 space-y-4">
 
                             <div className="flex justify-between items-center">
                                 <h3 className="text-base font-bold text-gray-900 dark:text-white">
@@ -276,13 +276,13 @@ export default function BamsIndex({
                 disabled={selectedIds.length === 0}
                 className="px-3 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-xl text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50" data-cds-action="true" data-cds-action-variant="danger">
 
-                                        🗑️ Delete Selected ({selectedIds.length})
+                                        ðŸ—‘ï¸ Delete Selected ({selectedIds.length})
                                     </button>
               }
                             </div>
 
                             <div className="overflow-x-auto">
-                                <table className="w-full text-left border-collapse border border-gray-300 dark:border-gray-700 text-xs">
+                                <table className="cds-data-table w-full text-left border-collapse border border-gray-300 dark:border-gray-700 text-xs">
 
                                     <thead className="bg-green-800 text-white uppercase font-bold text-center">
                                         <tr>
@@ -393,7 +393,7 @@ export default function BamsIndex({
 
                     {/* TAB 2: ENCODE FORM */}
                     {canCreate && activeTab === 'add' &&
-          <div className="max-w-5xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
+          <div className="cds-card-surface max-w-5xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
 
                             <div className="border-b border-gray-200 dark:border-gray-700 pb-4 mb-6">
                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">
@@ -683,7 +683,7 @@ export default function BamsIndex({
                                 <div className="space-y-3 bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border border-gray-300 dark:border-gray-700">
 
                                     <h4 className="font-bold text-green-700 dark:text-green-400 text-sm">
-                                        🌲 Tree / Species Record Entry
+                                        ðŸŒ² Tree / Species Record Entry
                                     </h4>
 
                                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -781,7 +781,7 @@ export default function BamsIndex({
                     )
                     }
 
-                    placeholder="N 67° E" />
+                    placeholder="N 67Â° E" />
 
                                         </div>
 
@@ -831,7 +831,7 @@ export default function BamsIndex({
                 disabled={form.processing}
                 className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl shadow-sm transition text-sm" data-cds-action="true" data-cds-action-variant="primary">
 
-                                    💾 Save Record
+                                    ðŸ’¾ Save Record
                                 </button>
 
                             </form>
@@ -850,7 +850,7 @@ export default function BamsIndex({
 
                     {/* TAB 4: EXCEL / CSV IMPORT */}
                     {canCreate && activeTab === 'excel-import' &&
-          <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
+          <div className="cds-card-surface max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
 
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
                                 Bulk Import Excel / CSV Data
@@ -935,7 +935,7 @@ export default function BamsIndex({
                 disabled={excelForm.processing}
                 className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">
 
-                                    🚀 Upload and Process Excel Data
+                                    ðŸš€ Upload and Process Excel Data
                                 </button>
 
                             </form>
@@ -944,7 +944,7 @@ export default function BamsIndex({
 
                     {/* TAB 5: SPATIAL FILE IMPORT */}
                     {canManageSpatial && activeTab === 'spatial-import' &&
-          <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
+          <div className="cds-card-surface max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
 
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-1">
                                 Import Spatial Boundary File
@@ -1036,7 +1036,7 @@ export default function BamsIndex({
                 disabled={spatialForm.processing}
                 className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">
 
-                                    🌐 Upload and Render Spatial Data
+                                    ðŸŒ Upload and Render Spatial Data
                                 </button>
 
                             </form>

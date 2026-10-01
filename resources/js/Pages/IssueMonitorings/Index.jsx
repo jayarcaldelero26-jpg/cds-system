@@ -7,6 +7,7 @@ import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
 import Tooltip from '../../Components/Tooltip';
+import FilterToolbar from '../../Components/Form/FilterToolbar';
 
 const statusVariants = {
   'Resolved': 'active', // Green
@@ -21,6 +22,12 @@ export default function Index({ issues, filters, protectedAreas, statuses }) {
   useEffect(() => setSearch(filters.search || ''), [filters.search]);
 
   const visit = (params) => router.get('/issue-monitorings', { ...filters, search, ...params }, { preserveState: true, replace: true });
+  const appliedFilters = [
+    ...(filters.search ? [{ key: 'search', label: 'Search', value: filters.search, onRemove: () => { setSearch(''); visit({ search: undefined }); } }] : []),
+    ...(filters.protected_area_id ? [{ key: 'protected_area_id', label: 'Protected Area', value: protectedAreas.find(area => String(area.id) === String(filters.protected_area_id))?.name || filters.protected_area_id, onRemove: () => visit({ protected_area_id: undefined, page: 1 }) }] : []),
+    ...(filters.status ? [{ key: 'status', label: 'Status', value: filters.status, onRemove: () => visit({ status: undefined, page: 1 }) }] : []),
+  ];
+  const clearFilters = () => { setSearch(''); visit({ search: undefined, protected_area_id: undefined, status: undefined, page: 1 }); };
   const remove = () => router.delete(`/issue-monitorings/${deleting.id}`, { onFinish: () => setDeleting(null) });
 
   const columns = [
@@ -94,20 +101,16 @@ export default function Index({ issues, filters, protectedAreas, statuses }) {
 
             <FloatingInput variant="legacy" id="index-search" label="Search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search issues, findings, or PAMOs..." size="sm" />
                     </div>
-                    <div>
-
-            <FloatingSelect variant="legacy" id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
+                    <div className="md:col-span-2"><FilterToolbar label="Filters" chips={appliedFilters} onClear={clearFilters}>
+            <div className="grid gap-3 sm:grid-cols-2"><FloatingSelect variant="legacy" id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
                             <option value="">All protected areas</option>
                             {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
                         </FloatingSelect>
-                    </div>
-                    <div>
-
             <FloatingSelect variant="legacy" id="index-status" label="Status" value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
                         </FloatingSelect>
-                    </div>
+            </div></FilterToolbar></div>
                     <div className="flex items-end md:col-span-4">
                         <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">Search Filter</button>
                     </div>

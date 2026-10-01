@@ -771,7 +771,7 @@ final class SubmissionTrackingService
                 // immediate handoff to the Office of the PENRO. Keep both
                 // immutable events in the same transaction so ownership cannot
                 // be left between the two stages.
-                $this->pambRouting->record(
+                return $this->pambRouting->record(
                     $record->fresh(),
                     PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
                     $actionAt->toDateTimeString(),

@@ -60,6 +60,7 @@ export default function FloatingField({
     variant = 'calendar',
     hasLeadingIcon = false,
     showFocusRing = true,
+    hideLabel = false,
 }) {
     const generatedId = useId();
     const fieldId = id || 'field-' + generatedId.replace(/:/g, '');
@@ -83,9 +84,9 @@ export default function FloatingField({
             onAnimationStart={(event) => event.animationName === 'floating-field-autofill' && setNativeHasValue(event.target?.value !== undefined && event.target?.value !== '')}
             onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
         >
-            <label htmlFor={fieldId} className={'mb-1.5 block min-w-0 break-words text-xs font-semibold leading-4 ' + labelColor}>
+            {!hideLabel && <label htmlFor={fieldId} className={'mb-1.5 block min-w-0 break-words text-xs font-semibold leading-4 ' + labelColor}>
                 {label}{required && <span className="ml-0.5 whitespace-nowrap text-red-500 dark:text-red-400">*</span>}
-            </label>
+            </label>}
             <div className={'relative min-w-0 border shadow-none transition-colors duration-150 ' + (calendarStyle ? 'rounded-lg' : 'rounded-ui') + focusRingClass + ' ' + background + ' ' + border}>
                 {children({
                     ref,

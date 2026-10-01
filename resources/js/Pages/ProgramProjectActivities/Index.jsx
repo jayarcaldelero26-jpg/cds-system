@@ -6,6 +6,7 @@ import ConfirmDialog from '../../Components/ConfirmDialog';
 import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
+import FilterToolbar from '../../Components/Form/FilterToolbar';
 
 const statusVariants = {
   'Completed': 'active',
@@ -22,6 +23,13 @@ export default function Index({ ppas, filters, protectedAreas, categories, statu
 
 
   const visit = (params) => router.get('/program-project-activities', { ...filters, search, ...params }, { preserveState: true, replace: true });
+  const appliedFilters = [
+    ...(filters.search ? [{ key: 'search', label: 'Search', value: filters.search, onRemove: () => { setSearch(''); visit({ search: undefined }); } }] : []),
+    ...(filters.protected_area_id ? [{ key: 'protected_area_id', label: 'Protected Area', value: protectedAreas.find(area => String(area.id) === String(filters.protected_area_id))?.name || filters.protected_area_id, onRemove: () => visit({ protected_area_id: undefined, page: 1 }) }] : []),
+    ...(filters.category ? [{ key: 'category', label: 'Category', value: filters.category, onRemove: () => visit({ category: undefined, page: 1 }) }] : []),
+    ...(filters.status ? [{ key: 'status', label: 'Status', value: filters.status, onRemove: () => visit({ status: undefined, page: 1 }) }] : []),
+  ];
+  const clearFilters = () => { setSearch(''); visit({ search: undefined, protected_area_id: undefined, category: undefined, status: undefined, page: 1 }); };
   const remove = () => router.delete(`/program-project-activities/${deleting.id}`, { onFinish: () => setDeleting(null) });
 
   const formatCurrency = (amount) => {
@@ -110,27 +118,20 @@ export default function Index({ ppas, filters, protectedAreas, categories, statu
 
             <FloatingInput variant="legacy" id="index-search-ppas" label="Search PPAs" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search title, source of fund, remarks..." size="sm" />
                     </div>
-                    <div>
-
-            <FloatingSelect variant="legacy" id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
+                    <div className="md:col-span-2"><FilterToolbar chips={appliedFilters} onClear={clearFilters}>
+            <div className="grid gap-3 sm:grid-cols-3"><FloatingSelect variant="legacy" id="index-protected-area" label="Protected Area" value={filters.protected_area_id || ''} onChange={(e) => visit({ protected_area_id: e.target.value, page: 1 })}>
                             <option value="">All protected areas</option>
                             {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
                         </FloatingSelect>
-                    </div>
-                    <div>
-
             <FloatingSelect variant="legacy" id="index-category" label="Category" value={filters.category || ''} onChange={(e) => visit({ category: e.target.value, page: 1 })}>
                             <option value="">All categories</option>
                             {categories.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
                         </FloatingSelect>
-                    </div>
-                    <div>
-
             <FloatingSelect variant="legacy" id="index-status" label="Status" value={filters.status || ''} onChange={(e) => visit({ status: e.target.value, page: 1 })}>
                             <option value="">All statuses</option>
                             {statuses.map((stat) => <option key={stat} value={stat}>{stat}</option>)}
                         </FloatingSelect>
-                    </div>
+            </div></FilterToolbar></div>
                     <div className="flex items-end md:col-span-4">
                         <button type="submit" className="w-full sm:w-auto rounded-lg bg-green-800 px-4 py-2 text-sm font-semibold text-white hover:bg-green-900" data-cds-action="true" data-cds-action-variant="primary">Search Filter</button>
                     </div>

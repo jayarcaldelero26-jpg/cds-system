@@ -1,7 +1,7 @@
 import { Icon } from '@iconify/react';
 import { router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
-import Button from '@/Components/Button';
+import UtilityIconButton from '@/Components/UtilityIconButton';
 
 const relativeTime = value => {
     const timestamp = value ? Date.parse(value) : Number.NaN;
@@ -65,27 +65,27 @@ export default function NotificationBell({ initial = { unread_count: 0, notifica
     const badge = unread > 9 ? '9+' : unread;
 
     return <div ref={root} className="relative">
-        <button type="button" onClick={() => { setOpen(value => !value); refresh(); }} className="relative rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800" aria-label="Notifications" aria-expanded={open} data-cds-action="true" data-cds-action-variant="primary">
+        <UtilityIconButton onClick={() => { setOpen(value => !value); refresh(); }} className="relative p-2 text-gray-500 hover:text-gray-700 dark:text-gray-300" aria-label="Notifications" aria-expanded={open}>
             <Icon icon="solar:bell-linear" width="22" height="22" />
             {unread > 0 && <span className="absolute -right-0.5 -top-0.5 flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-bold leading-5 text-white">{badge}</span>}
-        </button>
-        {open && <div className="absolute right-0 z-50 mt-2 w-[22rem] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+        </UtilityIconButton>
+        {open && <div className="cds-menu-panel absolute right-0 z-50 mt-2 w-[22rem] overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
                 <p className="text-sm font-bold text-gray-900 dark:text-white">Notifications</p>
                 <p className="text-xs text-gray-500">{unread ? unread + ' notification' + (unread === 1 ? '' : 's') : 'No new notifications.'}</p>
             </div>
             <div className="max-h-[26rem] overflow-y-auto">
-                {state.notifications?.length ? state.notifications.map(notification => <Button type="button" size="compact" key={notification.id} onClick={() => openNotification(notification)} className="flex w-full items-start justify-start gap-3 rounded-none border-b border-white/15 px-4 py-3 text-left text-sm !text-white">
+                {state.notifications?.length ? state.notifications.map(notification => <button type="button" key={notification.id} onClick={() => openNotification(notification)} className="flex w-full items-start justify-start gap-3 border-b border-gray-100 px-4 py-3 text-left text-sm text-gray-800 transition hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-600 dark:border-gray-800 dark:text-gray-100 dark:hover:bg-gray-800">
                     <Icon icon={icon(notification.severity)} width="19" height="19" className={'mt-0.5 shrink-0 ' + tone(notification.severity)} />
                     <span className="min-w-0 flex-1">
                         <span className="flex items-start justify-between gap-2"><strong className="text-sm text-white">{notification.title}</strong><i className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-red-400" /></span>
                         <span className="mt-1 block text-xs leading-5 text-white/85">{notification.message}</span>
                         <span className="mt-1 block text-[11px] text-white/70">{relativeTime(notification.created_at)}</span>
                     </span>
-                </Button>) : <div className="px-4 py-8 text-center text-sm text-gray-500">No new notifications.</div>}
+                </button>) : <div className="px-4 py-8 text-center text-sm text-gray-500">No new notifications.</div>}
             </div>
             <div className="border-t border-gray-100 p-2 dark:border-gray-800">
-                <Button type="button" size="compact" onClick={() => request('/notifications/clear', 'POST')} className="block w-full rounded-lg px-3 py-2 text-center text-sm">Clear Notifications</Button>
+                <button type="button" onClick={() => request('/notifications/clear', 'POST')} className="min-h-10 rounded-md px-3 py-2 text-sm font-semibold text-gray-600 transition hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white">Clear Notifications</button>
             </div>
         </div>}
     </div>;

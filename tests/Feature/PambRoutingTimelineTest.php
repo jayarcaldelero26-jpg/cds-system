@@ -8,6 +8,7 @@ use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Models\DocumentArchive;
 use App\Services\Archive\GoogleDriveArchiveGateway;
+use App\Services\Archive\CompletedReportArchiveHook;
 use App\Services\BusinessCalendarService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\DocumentRoutingPresenter;
@@ -47,11 +48,13 @@ function timelineService(): PambRoutingTimelineService { return app(PambRoutingT
 final class PambRoutingTestArchiveGateway implements GoogleDriveArchiveGateway
 {
     public array $objects = [];
+    public bool $failUpload = false;
     public function findByIdentityAndHash(array $identity, string $sha256): ?array { return null; }
     public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
+        if ($this->failUpload) throw new RuntimeException('Test archive upload failure');
         $id = 'pamb-test-archive-'.count($this->objects);
-        $this->objects[$id] = ['identity' => $identity, 'sha256' => $sha256, 'size' => filesize($localPath)];
+        $this->objects[$id] = ['identity' => $identity, 'sha256' => $sha256, 'size' => filesize($localPath), 'filename' => $filename, 'folder_path' => $archiveContext['folder_path'] ?? null];
         return ['file_id' => $id, 'folder_id' => $folderId];
     }
     public function verify(string $fileId, string $sha256, int $size): bool { return $this->verifyAvailability($fileId, $sha256, $size) === 'verified'; }
@@ -330,6 +333,74 @@ test('normal routing endpoint ignores client timestamp and records actor once', 
         ->and(AuditLog::query()->where('action', 'PAMB Internal Routing Event Recorded')->where('entity_id', (string) $report->id)->count())->toBe(1)
         ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(1)
         ->and($gateway->objects)->toHaveCount(1);
+});
+
+test('canonical PAMB receipt archives its automatic PENRO Records handoff using the saved activity name', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    $path = 'conservation-report-movs/receipt-current.pdf';
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'mov_file_path' => $path, 'mov_file_name' => 'unrelated-upload-name.pdf']);
+    Storage::disk('local')->put($path, "%PDF-1.4\nPAMB checkpoint fixture");
+    $gateway = new PambRoutingTestArchiveGateway();
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+
+    $this->actingAs($this->user)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-05',
+    ])->assertSessionHasNoErrors();
+
+    $events = $report->fresh()->routingEvents()->orderBy('id')->pluck('stage_key')->all();
+    $archive = DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->where('logical_slot', 'mov')->firstOrFail();
+    expect($events)->toBe([PambRoutingTimelineService::RECORDS_RECEIVED, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])
+        ->and($archive->archive_status)->toBe('ARCHIVED')
+        ->and($archive->original_filename)->toBe('Regular PAMB.pdf')
+        ->and($gateway->objects[$archive->google_drive_file_id]['filename'])->toBe('Regular PAMB.pdf')
+        ->and($gateway->objects[$archive->google_drive_file_id]['folder_path'])->toBe(['Conservation Unit', 'CENRO Mati', 'Regular PAMB Meetings']);
+});
+
+test('canonical PAMB receipt rolls back both events and receipt date when its automatic archive is disabled', function (): void {
+    $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    config(['services.google_drive_archive.enabled' => false, 'services.document_archive.driver' => 'fake']);
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
+
+    $this->actingAs($this->user)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-05',
+    ])->assertSessionHasErrors('archive');
+
+    expect($report->fresh()->date_received_penro)->toBeNull()
+        ->and($report->fresh()->routingEvents()->count())->toBe(0)
+        ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
+});
+
+test('PAMB checkpoint lifecycle rejects a missing routing actor', function (): void {
+    $report = timelinePambReport($this);
+
+    expect(fn () => app(CompletedReportArchiveHook::class)->afterPambTransition(
+        'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, null,
+    ))->toThrow(ValidationException::class, 'authenticated routing actor');
+});
+
+test('canonical PAMB receipt rolls back when its automatic archive upload fails', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    $path = 'conservation-report-movs/failed-receipt-current.pdf';
+    $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'mov_file_path' => $path]);
+    Storage::disk('local')->put($path, "%PDF-1.4\nPAMB checkpoint fixture");
+    $gateway = new PambRoutingTestArchiveGateway();
+    $gateway->failUpload = true;
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+
+    $this->actingAs($this->user)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-05',
+    ])->assertSessionHasErrors('archive');
+
+    expect($report->fresh()->date_received_penro)->toBeNull()
+        ->and($report->fresh()->routingEvents()->count())->toBe(0)
+        ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(0)
+        ->and(Storage::disk('local')->exists($path))->toBeTrue();
 });
 
 test('Super Admin cannot execute a normal PENRO routing stage', function () {

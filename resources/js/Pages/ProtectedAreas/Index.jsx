@@ -1,5 +1,5 @@
-import { FloatingInput } from "@/Components/Form";import { Link, router, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { FloatingInput } from "@/Components/Form";import { Icon } from '@iconify/react';import { Link, router, usePage } from '@inertiajs/react';
+import { useEffect, useRef, useState } from 'react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import ConfirmDialog from '../../Components/ConfirmDialog';
@@ -37,6 +37,13 @@ function DetailItem({ label, value, className = '' }) {
 
 }
 
+export function ProtectedAreaDetailActions({ areaId, canEdit, canDelete, onDelete }) {
+  return <div className="flex items-center gap-2">
+    {canEdit && <Link href={`/protected-areas/${areaId}/edit`} className="cds-compact-action inline-flex min-w-[92px] items-center justify-center gap-1.5 rounded-lg font-semibold text-green-800 hover:bg-green-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-green-300 dark:hover:bg-green-950/30" data-cds-action="true" data-cds-action-variant="primary"><Icon icon="lucide:pencil" width="14" height="14" aria-hidden="true" /> Edit</Link>}
+    {canDelete && <button type="button" onClick={onDelete} className="cds-compact-action inline-flex min-w-[92px] items-center justify-center gap-1.5 rounded-lg border border-red-200 bg-red-50 font-semibold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300" data-cds-action="true" data-cds-action-variant="danger"><Icon icon="lucide:trash-2" width="14" height="14" aria-hidden="true" /> Delete</button>}
+  </div>;
+}
+
 export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   const { auth } = usePage().props;
 
@@ -46,6 +53,8 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   const [protectedAreaToDelete, setProtectedAreaToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const detailsDialogRef = useRef(null);
+  const detailsOpenerRef = useRef(null);
 
   useEffect(() => setSearch(filters.search || ''), [filters.search]);
   useEffect(() => {
@@ -89,20 +98,17 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
       event.stopPropagation();
       sortBy(key);
     }}
-    className="inline-flex items-center gap-1 font-semibold transition hover:text-green-100" data-cds-action="true" data-cds-action-variant="primary">
+    className="cds-table-sort-control inline-flex items-center gap-1 font-semibold">
 
             {label}
             <span aria-hidden="true">
-                {filters.sort === key ?
-      filters.direction === 'asc' ?
-      '↑' :
-      '↓' :
-      '↕'}
+                <Icon icon={filters.sort === key ? (filters.direction === 'asc' ? 'lucide:arrow-up' : 'lucide:arrow-down') : 'lucide:arrow-up-down'} width="14" height="14" />
             </span>
         </button>;
 
 
   const openDetails = (area) => {
+    detailsOpenerRef.current = document.activeElement;
     setSelectedArea(area);
     setDetailsOpen(true);
   };
@@ -111,6 +117,18 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
     setDetailsOpen(false);
     setSelectedArea(null);
   };
+
+  useEffect(() => {
+    if (!detailsOpen) return undefined;
+    const onKeyDown = event => { if (event.key === 'Escape') { event.preventDefault(); closeDetails(); } };
+    document.addEventListener('keydown', onKeyDown);
+    detailsDialogRef.current?.focus();
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      detailsOpenerRef.current?.focus?.();
+      detailsOpenerRef.current = null;
+    };
+  }, [detailsOpen]);
 
   const deleteProtectedArea = () => {
     if (!protectedAreaToDelete) return;
@@ -147,6 +165,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   const columns = [
   {
     key: 'name',
+    ariaSort: filters.sort === 'name' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('Protected Area', 'name'),
     render: (area) =>
     clickableCell(
@@ -170,6 +189,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   },
   {
     key: 'category',
+    ariaSort: filters.sort === 'category' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('Category', 'category'),
     render: (area) =>
     clickableCell(
@@ -181,6 +201,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   },
   {
     key: 'municipality',
+    ariaSort: filters.sort === 'municipality' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('Municipality', 'municipality'),
     render: (area) =>
     clickableCell(
@@ -192,6 +213,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   },
   {
     key: 'area_hectares',
+    ariaSort: filters.sort === 'area_hectares' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('Total Area (ha)', 'area_hectares'),
     render: (area) =>
     clickableCell(
@@ -231,6 +253,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   },
   {
     key: 'pamo',
+    ariaSort: filters.sort === 'pamo' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('PAMO', 'pamo'),
     render: (area) =>
     clickableCell(
@@ -242,6 +265,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   },
   {
     key: 'pasu',
+    ariaSort: filters.sort === 'pasu' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('PASu', 'pasu'),
     render: (area) =>
     clickableCell(
@@ -253,6 +277,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   },
   {
     key: 'status',
+    ariaSort: filters.sort === 'status' ? (filters.direction === 'asc' ? 'ascending' : 'descending') : 'none',
     label: sortableLabel('Status', 'status'),
     render: (area) =>
     clickableCell(
@@ -301,17 +326,11 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
             <PageHeader
         title="Protected Area Management"
         description="Master database of protected areas managed by DENR PENRO Davao Oriental."
-        actions={
-        auth.canCreateProtectedAreas &&
-        <button
-          type="button"
-          onClick={() => setCreateOpen(true)}
-          className="inline-flex items-center justify-center rounded-xl bg-green-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-green-900 focus:outline-none focus:ring-2 focus:ring-green-700 focus:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">
+        />
 
-                            Add protected area
-                        </button>
-
-        } />
+            {auth.canCreateProtectedAreas && <div className="cds-action-row">
+                <button type="button" onClick={() => setCreateOpen(true)} className="cds-page-action inline-flex items-center justify-center text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">Add protected area</button>
+            </div>}
 
 
             <Card
@@ -365,7 +384,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                 </div>
             </Card>
 
-            <div className="mt-5 flex items-center justify-between text-sm">
+            <div className="cds-pagination mt-5 flex items-center justify-between text-sm">
                 {protectedAreas.prev_page_url ?
         <Link
           href={protectedAreas.prev_page_url}
@@ -397,7 +416,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
           if (event.target === event.currentTarget) closeDetails();
         }}>
 
-                    <div className="protected-area-modal relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
+                    <div ref={detailsDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="protected-area-details-title" className="protected-area-modal relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl focus:outline-none dark:border-gray-800 dark:bg-gray-900">
                         {/* Modal Header */}
                         <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/80 px-6 py-4 dark:border-gray-800 dark:bg-gray-800/40">
                             <div className="flex min-w-0 items-center gap-3">
@@ -406,7 +425,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                 </div>
 
                                 <div className="min-w-0">
-                                    <h3 className="truncate text-base font-bold text-gray-900 dark:text-white">
+                                    <h3 id="protected-area-details-title" className="truncate text-base font-bold text-gray-900 dark:text-white">
                                         Protected Area Full Details
                                     </h3>
                                     <p className="truncate text-xs text-gray-500 dark:text-gray-400">
@@ -418,20 +437,12 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                 </div>
                             </div>
 
-                            <button
-              type="button"
-              onClick={closeDetails}
-              className="ml-4 rounded-lg p-2 text-xl leading-none text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
-              aria-label="Close details" data-cds-action="true" data-cds-action-variant="primary">
-
-                                ×
-                            </button>
                         </div>
 
                         {/* Modal Body */}
                         <div className="protected-area-scrollbar flex-1 space-y-5 overflow-y-auto p-5 sm:p-6">
                             {/* Summary Cards */}
-                            <div className="grid grid-cols-2 gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50 sm:grid-cols-4">
+                            <div className="cds-card-surface grid grid-cols-2 gap-3 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800 sm:grid-cols-4">
                                 <DetailItem
                 label="Category"
                 value={selectedArea.category} />
@@ -477,7 +488,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                     </h4>
                                 </div>
 
-                                <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+                                <div className="cds-card-surface rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
                                     <div className="mb-4 rounded-xl border border-green-200 bg-green-50/70 p-3 dark:border-green-900 dark:bg-green-950/30">
                                         <p className="text-[11px] font-medium uppercase tracking-wide text-green-700 dark:text-green-400">
                                             Region
@@ -510,7 +521,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                     </h4>
                                 </div>
 
-                                <div className="rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 dark:border-emerald-900 dark:bg-emerald-950/20">
+                                <div className="cds-card-surface rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
                                     <div className="grid gap-4 sm:grid-cols-3">
                                         <DetailItem
                     label="Core Zone"
@@ -559,7 +570,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                     </h4>
                                 </div>
 
-                                <div className="grid gap-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:grid-cols-2">
+                                <div className="cds-card-surface grid gap-4 rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900 sm:grid-cols-2">
                                     <DetailItem
                   label="PAMO"
                   value={selectedArea.pamo} />
@@ -588,7 +599,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                 </div>
 
                                 <div className="space-y-3">
-                                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+                                    <div className="cds-card-surface rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
                                         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                             Description
                                         </p>
@@ -598,7 +609,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
                                         </p>
                                     </div>
 
-                                    <div className="rounded-2xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800/50">
+                                    <div className="cds-card-surface rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
                                         <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                             Remarks
                                         </p>
@@ -612,28 +623,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
 
                         {/* Modal Footer */}
                         <div className="flex flex-col gap-3 border-t border-gray-100 bg-gray-50 px-5 py-4 dark:border-gray-800 dark:bg-gray-800/40 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-                            <div className="flex items-center gap-2">
-                                {auth.canUpdateProtectedAreas &&
-              <Link
-                href={`/protected-areas/${selectedArea.id}/edit`}
-                className="inline-flex items-center justify-center rounded-xl border border-green-200 bg-green-50 px-4 py-2.5 text-xs font-bold text-green-700 transition hover:bg-green-100 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300 dark:hover:bg-green-950">
-
-                                        ✏️ Edit This Protected Area
-                                    </Link>
-              }
-
-                                {auth.canDeleteProtectedAreas &&
-              <button
-                type="button"
-                onClick={() =>
-                setProtectedAreaToDelete(selectedArea)
-                }
-                className="inline-flex items-center justify-center rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-bold text-red-700 transition hover:bg-red-100 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300" data-cds-action="true" data-cds-action-variant="danger">
-
-                                        🗑️ Delete
-                                    </button>
-              }
-                            </div>
+                            <ProtectedAreaDetailActions areaId={selectedArea.id} canEdit={auth.canUpdateProtectedAreas} canDelete={auth.canDeleteProtectedAreas} onDelete={() => setProtectedAreaToDelete(selectedArea)} />
 
                             <button
               type="button"
@@ -649,9 +639,10 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
 
             <ConfirmDialog
         open={Boolean(protectedAreaToDelete)}
+        variant="danger"
         title="Delete protected area?"
         message={`Remove ${protectedAreaToDelete?.name} from the active protected area registry? This record can be restored from the database if needed.`}
-        confirmLabel="Delete protected area"
+        confirmLabel="Delete"
         onCancel={() => setProtectedAreaToDelete(null)}
         onConfirm={deleteProtectedArea}
         processing={deleting} />

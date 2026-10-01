@@ -81,7 +81,7 @@ export default function GlobalSearch({ onNavigate }) {
                 {query && <button type="button" onClick={clear} className="rounded-md p-1 text-gray-400 transition hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:hover:bg-gray-700 dark:hover:text-gray-100" aria-label="Clear search" data-cds-action="true" data-cds-action-variant="primary"><Icon icon="solar:close-circle-linear" width="18" height="18" /></button>}
             </span>
         </div>
-        {isOpen && canSearch && <div className="absolute z-50 mt-2 max-h-[min(32rem,calc(100vh-7rem))] w-full overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-900" role="listbox" aria-label="Global search results">
+        {isOpen && canSearch && <div className="cds-menu-panel absolute z-50 mt-2 max-h-[min(32rem,calc(100vh-7rem))] w-full overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-900" role="listbox" aria-label="Global search results">
             {results.length ? data.groups.map(group => <div key={group.key} className="py-1 first:pt-0 last:pb-0"><p className="px-2 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-gray-400 dark:text-gray-500">{group.label}</p>{group.results.map(result => {
                 const index = results.indexOf(result);
                 const active = index === selectedIndex;

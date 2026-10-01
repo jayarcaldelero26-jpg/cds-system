@@ -34,6 +34,28 @@ test('archive filenames preserve readable activity names, sanitize path characte
         ->toBe('International Coastal Cleanup 2026.pdf');
 });
 
+test('Homestay, AWS, and PAMB keep their Conservation Unit module mappings', function (): void {
+    $this->seed(ModuleDefinitionSeeder::class);
+    $tracking = app(\App\Services\SubmissionTracking\SubmissionTrackingService::class);
+    $builder = app(ArchivePathBuilder::class);
+
+    foreach ([
+        ['source' => 'conservation', 'module' => 'homestay', 'activity' => 'Homestay'],
+        ['source' => 'aws', 'module' => 'automated_weather_station', 'activity' => 'AWS'],
+        ['source' => 'conservation', 'module' => 'regular_pamb', 'activity' => 'Regular PAMB'],
+    ] as $case) {
+        $source = $tracking->source($case['source']);
+        $record = new ($source['model'])();
+        if ($case['source'] === 'conservation') $record->setAttribute('workflow_key', $case['module']);
+        $module = ModuleDefinition::query()->active()->notRetired()->where('code', ($source['archive_module_code'])($record))->firstOrFail();
+        $path = $builder->build($module, $source['archive_unit'], 'CENRO Baganga', $case['activity']);
+
+        expect($source['archive_unit'])->toBe('Conservation Unit')
+            ->and($path['segments'])->toBe(['Conservation Unit', 'CENRO Baganga', $module->name])
+            ->and($path['filename'])->toBe($case['activity'].'.pdf');
+    }
+});
+
 test('activity archive filenames fit the 255-character metadata column without splitting Unicode', function (): void {
     $module = new ModuleDefinition(['name' => 'Activity Reports', 'is_active' => true]);
     $builder = app(ArchivePathBuilder::class);

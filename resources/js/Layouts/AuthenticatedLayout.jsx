@@ -1,5 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Icon as IconifyIcon } from '@iconify/react';
+import UtilityIconButton from '@/Components/UtilityIconButton';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
@@ -499,9 +500,9 @@ export function AuthenticatedShell({ children }) {
                             <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search CDS-SMART" title="Search CDS-SMART" data-cds-action="true" data-cds-action-variant="primary">
                                 <IconifyIcon icon="solar:magnifer-linear" width="20" height="20" aria-hidden="true" />
                             </button>
-                            <button type="button" onClick={toggleTheme} className="flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} data-cds-action="true" data-cds-action-variant="primary">
+                        <UtilityIconButton onClick={toggleTheme} className="border border-gray-200 dark:border-gray-700" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
                                 <IconifyIcon icon={darkMode ? 'solar:sun-2-linear' : 'solar:moon-linear'} width="19" height="19" aria-hidden="true" />
-                            </button>
+                        </UtilityIconButton>
                             <NotificationBell initial={notificationBell} />
                             <div className="relative">
                                 <button type="button" onClick={() => setProfileOpen((open) => !open)} className="flex items-center gap-3 rounded-lg p-1.5 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
@@ -512,7 +513,7 @@ export function AuthenticatedShell({ children }) {
                                     </span>
                                 </button>
                                 {profileOpen && (
-                                    <div className="absolute right-0 z-50 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="menu">
+                                    <div className="cds-menu-panel absolute right-0 z-50 mt-2 w-52 rounded-lg border border-gray-200 bg-white p-1 shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="menu">
                                         <Link href="/profile" className="block rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800">Profile settings</Link>
                                         <Button type="button" size="compact" onClick={() => router.post('/logout')} className="block w-full rounded-md px-3 py-2 text-left text-sm">
                                                 Log out

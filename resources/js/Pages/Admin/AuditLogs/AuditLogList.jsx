@@ -6,6 +6,8 @@ import PageHeader from '@/Components/PageHeader';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { formatReportDateTime } from '@/Utils/dateFormatters';
 import DateRangePicker from '@/Components/DateRangePicker';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
+import FloatingSelect from '@/Components/Form/FloatingSelect';
 
 const auditDash = '\u2014';
 const metadataLabels = {
@@ -236,12 +238,16 @@ export default function AuditLogList({ logs = { data: [] }, filters = {}, eventT
     ];
     const shown = detail || selected;
     const inputClass = 'h-10 rounded-lg border border-gray-300 px-3 text-sm dark:border-gray-700 dark:bg-gray-800';
+    const appliedFilters = [
+        ...(filters.search ? [{ key: 'search', label: 'Search', value: filters.search, onRemove: () => { setSearch(''); apply({ search: undefined }); } }] : []),
+        ...(filters.event_type ? [{ key: 'event_type', label: 'Event Type', value: filters.event_type, onRemove: () => apply({ event_type: undefined }) }] : []),
+        ...(filters.date_from || filters.date_to ? [{ key: 'date_range', label: 'Date Range', value: `${filters.date_from || 'Any'} – ${filters.date_to || 'Any'}`, onRemove: () => apply({ date_from: undefined, date_to: undefined }) }] : []),
+    ];
     const filtersPanel = createElement(
         'div',
-        { className: 'grid gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm md:grid-cols-4 dark:border-gray-800 dark:bg-gray-900' },
+        { className: 'cds-card-surface flex flex-wrap items-end gap-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900' },
         createElement('input', { value: search, onChange: event => setSearch(event.target.value), onKeyDown: event => event.key === 'Enter' && apply({}), placeholder: 'Search', className: inputClass }),
-        createElement('select', { defaultValue: filters.event_type || '', onChange: event => apply({ event_type: event.target.value || undefined }), className: inputClass }, createElement('option', { value: '' }, 'All event types'), ...eventTypes.map(type => createElement('option', { key: type }, type))),
-        createElement(DateRangePicker, { id: 'audit-log-date-range', label: 'Date Range', value: { from: filters.date_from || '', to: filters.date_to || '' }, onChange: ({ from, to }) => apply({ date_from: from || undefined, date_to: to || undefined }) }),
+        createElement(FilterToolbar, { chips: appliedFilters, children: createElement('div', { className: 'grid gap-3 sm:grid-cols-2' }, createElement(FloatingSelect, { label: 'Event Type', size: 'sm', value: filters.event_type || '', onChange: event => apply({ event_type: event.target.value || undefined }) }, createElement('option', { value: '' }, 'All event types'), ...eventTypes.map(type => createElement('option', { key: type }, type))), createElement(DateRangePicker, { id: 'audit-log-date-range', label: 'Date Range', value: { from: filters.date_from || '', to: filters.date_to || '' }, onChange: ({ from, to }) => apply({ date_from: from || undefined, date_to: to || undefined }) })) }),
     );
     const pagination = logs.links?.length > 3 ? createElement(
         'div',

@@ -70,6 +70,7 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
         <div className="space-y-4">
             <CrudSection
                 title="Routing Activity"
+                cardSurface
                 subtitle="Recent activity and operational timing. Current holder and routing status are summarized above."
             >
                 <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -125,6 +126,7 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
 
             <CrudSection
                 title="Canonical Routing Progress"
+                cardSurface
                 subtitle={`${routing.profile_label}. Canonical routing path showing completed, current, and upcoming stages.`}
             >
                 {hasToggle && <div className="mb-2 flex justify-end"><button type="button" aria-expanded={showRemainingSteps} aria-controls="document-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show ${hiddenSteps.length} more steps`}</button></div>}

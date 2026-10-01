@@ -24,7 +24,6 @@ export default function DocumentPreviewDialog({ open, row, onClose }) {
         <div role="dialog" aria-modal="true" aria-label="Document Preview" className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-5 py-4 dark:border-gray-700">
                 <div className="min-w-0"><h2 className="text-base font-bold text-gray-900 dark:text-white">Document Preview</h2><p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{attachment?.name || 'MOV / report attachment'}</p></div>
-                <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close preview" data-cds-action="true" data-cds-action-variant="primary">×</button>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-5">
                 <dl className="mb-4 grid gap-3 text-xs sm:grid-cols-4">

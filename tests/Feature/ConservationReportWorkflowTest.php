@@ -184,13 +184,13 @@ test('a report persists its route workflow key and cannot appear in another work
 
         'protected_area_id' => $this->area->id,
         'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report',
-        'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-20', 'date_accomplished' => '2026-08-24',
+        'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-20', 'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']], 'date_accomplished' => '2026-08-24',
         'mov' => UploadedFile::fake()->create('homestay.pdf', 100, 'application/pdf'),
     ])->assertSessionHasNoErrors();
     ConservationReportSubmission::create(['workflow_key' => 'mpan', 'activity_name' => 'MPAN Enhancement', 'date_accomplished' => '2026-08-24']);
 
-    $this->assertDatabaseHas('conservation_report_submissions', ['workflow_key' => 'homestay', 'activity_name' => 'Training on Homestay Program']);
-    $this->actingAs($this->user)->get(route('conservation-reports.index', 'homestay'))->assertInertia(fn (Assert $page) => $page->component('ConservationReports/Index')->count('submissions.data', 1)->where('submissions.data.0.workflow_key', 'homestay'));
+    $this->assertDatabaseHas('conservation_report_submissions', ['workflow_key' => 'homestay', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report']);
+    $this->actingAs($this->user)->get(route('conservation-reports.index', 'homestay'))->assertInertia(fn (Assert $page) => $page->component('ConservationReports/Index')->count('submissions.data', 1)->where('submissions.data.0.workflow_key', 'homestay')->where('submissions.data.0.document_type', 'Progress Report'));
 });
 
 test('meeting PAMB stores independent dates and uses Date Accomplished when present', function () {
@@ -496,6 +496,8 @@ test('the standard report form requires an attachment and leaves routing dates f
         'activity_name' => 'Training on Homestay Program',
         'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-20',
+        'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']],
         'date_accomplished' => '2026-08-24',
     ])->assertSessionHasErrors(['mov' => 'A report attachment / MOV is required.']);
 
@@ -506,6 +508,7 @@ test('the standard report form requires an attachment and leaves routing dates f
         'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1',
         'date_conducted' => '2026-08-20',
+        'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']],
         'date_accomplished' => '2026-08-24',
         'mov' => UploadedFile::fake()->create('mov.pdf', 100, 'application/pdf'),
     ])->assertSessionHasNoErrors();
@@ -528,9 +531,9 @@ test('editing a conservation report preserves its attachment unless an explicit 
     Storage::disk('public')->put('conservation-report-movs/original.pdf', 'original');
     $report = ConservationReportSubmission::create([
         'workflow_key' => 'homestay', 'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
-        'date_accomplished' => '2026-08-24', 'mov_file_name' => 'original.pdf', 'mov_file_path' => 'conservation-report-movs/original.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'date_conducted' => '2026-08-20', 'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']], 'date_accomplished' => '2026-08-24', 'mov_file_name' => 'original.pdf', 'mov_file_path' => 'conservation-report-movs/original.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
-    $payload = ['protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1', 'date_accomplished' => '2026-08-24'];
+    $payload = ['protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-20', 'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']], 'date_accomplished' => '2026-08-24'];
 
     $this->actingAs($this->user)->put(route('conservation-reports.update', ['homestay', $report]), $payload)->assertSessionHasNoErrors();
     expect($report->fresh()->mov_file_path)->toBe('conservation-report-movs/original.pdf');
@@ -552,13 +555,13 @@ test('a crafted hidden attachment removal flag cannot erase an existing conserva
     Storage::disk('public')->put('conservation-report-movs/protected.pdf', 'protected');
     $report = ConservationReportSubmission::create([
         'workflow_key' => 'homestay', 'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
-        'date_accomplished' => '2026-08-24', 'mov_file_name' => 'protected.pdf', 'mov_file_path' => 'conservation-report-movs/protected.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'date_conducted' => '2026-08-20', 'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']], 'date_accomplished' => '2026-08-24', 'mov_file_name' => 'protected.pdf', 'mov_file_path' => 'conservation-report-movs/protected.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
 
     $this->actingAs($this->user)->put(route('conservation-reports.update', ['homestay', $report]), [
         'protected_area_id' => $this->area->id, 'target_office' => 'CENRO Mati',
         'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
-        'date_accomplished' => '2026-08-24', 'delete_mov' => true,
+        'date_conducted' => '2026-08-20', 'date_conducted_ranges' => [['from' => '2026-08-20', 'to' => '2026-08-20']], 'date_accomplished' => '2026-08-24', 'delete_mov' => true,
     ])->assertSessionHasNoErrors();
 
     expect($report->fresh()->mov_file_path)->toBe('conservation-report-movs/protected.pdf');

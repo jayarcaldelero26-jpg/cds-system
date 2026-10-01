@@ -26,7 +26,7 @@ export default function PlanInformation({ selectedPlanType, planProfile, protect
     }, [profile?.id, profile?.updated_at, documents]);
 
     return <>
-        <section className="mb-5 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <section className="cds-card-surface mb-5 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div><h2 className="text-xs font-bold uppercase tracking-wide text-green-700 dark:text-green-400">Plan Information / Approval Profile</h2>{profile ? <div className="mt-3 flex flex-wrap gap-2"><span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700 dark:bg-blue-950 dark:text-blue-300">Approval: {profile.approval_status}</span><span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700 dark:bg-green-950 dark:text-green-300">{completeness(profile)}</span></div> : <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Plan information has not been added yet.</p>}</div>
                 {profile ? <button type="button" onClick={() => setDetailsOpen(true)} className={`${buttonClass} border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700`} data-cds-action="true" data-cds-action-variant="primary">View Plan Information</button> : canCreate ? <button type="button" onClick={() => setEditing(true)} className={`${buttonClass} bg-green-700 text-white shadow-sm hover:bg-green-800`} data-cds-action="true" data-cds-action-variant="primary">+ Add Plan Information</button> : null}

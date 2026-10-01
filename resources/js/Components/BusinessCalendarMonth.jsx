@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react';
 import { router } from '@inertiajs/react';
 import { formatReportDate } from '@/Utils/dateFormatters';
+import FloatingSelect from '@/Components/Form/FloatingSelect';
+import UtilityIconButton from '@/Components/UtilityIconButton';
+import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
@@ -72,6 +75,7 @@ export default function BusinessCalendarMonth({
                     setShowMovs={setShowMovs}
                     chooseModule={module => navigate({ module })}
                     chooseProtectedArea={protected_area_id => navigate({ protected_area_id })}
+                    clearFilters={() => navigate({ module: '', protected_area_id: '' })}
                     canManage={canManage}
                     onAdd={onAdd}
                 />
@@ -97,7 +101,7 @@ export default function BusinessCalendarMonth({
     </section>;
 }
 
-function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, chooseModule, chooseProtectedArea, canManage, onAdd }) {
+function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd }) {
     return <div className="flex w-full flex-col sm:grid sm:grid-cols-2 sm:gap-5 xl:min-h-[520px] xl:flex-1 xl:flex xl:flex-col xl:gap-0">
         <div className="xl:mb-6">
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/65 dark:text-emerald-300/70">Show on calendar</p>
@@ -106,23 +110,23 @@ function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, c
                 Submitted MOVs
             </label>
         </div>
-        <div className="mt-5 sm:mt-0 xl:mb-6 xl:mt-0">
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/65 dark:text-emerald-300/70">Modules</p>
-            <div className="space-y-2.5">
-                <ModuleChoice label="All Modules" checked={!filters.module} onChange={() => chooseModule('')} />
-                {modules.map(module => <ModuleChoice key={module.key} label={module.label} checked={filters.module === module.key} onChange={() => chooseModule(filters.module === module.key ? '' : module.key)} />)}
-            </div>
+        <div className="mt-5 sm:col-span-2 xl:mb-6 xl:mt-0">
+            <FilterToolbar label="Calendar filters" chips={[
+                ...(filters.module ? [{ key: 'module', label: 'Module', value: modules.find(item => item.key === filters.module)?.label || filters.module, onRemove: () => chooseModule('') }] : []),
+                ...(filters.protected_area_id ? [{ key: 'protected_area_id', label: 'Protected Area', value: protectedAreas.find(area => String(area.id) === String(filters.protected_area_id))?.name || filters.protected_area_id, onRemove: () => chooseProtectedArea('') }] : []),
+            ]} onClear={clearFilters}>
+                <div className="grid gap-3 sm:grid-cols-2">
+                    <FloatingSelect label="Module" aria-label="Module" size="sm" value={filters.module || ''} onChange={event => chooseModule(event.target.value)}>
+                        <option value="">All Modules</option>
+                        {modules.map(module => <option key={module.key} value={module.key}>{module.label}</option>)}
+                    </FloatingSelect>
+                    <FloatingSelect label="Protected Area" size="sm" value={filters.protected_area_id || ''} onChange={event => chooseProtectedArea(event.target.value)}>
+                        <option value="">All Protected Areas</option>
+                        {protectedAreas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
+                    </FloatingSelect>
+                </div>
+            </FilterToolbar>
         </div>
-        <label className="mt-5 block sm:col-span-2 xl:mt-0">
-            <span className="mb-2 block text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/65 dark:text-emerald-300/70">Protected Area</span>
-            <span className="relative block">
-                <select value={filters.protected_area_id || ''} onChange={event => chooseProtectedArea(event.target.value)} className="h-10 w-full appearance-none rounded-lg border border-slate-200 bg-white/90 px-3 pr-9 text-xs font-medium text-slate-700 outline-none transition focus:border-green-700 focus:ring-2 focus:ring-green-700/15 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                    <option value="">All Protected Areas</option>
-                    {protectedAreas.map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
-                </select>
-                <ChevronDown />
-            </span>
-        </label>
         {canManage && <div className="mt-6 border-t border-emerald-100/90 pt-4 sm:col-span-2 xl:mt-auto">
             <button type="button" onClick={() => onAdd('')} title="Add Non-Working Day" aria-label="Add Non-Working Day" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-md transition hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">
                 <PlusIcon />
@@ -132,26 +136,19 @@ function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, c
     </div>;
 }
 
-function ModuleChoice({ label, checked, onChange }) {
-    return <label className="flex cursor-pointer items-start gap-2.5 text-xs text-slate-600 dark:text-gray-300">
-        <input type="checkbox" checked={checked} onChange={onChange} className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-green-700 focus:ring-green-600 dark:border-gray-600 dark:bg-gray-800" />
-        <span className={checked ? 'font-semibold text-emerald-800 dark:text-emerald-300' : ''}>{label}</span>
-    </label>;
-}
-
 function CalendarToolbar({ view, month, year, shiftMonth, shiftYear, goToday, setView }) {
     const monthMode = view === 'month';
-    const navClass = 'inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white/90 text-slate-700 shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200';
+    const navClass = 'inline-flex h-10 w-10 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white';
     const neutralViewClass = 'border border-slate-200 bg-white text-slate-700 shadow-sm hover:border-emerald-300 hover:bg-emerald-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200';
 
     return <header className="flex flex-wrap items-center justify-between gap-3 px-4 py-4 sm:px-5">
         <div className="flex items-center gap-2">
-            <button type="button" onClick={() => monthMode ? shiftMonth(-1) : shiftYear(-1)} className={navClass} aria-label={monthMode ? 'Previous month' : 'Previous year'} data-cds-action="true" data-cds-action-variant="primary"><Chevron direction="left" /></button>
+            <UtilityIconButton onClick={() => monthMode ? shiftMonth(-1) : shiftYear(-1)} className={navClass} aria-label={monthMode ? 'Previous month' : 'Previous year'}><Chevron direction="left" /></UtilityIconButton>
             <h2 className="min-w-[175px] text-center text-xl font-bold tracking-wide text-slate-800 dark:text-white sm:text-2xl">{monthMode ? monthLabel(month) : year}</h2>
-            <button type="button" onClick={() => monthMode ? shiftMonth(1) : shiftYear(1)} className={navClass} aria-label={monthMode ? 'Next month' : 'Next year'} data-cds-action="true" data-cds-action-variant="primary"><Chevron direction="right" /></button>
+            <UtilityIconButton onClick={() => monthMode ? shiftMonth(1) : shiftYear(1)} className={navClass} aria-label={monthMode ? 'Next month' : 'Next year'}><Chevron direction="right" /></UtilityIconButton>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={goToday} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${neutralViewClass}`} data-cds-action="true" data-cds-action-variant="primary">Today</button>
+            <button type="button" onClick={goToday} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${neutralViewClass}`}>Today</button>
             <button type="button" onClick={() => setView('month')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${monthMode ? 'cds-tab-active border border-green-700 bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Month</button>
             <button type="button" onClick={() => setView('year')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${!monthMode ? 'cds-tab-active border border-green-700 bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Year</button>
         </div>
@@ -273,7 +270,7 @@ function DateEventsModal({ date, events, onClose, onSelect }) {
         <section role="dialog" aria-modal="true" aria-label={`Submitted reports for ${formatReportDate(date)}`} className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <header className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                 <div><h3 className="text-sm font-bold text-gray-900 dark:text-white">Submitted reports</h3><p className="mt-0.5 text-xs text-gray-500">{formatReportDate(date)} · {events.length} events</p></div>
-                <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close" data-cds-action="true" data-cds-action-variant="primary">&times;</button>
+                <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close">&times;</button>
             </header>
             <div className="max-h-[60vh] space-y-2 overflow-y-auto p-4">
                 {events.map(event => <button key={event.source_key} type="button" onClick={() => onSelect(event)} className="w-full rounded-lg border border-gray-200 p-3 text-left hover:border-green-300 hover:bg-green-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:hover:border-green-800 dark:hover:bg-green-950/20" data-cds-action="true" data-cds-action-variant="primary"><span className="block text-xs font-bold text-gray-900 dark:text-white">{event.module} • {event.source_name || event.office || 'Office'}</span><span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">{event.title}{event.reporting_period ? ` · ${event.reporting_period}` : ''}</span></button>)}
@@ -303,5 +300,4 @@ function mondayIndex(date) { return (date.getDay() + 6) % 7; }
 function monthDays(year, month) { const first = new Date(year, month, 1); const leading = mondayIndex(first); const total = new Date(year, month + 1, 0).getDate(); const count = Math.ceil((leading + total) / 7) * 7; return Array.from({ length: count }, (_, index) => { const date = new Date(year, month, index - leading + 1); return { key: dateKey(date), number: date.getDate(), inMonth: date.getMonth() === month }; }); }
 function miniMonthDays(year, month) { const leading = mondayIndex(new Date(year, month, 1)); const total = new Date(year, month + 1, 0).getDate(); const slots = Math.ceil((leading + total) / 7) * 7; return Array.from({ length: slots }, (_, index) => index >= leading && index < leading + total ? index - leading + 1 : null); }
 function Chevron({ direction }) { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true"><path d={direction === 'left' ? 'm15 18-6-6 6-6' : 'm9 18 6-6-6-6'} /></svg>; }
-function ChevronDown() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>; }
 function PlusIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" className="h-5 w-5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>; }
