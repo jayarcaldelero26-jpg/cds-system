@@ -31,6 +31,11 @@ class BusinessCalendarService
     /** @var array<string, Collection<int, NonWorkingDay>> */
     private static array $activeDaysByYear = [];
 
+    private static int $activeDaysVersion = 0;
+
+    /** @var array<string, array{version:int,days:int}> */
+    private array $workingDayCounts = [];
+
     public function isWorkingDay(CarbonInterface|string $date, ?string $office = null, ?array $workingWeekdays = null): bool
     {
         $day = $this->date($date);
@@ -87,11 +92,43 @@ class BusinessCalendarService
             return 0;
         }
 
+        $workingWeekdays ??= self::PAMB_WORKING_WEEKDAYS;
+        $normalizedWeekdays = array_values(array_unique(array_map('intval', $workingWeekdays)));
+        sort($normalizedWeekdays);
+        $inputKey = hash('sha256', json_encode([
+            $start->toDateString(),
+            $end->toDateString(),
+            mb_strtolower(trim((string) $office)),
+            $countingSemantics,
+            $normalizedWeekdays,
+        ], JSON_THROW_ON_ERROR));
+        $version = self::$activeDaysVersion;
+        $cached = $this->workingDayCounts[$inputKey] ?? null;
+        if ($cached !== null && $cached['version'] === $version) {
+            return $cached['days'];
+        }
+
         $days = 0;
+        $nonWorkingDatesByYear = [];
         for ($cursor = $start->addDay(); $cursor->lessThanOrEqualTo($end); $cursor = $cursor->addDay()) {
-            if ($this->isWorkingDay($cursor, $office, $workingWeekdays)) {
+            if (! in_array($cursor->dayOfWeekIso, $workingWeekdays, true)) {
+                continue;
+            }
+
+            $year = (string) $cursor->year;
+            if (! array_key_exists($year, $nonWorkingDatesByYear)) {
+                $nonWorkingDatesByYear[$year] = $this->activeNonWorkingDays((int) $year, $office)
+                    ->mapWithKeys(fn (NonWorkingDay $holiday): array => [$holiday->date->toDateString() => true])
+                    ->all();
+            }
+
+            if (! isset($nonWorkingDatesByYear[$year][$cursor->toDateString()])) {
                 $days++;
             }
+        }
+
+        if ($version === self::$activeDaysVersion) {
+            $this->workingDayCounts[$inputKey] = ['version' => $version, 'days' => $days];
         }
 
         return $days;
@@ -126,6 +163,7 @@ class BusinessCalendarService
     public static function forgetCache(): void
     {
         self::$activeDaysByYear = [];
+        self::$activeDaysVersion++;
     }
 
     private function date(CarbonInterface|string $date): CarbonImmutable

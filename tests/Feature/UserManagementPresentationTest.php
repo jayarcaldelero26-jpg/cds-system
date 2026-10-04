@@ -8,7 +8,7 @@ test('user management uses clickable rows instead of a table action column', fun
     $columns = Str::before(Str::after($page, 'const columns = ['), '];');
 
     expect($columns)
-        ->toContain("label: 'Name'")
+        ->toContain("label: 'User'")
         ->toContain("label: 'Account Status'")
         ->not->toContain("key: 'actions'")
         ->not->toContain('>Edit<')
@@ -18,7 +18,7 @@ test('user management uses clickable rows instead of a table action column', fun
 
     expect($page)
         ->toContain('onRowClick={setSelectedUser}')
-        ->toContain('title="User Details"')
+        ->toContain("title={selectedUser?.name || 'User Details'}")
         ->toContain('Click any row to view user details and administrative actions');
 });
 
@@ -29,8 +29,6 @@ test('user details exposes the saved assignment and state-specific administrativ
         ->toContain("if (!user?.is_approved) return { label: 'Pending Approval', variant: 'pending' }")
         ->toContain("if (user?.is_active) return { label: 'Active', variant: 'active' }")
         ->toContain('User Category')
-        ->toContain('Office Designated')
-        ->toContain('Protected Area / PAMO Assignment')
         ->toContain('Registration Date')
         ->toContain('Last Updated')
         ->toContain('Activate Account')

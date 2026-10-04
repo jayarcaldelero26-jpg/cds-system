@@ -432,6 +432,32 @@ textarea:-webkit-autofill {
     box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 3px rgb(0 0 0 / 0.32);
 }
 
+/* Honor the existing shared neutral Button variants instead of painting them as primary actions. */
+[data-cds-action="true"][data-cds-action-variant="cancel"],
+[data-cds-action="true"][data-cds-action-variant="back"] {
+    background-color: #fff;
+    background-image: none;
+    border-color: #d1d5db;
+    color: #374151;
+}
+
+[data-cds-action="true"][data-cds-action-variant="cancel"]:not(:disabled):not([aria-disabled="true"]):hover,
+[data-cds-action="true"][data-cds-action-variant="back"]:not(:disabled):not([aria-disabled="true"]):hover {
+    background-color: #f9fafb;
+}
+
+.dark [data-cds-action="true"][data-cds-action-variant="cancel"],
+.dark [data-cds-action="true"][data-cds-action-variant="back"] {
+    background-color: #1f2937;
+    border-color: #4b5563;
+    color: #f3f4f6;
+}
+
+.dark [data-cds-action="true"][data-cds-action-variant="cancel"]:not(:disabled):not([aria-disabled="true"]):hover,
+.dark [data-cds-action="true"][data-cds-action-variant="back"]:not(:disabled):not([aria-disabled="true"]):hover {
+    background-color: #374151;
+}
+
 /* Rich-text toolbar commands are editor controls, not application actions. */
 .compliance-rich-text-toolbar button {
     min-height: 0;
@@ -727,6 +753,12 @@ button[role="tab"][aria-selected="true"] {
 
 .cds-tab-active,
 nav[aria-label="Dashboard program tabs"] button[aria-current="page"] {
+    background-image: var(--cds-selected-tab-gradient);
+    border-color: #15803d;
+    color: var(--cds-selected-tab-color);
+}
+
+.cds-submission-tracking-nav-tab[aria-current="page"] {
     background-image: var(--cds-selected-tab-gradient);
     border-color: #15803d;
     color: var(--cds-selected-tab-color);

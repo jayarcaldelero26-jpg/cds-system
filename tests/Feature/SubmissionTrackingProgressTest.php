@@ -232,15 +232,12 @@ test('PAMB terminal event from an earlier cycle does not complete progress in an
         ->and($completedActiveRouting['processing_percentage'])->toBe(100);
 });
 
-test('tracking detail exposes the profile-aware processing percentage and compact status marker', function (): void {
+test('tracking progress bar retains its gradient, sweep, and compact status styles', function (): void {
     $tracking = file_get_contents(base_path('resources/js/Pages/SubmissionTracking/Index.jsx'));
     $progress = file_get_contents(base_path('resources/js/Components/SubmissionTracking/SubmissionTrackingProgress.jsx'));
-    $presentation = file_get_contents(base_path('resources/js/Utils/submissionTrackingPresentation.js'));
     $css = file_get_contents(base_path('resources/css/app.css'));
 
     expect($tracking)
-        ->toContain('<SubmissionTrackingProgress row={row} />')
-        ->toContain('<SubmissionTrackingProgress row={details} />')
         ->toContain('edats-tracking-current-marker__pulse')
         ->not->toContain('official-report-document-update')
         ->not->toContain('Official report document update')
@@ -250,11 +247,6 @@ test('tracking detail exposes the profile-aware processing percentage and compac
         ->toContain('submission-tracking-progress__sweep')
         ->toContain('bg-slate-200')
         ->toContain('bg-slate-700')
-        ->and($presentation)
-        ->toContain('Routing Progress')
-        ->not->toContain('MOV Review Progress')
-        ->toContain('const value = Number(routing.processing_percentage)')
-        ->toContain('routing_summary')
         ->and($css)
         ->toContain('@keyframes edats-tracking-status-pulse')
         ->toContain('2.1s ease-out infinite')

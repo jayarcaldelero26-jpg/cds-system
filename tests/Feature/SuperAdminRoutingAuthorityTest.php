@@ -119,8 +119,8 @@ test('Super Admin monitors the real PAMB owner without becoming a duplicate rout
     $this->actingAs($admin);
     $tracking = app(SubmissionTrackingService::class);
     $officeOwnedRow = $tracking->records()->firstWhere('source_id', $report->id);
-    expect($officeOwnedRow['routing']['responsible_user_category'])->toBe(OrganizationalAccessService::OFFICE_PENRO)
-        ->and($officeOwnedRow['routing']['current_location'])->toBe('For Receipt by Office of the PENRO');
+    expect(app(OrganizationalAccessService::class)->normalizeCategory($officeOwnedRow['routing']['responsible_user_category']))->toBe(OrganizationalAccessService::OFFICE_PENRO)
+        ->and($officeOwnedRow['routing']['current_location'])->toBe('In Transit');
 
     $timeline->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_PENRO, '2026-08-06 10:00:00', $office->id);
     $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, '2026-08-06 11:00:00', $office->id);
@@ -130,9 +130,9 @@ test('Super Admin monitors the real PAMB owner without becoming a duplicate rout
     $adminCurrentStage = collect($adminRow['routing_timeline'])->firstWhere('status', 'current');
     $adminWorkspace = $tracking->workspaceQueues();
 
-    expect($adminRow['routing']['responsible_user_category'])->toBe(OrganizationalAccessService::PENRO_TSD_CHIEF)
-        ->and($adminRow['routing']['current_location'])->toBe('For Receipt by PENRO TSD Chief')
-        ->and($adminRow['routing']['next_expected_action'])->toBe('Record Receipt by PENRO TSD Chief')
+    expect(app(OrganizationalAccessService::class)->normalizeCategory($adminRow['routing']['responsible_user_category']))->toBe(OrganizationalAccessService::PENRO_TSD_CHIEF)
+        ->and($adminRow['routing']['current_location'])->toBe('In Transit')
+        ->and($adminRow['routing']['next_expected_action'])->toBe('Receive')
         ->and($adminCurrentStage['can_record'])->toBeFalse()
         ->and($adminRow['pamb_action_flags']['can_return_for_penro_correction'])->toBeFalse()
         ->and($adminRow['pamb_action_flags']['can_approve_for_regional_release'])->toBeFalse()

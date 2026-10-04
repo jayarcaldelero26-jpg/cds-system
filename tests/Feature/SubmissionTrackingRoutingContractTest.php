@@ -141,7 +141,7 @@ test('PAMB retains its detailed routing profile through the shared contract adap
 
     $row = app(SubmissionTrackingService::class)->records()->firstWhere(fn (array $item): bool => $item['source'] === 'conservation' && (int) $item['source_id'] === $report->id);
 
-    expect($row['routing']['profile_key'])->toBe('pamb_detailed')
+    expect($row['routing']['profile_key'])->toBe('canonical_cenro_penro_regional')
         ->and($row['pamb_routing_applicable'])->toBeTrue()
         ->and($row['routing']['route_granularity'])->toBe('detailed');
 });

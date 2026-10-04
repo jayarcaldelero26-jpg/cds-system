@@ -109,7 +109,7 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                         {actions.map((action) => (
                             <Button
                                 size="compact"
-                                variant={action.correction ? "danger" : "primary"}
+                                variant={action.correction ? "warning" : "primary"}
                                 key={action.key}
                                 type="button"
                                 onClick={() => onAction?.(action)}
@@ -193,6 +193,9 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                                         Recorded by {event.recorded_by}
                                         {event.actor_category
                                             ? ` · ${event.actor_category}`
+                                            : ""}
+                                        {event.actor_office
+                                            ? ` · ${event.actor_office}`
                                             : ""}
                                     </p>
                                 )}

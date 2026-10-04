@@ -48,6 +48,7 @@ test('a Conservation report stores an activity name outside the registry', funct
         'activity_name' => 'Community-led homestay orientation',
         'document_type' => 'Progress Report',
         'reporting_period' => 'Quarter 1',
+        'date_conducted_ranges' => [['from' => '2026-08-24', 'to' => '2026-08-24']],
         'date_accomplished' => '2026-08-24',
         'mov' => UploadedFile::fake()->create('custom-activity.pdf', 100, 'application/pdf'),
     ])->assertSessionHasNoErrors();
@@ -58,6 +59,10 @@ test('a Conservation report stores an activity name outside the registry', funct
         'target_office' => 'CENRO Mati',
         'activity_name' => 'Community-led homestay orientation',
     ]);
+
+    $stored = ConservationReportSubmission::query()->where('workflow_key', 'homestay')->firstOrFail();
+    expect($stored->date_conducted)->toBe('2026-08-24')
+        ->and($stored->date_conducted_ranges)->toBe([['from' => '2026-08-24', 'to' => '2026-08-24']]);
 });
 
 test('a Conservation report updates to an activity name outside the registry', function () {
@@ -75,6 +80,7 @@ test('a Conservation report updates to an activity name outside the registry', f
         'protected_area_id' => $this->area->id,
         'target_office' => 'CENRO Mati',
         'activity_name' => 'Revised community homestay workshop',
+        'date_conducted_ranges' => [['from' => '2026-08-24', 'to' => '2026-08-24']],
         'date_accomplished' => '2026-08-24',
     ])->assertSessionHasNoErrors();
 
@@ -85,6 +91,9 @@ test('a Conservation report updates to an activity name outside the registry', f
         'activity_name' => 'Revised community homestay workshop',
         'date_accomplished' => '2026-08-24',
     ]);
+
+    expect($submission->fresh()->date_conducted)->toBe('2026-08-24')
+        ->and($submission->fresh()->date_conducted_ranges)->toBe([['from' => '2026-08-24', 'to' => '2026-08-24']]);
 });
 
 test('registry activity defaults remain available as prefill suggestions', function () {

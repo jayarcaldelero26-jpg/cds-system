@@ -1364,7 +1364,7 @@ test('legacy nonproduction history does not count as production sends or failure
         ->assertInertia(fn (Assert $page) => $page
             ->where('summary.sent_today', 0)
             ->where('summary.failed_today', 0)
-            ->has('runs', 2));
+            ->missing('runs'));
 });
 
 test('production history counts toward sent and failed overview counters', function () {

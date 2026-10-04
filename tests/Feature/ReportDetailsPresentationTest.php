@@ -94,27 +94,18 @@ it('uses a safe UTF-8 fallback throughout Submission Tracking', function () {
 });
 
 it('clarifies PAMB timeline dates and actor context without changing workflow actions', function () {
-    $timeline = File::get(resource_path('js/Components/SubmissionTracking/PambRoutingTimeline.jsx'));
-    $mov = File::get(resource_path('js/Components/SubmissionTracking/PambMovProgress.jsx'));
-    $controller = File::get(app_path('Http/Controllers/SubmissionTrackingController.php'));
+    $timeline = File::get(resource_path('js/Components/SubmissionTracking/DocumentRoutingTimeline.jsx'));
     $tracking = File::get(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
-    $routingService = File::get(app_path('Services/SubmissionTracking/PambRoutingTimelineService.php'));
 
     expect($tracking)
-        ->toContain('Submission Status')
-        ->toContain('Currently with:')
-        ->toContain('statusContext.current_unit');
-    expect($routingService)
-        ->toContain('PENRO internal routing in progress')
-        ->toContain('status_context');
+        ->toContain('<SubmissionReportContext row={row} />')
+        ->toContain('<SubmissionReportContext row={details} expanded />')
+        ->toContain('<DocumentRoutingTimeline')
+        ->toContain('Currently with: {statusContext.current_unit}');
 
     expect($timeline)
-        ->toContain('Business date:')
-        ->not->toContain('Routing Role / Office')
-        ->toContain('actor_category_label')
-        ->and(substr_count($timeline, 'lastAction.recorded_by_role'))->toBe(1);
-    expect($mov)
-        ->toContain('CENRO MOV Review History')
-        ->toContain('recorded_role');
-    expect($controller)->toContain('CENRO MOV processing: 100% complete.');
+        ->toContain('recorded_by')
+        ->toContain('Show fewer steps')
+        ->toContain('event.from')
+        ->toContain('event.to');
 });

@@ -9,9 +9,29 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 // Compile the real components in memory. No browser, network, or output files.
 async function component(name) {
+    const componentPath = name.includes('/') ? name : `SubmissionTracking/${name}`;
+    const inputPath = componentPath.startsWith('Pages/')
+        ? `resources/js/${componentPath}.jsx`
+        : `resources/js/Components/${componentPath}.jsx`;
     const bundle = await rolldown({
-        input: resolve(`resources/js/Components/SubmissionTracking/${name}.jsx`),
+        input: resolve(inputPath),
         external: id => id === 'react' || id.startsWith('react/'),
+        plugins: [{
+            name: 'isolated-page-test-shims',
+            resolveId(source) {
+                if (source === '@inertiajs/react') return '\0inertia-ssr-shim';
+                if (source === 'pdfjs-dist') return '\0pdfjs-ssr-shim';
+                if (source === 'pdfjs-dist/build/pdf.worker.min.mjs?url') return '\0pdfjs-worker-ssr-shim';
+            },
+            load(id) {
+                if (id === '\0pdfjs-ssr-shim') return 'export const GlobalWorkerOptions = {}; export const getDocument = () => { throw new Error("PDF rendering is unavailable in this markup fixture"); };';
+                if (id === '\0pdfjs-worker-ssr-shim') return 'export default "/pdfjs-worker-fixture.mjs";';
+                if (id === '\0inertia-ssr-shim') {
+                    return 'export const Head = () => null; export const Link = () => null; export const router = {}; export const usePage = () => ({ props: {} }); export const useForm = () => ({});';
+                }
+                if (/\.(png|jpe?g|svg|webp|gif)$/.test(id)) return 'export default "test-image";';
+            },
+        }],
         resolve: { alias: { '@': resolve('resources/js') } },
         transform: { jsx: { runtime: 'automatic' } },
     });
@@ -23,22 +43,53 @@ async function component(name) {
 }
 
 const Preview = await component('DocumentPreviewDialog');
+const PdfViewer = await component('PdfDocumentViewer');
 const PambProgress = await component('PambMovProgress');
-const trackingPage = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
+const PambActions = await component('PambMovActions');
+const ReviewHistory = await component('SubmissionReviewHistory');
+const AttachmentDropzone = await component('Attachments/AttachmentDropzone');
+const RoutingTimeline = await component('DocumentRoutingTimeline');
+const Progress = await component('SubmissionTrackingProgress');
+const ReportContext = await component('SubmissionReportContext');
+const NotificationComponents = await component('Notifications/NotificationBell');
+const NotificationPanel = NotificationComponents.NotificationPanel;
+const CrudFormModal = await component('Crud/CrudFormModal');
+const UserManagement = await component('Pages/Admin/Users/Index');
+const appStyles = readFileSync(resolve('resources/css/app.css'), 'utf8');
+const previewDialogSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
 const render = row => renderToStaticMarkup(React.createElement(Preview, { open: true, row }));
 
-test('only the protected current document is embedded for supported MIME types', () => {
+test('supported protected previews wait for a validated response before embedding a blob URL', () => {
     for (const mime_type of ['application/pdf', 'image/jpeg', 'image/png']) {
-        const markup = render({ current_document: { name: 'synthetic', mime_type, preview_url: '/attachments/aws-report/1/report?preview=1' }, mov_url: '/overview' });
-        assert.match(markup, /src="\/attachments\/aws-report\/1\/report\?preview=1"/);
+        const markup = render({ current_document: { name: 'synthetic', mime_type, can_preview: true, preview_url: '/attachments/aws-report/1/report?preview=1' }, mov_url: '/overview' });
+        assert.match(markup, /Loading document preview/);
+        assert.doesNotMatch(markup, /<iframe|<img|\/attachments\/aws-report\/1\/report/);
         assert.doesNotMatch(markup, /\/overview/);
-        assert.match(markup, mime_type === 'application/pdf' ? /<iframe/ : /<img/);
     }
+    assert.match(previewDialogSource, /startProtectedPreview\(url,/);
+    assert.match(previewDialogSource, /<PdfDocumentViewer blob=\{current\.blob\}/);
+    assert.match(previewDialogSource, /<img src=\{current\.url\}/);
+});
+
+test('PDF viewer exposes Fit Page, zoom, and bounded page controls', () => {
+    const markup = renderToStaticMarkup(React.createElement(PdfViewer, { blob: new Blob(), title: 'Portrait report' }));
+    assert.match(markup, /aria-label="PDF controls"/);
+    assert.match(markup, /aria-label="Zoom out"/);
+    assert.match(markup, />Fit Page</);
+    assert.match(markup, /aria-label="Zoom in"/);
+    assert.match(markup, /aria-label="Zoom percentage"/);
+    assert.match(markup, /aria-label="Previous page" disabled/);
+    assert.match(markup, /aria-label="Next page" disabled/);
+    assert.match(markup, /class="[^"]*overflow-auto[^"]*" role="region" aria-label="PDF page"/);
+    assert.match(markup, /class="hidden" aria-label="Portrait report, page 1 of 0"/);
+    assert.match(markup, /Preparing PDF preview/);
+    assert.match(markup, /aria-label="Zoom percentage"[^>]*>—%/);
+    assert.match(markup, /Page — of —/);
 });
 
 test('unsupported and unverified MIME never embed, even with a PDF filename', () => {
     for (const mime_type of [null, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']) {
-        const markup = render({ current_document: { name: 'looks-like.pdf', mime_type, preview_url: '/attachments/source/1/mov?preview=1', download_url: '/attachments/source/1/mov?download=1' } });
+        const markup = render({ current_document: { name: 'looks-like.pdf', mime_type, can_preview: true, preview_url: '/attachments/source/1/mov?preview=1', download_url: '/attachments/source/1/mov?download=1' } });
         assert.doesNotMatch(markup, /<iframe|<img/);
         assert.match(markup, /Download Current Copy/);
         assert.match(markup, mime_type ? /cannot be previewed/ : /could not be verified/);
@@ -46,7 +97,7 @@ test('unsupported and unverified MIME never embed, even with a PDF filename', ()
 });
 
 test('missing current descriptor cannot revive other document URLs', () => {
-    const markup = render({ current_document: null, mov_url: '/overview', effective_document: { url: '/archive' }, mov_attachment: { url: '/history', mime_type: 'application/pdf' } });
+    const markup = render({ current_document: { can_preview: true }, mov_url: '/overview', effective_document: { url: '/archive' }, mov_attachment: { url: '/history', mime_type: 'application/pdf' } });
     assert.doesNotMatch(markup, /<iframe|<img|\/overview|\/archive|\/history|Download Current Copy/);
     assert.match(markup, /No MOV\/report attachment is available/);
 });
@@ -61,7 +112,6 @@ test('PAMB MOV Review retains milestones and actions without a second overall pe
                 status_label: 'Reviewed by CENRO CDS Chief - Ready for Release',
                 workflow_status: 'Ready for CENRO Records Release',
                 milestones: [{ key: 'submitted', label: 'MOV Submitted for Review', complete: true }],
-                review_history: [{ event_label: 'Marked Ready for Release', recorded_by: 'Reviewer', recorded_at: '2026-09-28' }],
                 turnaround: { label: 'On time', deadline: '2026-09-30' },
             },
             mov_url: '/protected/current-mov',
@@ -73,14 +123,365 @@ test('PAMB MOV Review retains milestones and actions without a second overall pe
     assert.match(markup, /MOV Review/);
     assert.match(markup, /Ready for CENRO Records Release/);
     assert.match(markup, /MOV Submitted for Review/);
-    assert.match(markup, /CENRO MOV Review History/);
     assert.match(markup, /Release/);
     assert.doesNotMatch(markup, /MOV Processing Progress|70%|role="progressbar"|View MOV|protected\/current-mov/);
 });
 
+test('extracted MOV actions render for the current review owner', () => {
+    const markup = renderToStaticMarkup(React.createElement(PambActions, {
+        row: {
+            mov_processing: { applicable: true, status_key: 'submitted_for_review' },
+            pamb_action_flags: { can_review: true, can_release: false },
+        },
+        onReview: () => {},
+    }));
+
+    assert.match(markup, /Ready for Release/);
+    assert.match(markup, /Needs Correction/);
+    assert.doesNotMatch(markup, /Submit for Review|>Release</);
+});
+
+test('Submission Review History renders MOV and routing event actor context in its details surface', () => {
+    const markup = renderToStaticMarkup(React.createElement(ReviewHistory, {
+        row: {
+            date_conducted: '2026-09-28',
+            mov_processing: {
+                applicable: true,
+                review_history: [{
+                    event_key: 'ready_for_release',
+                    event_label: 'Marked Ready for Release',
+                    recorded_by: 'Chief Reviewer',
+                    recorded_role: 'CENRO CDS Chief',
+                    recorded_office: 'CENRO Mati',
+                    recorded_at: '2026-09-28T10:00:00+08:00',
+                    remarks: 'Reviewed the signed copy.',
+                }],
+            },
+            routing: { routing_history: [] },
+        },
+    }));
+
+    assert.match(markup, /MOV Review History/);
+    assert.match(markup, /Marked Ready for Release/);
+    assert.match(markup, /Chief Reviewer/);
+    assert.match(markup, /CENRO CDS Chief/);
+    assert.match(markup, /CENRO Mati/);
+    assert.match(markup, /Reviewed the signed copy\./);
+});
+
+test('Full Details hides duplicate inline routing history while Review history keeps distinct corrections, override metadata, and attachments', () => {
+    const routingHistory = [
+        {
+            id: 301, key: 'returned_for_correction:301', label: 'Returned for Correction',
+            occurred_at: '2026-09-28T10:00:00+08:00', recorded_by: 'CENRO Records User',
+            actor_category: 'CENRO Records', actor_office: 'CENRO Baganga', remarks: 'First cycle correction.',
+            correction: true, from: 'CENRO Records', to: 'CENRO CDS Focal Person',
+            correction_reason: 'Missing signature', correction_detail: 'Add the chair signature.',
+            administrative_override: true, override_for_category: 'CENRO CDS Chief', override_for_office: 'CENRO Baganga',
+            attachment: { name: 'cycle-one.pdf', size: 2048, preview_url: '/safe/cycle-one', download_url: '/safe/cycle-one?download=1' },
+        },
+        {
+            id: 302, key: 'returned_for_correction:302', label: 'Returned for Correction',
+            occurred_at: '2026-09-28T10:00:00+08:00', recorded_by: 'CENRO Records User',
+            actor_category: 'CENRO Records', actor_office: 'CENRO Baganga', remarks: 'Second cycle correction.',
+            correction: true, from: 'CENRO Records', to: 'CENRO CDS Focal Person',
+            correction_reason: 'Missing signature', correction_detail: 'Use the current signed version.',
+            administrative_override: false,
+            attachment: { name: 'cycle-two.pdf', size: 3072, preview_url: '/safe/cycle-two', download_url: '/safe/cycle-two?download=1' },
+        },
+    ];
+    const row = {
+        can_transition: false,
+        routing: {
+            profile_label: 'Conservation routing', actions: [], routing_history: routingHistory,
+            timeline: [{ key: 'current', label: 'CENRO CDS Focal Person', status: 'current' }],
+        },
+    };
+    const timeline = renderToStaticMarkup(React.createElement(RoutingTimeline, { row, hideRoutingHistory: true }));
+    const history = renderToStaticMarkup(React.createElement(ReviewHistory, { row: { routing: { routing_history: routingHistory } } }));
+    assert.doesNotMatch(timeline, /Complete Routing \/ Correction History|First cycle correction|cycle-one\.pdf/);
+    assert.match(timeline, /Canonical Routing Progress/);
+    assert.equal((history.match(/Returned for Correction/g) || []).length, 2);
+    assert.match(history, /Admin Override/);
+    assert.match(history, /Override for: CENRO CDS Chief/);
+    assert.match(history, /CENRO Baganga/);
+    assert.match(history, /First cycle correction\./);
+    assert.match(history, /Second cycle correction\./);
+    assert.match(history, /cycle-one\.pdf/);
+    assert.match(history, /cycle-two\.pdf/);
+    assert.match(history, /href="\/safe\/cycle-one"/);
+    assert.match(history, /href="\/safe\/cycle-two"/);
+});
+
+test('attachment dropzone renders its accessible control and dark theme style hook', () => {
+    const markup = renderToStaticMarkup(React.createElement(AttachmentDropzone, {
+        id: 'routing-attachment',
+        label: 'Updated Official Copy',
+        files: [],
+        onChange: () => {},
+        accept: '.pdf',
+        acceptedTypesHint: 'PDF',
+        canManage: true,
+    }));
+
+    assert.match(markup, /data-cds-attachment-dropzone/);
+    assert.match(markup, /<button[^>]*type="button"[^>]*id="routing-attachment"/);
+    assert.match(markup, /Updated Official Copy/);
+    assert.match(markup, /dark:text-slate-200/);
+    assert.match(appStyles, /\.dark \.cds-file-dropzone\s*\{[^}]*background:\s*#111827;/);
+    assert.match(appStyles, /\.dark \.cds-file-dropzone:hover[\s\S]*?background:\s*#10251f;/);
+});
+
+test('routing timeline omits absent summary values and wraps long office destinations', () => {
+    const destination = 'Office of the PENRO Records and Information Management Unit';
+    const markup = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+        row: {
+            can_transition: false,
+            routing: {
+                last_updated: null,
+                recorded_by: null,
+                actions: [],
+                routing_history: [],
+                timeline: [{
+                    key: 'records-forwarded',
+                    label: 'Forwarded to Records',
+                    status: 'completed',
+                    event_type: 'forwarded',
+                    occurred_at: '2026-09-28T10:00:00+08:00',
+                    from: 'CENRO Community Environment and Natural Resources Unit',
+                    to: destination,
+                    office: destination,
+                }],
+            },
+        },
+    }));
+
+    assert.match(markup, /Forwarded to Records/);
+    assert.match(markup, new RegExp(destination));
+    assert.match(markup, /break-words/);
+    assert.doesNotMatch(markup, /Last Updated|Recorded By/);
+});
+
+test('Manual PAMB canonical workspace payload renders through the shared details timeline', () => {
+    const row = {
+        source: 'conservation',
+        workflow_key: 'updating_pamb_manual',
+        pamb_routing_applicable: false,
+        can_transition: false,
+        routing_timeline: [],
+        routing: {
+            profile_key: 'canonical_cenro_penro_regional',
+            profile_label: 'CENRO-to-PENRO canonical routing',
+            current_stage: 'transit_to_cenro_chief',
+            current_location: 'CENRO CDS Chief',
+            current_status: 'In Transit',
+            processing_percentage: 20,
+            next_expected_action: 'Receive',
+            actions: [],
+            routing_history: [],
+            timeline: [
+                { key: 'cenro_preparation', label: 'CENRO CDS Focal Person', status: 'completed', event_type: 'stage' },
+                { key: 'transit_to_cenro_chief', label: 'Forwarded to CENRO CDS Chief', status: 'current', event_type: 'forwarded', from: 'CENRO CDS Focal Person', to: 'CENRO CDS Chief', office: 'CENRO Mati', occurred_at: '2026-08-03T09:00:00+08:00' },
+                { key: 'cenro_chief', label: 'CENRO CDS Chief', status: 'pending', action_label: 'Receive' },
+            ],
+        },
+    };
+    const markup = renderToStaticMarkup(React.createElement(RoutingTimeline, { row }));
+    const progress = renderToStaticMarkup(React.createElement(Progress, { row }));
+
+    assert.match(markup, /Canonical Routing Progress/);
+    assert.match(markup, /CENRO-to-PENRO canonical routing/);
+    assert.match(markup, /Forwarded to CENRO CDS Chief/);
+    assert.match(markup, /CENRO CDS Focal Person/);
+    assert.match(markup, /Receive/);
+    assert.match(progress, /aria-valuenow="20"/);
+    assert.doesNotMatch(markup, /PAMB detailed routing|MOV Review/);
+});
+
+test('user organization details render saved office and protected-area assignments', () => {
+    const markup = renderToStaticMarkup(React.createElement(UserManagement.UserOrganizationDetails, {
+        user: { office_designated: 'CENRO Mati', protected_area_name: 'Mount Hamiguitan Range Wildlife Sanctuary' },
+    }));
+
+    assert.match(markup, /Office/);
+    assert.match(markup, /CENRO Mati/);
+    assert.match(markup, /Protected Area \/ PAMO Assignment/);
+    assert.match(markup, /Mount Hamiguitan Range Wildlife Sanctuary/);
+});
+
 test('compact rows and Full Details use the normalized routing percentage as their only overall bars', () => {
-    assert.match(trackingPage, /routing\.processing_percentage/);
-    assert.match(trackingPage, /details\.routing\.processing_percentage/);
-    assert.equal([...trackingPage.matchAll(/role="progressbar"/g)].length, 2);
-    assert.doesNotMatch(trackingPage, /mov_processing\.percent/);
+    const row = {
+        routing: { processing_percentage: 35 },
+        mov_processing: { applicable: true, percent: 100 },
+    };
+    const markup = renderToStaticMarkup(React.createElement(Progress, { row }));
+
+    assert.match(markup, /role="progressbar"/);
+    assert.match(markup, /aria-valuenow="35"/);
+    assert.doesNotMatch(markup, /aria-valuenow="100"/);
+});
+
+test('Full Details routing progress renders the existing percentage for populated PAMB, TWC, and ENGP records', () => {
+    const fixtures = [
+        ['Regular PAMB', { workflow_key: 'regular_pamb', routing: { processing_percentage: 35 } }, '35'],
+        ['Special PAMB', { workflow_key: 'special_pamb', routing: { processing_percentage: 55 } }, '55'],
+        ['TWC', { workflow_key: 'twc_meetings', routing: { processing_percentage: 80 } }, '80'],
+        ['ENGP', { workflow_key: 'site_visit', routing: { processing_percentage: 20 } }, '20'],
+    ];
+
+    for (const [label, row, percentage] of fixtures) {
+        const markup = renderToStaticMarkup(React.createElement('section', {
+            'aria-label': 'Routing progress and current official document',
+        }, React.createElement('h2', null, 'Processing Progress'), React.createElement(Progress, { row })));
+        assert.match(markup, /aria-label="Routing progress and current official document"/);
+        assert.match(markup, new RegExp(`aria-valuenow="${percentage}"`), label);
+        assert.match(markup, new RegExp(`${percentage}%`), label);
+    }
+});
+
+test('100 percent processing stays distinct from pending terminal custody', () => {
+    const markup = renderToStaticMarkup(React.createElement(Progress, {
+        row: { routing_complete: false, routing: { processing_percentage: 100 } },
+    }));
+    assert.match(markup, /aria-label="Processing Progress"/);
+    assert.match(markup, /aria-valuenow="100"/);
+    assert.match(markup, /Processing is at 100%; final custody routing is still pending\./);
+    const completed = renderToStaticMarkup(React.createElement(Progress, {
+        row: { routing_complete: true, routing: { processing_percentage: 100 } },
+    }));
+    assert.doesNotMatch(completed, /final custody routing is still pending/);
+});
+
+test('notification rows render readable light and dark text, focus styling, and raw clear controls', () => {
+    const calls = [];
+    const props = {
+        onRetry: () => calls.push('retry'),
+        onOpen: notification => calls.push(['open', notification.id]),
+        onClear: () => calls.push('clear'),
+        state: {
+            unread_count: 1,
+            notifications: [{ id: 8, title: 'Correction received', message: 'Returned by CENRO Records', created_at: '2026-10-03T00:00:00Z', severity: 'danger', url: '/submission-tracking' }],
+        },
+    };
+    const markup = renderToStaticMarkup(React.createElement(NotificationPanel, props));
+    assert.match(markup, /text-gray-900 dark:text-white[^>]*>Correction received/);
+    assert.match(markup, /text-gray-700 dark:text-gray-200[^>]*>Returned by CENRO Records/);
+    assert.match(markup, /text-gray-500 dark:text-gray-400/);
+    assert.match(markup, /focus-visible:ring-2/);
+    assert.match(markup, /Clear Notifications/);
+    assert.doesNotMatch(markup, /text-white\/85|text-white\/70/);
+    assert.doesNotMatch(markup, /Clear Notifications[\s\S]*?data-cds-action/);
+    const findButton = (node, label) => {
+        if (!React.isValidElement(node)) return null;
+        if (node.type === 'button' && node.props.children === label) return node;
+        const children = React.Children.toArray(node.props.children);
+        for (const child of children) {
+            const result = findButton(child, label);
+            if (result) return result;
+        }
+        return null;
+    };
+    const findButtonContaining = (node, label) => {
+        if (!React.isValidElement(node)) return null;
+        const contains = child => {
+            if (child === label) return true;
+            if (!React.isValidElement(child)) return false;
+            return React.Children.toArray(child.props.children).some(contains);
+        };
+        if (node.type === 'button' && contains(node)) return node;
+        return React.Children.toArray(node.props.children).map(child => findButtonContaining(child, label)).find(Boolean) || null;
+    };
+    const tree = NotificationPanel(props);
+    findButton(tree, 'Clear Notifications').props.onClick();
+    const rowButton = findButtonContaining(tree, 'Correction received');
+    rowButton.props.onClick();
+    assert.deepEqual(calls, ['clear', ['open', 8]]);
+});
+
+test('notification panel renders an explicit retry error state without showing an empty result', () => {
+    const markup = renderToStaticMarkup(React.createElement(NotificationPanel, {
+        state: { unread_count: 0, notifications: [] },
+        requestError: 'Notifications could not be loaded. Check your connection and try again.',
+        onRetry() {}, onOpen() {}, onClear() {},
+    }));
+    assert.match(markup, /role="alert"/);
+    assert.match(markup, />Retry</);
+    assert.doesNotMatch(markup, /No new notifications\.<\/div>/);
+});
+
+test('correction confirmation submit uses warning while other form saves retain primary styling and guards', () => {
+    const renderModal = (saveVariant, processing = false) => renderToStaticMarkup(React.createElement(CrudFormModal, {
+        open: true,
+        mode: 'edit',
+        title: 'Return for Correction',
+        saveLabel: 'Return for Correction',
+        saveVariant,
+        processing,
+        onClose() {},
+        onSubmit() {},
+    }));
+    assert.match(renderModal('warning'), /data-cds-action-variant="warning"[^>]*>Return for Correction/);
+    assert.match(renderModal('warning', true), /data-cds-action-variant="warning"[^>]*disabled=""[^>]*>Updating/);
+    assert.match(renderModal(undefined), /data-cds-action-variant="primary"[^>]*>Return for Correction/);
+    const source = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
+    assert.match(source, /saveVariant=\{genericAction\?\.correction \? "warning" : "primary"\}/);
+    assert.match(source, /saveVariant=\{String\(routingStage\?\.key \|\| routingStage\?\.stage_key \|\| ""\)\.includes\("return_for_correction"\)/);
+});
+
+test('shared report context uses honest ENGP values and expands actual PAMB dates', () => {
+    const engp = renderToStaticMarkup(React.createElement(ReportContext, {
+        row: {
+            tracking_number: 'ENGP-2026-001',
+            module: 'ENGP Quarterly Report',
+            document_type: 'Quarterly Report',
+            target_office: 'PENRO Davao Oriental',
+            period_label: 'Quarter 3, 2026',
+            protected_area: null,
+            date_received_penro: null,
+        },
+        expanded: true,
+    }));
+    assert.match(engp, /ENGP-2026-001/);
+    assert.match(engp, /PENRO Davao Oriental/);
+    assert.match(engp, /Quarter 3, 2026/);
+    assert.doesNotMatch(engp, /Protected Area|PENRO Receipt/);
+
+    const populatedEngp = renderToStaticMarkup(React.createElement(ReportContext, {
+        row: {
+            tracking_number: 'ENGP-2026-042',
+            module: 'Site Visit',
+            activity_name: 'Field verification at Banao Watershed',
+            document_type: 'Quarterly Report',
+            target_office: 'CENRO Baganga',
+            period_label: 'Quarter 2, 2026',
+            protected_area: null,
+            date_received_penro: '2026-07-14',
+        },
+        expanded: true,
+    }));
+    assert.match(populatedEngp, /ENGP-2026-042/);
+    assert.match(populatedEngp, /Site Visit/);
+    assert.match(populatedEngp, /Field verification at Banao Watershed/);
+    assert.match(populatedEngp, /CENRO Baganga/);
+    assert.match(populatedEngp, /Quarter 2, 2026/);
+    assert.match(populatedEngp, /PENRO Receipt/);
+    assert.doesNotMatch(populatedEngp, /Protected Area/);
+
+    const pamb = renderToStaticMarkup(React.createElement(ReportContext, {
+        row: {
+            tracking_number: 'CDS-2026-002',
+            module: 'Regular PAMB',
+            document_type: 'Minutes',
+            target_office: 'CENRO Mati',
+            protected_area: 'Example Protected Area',
+            reporting_period: 'Quarter 3',
+            date_conducted: '2026-08-03',
+            date_report_released_cenro: '2026-08-04',
+            date_received_penro: null,
+        },
+        expanded: true,
+    }));
+    assert.match(pamb, /Example Protected Area/);
+    assert.match(pamb, /CENRO Release/);
+    assert.doesNotMatch(pamb, /PENRO Receipt/);
 });

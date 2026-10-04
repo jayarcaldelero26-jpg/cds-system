@@ -44,7 +44,6 @@ final class SubmissionTrackingEngpCompletedFilterTest extends TestCase
         $schema->create('engp_report_submissions', function (Blueprint $table): void {
             $table->id();
             $table->date('date_received_penro')->nullable();
-            $table->date('date_endorsed_regional')->nullable();
             $table->softDeletes();
         });
         $schema->create('document_routing_events', function (Blueprint $table): void {
@@ -106,22 +105,22 @@ final class SubmissionTrackingEngpCompletedFilterTest extends TestCase
         self::assertSame([1], $this->filteredIds(EngpReportSubmission::query(), 'engp', 'engp_report_submissions'));
     }
 
-    public function test_engp_completed_filter_uses_legacy_milestone_only_without_routing_events(): void
+    public function test_engp_completed_filter_requires_a_matching_regional_release_event(): void
     {
         $this->database->getConnection()->table('engp_report_submissions')->insert([
-            ['id' => 1, 'date_received_penro' => '2026-09-20', 'date_endorsed_regional' => '2026-09-22'],
-            ['id' => 2, 'date_received_penro' => '2026-09-20', 'date_endorsed_regional' => '2026-09-22'],
+            ['id' => 1, 'date_received_penro' => '2026-09-20'],
+            ['id' => 2, 'date_received_penro' => '2026-09-20'],
+            ['id' => 3, 'date_received_penro' => '2026-09-20'],
+            ['id' => 4, 'date_received_penro' => '2026-09-20'],
         ]);
-
-        self::assertSame([1, 2], $this->filteredIds(EngpReportSubmission::query(), 'engp', 'engp_report_submissions'));
 
         $this->database->getConnection()->table('document_routing_events')->insert([
-            'source_type' => 'engp',
-            'source_id' => 2,
-            'to_stage' => 'penro_records',
+            ['source_type' => 'engp', 'source_id' => 2, 'to_stage' => 'penro_records'],
+            ['source_type' => 'conservation', 'source_id' => 3, 'to_stage' => 'released_to_regional'],
+            ['source_type' => 'engp', 'source_id' => 4, 'to_stage' => 'released_to_regional'],
         ]);
 
-        self::assertSame([1], $this->filteredIds(EngpReportSubmission::query(), 'engp', 'engp_report_submissions'));
+        self::assertSame([4], $this->filteredIds(EngpReportSubmission::query(), 'engp', 'engp_report_submissions'));
     }
 
     public function test_conservation_completed_filter_keeps_its_existing_date_predicate(): void

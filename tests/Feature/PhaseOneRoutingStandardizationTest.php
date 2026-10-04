@@ -134,6 +134,70 @@ test('generic PENRO Records receipt stays at PENRO Records until an explicit for
         ->and(collect($routing->presentation($report->fresh(), 'bms', null, $office)['allowed_actions'])->pluck('key')->all())->toBe(['receive_at_office_penro']);
 });
 
+test('PAMB manual compliance dates use the Conservation canonical custody route', function (): void {
+    $focal = phaseOneActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $area = ProtectedArea::create([
+        'name' => 'Phase One Manual PA', 'short_name' => 'P1MAN', 'category' => 'Protected Landscape',
+        'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'XI',
+        'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+    ]);
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'updating_pamb_manual', 'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Mati', 'activity_name' => 'Workshop / Writeshop',
+        'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 3',
+        'date_accomplished' => '2026-08-03', 'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    $tracking = app(SubmissionTrackingService::class);
+    $this->actingAs($focal);
+
+    expect($tracking->usesGenericRouting('conservation', $report->id))->toBeTrue()
+        ->and($tracking->genericTransitionKeys('conservation', $report->id))->toContain('forward_to_cenro_chief');
+
+    $this->actingAs($focal)->post(route('submission-tracking.transition', [
+        'source' => 'conservation', 'record' => $report->id, 'stage' => 'forward_to_cenro_chief',
+    ]), [
+        'stage' => 'forward_to_cenro_chief',
+    ])->assertSessionHasNoErrors();
+
+    $event = \App\Models\DocumentRoutingEvent::query()
+        ->where('source_type', 'conservation')->where('source_id', $report->id)->firstOrFail();
+    $row = $tracking->records(['program' => 'conservation'])->firstWhere('source_id', $report->id);
+
+    expect($event->metadata['action_key'])->toBe('forward_to_cenro_chief')
+        ->and($event->workflow_key)->toBe('updating_pamb_manual')
+        ->and(data_get($row, 'routing.profile_key'))->toBe('canonical_cenro_penro_regional')
+        ->and(data_get($row, 'routing.current_stage'))->toBe(DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)
+        ->and(data_get($row, 'routing.actions'))->toBe([])
+        ->and(data_get($row, 'days_complied'))->toBe('Pending Submission by CENRO');
+});
+
+test('PAMB manual workflow keeps the direct-to-PENRO canonical profile for MHRWS', function (): void {
+    $admin = dashboardGlobalUser();
+    $area = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary', 'municipality' => 'San Isidro', 'province' => 'Davao Oriental',
+        'region' => 'XI', 'created_by' => $admin->id, 'updated_by' => $admin->id,
+    ]);
+    $report = ConservationReportSubmission::create([
+        'workflow_key' => 'updating_pamb_manual', 'protected_area_id' => $area->id,
+        'target_office' => 'PENRO Davao Oriental', 'activity_name' => 'Workshop / Writeshop',
+        'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 3',
+        'date_accomplished' => '2026-08-03', 'created_by' => $admin->id, 'updated_by' => $admin->id,
+    ]);
+    $routing = app(DocumentRoutingTransitionService::class);
+    $state = $routing->state($report, 'conservation', null, $admin);
+
+    expect($state['profile']['key'])->toBe('canonical_direct_penro')
+        ->and($state['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and(collect($state['actions'])->pluck('key')->all())->toContain('forward_from_penro_origin')
+        ->and(collect($state['actions'])->pluck('key')->all())->not->toContain('forward_to_cenro_chief');
+});
+
 test('generic correction reference uploads use correction_reference and never become effective copies', function (): void {
     Storage::fake('local');
     $focal = phaseOneActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');

@@ -1,14 +1,13 @@
 export function progressMeasureForSubmission(row) {
     const routing = row?.routing || row?.routing_summary || {};
-    // MOV milestones have their own percentage and can reach 100% before
-    // the report completes routing. The shared bar represents routing only;
-    // MOV progress remains available in its separate milestone presentation.
+    // This is the existing stage-based processing measure. MOV milestones
+    // remain separate, and 100% does not replace the terminal custody flag.
     const value = Number(routing.processing_percentage);
 
     if (!Number.isFinite(value) || value <= 0) return null;
 
     return {
-        label: "Routing Progress",
+        label: "Processing Progress",
         value: Math.max(0, Math.min(100, value)),
     };
 }

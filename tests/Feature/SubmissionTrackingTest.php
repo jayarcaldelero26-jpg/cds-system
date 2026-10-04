@@ -2,14 +2,18 @@
 
 use App\Models\ConservationReportSubmission;
 use App\Models\DocumentRoutingEvent;
+use App\Models\OrganizationalOffice;
 use App\Models\ModuleDefinition;
 use App\Models\EngpReportSubmission;
 use App\Models\PambRoutingEvent;
 use App\Models\User;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Services\Compliance\OverdueReportService;
+use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\BusinessCalendarService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use Carbon\CarbonImmutable;
@@ -48,6 +52,11 @@ test('Completed filter follows ENGP and PAMB terminal release while preserving g
         'reporting_year' => 2026, 'period_key' => '2026-01', 'period_label' => 'January 2026',
         'deadline_submission' => '2026-01-20', 'date_received_penro' => '2026-01-19',
         'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]);
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'conservation', 'source_id' => $engp->id, 'workflow_key' => 'homestay',
+        'event_key' => 'released', 'from_stage' => 'penro_records_final', 'to_stage' => 'released_to_regional',
+        'occurred_at' => '2026-01-20 09:00:00', 'recorded_by' => $this->user->id,
     ]);
     $tracking = app(SubmissionTrackingService::class);
     $completedEngpFilter = ['program' => 'engp', 'status' => 'Completed'];
@@ -157,7 +166,9 @@ test('submission status overview exposes canonical module and program area metad
         'workflow_key' => 'site_visit', 'office' => 'CENRO Baganga', 'section_name' => 'NGP',
         'activity_name' => 'ENGP Site Visit Report', 'document_type' => 'Quarterly Report',
         'reporting_year' => 2026, 'period_key' => 'Q1', 'period_label' => 'Quarter 1',
-        'deadline_submission' => '2026-09-01', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'deadline_submission' => '2026-09-01', 'date_received_penro' => '2026-08-20',
+        'mov_file_path' => 'engp/site-visits/2026-q1.pdf',
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $unknown = ConservationReportSubmission::create([
         'workflow_key' => 'unknown_overview_workflow', 'activity_name' => 'Unknown activity',
@@ -174,10 +185,18 @@ test('submission status overview exposes canonical module and program area metad
         ->and($row('conservation', $dynamicRecord->id)['program_area'])->toBe('Development')
         ->and($row('engp', $siteVisit->id)['module_name'])->toBe('Site Visit')
         ->and($row('engp', $siteVisit->id)['program_area'])->toBe('National Greening Program')
+        ->and($row('engp', $siteVisit->id)['target_office'])->toBe('CENRO Baganga')
+        ->and($row('engp', $siteVisit->id)['activity_name'])->toBe('ENGP Site Visit Report')
+        ->and($row('engp', $siteVisit->id)['document_type'])->toBe('Quarterly Report')
+        ->and($row('engp', $siteVisit->id)['reporting_period'])->toBe('Quarter 1')
+        ->and($row('engp', $siteVisit->id)['date_received_penro'])->toBe('2026-08-20')
+        ->and($row('engp', $siteVisit->id)['deadline_submission'])->toBe('2026-09-01')
+        ->and($row('engp', $siteVisit->id)['routing']['current_stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($row('engp', $siteVisit->id)['routing']['next_expected_action'])->toBe('Forward to Office of the PENRO')
         ->and($row('conservation', $unknown->id)['module_name'])->toBe('Conservation Report');
 
     $this->actingAs($this->user)->get(route('submission-tracking.index'))->assertOk()->assertInertia(fn (Assert $page) => $page
-        ->has('queues.for_submission')
+        ->missing('queues')->has('workspaceQueues.incoming')
         // A legacy CDS user resolves to Conservation for compatibility and
         // must no longer receive Development/ENGP tracking rows.
     );
@@ -263,64 +282,147 @@ test('routing correction follows the authenticated user password after it change
         ->and(\App\Models\AuditLog::query()->get()->toJson())->not->toContain('secret-password');
 });
 
-test('an accomplished conservation report enters the CENRO release queue and transitions through routing without duplication', function () {
+test('an accomplished conservation report separates PENRO receipt from forwarding without duplication', function () {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    $archivePath = 'conservation-report-movs/submission-tracking-checkpoint.pdf';
+    Storage::disk('local')->put($archivePath, "%PDF-1.4\nIsolated routing checkpoint fixture");
+    $archiveGateway = \Mockery::mock(GoogleDriveArchiveGateway::class);
+    $archiveGateway->shouldReceive('findByIdentityAndHash')->once()->andReturnNull();
+    $archiveGateway->shouldReceive('upload')->once()->andReturn(['file_id' => 'submission-tracking-test-archive', 'folder_id' => 'submission-tracking-test-folder']);
+    $archiveGateway->shouldReceive('verify')->once()->with('submission-tracking-test-archive', \Mockery::type('string'), \Mockery::type('int'))->andReturnTrue();
+    $archiveGateway->shouldReceive('verifyAvailability')->once()->with('submission-tracking-test-archive', \Mockery::type('string'), \Mockery::type('int'))->andReturn('verified');
+    app()->instance(GoogleDriveArchiveGateway::class, $archiveGateway);
+
     $cenroRecords = User::factory()->create(['section' => 'CENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
     $cenroRecords->assignRole(Role::findOrCreate('CENRO Records Unit', 'web'));
     $penroRecords = User::factory()->create(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
     $penroRecords->assignRole(Role::findOrCreate('PENRO Records Unit', 'web'));
     $area = ProtectedArea::create(['name' => 'Submission Tracking Test PA', 'short_name' => 'STTPA', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'XI', 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('name', 'CENRO Mati')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $this->user->id,
+    ]);
     $cenroRecords->assignRole(Role::findOrCreate('CENRO Records Unit', 'web'));
     $penroRecords->assignRole(Role::findOrCreate('PENRO Records Unit', 'web'));
     foreach ([$cenroRecords, $penroRecords] as $actor) { foreach (['reports.view', 'technical-reports.update'] as $ability) $actor->givePermissionTo(Permission::findOrCreate($ability, 'web')); }
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'mov_processing_status' => 'ready_for_release', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 1', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'mov_file_name' => 'checkpoint.pdf', 'mov_file_path' => $archivePath, 'mov_processing_status' => 'ready_for_release', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'activity_name' => 'Regular PAMB', 'date_accomplished' => null, 'created_by' => $this->user->id, 'updated_by' => $this->user->id]);
 
-    $this->actingAs($cenroRecords)->get(route('submission-tracking.index'))->assertOk()->assertInertia(fn (Assert $page) => $page->component('SubmissionTracking/Index')->count('queues.cenro_release', 1));
-    $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE]), ['stage' => SubmissionTrackingService::CENRO_RELEASE, 'date' => '2026-08-04'])->assertSessionHasNoErrors();
-    $this->assertDatabaseHas('conservation_report_submissions', ['id' => $report->id, 'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => null]);
-    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), ['stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-06'])->assertSessionHasNoErrors();
-    $this->assertDatabaseHas('conservation_report_submissions', ['id' => $report->id, 'date_received_penro' => '2026-08-06']);
-    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), ['stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT, 'date' => '2026-08-07'])->assertSessionHasNoErrors();
+    $focal = User::factory()->create(['section' => OrganizationalAccessService::CENRO_FOCAL, 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
+    foreach ([$focal, $chief] as $actor) {
+        foreach (['reports.view', 'technical-reports.update'] as $ability) $actor->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    $routing->transition($report, 'conservation', 'forward_to_cenro_chief', $focal->id);
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_cenro_records', $chief->id);
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_records', $cenroRecords->id);
+    $this->actingAs($cenroRecords)->get(route('submission-tracking.index'))->assertOk()->assertInertia(fn (Assert $page) => $page->component('SubmissionTracking/Index')->missing('queues')->count('workspaceQueues.incoming', 1));
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_penro_records', $cenroRecords->id);
+    expect($report->fresh()->date_report_released_cenro)->not->toBeNull()
+        ->and($report->fresh()->date_received_penro)->toBeNull();
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_penro_records', $penroRecords->id);
+    expect($report->fresh()->date_received_penro)->not->toBeNull();
+
+    $this->assertDatabaseMissing('document_archives', ['source_type' => 'conservation', 'source_id' => $report->id, 'logical_slot' => 'mov']);
+    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, \App\Services\SubmissionTracking\PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO]), [
+        'stage' => \App\Services\SubmissionTracking\PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+    ])->assertSessionHasNoErrors();
+    $this->assertDatabaseHas('document_archives', ['source_type' => 'conservation', 'source_id' => $report->id, 'logical_slot' => 'mov', 'google_drive_file_id' => 'submission-tracking-test-archive', 'archive_status' => 'ARCHIVED', 'remote_availability' => 'verified']);
+    expect(Storage::disk('local')->exists($archivePath))->toBeTrue();
+    $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'conservation');
+    expect($state['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->and(collect($state['actions'])->pluck('key'))->toContain('receive_at_office_penro');
     expect(ConservationReportSubmission::count())->toBe(2);
 });
 
 test('History contains each completed routing workflow once and excludes intermediate active stages', function () {
     $released = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Released only', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
-        'date_report_released_cenro' => '2026-08-02', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $received = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Received only', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
-        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $completedEarlier = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed earlier', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
-        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-04', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     $completedLater = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'activity_name' => 'Completed later', 'date_conducted' => '2026-08-01', 'date_accomplished' => '2026-08-01',
-        'date_report_released_cenro' => '2026-08-02', 'date_received_penro' => '2026-08-03', 'date_endorsed_regional' => '2026-08-05', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
-    foreach ([[$completedEarlier, '2026-08-04'], [$completedLater, '2026-08-05']] as [$completed, $date]) {
-        PambRoutingEvent::query()->create([
-            'conservation_report_submission_id' => $completed->id,
-            'workflow_key' => $completed->workflow_key,
-            'stage_key' => \App\Services\SubmissionTracking\PambRoutingTimelineService::RELEASED_TO_REGIONAL,
-            'occurred_at' => $date.' 09:00:00',
-            'recorded_by' => $this->user->id,
+    $timeline = app(PambRoutingTimelineService::class);
+    $cenroRecords = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
+    $penroRecords = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    foreach ([$released, $received, $completedEarlier, $completedLater] as $report) {
+        $report->update([
+            'mov_processing_status' => 'ready_for_release',
+            'date_report_released_cenro' => '2026-08-02',
         ]);
+        $timeline->recordCanonical($report, SubmissionTrackingService::CENRO_RELEASE, '2026-08-02', $cenroRecords->id, CarbonImmutable::parse('2026-08-02 09:00:00', 'Asia/Manila'));
+    }
+    foreach ([$received, $completedEarlier, $completedLater] as $report) {
+        $report->update(['date_received_penro' => '2026-08-03']);
+    }
+    $timeline->recordCanonical($received, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-03', $penroRecords->id, CarbonImmutable::parse('2026-08-03 09:00:00', 'Asia/Manila'));
+    $timeline->recordCanonical($completedEarlier, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-03', $penroRecords->id, CarbonImmutable::parse('2026-08-03 09:00:00', 'Asia/Manila'));
+    $timeline->recordCanonical($completedLater, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-03', $penroRecords->id, CarbonImmutable::parse('2026-08-03 09:00:00', 'Asia/Manila'));
+
+    $office = User::factory()->create(['section' => OrganizationalAccessService::OFFICE_PENRO, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    $tsd = User::factory()->create(['section' => OrganizationalAccessService::PENRO_TSD_CHIEF, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    $focal = User::factory()->create(['section' => OrganizationalAccessService::PENRO_FOCAL, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::PENRO_CHIEF, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    $stages = [
+        [PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, $penroRecords],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO, $office],
+        [PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, $office],
+        [PambRoutingTimelineService::RECEIVED_BY_TSD, $tsd],
+        [PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, $tsd],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS, $focal],
+        [PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF, $focal],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF, $chief],
+        [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, $chief],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL, $office],
+        [PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, $office],
+        [PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL, $penroRecords],
+    ];
+    foreach ([[$completedEarlier, '2026-08-04'], [$completedLater, '2026-08-05']] as [$completed, $date]) {
+        foreach ($stages as $index => [$stage, $actor]) {
+            $timestamp = CarbonImmutable::parse($date.' 09:'.str_pad((string) $index, 2, '0', STR_PAD_LEFT).':00', 'Asia/Manila');
+            try {
+                $timeline->record($completed, $stage, $timestamp->toDateTimeString(), $actor->id);
+            } catch (\Illuminate\Validation\ValidationException $exception) {
+                throw new \RuntimeException('History fixture failed at '.$stage.': '.$exception->getMessage(), previous: $exception);
+            }
+        }
+        $completed->update(['date_endorsed_regional' => $date]);
+        $timeline->recordCanonical($completed, SubmissionTrackingService::REGIONAL_ENDORSEMENT, $date, $penroRecords->id, CarbonImmutable::parse($date.' 09:30:00', 'Asia/Manila'));
     }
 
+    $admin = User::factory()->create(['section' => 'CDS']);
+    $admin->assignRole(Role::findOrCreate('Super Admin', 'web'));
+    $this->actingAs($admin);
     $queues = app(SubmissionTrackingService::class)->queues();
+    $workspace = app(SubmissionTrackingService::class)->workspaceQueues();
     $history = $queues['history']->where('source', 'conservation')->values();
+    $activeIds = collect($workspace['incoming'])->pluck('source_id');
+    $releasedStage = collect($timeline->present($released->fresh())['timeline'])->firstWhere('status', 'current')['key'];
+    $receivedStage = collect($timeline->present($received->fresh())['timeline'])->firstWhere('status', 'current')['key'];
 
-    expect($queues[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->toContain($released->id)
-        ->and($queues[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->pluck('source_id'))->toContain($received->id)
+    expect($releasedStage)->toBe(PambRoutingTimelineService::RECORDS_RECEIVED)
+        ->and($receivedStage)->toBe(PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO)
+        ->and($activeIds)->toContain($released->id, $received->id)
         ->and($history->pluck('source_id')->all())->toBe([$completedLater->id, $completedEarlier->id])
         ->and($history->pluck('source_id'))->not->toContain($released->id, $received->id)
-        ->and($history->firstWhere('source_id', $completedLater->id)['completed_at'])->toBe('2026-08-05')
+        ->and($history->firstWhere('source_id', $completedLater->id)['completed_at'])->toBe('2026-08-05T09:30:00+08:00')
         ->and($history->where('source_id', $completedLater->id))->toHaveCount(1);
 });
 
@@ -343,15 +445,35 @@ test('generic conservation reports remain live in Alerts until PENRO receipt whi
     $today = CarbonImmutable::parse('2026-08-25', 'Asia/Manila');
 
     $future = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-24', 'date_accomplished' => '2026-08-24', 'mov_file_path' => 'conservation-report-movs/future.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-24', 'date_accomplished' => '2026-08-24', 'mov_file_path' => 'conservation-report-movs/future.pdf', 'mov_processing_status' => 'ready_for_release', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     Storage::disk('public')->put($future->mov_file_path, 'future MOV');
 
     $report = ConservationReportSubmission::create([
-        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 2', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'mov_file_path' => 'conservation-report-movs/overdue.pdf', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+        'workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Regular PAMB', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 2', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'mov_file_path' => 'conservation-report-movs/overdue.pdf', 'mov_processing_status' => 'ready_for_release', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
     ]);
     Storage::disk('public')->put($report->mov_file_path, 'overdue MOV');
 
+    $cenroRecords = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
+    $penroRecords = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    foreach ([$cenroRecords, $penroRecords] as $actor) {
+        $actor->assignRole(Role::findOrCreate('no_role', 'web'));
+        foreach (['reports.view', 'technical-reports.update'] as $ability) $actor->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+    $focal = User::factory()->create(['section' => OrganizationalAccessService::CENRO_FOCAL, 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'unit_assignment' => 'conservation', 'office_designated' => 'CENRO Mati']);
+    foreach ([$focal, $chief] as $actor) {
+        $actor->assignRole(Role::findOrCreate('no_role', 'web'));
+        foreach (['reports.view', 'technical-reports.update'] as $ability) $actor->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    foreach ([$future, $report] as $candidate) {
+        $routing->transition($candidate, 'conservation', 'forward_to_cenro_chief', $focal->id);
+        $routing->transition($candidate->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
+        $routing->transition($candidate->fresh(), 'conservation', 'forward_to_cenro_records', $chief->id);
+        $routing->transition($candidate->fresh(), 'conservation', 'receive_at_cenro_records', $cenroRecords->id);
+    }
+    $this->actingAs($cenroRecords);
     $cenroQueue = $tracking->queues()[SubmissionTrackingService::CENRO_RELEASE];
     expect($cenroQueue->pluck('source_id'))->toContain($future->id, $report->id)
         ->and($alerts->overdueReports($today)->firstWhere('sourceId', $future->id))->toBeNull();
@@ -362,17 +484,19 @@ test('generic conservation reports remain live in Alerts until PENRO receipt whi
         ->and($overdue->deadline)->toBe($report->deadline_submission)
         ->and($overdue->complianceIssue)->toBe('Report Not Yet Submitted');
 
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE, '2026-08-14', $this->user->id);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_penro_records', $cenroRecords->id);
+    $this->actingAs($penroRecords);
     expect($tracking->queues()[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->toContain($report->id)
         ->and($alerts->overdueReports($today)->firstWhere('sourceId', $report->id))->not->toBeNull();
 
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-18', $this->user->id);
-    expect($tracking->queues()[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->pluck('source_id'))->toContain($report->id)
-        ->and($alerts->overdueReports($today)->firstWhere('sourceId', $report->id))->toBeNull();
-
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT, '2026-08-19', $this->user->id);
-    expect($tracking->records()->firstWhere('source_id', $report->id)['stage'])->toBe('endorsed')
-        ->and($alerts->overdueReports($today)->firstWhere('sourceId', $report->id))->toBeNull();
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_penro_records', $penroRecords->id);
+    $this->actingAs($penroRecords);
+    $current = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'conservation');
+    expect($report->fresh()->date_received_penro)->not->toBeNull()
+        ->and($current['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and(collect($current['actions'])->pluck('key'))->toContain('forward_to_office_penro')
+        ->and($alerts->overdueReports($today)->firstWhere('sourceId', $report->id))->toBeNull()
+        ->and($report->fresh()->date_endorsed_regional)->toBeNull();
 });
 
 test('Alerts consumes each generic conservation workflow deadline from its live report record', function (string $workflowKey, string $activity, string $document, string $expectedDeadline) {

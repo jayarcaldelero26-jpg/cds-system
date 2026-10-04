@@ -63,7 +63,6 @@ final class SubmissionTrackingPambCompletedFilterTest extends TestCase
         $schema->create('engp_report_submissions', function (Blueprint $table): void {
             $table->id();
             $table->date('date_received_penro')->nullable();
-            $table->date('date_endorsed_regional')->nullable();
             $table->softDeletes();
         });
         $schema->create('document_routing_events', function (Blueprint $table): void {
@@ -135,19 +134,21 @@ final class SubmissionTrackingPambCompletedFilterTest extends TestCase
         self::assertSame([2, 4, 6, 7], $this->filteredIds(ConservationReportSubmission::query(), 'conservation', 'conservation_report_submissions'));
     }
 
-    public function test_engp_completed_filter_keeps_event_and_no_events_legacy_behavior(): void
+    public function test_engp_completed_filter_uses_only_an_engp_regional_release_event(): void
     {
         $this->database->getConnection()->table('engp_report_submissions')->insert([
-            ['id' => 1, 'date_received_penro' => '2026-09-20', 'date_endorsed_regional' => '2026-09-22'],
-            ['id' => 2, 'date_received_penro' => '2026-09-20', 'date_endorsed_regional' => '2026-09-22'],
-            ['id' => 3, 'date_received_penro' => '2026-09-20', 'date_endorsed_regional' => null],
+            ['id' => 1, 'date_received_penro' => '2026-09-20'],
+            ['id' => 2, 'date_received_penro' => '2026-09-20'],
+            ['id' => 3, 'date_received_penro' => '2026-09-20'],
+            ['id' => 4, 'date_received_penro' => '2026-09-20'],
         ]);
         $this->database->getConnection()->table('document_routing_events')->insert([
             ['source_type' => 'engp', 'source_id' => 2, 'to_stage' => 'penro_records'],
             ['source_type' => 'engp', 'source_id' => 3, 'to_stage' => 'released_to_regional'],
+            ['source_type' => 'conservation', 'source_id' => 4, 'to_stage' => 'released_to_regional'],
         ]);
 
-        self::assertSame([1, 3], $this->filteredIds(EngpReportSubmission::query(), 'engp', 'engp_report_submissions'));
+        self::assertSame([3], $this->filteredIds(EngpReportSubmission::query(), 'engp', 'engp_report_submissions'));
     }
 
     private function filteredIds($query, string $sourceKey, string $table): array

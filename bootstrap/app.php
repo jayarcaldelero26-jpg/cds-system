@@ -24,6 +24,10 @@ return Application::configure(basePath: dirname(__DIR__))
                 | Request::HEADER_X_FORWARDED_PROTO,
         );
 
+        $middleware->web(prepend: [
+            \App\Http\Middleware\LocalNavigationTiming::class,
+        ]);
+
         $middleware->web(append: [
             \App\Http\Middleware\ResolveLoginDestination::class,
             \App\Http\Middleware\HandleInertiaRequests::class,

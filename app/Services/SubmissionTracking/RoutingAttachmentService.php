@@ -62,8 +62,34 @@ final class RoutingAttachmentService
         }
     }
     public function latest(string $source, int $sourceId): ?SubmissionRoutingAttachment { return SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->latest('id')->first(); }
-    public function forDocumentEvents(iterable $ids): array { return SubmissionRoutingAttachment::query()->whereIn('document_routing_event_id', collect($ids)->filter()->all())->get()->keyBy('document_routing_event_id')->all(); }
-    public function forPambEvents(iterable $ids): array { return SubmissionRoutingAttachment::query()->whereIn('pamb_routing_event_id', collect($ids)->filter()->all())->get()->keyBy('pamb_routing_event_id')->all(); }
+    public function forDocumentEvents(iterable $ids): array
+    {
+        $ids = collect($ids)->filter()->unique()->values();
+        if ($ids->isEmpty()) return [];
+
+        $attachments = [];
+        foreach ($ids->chunk(500) as $chunk) {
+            foreach (SubmissionRoutingAttachment::query()->whereIn('document_routing_event_id', $chunk)->get() as $attachment) {
+                $attachments[$attachment->document_routing_event_id] = $attachment;
+            }
+        }
+
+        return $attachments;
+    }
+    public function forPambEvents(iterable $ids): array
+    {
+        $ids = collect($ids)->filter()->unique()->values();
+        if ($ids->isEmpty()) return [];
+
+        $attachments = [];
+        foreach ($ids->chunk(500) as $chunk) {
+            foreach (SubmissionRoutingAttachment::query()->whereIn('pamb_routing_event_id', $chunk)->get() as $attachment) {
+                $attachments[$attachment->pamb_routing_event_id] = $attachment;
+            }
+        }
+
+        return $attachments;
+    }
     public function forStages(string $source, int $sourceId): array { return SubmissionRoutingAttachment::query()->where('source', $source)->where('source_id', $sourceId)->latest('id')->get()->unique('stage_key')->keyBy('stage_key')->all(); }
     public function descriptor(SubmissionRoutingAttachment $attachment): array
     {

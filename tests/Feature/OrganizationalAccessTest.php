@@ -106,7 +106,7 @@ test('PAMB tracking and ENGP records are filtered by the assigned office', funct
     $area = organizationalArea($baganga);
     $otherArea = organizationalArea($baganga, 'Mount Hamiguitan Range Wildlife Sanctuary');
 
-    ConservationReportSubmission::create([
+    $report = ConservationReportSubmission::create([
         'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
         'activity_name' => 'Regular PAMB', 'document_type' => 'Report', 'reporting_period' => 'Quarter 1',
         'date_conducted' => '2026-08-20',
@@ -118,7 +118,8 @@ test('PAMB tracking and ENGP records are filtered by the assigned office', funct
     ]);
 
     $this->actingAs($baganga)->get('/submission-tracking')->assertInertia(fn (Assert $page) => $page
-        ->has('queues.for_submission', 1));
+        ->missing('queues')->has('workspaceQueues.incoming', 1)
+        ->where('workspaceQueues.incoming.0.source_id', $report->id));
 
     $development = organizationalUser('CENRO CDS Focal Person', 'development', 'CENRO Baganga');
     EngpReportSubmission::create([

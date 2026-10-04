@@ -168,6 +168,79 @@ test('working days and signed differences preserve tracker boundaries and signs'
         ->and($calendar->signedWorkingDayDifference('2026-07-20', '2026-07-21'))->toBe(-1);
 });
 
+test('working-day range prepares scope-aware holiday dates without changing counting semantics', function () {
+    $calendar = app(BusinessCalendarService::class);
+
+    NonWorkingDay::create([
+        'date' => '2026-08-25', 'name' => 'National', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-08-25', 'name' => 'Same-date office declaration', 'type' => NonWorkingDay::TYPE_OFFICE_DECLARED_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_OFFICE, 'location' => 'CENRO Mati', 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-08-26', 'name' => 'Regional', 'type' => NonWorkingDay::TYPE_LOCAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_DAVAO_ORIENTAL, 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-08-31', 'name' => 'Other type remains non-working', 'type' => NonWorkingDay::TYPE_OTHER,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-09-01', 'name' => 'Office A', 'type' => NonWorkingDay::TYPE_OFFICE_DECLARED_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_OFFICE, 'location' => 'CENRO Mati', 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-09-02', 'name' => 'Office B', 'type' => NonWorkingDay::TYPE_OFFICE_DECLARED_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_OFFICE, 'location' => 'PENRO', 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2026-08-27', 'name' => 'Inactive', 'type' => NonWorkingDay::TYPE_SPECIAL_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => false,
+    ]);
+
+    $range = ['2026-08-24', '2026-09-03'];
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(3)
+        ->and($calendar->workingDaysBetween(...$range, office: 'PENRO'))->toBe(3)
+        ->and($calendar->workingDaysBetween(...$range, office: '  cenro mati '))->toBe(3)
+        ->and($calendar->workingDaysBetween(...$range))->toBe(4)
+        ->and($calendar->workingDaysBetween('2026-08-24', '2026-08-24'))->toBe(0)
+        ->and($calendar->workingDaysBetween('2026-09-03', '2026-08-24'))->toBe(0);
+
+    // The model's existing save hook invalidates the year cache between calls.
+    NonWorkingDay::create([
+        'date' => '2026-09-03', 'name' => 'Added during test', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    expect($calendar->workingDaysBetween(...$range))->toBe(3)
+        ->and($calendar->workingDaysBetween(...$range, office: 'PENRO'))->toBe(2);
+});
+
+test('working-day range retains year and leap-day boundaries and normalizes date objects without mutation', function () {
+    $calendar = app(BusinessCalendarService::class);
+
+    expect($calendar->workingDaysBetween('2024-02-27', '2024-03-02'))->toBe(2)
+        ->and($calendar->workingDaysBetween('2024-12-30', '2025-01-03'))->toBe(3);
+
+    NonWorkingDay::create([
+        'date' => '2024-02-29', 'name' => 'Leap day', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+    NonWorkingDay::create([
+        'date' => '2025-01-01', 'name' => 'New year', 'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY,
+        'scope' => NonWorkingDay::SCOPE_NATIONAL, 'is_active' => true,
+    ]);
+
+    expect($calendar->workingDaysBetween('2024-02-27', '2024-03-02'))->toBe(1)
+        ->and($calendar->workingDaysBetween('2024-12-30', '2025-01-03'))->toBe(2);
+
+    $start = Carbon\CarbonImmutable::parse('2026-08-24 23:30:00', 'Pacific/Auckland');
+    $original = $start->format('c');
+    expect($calendar->workingDaysBetween($start, '2026-08-27'))->toBe(3)
+        ->and($start->format('c'))->toBe($original);
+});
+
 test('all enrolled tracker models consume the centralized Conservation working-day deadlines and distances', function () {
     $standardA = [BmsReportSubmission::class, BamsReportSubmission::class, ImeaReportSubmission::class];
     foreach ($standardA as $modelClass) {

@@ -1,6 +1,5 @@
 import { formatReportDate, formatReportDateTime } from '@/Utils/dateFormatters';
-import { useState } from 'react';
-import Button from '@/Components/Button';
+import PambMovActions from '@/Components/SubmissionTracking/PambMovActions';
 
 const FALLBACK = '\u2014';
 
@@ -18,23 +17,14 @@ function MilestoneMarker({ item }) {
     return <span className="flex h-3 w-3 shrink-0 rounded-full border border-gray-400" aria-hidden="true" />;
 }
 
-export default function PambMovProgress({ row, context = {}, onSubmit, onReview, onRelease }) {
+export default function PambMovProgress({ row, context = {}, onSubmit, onReview, onRelease, hideReleaseAction = false }) {
     const progress = row?.mov_processing;
-    const [submitting, setSubmitting] = useState(false);
     if (!progress?.applicable) return null;
 
     const status = progress.status_key;
     const reviewable = status === 'submitted_for_review';
     const correction = status === 'needs_correction';
-    const releasable = status === 'ready_for_release';
-    const actions = row.pamb_action_flags || {};
-    const canSubmit = (actions.can_submit ?? context.can_submit_mov) && Boolean(row.mov_url) && (status === 'activity_conducted' || correction);
-    const awaitingChiefReview = reviewable && !context.can_review_mov;
-    const submitReview = () => {
-        if (submitting || !canSubmit) return;
-        setSubmitting(true);
-        onSubmit?.(row, { onFinish: () => setSubmitting(false) });
-    };
+    const awaitingChiefReview = reviewable && !(row.pamb_action_flags?.can_review ?? context.can_review_mov);
 
     return <section className="cds-card-surface space-y-3 rounded-xl border border-green-100 bg-green-50/60 p-3 dark:border-green-900/60 dark:bg-green-950/20" aria-label="MOV Review">
         <div className="flex flex-wrap items-end justify-between gap-2">
@@ -61,11 +51,7 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
         <div className="flex flex-wrap gap-2">
             {correction && row.source_url && <a href={row.source_url} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction inline-flex rounded-lg px-2.5 py-1.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2">Edit / Correct Submission</a>}
         </div>
-        <div className="flex flex-wrap gap-2">
-            {canSubmit && <Button type="button" size="compact" variant="primary" onClick={submitReview} disabled={submitting} aria-busy={submitting} className="rounded-lg px-2.5 py-1.5 text-xs">{submitting ? 'Submitting...' : correction ? 'Resubmit for Review' : 'Submit for Review'}</Button>}
-            {(actions.can_review ?? context.can_review_mov) && reviewable && <><Button type="button" size="compact" variant="primary" onClick={() => onReview?.(row, 'ready_for_release')} className="rounded-lg px-2.5 py-1.5 text-xs">Ready for Release</Button><Button type="button" size="compact" variant="secondary" onClick={() => onReview?.(row, 'needs_correction')} className="rounded-lg border-amber-300 px-2.5 py-1.5 text-xs text-amber-800 hover:border-amber-400 hover:bg-amber-50 dark:border-amber-700 dark:text-amber-200 dark:hover:bg-amber-950/30">Needs Correction</Button></>}
-            {actions.can_release === true && row.cenro_release_applicable !== false && releasable && <Button type="button" size="compact" variant="primary" onClick={() => onRelease?.(row)} className="rounded-lg px-2.5 py-1.5 text-xs">Release</Button>}
-        </div>
+        <PambMovActions row={row} context={context} onSubmit={onSubmit} onReview={onReview} onRelease={onRelease} hideReleaseAction={hideReleaseAction} />
         {progress.chief_verdict_label && <div className="border-t border-green-100 pt-2 text-[11px] text-gray-600 dark:border-green-900/60 dark:text-gray-300"><span className="font-bold uppercase tracking-wide text-gray-500">Final Chief Verdict:</span> {progress.chief_verdict_label}</div>}
     </section>;
 }

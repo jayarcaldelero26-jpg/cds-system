@@ -7,6 +7,7 @@ use App\Models\ConservationReportSubmission;
 use App\Services\BusinessCalendarService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Support\DatePresentationNormalizer;
+use App\Support\LocalNavigationTrace;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -30,14 +31,16 @@ final class DocumentRoutingPresenter
     ) {}
 
     /** @param Collection<int,AuditLog>|null $auditLogs @param Collection<int,\App\Models\DocumentRoutingEvent>|null $routingEvents */
-    public function present(Model $record, string $sourceKey, ?Collection $auditLogs = null, ?Collection $routingEvents = null): array
+    public function present(Model $record, string $sourceKey, ?Collection $auditLogs = null, ?Collection $routingEvents = null, ?Collection $pambOverrides = null, ?array $resolvedState = null, ?array $documentAttachments = null): array
     {
-        return $this->presentCanonical($record, $sourceKey, $routingEvents ?? collect());
+        LocalNavigationTrace::incrementCurrent('canonical_routing_presentations');
+        return $this->presentCanonical($record, $sourceKey, $routingEvents ?? collect(), $pambOverrides ?? collect(), $resolvedState, $documentAttachments);
     }
 
     /** @param array<string,mixed> $pamb */
-    public function presentPamb(Model $record, array $pamb): array
+    public function presentPamb(Model $record, array $pamb, ?Collection $routingOverrides = null): array
     {
+        LocalNavigationTrace::incrementCurrent('pamb_routing_presentations');
         $summary = $pamb['routing_summary'] ?? [];
         $timeline = collect($pamb['timeline'] ?? [])->values()->all();
         $current = collect($timeline)->firstWhere('status', 'current');
@@ -56,7 +59,12 @@ final class DocumentRoutingPresenter
             $responsibleActor = $this->organization->categoryLabel($preReleaseMovOwner);
         }
         $last = $summary['last_action'] ?? null;
-        $overrides = \App\Models\SubmissionRoutingOverride::query()->where('source', 'conservation')->where('source_record_id', $record->getKey())->get()->keyBy('action_key');
+        $overrides = ($routingOverrides ?? \App\Models\SubmissionRoutingOverride::query()
+            ->where('source', 'conservation')->where('source_record_id', $record->getKey())->get())
+            ->where('source', 'conservation')
+            ->where('source_record_id', $record->getKey())
+            ->where('engine', 'pamb')
+            ->keyBy('action_key');
 
         return [
             'profile_key' => 'pamb_detailed',
@@ -149,9 +157,9 @@ final class DocumentRoutingPresenter
     }
 
     /** @param Collection<int,\App\Models\DocumentRoutingEvent> $routingEvents */
-    private function presentCanonical(Model $record, string $sourceKey, Collection $routingEvents): array
+    private function presentCanonical(Model $record, string $sourceKey, Collection $routingEvents, Collection $pambOverrides, ?array $resolvedState = null, ?array $documentAttachments = null): array
     {
-        $state = app(DocumentRoutingTransitionService::class)->presentation($record, $sourceKey, $routingEvents, auth()->user());
+        $state = app(DocumentRoutingTransitionService::class)->presentation($record, $sourceKey, $routingEvents, auth()->user(), $resolvedState);
         $profile = $state['profile'];
         $actions = collect($state['actions']);
         $currentStage = (string) $state['stage'];
@@ -159,10 +167,16 @@ final class DocumentRoutingPresenter
             ? DocumentRoutingProfileRegistry::PAMO_ORIGIN
             : ($profile['key'] === 'canonical_direct_penro' ? DocumentRoutingProfileRegistry::PENRO_ORIGIN : DocumentRoutingProfileRegistry::PREPARATION);
         $pathStart = $state['bootstrapped'] ? $currentStage : $start;
+        // Correction acknowledgement temporarily replaces executable actions.
+        // Keep the displayed route on the existing profile graph; otherwise a
+        // self-loop acknowledgement hides the current PENRO correction stage.
+        $routeActions = collect($this->profiles->actionProfile(
+            $sourceKey, $profile['key'] === 'canonical_direct_penro'
+        )['actions']);
         $path = [$pathStart];
         $cursor = $pathStart;
         $visited = [$cursor];
-        while ($action = $actions->first(fn (array $candidate): bool => $candidate['from'] === $cursor && ! ($candidate['correction'] ?? false))) {
+        while ($action = $routeActions->first(fn (array $candidate): bool => $candidate['from'] === $cursor && ! ($candidate['correction'] ?? false))) {
             if (in_array($action['to'], $visited, true)) break;
             $path[] = $action['to'];
             $cursor = $action['to'];
@@ -170,11 +184,22 @@ final class DocumentRoutingPresenter
             if (count($path) > 30) break;
         }
         $eventByStage = $state['events']->keyBy('to_stage');
-        $currentStage = (string) $state['stage'];
+        $latestReturnIndex = null;
+        foreach ($state['events']->values() as $index => $event) {
+            if ($event->event_key === 'returned_for_correction') $latestReturnIndex = $index;
+        }
+        $activeEventsByStage = $latestReturnIndex === null
+            ? $eventByStage
+            : $state['events']->values()->slice($latestReturnIndex)->keyBy('to_stage');
+        $currentPosition = array_search($currentStage, $path, true);
         $timeline = [];
-        foreach ($path as $stage) {
-            $event = $eventByStage->get($stage);
-            $action = $actions->firstWhere('to', $stage);
+        foreach ($path as $position => $stage) {
+            // A later checkpoint reached before the latest return stays in
+            // history, but cannot complete a pending step in this cycle.
+            $event = $latestReturnIndex !== null && $currentPosition !== false && $position > $currentPosition
+                ? $activeEventsByStage->get($stage)
+                : $eventByStage->get($stage);
+            $action = $routeActions->firstWhere('to', $stage);
             $isCurrent = $stage === $currentStage;
             $timeline[] = [
                 'key' => $stage,
@@ -193,7 +218,9 @@ final class DocumentRoutingPresenter
                 'pending_since' => $isCurrent ? $this->pendingSince($state, $record, $event) : null,
                 'working_days_pending' => $isCurrent ? $this->pendingDays($state, $record, $event, $sourceKey) : null,
                 'recorded_by' => $event?->recordedBy?->name,
-                'actor_category' => $event?->recordedBy?->section,
+                'actor_category' => $event?->recordedBy ? $this->organization->categoryLabel($this->organization->effectiveCategory($event->recordedBy)) : null,
+                'actor_category_code' => $event?->recordedBy ? $this->organization->effectiveCategory($event->recordedBy) : null,
+                'actor_office' => $event?->recordedBy ? $this->organization->normalizeOffice($event->recordedBy->office_designated) : null,
                 'remarks' => $event?->remarks,
             ];
         }
@@ -205,6 +232,13 @@ final class DocumentRoutingPresenter
         $last = collect($timeline)->filter(fn (array $item): bool => filled($item['occurred_at']))->last();
         $nextAction = $state['allowed_actions'][0] ?? null;
         $informationalAction = $actions->first(fn (array $action): bool => $action['from'] === $currentStage && ! ($action['internal_only'] ?? false));
+        // Canonical custody ownership comes from the current route graph. MOV
+        // review and release ownership is presented in its separate MOV
+        // context and must not replace custody ownership before a handoff.
+        $responsibleUserCategory = $this->organization->categoryLabel(data_get($informationalAction, 'categories.0'))
+            ?: data_get($current, 'actor_category');
+        $nextExpectedAction = data_get($informationalAction, 'action_label')
+            ?? ($current ? 'No further routing action' : null);
         $allowed = collect($state['allowed_actions'])->map(fn (array $action): array => [
             'key' => $action['key'], 'label' => $action['label'], 'action_label' => $action['action_label'], 'to' => $action['to'], 'to_office' => $action['to_office'], 'correction' => (bool) ($action['correction'] ?? false), 'correction_reference_allowed' => (bool) ($action['correction_reference_allowed'] ?? ($sourceKey !== 'engp' && ($action['correction'] ?? false))), 'remarks_required' => (bool) (($action['correction'] ?? false) && ! isset($action['receipt_correction_context'])), 'receipt_correction_context' => $action['receipt_correction_context'] ?? null,
             'attachment_allowed' => (bool) ($action['attachment_allowed'] ?? (
@@ -214,19 +248,46 @@ final class DocumentRoutingPresenter
             'can_replace_document' => (bool) ($action['can_replace_document'] ?? false),
         ])->values()->all();
 
-        $attachments = $this->routingAttachments->forDocumentEvents($state['events']->pluck('id'));
-        $history = $state['events']->map(function (\App\Models\DocumentRoutingEvent $event) use ($actions, $attachments): array {
+        $attachments = $documentAttachments ?? $this->routingAttachments->forDocumentEvents($state['events']->pluck('id'));
+        $legacyPambIds = $state['events']->map(fn (\App\Models\DocumentRoutingEvent $event): ?int => data_get($event->metadata, 'legacy_pamb_event_id'))
+            ->filter()->values();
+        $legacyPambAttachments = $legacyPambIds->isNotEmpty() ? $this->routingAttachments->forPambEvents($legacyPambIds) : [];
+        $legacyOverrides = $pambOverrides
+            ->where('source', 'conservation')
+            ->where('source_record_id', $record->getKey())
+            ->where('engine', 'pamb')
+            ->values();
+        $history = $state['events']->map(function (\App\Models\DocumentRoutingEvent $event) use ($actions, $attachments, $legacyPambAttachments, $legacyOverrides): array {
             $action = $actions->first(fn (array $candidate): bool => $candidate['from'] === $event->from_stage && $candidate['to'] === $event->to_stage && $candidate['event_key'] === $event->event_key);
             $correction = $event->event_key === 'returned_for_correction';
+            $legacyId = data_get($event->metadata, 'legacy_pamb_event_id');
+            $attachment = $attachments[$event->id] ?? ($legacyId !== null ? ($legacyPambAttachments[$legacyId] ?? null) : null);
+            $legacyOverride = $legacyId === null ? null : $legacyOverrides->first(function ($override) use ($legacyId, $event): bool {
+                $overrideEventId = data_get($override->metadata, 'legacy_pamb_event_id');
+                if ($overrideEventId !== null) return (int) $overrideEventId === (int) $legacyId;
+
+                $stageKey = (string) data_get($event->metadata, 'legacy_pamb_stage_key', '');
+                return $stageKey !== ''
+                    && $override->action_key === $stageKey
+                    && $override->event_key === $stageKey
+                    && (int) $override->actual_actor_user_id === (int) $event->recorded_by;
+            });
             return [
                 'id' => $event->id, 'key' => $event->event_key.':'.$event->id,
                 'label' => $correction ? 'Returned for Correction' : (data_get($action, 'label') ?? ucfirst(str_replace('_', ' ', $event->event_key))),
                 'event_type' => $event->event_key, 'from' => $event->from_office, 'to' => $event->to_office,
                 'occurred_at' => $event->occurred_at?->toIso8601String(), 'recorded_at' => $event->created_at?->toIso8601String(),
                 'recorded_by' => $event->recordedBy?->name, 'actor_category' => $event->recordedBy ? $this->organization->effectiveCategory($event->recordedBy) : null, 'actor_office' => $event->recordedBy ? $this->organization->normalizeOffice($event->recordedBy->office_designated) : null,
-                'remarks' => $event->remarks, 'correction_reason_key' => data_get($event->metadata, 'correction_reason_key'), 'correction_reason' => data_get($event->metadata, 'correction_reason'), 'correction_detail' => data_get($event->metadata, 'correction_detail'), 'attachment' => isset($attachments[$event->id]) ? $this->routingAttachments->descriptor($attachments[$event->id]) : null, 'correction' => $correction, 'administrative_override' => (bool) data_get($event->metadata, 'administrative_override', false), 'override_for_category' => data_get($event->metadata, 'override_for_category'), 'override_for_office' => data_get($event->metadata, 'override_for_office'),
+                'remarks' => $event->remarks, 'correction_reason_key' => data_get($event->metadata, 'correction_reason_key'), 'correction_reason' => data_get($event->metadata, 'correction_reason'), 'correction_detail' => data_get($event->metadata, 'correction_detail'), 'attachment' => $attachment ? $this->routingAttachments->descriptor($attachment) : null, 'correction' => $correction, 'administrative_override' => (bool) data_get($event->metadata, 'administrative_override', false) || $legacyOverride !== null, 'override_for_category' => data_get($event->metadata, 'override_for_category') ?? $legacyOverride?->overridden_accountable_category, 'override_for_office' => data_get($event->metadata, 'override_for_office') ?? $legacyOverride?->overridden_office,
             ];
         })->values()->all();
+
+        // The latest event in chronological source-local order owns Last
+        // Action. Profile-order reduction can otherwise select an older final
+        // checkpoint after a correction returns to an earlier role.
+        if ($history !== []) {
+            $last = $history[array_key_last($history)];
+        }
 
         return [
             'profile_key' => $profile['key'], 'profile_label' => $profile['label'], 'route_granularity' => $profile['route_granularity'],
@@ -235,13 +296,13 @@ final class DocumentRoutingPresenter
             'current_location' => $this->stageLocation($current, $record, $state), 'current_status' => $this->stageStatus($current, $record, $state),
             'processing_percentage' => $this->processingPercentage($sourceKey, $currentStage),
             'responsible_office' => $this->organizationalOffice($record, data_get($current, 'key'), data_get($current, 'office') ?: $record->getAttribute('target_office')),
-            'responsible_user_category' => $this->organization->categoryLabel(data_get($informationalAction, 'categories.0')) ?: data_get($current, 'actor_category'),
-            'current_stage' => data_get($current, 'key'),
+            'responsible_user_category' => $responsibleUserCategory,
+            'current_stage' => $currentStage,
             'in_transit_to' => $current && str_starts_with((string) data_get($current, 'key'), 'transit_') ? data_get($current, 'to') : null,
             'pending_since' => data_get($current, 'pending_since'), 'working_days_pending' => data_get($current, 'working_days_pending'),
             'last_action' => $last ? ['label' => $last['label'], 'occurred_at' => $last['occurred_at'], 'recorded_by' => $last['recorded_by'], 'remarks' => $last['remarks']] : null,
             'last_updated' => $last['recorded_at'] ?? $last['occurred_at'] ?? null, 'recorded_by' => $last['recorded_by'] ?? null,
-            'next_expected_action' => data_get($informationalAction, 'action_label') ?? ($current ? 'No further routing action' : null),
+            'next_expected_action' => $nextExpectedAction,
             'deadline' => $record->getAttribute('deadline_submission'), 'compliance_status' => $record->getAttribute('timeliness'),
             'correction' => (bool) ($state['correction'] ?? false),
             'correction_reason_key' => data_get($state, 'correction_event.metadata.correction_reason_key'),
@@ -435,8 +496,8 @@ final class DocumentRoutingPresenter
         if (($state['correction'] ?? false) && in_array($state['stage'] ?? null, [DocumentRoutingProfileRegistry::PREPARATION, DocumentRoutingProfileRegistry::CDS_FOCAL], true)) {
             return ($state['stage'] ?? null) === DocumentRoutingProfileRegistry::PREPARATION ? 'CENRO CDS' : 'PENRO CDS';
         }
-        if (! $current) return $record->getAttribute('target_office') ?: 'CENRO';
-        if ($current['key'] === DocumentRoutingProfileRegistry::PREPARATION) return $record->getAttribute('target_office') ?: 'CENRO';
+        if (! $current) return $this->originOffice($record) ?: 'CENRO';
+        if ($current['key'] === DocumentRoutingProfileRegistry::PREPARATION) return $this->originOffice($record) ?: 'CENRO';
         if (str_starts_with((string) $current['key'], 'transit_')) return 'In Transit';
         if ($current['key'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL) return 'Regional Office';
         return $current['office'] ?? $current['to'] ?? 'Not available';
@@ -484,17 +545,24 @@ final class DocumentRoutingPresenter
         ];
 
         if (in_array($stage, $cenroStages, true)) {
-            return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: $fallback;
+            return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: ($this->originOffice($record) ?: $fallback);
         }
         if ($stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL) return 'Regional Office';
         if ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
             return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: $fallback;
         }
         if ($stage !== null) {
-            $targetOffice = (string) $record->getAttribute('target_office');
+            $targetOffice = (string) $this->originOffice($record);
             return str_starts_with($targetOffice, 'PENRO') ? $targetOffice : 'PENRO Davao Oriental';
         }
         return $fallback;
+    }
+
+    /** The ENGP source stores its originating office under a different field. */
+    private function originOffice(Model $record): ?string
+    {
+        $value = $record->getAttribute($record instanceof \App\Models\EngpReportSubmission ? 'office' : 'target_office');
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
 
     private function officeForActor(Model $record, ?string $actor, ?string $fallback = null): ?string

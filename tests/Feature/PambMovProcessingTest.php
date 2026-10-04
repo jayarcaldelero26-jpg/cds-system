@@ -2,6 +2,7 @@
 
 use App\Models\ConservationReportSubmission;
 use App\Models\DocumentRoutingEvent;
+use App\Models\PambRoutingEvent;
 use App\Models\SubmissionRoutingAttachment;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
@@ -154,10 +155,10 @@ test('a newly saved CENRO-managed Regular PAMB report enters only its CENRO CDS 
     expect($row['source'])->toBe('conservation')
         ->and($row['submission_status'])->toBe('Pending Submission by CENRO')
         ->and($row['routing']['responsible_office'])->toBe('CENRO Baganga')
-        ->and($row['routing']['responsible_user_category'])->toBe('CENRO_CDS_FOCAL')
-        ->and($row['routing']['next_expected_action'])->toBe('Submit MOV/report for CENRO CDS Chief review')
+        ->and($row['routing']['responsible_user_category'])->toBe('CENRO CDS Focal Person')
+        ->and($row['routing']['next_expected_action'])->toBe('Forward to CENRO Chief')
         ->and($workspace['incoming']->pluck('source_id')->all())->toContain($report->id)
-        ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('decision')
+        ->and($workspace['incoming']->firstWhere('source_id', $report->id)['incoming_action_category'])->toBe('forward')
         ->and($workspace['history']->pluck('source_id')->all())->not->toContain($report->id);
 
     foreach ([$chief, $records, $penroRecords, $penroFocal] as $nonOwner) {
@@ -186,10 +187,10 @@ test('a direct-PENRO Regular PAMB report does not enter a CENRO Incoming workspa
 
     $this->actingAs($penroRecords);
     expect($tracking->workspaceQueues()['incoming']->pluck('source_id')->all())->toContain($report->id)
-        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing']['responsible_user_category'])->toBe('PENRO_RECORDS');
+        ->and($tracking->records()->firstWhere('source_id', $report->id)['routing']['responsible_user_category'])->toBe('PENRO Records Unit');
 });
 
-test('PENRO Records receipt has no upload and hands off directly to Office of the PENRO', function (): void {
+test('PENRO Records receipt has no upload and exposes a separate Office forwarding action', function (): void {
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
     Storage::fake('local');
@@ -208,10 +209,10 @@ test('PENRO Records receipt has no upload and hands off directly to Office of th
     $before = $tracking->records()->firstWhere('source_id', $report->id);
     expect(collect($before['routing']['actions'])->pluck('action_label')->all())
         ->toBe(['Receive', 'Return for Correction'])
-        ->and(collect($before['routing']['actions'])->firstWhere('key', 'penro_receipt')['attachment_allowed'])->toBeFalse()
+        ->and(collect($before['routing']['actions'])->firstWhere('key', 'receive_at_penro_records')['can_replace_document'])->toBeFalse()
         ->and(collect($before['routing']['actions'])->pluck('key')->all())->not->toContain('release_to_regional');
 
-    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeFalse();
+    expect($tracking->canAttachRoutingCopy('conservation', $report, SubmissionTrackingService::PENRO_RECEIPT))->toBeTrue();
     $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
         'stage' => SubmissionTrackingService::PENRO_RECEIPT,
         'date' => '2026-08-05',
@@ -225,20 +226,29 @@ test('PENRO Records receipt has no upload and hands off directly to Office of th
 
     $this->actingAs($records);
     $recordsWorkspace = $tracking->workspaceQueues();
-    expect($recordsWorkspace['incoming']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and($recordsWorkspace['outgoing']->pluck('source_id')->all())->toContain($report->id);
+    expect($recordsWorkspace['incoming']->pluck('source_id')->all())->toContain($report->id)
+        ->and($recordsWorkspace['outgoing']->pluck('source_id')->all())->not->toContain($report->id);
+
+    $recordsRow = $tracking->records()->firstWhere('source_id', $report->id);
+    expect($recordsRow['routing']['current_stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($recordsRow['routing']['next_expected_action'])->toBe('Forward to Office of the PENRO');
+    $this->actingAs($records)->post(route('submission-tracking.internal-routing', [
+        'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+    ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertSessionHasNoErrors();
+
     $this->actingAs($office);
     $officeRow = $tracking->workspaceQueues()['incoming']->firstWhere('source_id', $report->id);
     expect($officeRow)->not->toBeNull()
-        ->and($officeRow['routing']['current_stage'])->toBe(PambRoutingTimelineService::RECEIVED_BY_PENRO)
-        ->and($officeRow['routing']['responsible_user_category'])->toBe('OFFICE_OF_THE_PENRO');
+        ->and($officeRow['routing']['current_stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->and($officeRow['routing']['responsible_user_category'])->toBe('Office of the PENRO');
 
     $this->actingAs($records)->post(route('submission-tracking.transition', [
         'conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT,
     ]), [
         'stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT,
         'date' => '2026-08-06',
-    ])->assertForbidden();
+    ])->assertRedirect()->assertSessionHasErrors('stage');
+    expect($report->fresh()->date_endorsed_regional)->toBeNull();
 });
 
 test('PENRO TSD Receive keeps ownership until the explicit Forward action', function (): void {
@@ -274,19 +284,19 @@ test('PENRO TSD Receive keeps ownership until the explicit Forward action', func
     $tracking = app(SubmissionTrackingService::class);
     $before = $tracking->records()->firstWhere('source_id', $report->id);
     $beforeQueue = $tracking->workspaceQueues();
-    expect($before['routing']['responsible_user_category'])->toBe('PENRO_TSD_CHIEF')
-        ->and($before['routing']['next_expected_action'])->toBe('Record Receipt by PENRO TSD Chief')
+    expect($before['routing']['responsible_user_category'])->toBe('PENRO TSD Chief')
+        ->and($before['routing']['next_expected_action'])->toBe('Receive')
         ->and($beforeQueue['incoming']->pluck('source_id')->all())->toContain($report->id)
-        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id && $item['required_action'] === 'Record Receipt by PENRO TSD Chief'))->toBeTrue();
+        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id && $item['required_action'] === 'Receive'))->toBeTrue();
 
     $timeline->record($report->fresh(), PambRoutingTimelineService::RECEIVED_BY_TSD, '2026-08-07 09:00:00', $tsd->id);
     $afterReceive = $tracking->records()->firstWhere('source_id', $report->id);
     $afterReceiveQueue = $tracking->workspaceQueues();
-    expect($afterReceive['routing']['responsible_user_category'])->toBe('PENRO_TSD_CHIEF')
-        ->and($afterReceive['routing']['next_expected_action'])->toBe('Forward to PENRO CDS Focal Person')
+    expect($afterReceive['routing']['responsible_user_category'])->toBe('PENRO TSD Chief')
+        ->and($afterReceive['routing']['next_expected_action'])->toBe('Forward to CDS Focal')
         ->and($afterReceiveQueue['incoming']->pluck('source_id')->all())->toContain($report->id)
         ->and($afterReceiveQueue['outgoing']->pluck('source_id')->all())->not->toContain($report->id)
-        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id && $item['required_action'] === 'Forward to PENRO CDS Focal Person'))->toBeTrue();
+        ->and(collect($tracking->dashboardActionQueue())->contains(fn (array $item): bool => (int) $item['source_id'] === $report->id && $item['required_action'] === 'Forward to CDS Focal'))->toBeTrue();
 
     $timeline->record($report->fresh(), PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, '2026-08-07 10:00:00', $tsd->id);
     $afterForwardQueue = $tracking->workspaceQueues();
@@ -308,6 +318,15 @@ test('completed PAMB submissions reject source and routing attachment mutations 
         'date_endorsed_regional' => '2026-08-06',
         'mov_file_path' => 'conservation-report-movs/completed.pdf',
         'mov_file_name' => 'completed.pdf',
+    ]);
+    // PAMB completion is established by the terminal canonical routing event;
+    // legacy date fields alone are metadata and do not complete the route.
+    PambRoutingEvent::query()->create([
+        'conservation_report_submission_id' => $report->id,
+        'workflow_key' => $report->workflow_key,
+        'stage_key' => PambRoutingTimelineService::RELEASED_TO_REGIONAL,
+        'occurred_at' => '2026-08-06 09:00:00',
+        'recorded_by' => $focal->id,
     ]);
     Storage::disk('local')->put($report->mov_file_path, '%PDF completed');
     expect(app(SubmissionTrackingService::class)->isRoutingComplete($report))->toBeTrue()
@@ -363,7 +382,6 @@ test('the active MOV marker uses a compact concentric pulse ring with reduced-mo
     expect($component)->toContain('edats-current-stage-marker__halo')
         ->toContain('edats-current-stage-marker__ripple--first')
         ->toContain('edats-current-stage-marker__ripple--second')
-        ->toContain('disabled={submitting}')
         ->and($styles)->toContain('@keyframes edats-current-stage-ripple')
         ->toContain('2.2s ease-out infinite')
         ->toContain('animation-delay: 1.1s')
@@ -452,19 +470,21 @@ test('CENRO review summary exposes the current verdict and preserves prior corre
         ]);
 });
 
-test('For Review status presents the Chief as the next action owner', function (): void {
-    $component = file_get_contents(resource_path('js/Components/SubmissionTracking/PambMovProgress.jsx'));
-    $page = file_get_contents(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
+test('For Review MOV status keeps canonical custody ownership with the focal', function (): void {
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
+    $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/owner-review.pdf']);
 
-    expect($component)->toContain('Review Status')
-        ->toContain('Awaiting Review by CENRO CDS Chief')
-        ->not->toContain('Next Action:')
-        ->toContain('Edit / Correct Submission')
-        ->and(preg_replace('/\\s+/', ' ', $component))->toContain('workflow_status')
-        ->and(preg_replace('/\\s+/', ' ', $page))->toContain('mov_processing')
-        ->toContain('details.routing?.next_expected_action')
-        ->toContain('submission_status')->toContain('Submission Status')->toContain('Routing Status');
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    $tracking = app(SubmissionTrackingService::class);
+    $row = $tracking->records()->firstWhere('source_id', $report->id);
+    expect($row['mov_processing']['workflow_status'])->toBe('Awaiting Review by CENRO CDS Chief')
+        ->and($row['routing']['responsible_user_category'])->toBe('CENRO CDS Focal Person')
+        ->and($row['pamb_action_flags']['can_review'])->toBeFalse();
 
+    $this->actingAs($chief);
+    $chiefRow = $tracking->records()->firstWhere('source_id', $report->id);
+    expect($chiefRow['pamb_action_flags']['can_review'])->toBeTrue();
 });
 test('needs correction requires remarks and returns the record to the focal queue', function (): void {
     $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
@@ -474,7 +494,13 @@ test('needs correction requires remarks and returns the record to the focal queu
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]));
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::NEEDS_CORRECTION])->assertSessionHasErrors('remarks');
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::NEEDS_CORRECTION, 'remarks' => 'Please correct the signature page.'])->assertSessionHasNoErrors();
-    $this->actingAs($chief)->get(route('submission-tracking.index'))->assertInertia(fn ($page) => $page->where('queues.needs_correction.0.source_id', $report->id));
+    $response = $this->actingAs($focal)->get(route('submission-tracking.index'))->assertOk();
+    $props = $response->inertiaProps();
+    $incoming = collect($props['workspaceQueues']['incoming']);
+    expect($props)->not->toHaveKey('queues')
+        ->and($incoming->pluck('source_id'))->toContain($report->id)
+        ->and($incoming->firstWhere('source_id', $report->id)['mov_processing']['queue'])->toBe('needs_correction')
+        ->and($incoming->firstWhere('source_id', $report->id)['mov_processing']['review_remarks'])->toBe('Please correct the signature page.');
 });
 
 test('records release uses the canonical CENRO release date and reaches one hundred percent', function (): void {
@@ -484,11 +510,21 @@ test('records release uses the canonical CENRO release date and reaches one hund
     $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/release.pdf']);
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]));
+    foreach ([[$focal, 'forward_to_cenro_chief'], [$chief, 'receive_at_cenro_chief']] as [$actor, $action]) {
+        $this->actingAs($actor)->post(route('submission-tracking.transition', ['conservation', $report->id, $action]), [
+            'stage' => $action,
+        ])->assertSessionHasNoErrors();
+    }
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::READY_FOR_RELEASE]);
+    foreach ([[$chief, 'forward_to_cenro_records'], [$records, 'receive_at_cenro_records']] as [$actor, $action]) {
+        $this->actingAs($actor)->post(route('submission-tracking.transition', ['conservation', $report->id, $action]), [
+            'stage' => $action,
+        ])->assertSessionHasNoErrors();
+    }
     $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE]), ['stage' => SubmissionTrackingService::CENRO_RELEASE, 'date' => '2026-08-10'])->assertSessionHasNoErrors();
 
     $released = $report->fresh();
-    expect($released->date_report_released_cenro->toDateString())->toBe('2026-08-10')
+    expect($released->date_report_released_cenro->toDateString())->toBe(CarbonImmutable::now('Asia/Manila')->toDateString())
         ->and(app(PambMovProcessingService::class)->present($released)['percent'])->toBe(100)
         ->and(app(PambMovProcessingService::class)->present($released)['status_label'])->toBe('Released by CENRO to PENRO');
 });
@@ -533,6 +569,251 @@ test('CENRO Records PAMB routing stays at 35 percent across authorized viewer co
     expect($presenter->presentPamb($report->fresh(), $pamb)['processing_percentage'])->toBe(100);
 });
 
+test('real Regular PAMB workspace and details progress separate receipt from forwarding', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $cenroRecords = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/progress-contract.pdf']);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\nregular PAMB progress contract");
+    app()->instance(\App\Services\Archive\GoogleDriveArchiveGateway::class, new PambMovArchiveGateway());
+
+    $workspaceRow = function (User $viewer) use ($report): array {
+        $url = route('submission-tracking.index').'?source=conservation&source_id='.$report->id;
+        $props = $this->actingAs($viewer)->get($url)->assertOk()->inertiaProps();
+        $row = collect($props['workspaceQueues'])->flatten(1)->first(fn (array $candidate): bool =>
+            ($candidate['source'] ?? null) === 'conservation'
+            && (int) ($candidate['source_id'] ?? 0) === $report->id
+        );
+        expect($row)->not->toBeNull();
+        expect(data_get($props, 'trackingContext.selected_record.routing.processing_percentage'))
+            ->toBe($row['routing']['processing_percentage']);
+
+        return $row;
+    };
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])->assertSessionHasNoErrors();
+    $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_chief']), ['stage' => 'receive_at_cenro_chief'])->assertSessionHasNoErrors();
+    $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertSessionHasNoErrors();
+    $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_records']), ['stage' => 'forward_to_cenro_records'])->assertSessionHasNoErrors();
+    $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_records']), ['stage' => 'receive_at_cenro_records'])->assertSessionHasNoErrors();
+
+    $readyForRelease = $workspaceRow($cenroRecords);
+    $releaseCheckpoint = collect($readyForRelease['routing']['timeline'])
+        ->firstWhere('key', \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::CENRO_RECORDS);
+    expect($readyForRelease['mov_processing']['status_key'])->toBe(PambMovProcessingService::READY_FOR_RELEASE)
+        ->and($releaseCheckpoint['status'])->toBe('current')
+        ->and($releaseCheckpoint['occurred_at'])->not->toBeNull();
+
+    $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE]), [
+        'stage' => SubmissionTrackingService::CENRO_RELEASE,
+        'date' => '2026-08-10',
+    ])->assertSessionHasNoErrors();
+
+    $released = $workspaceRow($penroRecords);
+    expect($report->fresh()->date_received_penro)->toBeNull()
+        ->and($released['routing']['current_stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and($released['routing']['profile_key'])->toBe('canonical_cenro_penro_regional')
+        ->and($released['routing']['profile_label'])->toBe('CENRO-to-PENRO canonical routing')
+        ->and($released['routing']['next_expected_action'])->toBe('Receive')
+        ->and($released['routing']['processing_percentage'])->toBe(80)
+        ->and($released['mov_processing']['percent'])->toBe(100)
+        ->and(collect($released['routing']['actions'])->pluck('key'))->toContain('receive_at_penro_records')
+        ->and(collect($released['routing']['timeline'])->firstWhere('key', \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS))
+            ->toMatchArray([
+                'status' => 'current',
+                'recorded_by' => $cenroRecords->name,
+            ])
+        ->and(collect($released['routing']['timeline'])->firstWhere('key', \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)['status'])->toBe('pending')
+        ->and(collect($released['routing']['timeline'])->firstWhere('key', \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)['status'])->toBe('pending');
+
+    $penroReceiptResponse = $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
+        'stage' => SubmissionTrackingService::PENRO_RECEIPT,
+        'date' => '2026-08-11',
+    ]);
+    $penroReceiptState = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->state($report->fresh()->load('protectedArea'), 'conservation');
+    $penroReceiptErrors = $penroReceiptResponse->getSession()->get('errors')?->getBag('default')->all() ?? [];
+    expect($penroReceiptErrors)->toBe([], 'PENRO receipt; current='.$penroReceiptState['stage'].' actions='.implode(',', collect($penroReceiptState['actions'])->pluck('key')->all()));
+
+    $received = $workspaceRow($penroRecords);
+    expect($report->fresh()->date_received_penro->toDateString())->toBe(CarbonImmutable::now('Asia/Manila')->toDateString())
+        ->and(collect($received['routing']['timeline'])->firstWhere('status', 'current')['key'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($received['routing']['processing_percentage'])->toBe(80)
+        ->and($received['routing']['next_expected_action'])->toBe('Forward to Office of the PENRO')
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+            ->get()->map(fn (DocumentRoutingEvent $event) => data_get($event->metadata, 'action_key'))->all())
+            ->toContain('forward_to_penro_records', 'receive_at_penro_records')
+        ->and($report->fresh()->routingEvents()->exists())->toBeFalse();
+
+    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', [
+        'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+    ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertSessionHasNoErrors();
+
+    $forwarded = $workspaceRow($penroRecords);
+    expect(collect($forwarded['routing']['timeline'])->firstWhere('status', 'current')['key'])
+        ->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->and($forwarded['routing']['next_expected_action'])->toBe('Receive')
+        ->and($report->fresh()->routingEvents()->exists())->toBeFalse();
+});
+
+test('Special PAMB and TWC controllers preserve the authorized receipt then forwarding sequence', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $cenroRecords = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = pambRoleUser('Office of the PENRO', 'OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    app()->instance(\App\Services\Archive\GoogleDriveArchiveGateway::class, new PambMovArchiveGateway());
+
+    foreach (['special_pamb', 'twc_meetings'] as $workflow) {
+        $report = pambReport($focal, [
+            'workflow_key' => $workflow,
+            'activity_name' => $workflow === 'special_pamb' ? 'Special PAMB Meetings' : 'TWC Meetings',
+            'mov_file_path' => "conservation-report-movs/{$workflow}-handoff.pdf",
+        ]);
+        Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\n{$workflow} isolated routing fixture");
+
+        $workspaceRow = function (User $viewer) use ($report): array {
+            $props = $this->actingAs($viewer)->get(route('submission-tracking.index').'?source=conservation&source_id='.$report->id)
+                ->assertOk()->inertiaProps();
+            $row = collect($props['workspaceQueues'])->flatten(1)->first(fn (array $candidate): bool =>
+                ($candidate['source'] ?? null) === 'conservation' && (int) ($candidate['source_id'] ?? 0) === $report->id
+            );
+            expect($row)->not->toBeNull();
+            expect(data_get($props, 'trackingContext.selected_record.routing.current_stage'))
+                ->toBe($row['routing']['current_stage']);
+
+            return $row;
+        };
+
+        $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))
+            ->assertSessionHasNoErrors();
+        $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])->assertSessionHasNoErrors();
+        $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_chief']), ['stage' => 'receive_at_cenro_chief'])->assertSessionHasNoErrors();
+        $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+            'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+        ])->assertSessionHasNoErrors();
+        $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_records']), ['stage' => 'forward_to_cenro_records'])->assertSessionHasNoErrors();
+        $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_records']), ['stage' => 'receive_at_cenro_records'])->assertSessionHasNoErrors();
+
+        $ready = $workspaceRow($cenroRecords);
+        expect($ready['mov_processing']['status_key'])->toBe(PambMovProcessingService::READY_FOR_RELEASE)
+            ->and(collect($ready['routing']['timeline'])->firstWhere('key', \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::CENRO_RECORDS))
+            ->toMatchArray(['status' => 'current'])
+            ->and(collect($ready['routing']['actions'])->pluck('key')->all())->toContain('forward_to_penro_records');
+
+        $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', [
+            'conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE,
+        ]), ['stage' => SubmissionTrackingService::CENRO_RELEASE, 'date' => '2026-08-10'])->assertSessionHasNoErrors();
+        $awaitingReceipt = $workspaceRow($penroRecords);
+        expect(collect($awaitingReceipt['routing']['timeline'])->firstWhere('status', 'current')['key'])
+            ->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+            ->and($awaitingReceipt['routing']['next_expected_action'])->toBe('Receive')
+            ->and($report->fresh()->date_received_penro)->toBeNull();
+        $this->actingAs($penroRecords)->post(route('submission-tracking.transition', [
+            'conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT,
+        ]), ['stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-11'])->assertSessionHasNoErrors();
+
+        $awaitingForward = $workspaceRow($penroRecords);
+        $current = collect($awaitingForward['routing']['timeline'])->firstWhere('status', 'current');
+        expect($report->fresh()->date_received_penro->toDateString())->toBe(CarbonImmutable::now('Asia/Manila')->toDateString())
+            ->and($current['key'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+            ->and(collect($awaitingForward['routing']['actions'])->pluck('key')->all())->toContain('forward_to_office_penro')
+            ->and($current['action_label'])->toBe('Receive')
+            ->and($awaitingForward['routing']['next_expected_action'])->toBe('Forward to Office of the PENRO')
+            ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+                ->get()->map(fn (DocumentRoutingEvent $event) => data_get($event->metadata, 'action_key'))->all())
+                ->toContain('forward_to_cenro_chief', 'receive_at_cenro_chief', 'forward_to_cenro_records', 'receive_at_cenro_records', 'forward_to_penro_records', 'receive_at_penro_records')
+            ->and($report->fresh()->routingEvents()->exists())->toBeFalse();
+
+        $this->actingAs($office)->post(route('submission-tracking.internal-routing', [
+            'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+        ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertForbidden();
+
+        $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', [
+            'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+        ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertSessionHasNoErrors();
+
+        $forwarded = $workspaceRow($penroRecords);
+        expect(collect($forwarded['routing']['timeline'])->firstWhere('status', 'current')['key'])
+            ->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+            ->and($forwarded['routing']['next_expected_action'])->toBe('Receive')
+            ->and($report->fresh()->routingEvents()->exists())->toBeFalse();
+    }
+});
+
+test('direct-to-PENRO Regular, Special, and TWC profiles omit CENRO release and retain explicit PENRO forwarding', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    $creator = User::factory()->create();
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $area = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary',
+        'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary',
+        'municipality' => 'San Isidro',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $creator->id,
+        'updated_by' => $creator->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $creator->id,
+    ]);
+    app()->instance(\App\Services\Archive\GoogleDriveArchiveGateway::class, new PambMovArchiveGateway());
+
+    foreach (['regular_pamb', 'special_pamb', 'twc_meetings'] as $workflow) {
+        $report = pambReport($penroRecords, [
+            'workflow_key' => $workflow,
+            'protected_area_id' => $area->id,
+            'target_office' => 'CENRO Mati',
+            'mov_file_path' => "conservation-report-movs/{$workflow}-direct.pdf",
+        ]);
+        Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\n{$workflow} direct route fixture");
+
+        $before = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+            ->presentation($report->fresh()->load('protectedArea'), 'conservation', null, $penroRecords);
+        expect($before['profile']['key'])->toBe('canonical_direct_penro')
+            ->and($before['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+            ->and(collect($before['allowed_actions'])->pluck('key'))->not->toContain('forward_to_cenro_chief');
+
+        $this->actingAs($penroRecords)->post(route('submission-tracking.transition', [
+            'conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT,
+        ]), ['stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-11'])->assertSessionHasNoErrors();
+
+        $afterReceipt = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+            ->presentation($report->fresh()->load('protectedArea'), 'conservation', null, $penroRecords);
+        expect($report->fresh()->date_report_released_cenro)->toBeNull()
+            ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+                ->get()->map(fn (DocumentRoutingEvent $event) => data_get($event->metadata, 'action_key'))->all())->toBe(['receive_at_penro_records'])
+            ->and($report->fresh()->routingEvents()->exists())->toBeFalse()
+            ->and($afterReceipt['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+            ->and(collect($afterReceipt['allowed_actions'])->pluck('key'))->toContain('forward_to_office_penro');
+
+        $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', [
+            'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+        ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertSessionHasNoErrors();
+        expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+            ->get()->map(fn (DocumentRoutingEvent $event) => data_get($event->metadata, 'action_key'))->all())->toBe(['receive_at_penro_records', 'forward_to_office_penro'])
+            ->and($report->fresh()->routingEvents()->exists())->toBeFalse();
+    }
+});
+
 test('CENRO office scope and PAMO protected-area scope are enforced on tracking and attachments', function (): void {
     Storage::fake('local');
     $cenro = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS', 'CENRO Mati');
@@ -542,7 +823,11 @@ test('CENRO office scope and PAMO protected-area scope are enforced on tracking 
     $visible = pambReport($cenro, ['protected_area_id' => $area->id, 'mov_file_path' => 'conservation-report-movs/visible.pdf']);
     $hidden = pambReport($cenro, ['target_office' => 'CENRO Baganga', 'protected_area_id' => $otherArea->id, 'mov_file_path' => 'conservation-report-movs/hidden.pdf']);
 
-    $this->actingAs($cenro)->get(route('submission-tracking.index'))->assertInertia(fn ($page) => $page->where('queues.for_release', fn ($queue) => collect($queue)->pluck('source_id')->doesntContain($hidden->id)));
+    $response = $this->actingAs($cenro)->get(route('submission-tracking.index'))->assertOk();
+    $props = $response->inertiaProps();
+    $workspaceIds = collect($props['workspaceQueues'])->flatten(1)->pluck('source_id');
+    expect($props)->not->toHaveKey('queues')
+        ->and($workspaceIds)->not->toContain($hidden->id);
     $this->actingAs($cenro)->get(route('attachments.show', ['conservation-report', $hidden->id, 'mov']))->assertForbidden();
     $this->actingAs($pamo)->get(route('submission-tracking.index'))->assertForbidden();
     expect($visible->protected_area_id)->toBe($area->id);
@@ -824,9 +1109,16 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
     $this->actingAs($penroChief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
         'decision' => PambMovProcessingService::READY_FOR_RELEASE,
     ])->assertForbidden();
+
+    // The shared Conservation profile requires these CENRO handoffs before
+    // Records forwards the submission to PENRO.
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])->assertSessionHasNoErrors();
+    $this->actingAs($cenroChief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_chief']), ['stage' => 'receive_at_cenro_chief'])->assertSessionHasNoErrors();
     $this->actingAs($cenroChief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
         'decision' => PambMovProcessingService::READY_FOR_RELEASE,
     ])->assertSessionHasNoErrors();
+    $this->actingAs($cenroChief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_records']), ['stage' => 'forward_to_cenro_records'])->assertSessionHasNoErrors();
+    $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_records']), ['stage' => 'receive_at_cenro_records'])->assertSessionHasNoErrors();
 
     $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE]), [
         'stage' => SubmissionTrackingService::CENRO_RELEASE,
@@ -848,6 +1140,10 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
         'date' => '2026-08-11',
     ])->assertSessionHasNoErrors();
 
+    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', [
+        'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+    ]), ['stage' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO])->assertSessionHasNoErrors();
+
     $actorStages = [
         [PambRoutingTimelineService::RECEIVED_BY_PENRO, $office],
         [PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, $office],
@@ -859,7 +1155,6 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
         [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, $penroChief],
         [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL, $office],
         [PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, $office],
-        [PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS, $office],
     ];
 
     foreach ($actorStages as [$stage, $expectedActor]) {
@@ -869,10 +1164,15 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
                 'stage' => $stage,
             ])->assertForbidden();
         }
-        $this->actingAs($expectedActor)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $stage]), [
+        $response = $this->actingAs($expectedActor)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $stage]), [
             'stage' => $stage,
-        ])->assertSessionHasNoErrors();
+        ]);
+        $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+            ->state($report->fresh()->load('protectedArea'), 'conservation');
+        $errors = $response->getSession()->get('errors')?->getBag('default')->all() ?? [];
+        expect($errors)->toBe([], 'Accepted legacy stage '.$stage.' for '.$expectedActor->section.'; current='.$state['stage'].' actions='.implode(',', collect($state['actions'])->pluck('key')->all()));
     }
+    expect($report->fresh()->routingEvents()->where('stage_key', PambRoutingTimelineService::FORWARDED_PENRO_TO_RECORDS)->exists())->toBeFalse();
 
     $finalStage = PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL;
     foreach ([$penroFocal, $penroChief] as $wrongActor) {
@@ -880,9 +1180,13 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
             'stage' => $finalStage,
         ])->assertForbidden();
     }
-    $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $finalStage]), [
+    $finalReceiptResponse = $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $finalStage]), [
         'stage' => $finalStage,
-    ])->assertSessionHasNoErrors();
+    ]);
+    $finalReceiptState = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->state($report->fresh()->load('protectedArea'), 'conservation');
+    $finalReceiptErrors = $finalReceiptResponse->getSession()->get('errors')?->getBag('default')->all() ?? [];
+    expect($finalReceiptErrors)->toBe([], 'PENRO final receipt; current='.$finalReceiptState['stage'].' actions='.implode(',', collect($finalReceiptState['actions'])->pluck('key')->all()));
 
     foreach ([$penroFocal, $penroChief] as $wrongActor) {
         $this->actingAs($wrongActor)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), [
@@ -890,12 +1194,16 @@ test('full CENRO to PENRO PAMB flow rejects every wrong PENRO category', functio
             'date' => '2026-08-12',
         ])->assertForbidden();
     }
-    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), [
+    $regionalReleaseResponse = $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT]), [
         'stage' => SubmissionTrackingService::REGIONAL_ENDORSEMENT,
         'date' => '2026-08-12',
-    ])->assertSessionHasNoErrors();
+    ]);
+    $regionalReleaseState = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->state($report->fresh()->load('protectedArea'), 'conservation');
+    $regionalReleaseErrors = $regionalReleaseResponse->getSession()->get('errors')?->getBag('default')->all() ?? [];
+    expect($regionalReleaseErrors)->toBe([], 'PENRO regional release; current='.$regionalReleaseState['stage'].' actions='.implode(',', collect($regionalReleaseState['actions'])->pluck('key')->all()));
 
-    expect($report->fresh()->date_endorsed_regional->toDateString())->toBe('2026-08-12');
+    expect($report->fresh()->date_endorsed_regional->toDateString())->toBe(CarbonImmutable::now('Asia/Manila')->toDateString());
 });
 
 function timelineServiceForBatch1(): PambRoutingTimelineService
@@ -1009,7 +1317,9 @@ test('MHRWS Office of the PENRO correction loop stays inside PENRO and preserves
         'remarks' => 'Please correct the missing technical attachment.',
     ])->assertSessionHasNoErrors();
 
-    expect($report->fresh()->routingEvents()->where('stage_key', PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION)->count())->toBe(1);
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+        ->where('metadata->action_key', 'return_from_office_for_correction')->count())->toBe(1)
+        ->and($report->fresh()->routingEvents()->where('stage_key', PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION)->exists())->toBeFalse();
 
     $cycleTwo = [
         [PambRoutingTimelineService::RECEIVED_BY_CDS.'__cycle_2', $penroFocal],
@@ -1024,12 +1334,12 @@ test('MHRWS Office of the PENRO correction loop stays inside PENRO and preserves
         ])->assertSessionHasNoErrors();
     }
 
-    $history = $timeline->present($report->fresh());
-    expect($report->fresh()->routingEvents()->where('stage_key', 'like', '%__cycle_2')->count())->toBe(5)
-        ->and(collect($history['timeline'])->pluck('key')->all())
-            ->toContain(PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION)
-            ->and(collect($history['timeline'])->pluck('key')->filter(fn (string $key): bool => str_contains($key, 'cenro'))->all())
-            ->toBeEmpty()
-            ->and(collect($history['timeline'])->firstWhere('status', 'current')['key'])
-            ->toBe(PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL.'__cycle_2');
+    $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->state($report->fresh()->load('protectedArea'), 'conservation');
+    $legacyCount = $report->fresh()->routingEvents()->count();
+    expect($legacyCount)->toBe(10)
+        ->and($state['active_cycle'])->toBe(2)
+        ->and($state['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::OFFICE_PENRO_RETURN)
+        ->and($state['events']->filter(fn (DocumentRoutingEvent $event): bool => ! str_starts_with((string) data_get($event->metadata, 'state_source'), 'legacy_pamb_event_projection'))->count())->toBe(6)
+        ->and($state['events']->filter(fn (DocumentRoutingEvent $event): bool => str_contains((string) $event->from_office, 'CENRO') || str_contains((string) $event->to_office, 'CENRO'))->count())->toBe(0);
 });

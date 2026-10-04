@@ -33,6 +33,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use App\Services\AuditLogService;
 use App\Services\Reports\ReportTrackingNumberService;
+use App\Support\LocalNavigationTrace;
 
 final class SubmissionTrackingService
 {
@@ -55,41 +56,68 @@ final class SubmissionTrackingService
             $sources = array_intersect_key($sources, ['engp' => true]);
         }
 
-        $loaded = collect($sources)
+        $loaded = LocalNavigationTrace::measureCurrent('st_source_load', fn () => collect($sources)
             ->flatMap(function (array $source, string $key) use ($filters, $limitPerSource) {
                 $query = $this->sourceQuery($key, $source, $filters, true);
                 if ($limitPerSource !== null) $query->limit(max(1, $limitPerSource));
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
-            });
+            }));
+        LocalNavigationTrace::incrementCurrent('source_rows_loaded', $loaded->count());
 
         // sourceQuery applies office/PA scope before hydration. CENRO visibility
         // has one additional direct-PENRO exclusion; apply it to the already
         // eager-loaded PA instead of re-fetching every conservation row by ID.
         $user = auth()->user();
-        if ($user && $this->pambAccess->isCenro($user)) {
-            $loaded = $loaded->reject(fn (array $item): bool => $item['key'] === 'conservation'
-                && $this->routingPolicy->isDirectPenro($item['record']))->values();
-        }
+        $loaded = LocalNavigationTrace::measureCurrent('st_scope_filter', function () use ($loaded, $user) {
+            if ($user && $this->pambAccess->isCenro($user)) {
+                return $loaded->reject(fn (array $item): bool => $item['key'] === 'conservation'
+                    && $this->routingPolicy->isDirectPenro($item['record']))->values();
+            }
+            return $loaded;
+        });
 
-        $this->moduleResolver->prime($loaded->pluck('record'));
-        $trackingNumbers = $assignTrackingNumbers
-            ? $this->trackingNumbers->ensureFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]))
-            : $this->trackingNumbers->existingFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]));
-        $correctionCounts = $this->correctionCounts($loaded);
+        [$trackingNumbers, $correctionCounts] = LocalNavigationTrace::measureCurrent('st_metadata', function () use ($loaded, $assignTrackingNumbers) {
+            $this->moduleResolver->prime($loaded->pluck('record'));
+            $trackingNumbers = $assignTrackingNumbers
+                ? $this->trackingNumbers->ensureFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]))
+                : $this->trackingNumbers->existingFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]));
+            return [$trackingNumbers, $this->correctionCounts($loaded)];
+        });
 
-        $routingAudits = $this->routingAudits($loaded);
-        $routingEvents = $this->genericRoutingEvents($loaded);
+        $routingAudits = LocalNavigationTrace::measureCurrent('st_audit_load', fn () => $this->routingAudits($loaded));
+        $routingEvents = LocalNavigationTrace::measureCurrent('st_routing_events', fn () => $this->genericRoutingEvents($loaded));
+        $documentEventIds = collect($routingEvents)->flatten(1)->pluck('id')->filter()->unique()->values();
+        $documentAttachments = LocalNavigationTrace::measureCurrent('st_document_attachment_lookup', fn () => $this->routingAttachments->forDocumentEvents($documentEventIds));
         $pambEventIds = $loaded->where('key', 'conservation')
             ->flatMap(fn (array $item) => $item['record']->routingEvents->pluck('id'))
             ->unique()->values();
-        $pambAttachments = $this->routingAttachments->forPambEvents($pambEventIds);
+        $pambAttachments = LocalNavigationTrace::measureCurrent('st_attachment_lookup', fn () => $this->routingAttachments->forPambEvents($pambEventIds));
+        [$pambRecords, $pambOverrides] = LocalNavigationTrace::measureCurrent('st_pamb_override_load', function () use ($loaded) {
+            $pambRecords = $loaded->filter(fn (array $item): bool => $item['key'] === 'conservation'
+                && $item['record'] instanceof ConservationReportSubmission
+                && $this->pambRouting->applies($item['record']));
+            $pambOverrides = [];
+            foreach ($pambRecords->pluck('record')->map(fn (Model $record): int => (int) $record->getKey())->unique()->chunk(500) as $ids) {
+                foreach (\App\Models\SubmissionRoutingOverride::query()
+                    ->where('source', 'conservation')
+                    ->whereIn('source_record_id', $ids)
+                    ->get(['source', 'source_record_id', 'engine', 'action_key', 'event_key', 'actual_actor_user_id', 'overridden_accountable_category', 'overridden_office', 'metadata']) as $override) {
+                    $pambOverrides['conservation:'.$override->source_record_id][] = $override;
+                }
+            }
+            return [$pambRecords, $pambOverrides];
+        });
         $documentRoutingPresenter = app(DocumentRoutingPresenter::class);
 
-        return $loaded
-            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers, $pambAttachments, $documentRoutingPresenter))
+        LocalNavigationTrace::incrementCurrent('workspace_source_rows', $loaded->count());
+        $normalized = LocalNavigationTrace::measureCurrent('st_routing_presentation', fn () => $loaded
+            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers, $pambAttachments, $documentRoutingPresenter, collect($pambOverrides[$item['key'].':'.$item['record']->getKey()] ?? []), $documentAttachments)));
+        LocalNavigationTrace::incrementCurrent('projected_rows', $normalized->count());
+
+        return LocalNavigationTrace::measureCurrent('st_filter_sort', fn () => $normalized
             ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
             ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
-            ->values();
+            ->values());
     }
 
     /** Lightweight bounded search for global-search consumers. */
@@ -170,6 +198,24 @@ final class SubmissionTrackingService
         ];
     }
 
+    /** Return only the bounded-page metadata when callers do not need normalized snapshot rows. */
+    public function pagination(array $filters = [], int $page = 1, int $perPage = 25): array
+    {
+        $page = max(1, $page);
+        $perPage = max(1, min(100, $perPage));
+        $total = $this->countForFilters($filters);
+
+        return [
+            'current_page' => $page,
+            'per_page' => $perPage,
+            'total' => $total,
+            'last_page' => max(1, (int) ceil($total / $perPage)),
+            'from' => $total > 0 ? (($page - 1) * $perPage) + 1 : null,
+            'to' => $total > 0 ? min($page * $perPage, $total) : null,
+            'has_more' => $page < max(1, (int) ceil($total / $perPage)),
+        ];
+    }
+
     /** @return array{modules:list<string>,targetOffices:list<string>,periods:list<string>,statuses:list<string>,years:list<int>} */
     public function filterOptions(array $filters = []): array
     {
@@ -222,11 +268,18 @@ final class SubmissionTrackingService
         $user = auth()->user();
         $category = $user ? $this->organization->effectiveCategory($user) : null;
         $conservation = $user && $this->organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION);
-        $pambRecords = $records->filter(fn (array $record): bool => ($record['pamb_routing_applicable'] ?? false));
-        $genericRecords = $records->filter(fn (array $record): bool => ! ($record['pamb_routing_applicable'] ?? false));
+        $pambMovRecords = $records->filter(fn (array $record): bool => ($record['pamb_routing_applicable'] ?? false));
+        $pambRecords = $pambMovRecords->reject(fn (array $record): bool => (bool) ($record['canonical_custody_applicable'] ?? false));
+        $genericRecords = $records->filter(fn (array $record): bool => ! ($record['pamb_routing_applicable'] ?? false) || (bool) ($record['canonical_custody_applicable'] ?? false));
 
         $merge = fn (Collection $pamb, Collection $generic): Collection => $pamb->merge($generic)->unique(fn (array $record): string => $record['source'].':'.$record['source_id'])->values();
-        $genericQueue = fn (string $queue): Collection => $this->genericQueue($genericRecords, $queue);
+        $genericQueue = fn (string $queue): Collection => $this->genericQueue($genericRecords, $queue)
+            // MOV review has its own PAMB queue. Do not also expose the same
+            // canonical-custody record as an ordinary focal routing item while
+            // it is waiting for a Chief verdict.
+            ->reject(fn (array $record): bool => ($record['pamb_routing_applicable'] ?? false)
+                && data_get($record, 'mov_processing.queue') === 'for_review')
+            ->values();
         $terminalHistory = $records->filter(fn (array $record): bool => (bool) ($record['routing_complete'] ?? false))
             ->sortByDesc(fn (array $record) => $record['completed_at'] ?? '')
             ->values();
@@ -259,10 +312,10 @@ final class SubmissionTrackingService
         if ($category === OrganizationalAccessService::CENRO_FOCAL) {
             $history = $terminalHistory;
             return [
-                'for_submission' => $merge($pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_submission'), $genericQueue('cenro_focal')),
-                'for_review' => $pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_review')->values(),
-                'needs_correction' => $merge($pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction'), $genericQueue('cenro_correction')),
-                'for_release' => $pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release')->values(),
+                'for_submission' => $merge($pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_submission'), $genericQueue('cenro_focal')),
+                'for_review' => $pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_review')->values(),
+                'needs_correction' => $merge($pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction'), $genericQueue('cenro_correction')),
+                'for_release' => $pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release')->values(),
                 'history' => $history,
                     'processed' => $processedHistory,
                 'release_history' => $history,
@@ -271,8 +324,8 @@ final class SubmissionTrackingService
         if ($category === OrganizationalAccessService::CENRO_CHIEF) {
             $history = $terminalHistory;
             return [
-                'for_review' => $merge($pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_review'), $genericQueue('cenro_chief')),
-                'needs_correction' => $pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
+                'for_review' => $merge($pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_review'), $genericQueue('cenro_chief')),
+                'needs_correction' => $pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
                 'history' => $history,
                     'processed' => $processedHistory,
                 'release_history' => $history,
@@ -281,8 +334,8 @@ final class SubmissionTrackingService
         if ($category === OrganizationalAccessService::CENRO_RECORDS) {
             $history = $terminalHistory;
             return [
-                'cenro_release' => $merge($pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release'), $genericQueue('cenro_records')),
-                'for_release' => $pambRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release')->values(),
+                'cenro_release' => $merge($pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release'), $genericQueue('cenro_records')),
+                'for_release' => $pambMovRecords->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'for_release')->values(),
                 'history' => $history,
                     'processed' => $processedHistory,
                 'release_history' => $history,
@@ -386,7 +439,7 @@ final class SubmissionTrackingService
         return $records->filter(function (array $record) use ($category, $office, $cenroCategories): bool {
             if ((bool) ($record['routing_complete'] ?? false)) return false;
 
-            $events = ($record['pamb_routing_applicable'] ?? false)
+            $events = ($record['pamb_routing_applicable'] ?? false) && ! ($record['canonical_custody_applicable'] ?? false)
                 ? collect($record['routing_timeline'] ?? [])
                 : collect(data_get($record, 'routing.routing_history', []));
 
@@ -419,9 +472,9 @@ final class SubmissionTrackingService
 
         return $records->filter(function (array $record) use ($category, $office, $cenroCategories): bool {
             if ((bool) ($record['routing_complete'] ?? false)) return false;
-            $events = ($record['pamb_routing_applicable'] ?? false) ? collect($record['routing_timeline'] ?? []) : collect(data_get($record, 'routing.routing_history', []));
+            $events = ($record['pamb_routing_applicable'] ?? false) && ! ($record['canonical_custody_applicable'] ?? false) ? collect($record['routing_timeline'] ?? []) : collect(data_get($record, 'routing.routing_history', []));
             $last = $events->filter(fn (mixed $event): bool => is_array($event) && filled($event['occurred_at'] ?? null))->sortBy(fn (array $event): string => (string) ($event['occurred_at'] ?? '').':'.str_pad((string) ($event['id'] ?? 0), 12, '0', STR_PAD_LEFT))->last();
-            if (($record['pamb_routing_applicable'] ?? false) && data_get($record, 'routing.last_action_actor_category')) {
+            if (($record['pamb_routing_applicable'] ?? false) && ! ($record['canonical_custody_applicable'] ?? false) && data_get($record, 'routing.last_action_actor_category')) {
                 $last = [
                     'actor_category' => data_get($record, 'routing.last_action_actor_category'),
                     'actor_office' => data_get($record, 'routing.last_action_actor_office'),
@@ -432,9 +485,9 @@ final class SubmissionTrackingService
                 ];
             }
             if (! is_array($last) || $this->organization->normalizeCategory($last['actor_category'] ?? null) !== $category) return false;
-            if (($record['pamb_routing_applicable'] ?? false)
+            if (($record['pamb_routing_applicable'] ?? false) && ! ($record['canonical_custody_applicable'] ?? false)
                 && ($last['event_type'] ?? null) === 'received') return false;
-            if (($record['pamb_routing_applicable'] ?? false)
+            if (($record['pamb_routing_applicable'] ?? false) && ! ($record['canonical_custody_applicable'] ?? false)
                 && data_get($record, 'routing.current_stage') === PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL) return false;
             $actorOffice = $this->organization->normalizeOffice($last['actor_office'] ?? null);
             return $actorOffice !== null ? $actorOffice === $office : (! in_array($category, $cenroCategories, true) || $this->organization->normalizeOffice($record['target_office'] ?? null) === $office);
@@ -535,10 +588,10 @@ final class SubmissionTrackingService
         // workspace projections; previously queues(), Incoming, and Outgoing
         // could each trigger a separate cross-source scan.
         $records = $snapshotRecords ?? $this->records($filters);
-        $queues = $this->queues($filters, $records);
+        $queues = LocalNavigationTrace::measureCurrent('st_queue_projection', fn () => $this->queues($filters, $records));
         $key = static fn (array $row): string => ($row['source'] ?? '').':'.($row['source_id'] ?? '');
 
-        $history = collect($queues)
+        $history = LocalNavigationTrace::measureCurrent('st_history_queue', fn () => collect($queues)
             ->only(['history', 'release_history'])
             ->flatten(1)
             ->filter(fn (mixed $row): bool => is_array($row) && (bool) ($row['routing_complete'] ?? false))
@@ -547,16 +600,16 @@ final class SubmissionTrackingService
                 ?? data_get($row, 'routing.last_updated')
                 ?? data_get($row, 'routing_summary.last_updated')
                 ?? '')
-            ->values();
+            ->values());
 
-        $incoming = $records
+        $incoming = LocalNavigationTrace::measureCurrent('st_incoming_queue', fn () => $records
             ->filter(fn (mixed $row): bool => is_array($row) && ! ($row['routing_complete'] ?? false))
             // Keep Incoming aligned with the canonical executable action
             // projection. This includes the final PENRO Records release
             // stage, which must remain discoverable until it is completed.
             ->filter(fn (array $row): bool => $this->isActionableWorkspaceRow($row, auth()->user()))
             ->unique($key)
-            ->values();
+            ->values());
         $queueMembership = [];
         foreach (collect($queues)->except(['history', 'release_history', 'processed', 'active', 'in_transit']) as $queueName => $queueRows) {
             foreach ($queueRows as $row) {
@@ -579,19 +632,19 @@ final class SubmissionTrackingService
             ];
         }
 
-        $incoming = $incoming->map(fn (array $row): array => [
+        $incoming = LocalNavigationTrace::measureCurrent('st_incoming_action_labels', fn () => $incoming->map(fn (array $row): array => [
             ...$row,
             'incoming_action_category' => $this->incomingActionCategory($row, $queueMembership[$key($row)] ?? []),
-        ])->values();
+        ])->values());
 
-        $outgoing = $this->outgoingByLatestOffice($records, auth()->user())
+        $outgoing = LocalNavigationTrace::measureCurrent('st_outgoing_queue', fn () => $this->outgoingByLatestOffice($records, auth()->user())
             ->filter(fn (mixed $row): bool => is_array($row) && ! ($row['routing_complete'] ?? false))
             ->unique($key)
             ->reject(fn (array $row): bool => $incoming->contains(fn (array $active): bool => $key($active) === $key($row)))
             ->sortByDesc(fn (array $row): string => data_get($row, 'routing.last_updated')
                 ?? data_get($row, 'routing_summary.last_updated')
                 ?? '')
-            ->values();
+            ->values());
 
         return ['incoming' => $incoming, 'outgoing' => $outgoing, 'history' => $history];
     }
@@ -765,21 +818,9 @@ final class SubmissionTrackingService
             $record->update($changes);
             if (! $record instanceof ConservationReportSubmission || ! $this->pambRouting->applies($record)) return null;
 
-            $canonicalEvent = $this->pambRouting->recordCanonical($record, $stage, $value, $userId, $actionAt);
-            if ($stage === self::PENRO_RECEIPT) {
-                // Ordinary PENRO Records receipt is an acknowledgement plus an
-                // immediate handoff to the Office of the PENRO. Keep both
-                // immutable events in the same transaction so ownership cannot
-                // be left between the two stages.
-                return $this->pambRouting->record(
-                    $record->fresh(),
-                    PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
-                    $actionAt->toDateTimeString(),
-                    $userId,
-                );
-            }
-
-            return $canonicalEvent;
+            // Receipt at PENRO Records is its own custody milestone. Forwarding
+            // to the Office of the PENRO remains a separately authorized action.
+            return $this->pambRouting->recordCanonical($record, $stage, $value, $userId, $actionAt);
         });
         try {
             $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);
@@ -819,13 +860,19 @@ final class SubmissionTrackingService
             }
         });
     }
-    public function recordInternalRouting(string $sourceKey, int $id, string $stageKey, string $occurredAt, ?int $userId = null, ?string $remarks = null): \App\Models\PambRoutingEvent
+    public function recordInternalRouting(string $sourceKey, int $id, string $stageKey, string $occurredAt, ?int $userId = null, ?string $remarks = null): \App\Models\PambRoutingEvent|DocumentRoutingEvent
     {
         if ($sourceKey !== 'conservation') {
             throw ValidationException::withMessages(['stage' => 'Detailed internal routing is limited to PAMB workflows.']);
         }
 
-        $record = ConservationReportSubmission::query()->findOrFail($id);
+        $record = ConservationReportSubmission::query()->with('protectedArea')->findOrFail($id);
+        $compatibility = app(ConservationMeetingRoutingCompatibilityAdapter::class);
+        if ($compatibility->applies($record)) {
+            $action = $compatibility->actionForLegacyStage($record, $stageKey);
+            if (! $action) throw ValidationException::withMessages(['stage' => 'This legacy PAMB stage is not a shared Conservation action.']);
+            return $this->genericRouting->transition($record, $sourceKey, $action, $userId, $remarks);
+        }
         return $this->pambRouting->record($record, $stageKey, $occurredAt, $userId, $remarks);
     }
 
@@ -845,6 +892,7 @@ final class SubmissionTrackingService
 
         if ($withRelations) {
             if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
+            if ($key !== 'engp') $query->with('protectedArea.supervisingOfficeAssignment.office:id,code,name,office_type,is_active');
             if ($key === 'conservation') $query->with(['routingEvents.recordedBy', 'movReviewEvents.recordedBy', 'movReviewedBy:id,name']);
             if ($key === 'engp') $query->with('releaseEvents');
         }
@@ -941,8 +989,9 @@ final class SubmissionTrackingService
 
     /** @param array<string, mixed> $source
      *  @return array<string, mixed> */
-    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection, array $trackingNumbers = [], array $pambAttachments = [], ?DocumentRoutingPresenter $documentRoutingPresenter = null): array
+    private function normalize(Model $record, string $sourceKey, array $source, array $correctionCounts = [], Collection $routingAudits = new Collection, Collection $routingEvents = new Collection, array $trackingNumbers = [], array $pambAttachments = [], ?DocumentRoutingPresenter $documentRoutingPresenter = null, Collection $pambOverrides = new Collection, array $documentAttachments = []): array
     {
+        $basePresentationMark = LocalNavigationTrace::markCurrentStarted('st_normalize_base');
         $isEngp = $sourceKey === 'engp';
         $period = $isEngp
             ? $record->getAttribute('period_label')
@@ -971,6 +1020,14 @@ final class SubmissionTrackingService
                 (string) $officialDocumentDefinition['definition']['official_key'],
             )
             : null;
+        $usesGenericRouting = $this->usesGenericRecord($sourceKey, $record);
+        $routingState = $usesGenericRouting
+            ? $this->genericRouting->state($record, $sourceKey, $routingEvents)
+            : null;
+        $canonicalMeetingRouting = $sourceKey === 'conservation'
+            && $usesGenericRouting
+            && $this->pambRouting->applies($record);
+        $sharedState = $canonicalMeetingRouting ? $routingState : null;
         $data = [
             'source' => $sourceKey,
             'source_id' => $record->getKey(),
@@ -1025,21 +1082,46 @@ final class SubmissionTrackingService
         $data['stage'] = $isEngp
             ? $this->statusPresenter->stage($record, $sourceKey, $routingEvents)
             : $this->stage($record);
-        $data['routing_complete'] = $isEngp
-            ? $this->genericRouting->state($record, 'engp', $routingEvents)['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL
-            : $this->isRoutingComplete($record);
-        $data['completed_at'] = $data['routing_complete'] ? $this->routingCompletedAt($record, $routingEvents) : null;
+        $data['routing_complete'] = $routingState !== null
+            ? $routingState['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL
+            : $this->isRoutingComplete($record, $routingEvents);
+        $data['completed_at'] = $routingState !== null
+            ? ($data['routing_complete'] ? $routingState['events']->last()?->occurred_at?->toIso8601String() : null)
+            : ($data['routing_complete'] ? $this->routingCompletedAt($record, $routingEvents) : null);
         $data['can_transition'] = $this->organization->canUseSubmissionTrackingSource(auth()->user(), $sourceKey, $source['ability']);
+        LocalNavigationTrace::markCurrentFinished('st_normalize_base', $basePresentationMark);
         $pambRouting = $sourceKey === 'conservation'
-            ? $this->pambRouting->present($record, null, $pambAttachments, $routingAudits)
+            ? LocalNavigationTrace::measureCurrent('st_pamb_timeline', fn () => $this->pambRouting->present($record, null, $pambAttachments, $routingAudits))
             : ['applicable' => false, 'timeline' => [], 'current_document_location' => null, 'routing_summary' => [], 'summary_metrics' => []];
+        $regionalRelease = null;
+        $latestPambOccurredAt = null;
+        if ($pambRouting['applicable']) {
+            foreach ($pambRouting['timeline'] ?? [] as $stage) {
+                if (! is_array($stage)) continue;
+                if ($regionalRelease === null
+                    && $this->pambRouting->canonicalStageKey((string) ($stage['stage_key'] ?? $stage['key'] ?? '')) === PambRoutingTimelineService::RELEASED_TO_REGIONAL) {
+                    $regionalRelease = $stage;
+                }
+                $occurredAt = (string) ($stage['occurred_at'] ?? '');
+                if (filled($occurredAt) && ($latestPambOccurredAt === null || $occurredAt > $latestPambOccurredAt)) {
+                    $latestPambOccurredAt = $occurredAt;
+                }
+            }
+        }
         if ($pambRouting['applicable']) {
             $data['routing_complete'] = (bool) ($pambRouting['routing_complete'] ?? false);
-            $regionalRelease = collect($pambRouting['timeline'] ?? [])->first(fn (array $stage): bool => $this->pambRouting->canonicalStageKey((string) ($stage['stage_key'] ?? $stage['key'] ?? '')) === PambRoutingTimelineService::RELEASED_TO_REGIONAL);
             $data['completed_at'] = $data['routing_complete'] ? ($regionalRelease['occurred_at'] ?? $data['date_endorsed_regional']) : null;
         }
+        if ($canonicalMeetingRouting) {
+            $data['routing_complete'] = $sharedState['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
+            $data['completed_at'] = $data['routing_complete']
+                ? $sharedState['events']->last()?->occurred_at?->toIso8601String()
+                : null;
+        }
         $data['pamb_routing_applicable'] = $pambRouting['applicable'];
+        $data['canonical_custody_applicable'] = $canonicalMeetingRouting;
         $data['routing_timeline'] = $pambRouting['timeline'];
+        $pambActionsMark = LocalNavigationTrace::markCurrentStarted('st_pamb_action_projection');
         if ($pambRouting['applicable'] && ($user = auth()->user())) {
             $data['pamb_action_flags'] = [
                 'can_submit' => $this->pambAccess->canPerformForSubmission($user, 'submit', $record),
@@ -1053,35 +1135,42 @@ final class SubmissionTrackingService
                 $stage['can_record'] = $stage['can_record'] && $this->pambAccess->canRecordInternalRouting($user, $record, $stage['stage_key']);
                 return $stage;
             }, $data['routing_timeline']);
-            $canonicalTransitionAllowed = $this->pambAccess->canPerformCanonical($user, $record, $data['stage']);
-            $internalTransitionAllowed = collect($data['routing_timeline'])
-                ->contains(fn (array $stage): bool => ($stage['status'] ?? null) === 'current' && (bool) ($stage['can_record'] ?? false));
-            $data['can_transition'] = $data['can_transition'] && ($canonicalTransitionAllowed || $internalTransitionAllowed);
+            if (! $canonicalMeetingRouting) {
+                $canonicalTransitionAllowed = $this->pambAccess->canPerformCanonical($user, $record, $data['stage']);
+                $internalTransitionAllowed = collect($data['routing_timeline'])
+                    ->contains(fn (array $stage): bool => ($stage['status'] ?? null) === 'current' && (bool) ($stage['can_record'] ?? false));
+                $data['can_transition'] = $data['can_transition'] && ($canonicalTransitionAllowed || $internalTransitionAllowed);
+            }
         }
         if ($pambRouting['applicable']) {
-            $data['routing_timeline'] = array_map(function (array $stage) use ($record, $sourceKey): array {
+            $data['routing_timeline'] = LocalNavigationTrace::measureCurrent('st_pamb_attachment_projection', fn () => array_map(function (array $stage) use ($record, $sourceKey, $routingEvents, $sharedState, $canonicalMeetingRouting): array {
                 $stage['stage_key'] = $stage['stage_key'] ?? $stage['key'];
-                $stage['attachment_allowed'] = $this->canAttachRoutingCopy($sourceKey, $record, (string) $stage['stage_key']);
+                $stage['attachment_allowed'] = $this->canAttachRoutingCopyForProjection(
+                    $sourceKey,
+                    $record,
+                    (string) $stage['stage_key'],
+                    $routingEvents,
+                    $canonicalMeetingRouting ? $sharedState : null,
+                );
                 return $stage;
-            }, $data['routing_timeline']);
+            }, $data['routing_timeline']));
         }
+        LocalNavigationTrace::markCurrentFinished('st_pamb_action_projection', $pambActionsMark);
         $data['current_document_location'] = $pambRouting['current_document_location'];
         $data['routing_summary'] = $pambRouting['routing_summary'];
         $data['routing_summary_metrics'] = $pambRouting['summary_metrics'];
-        $data['mov_processing'] = $sourceKey === 'conservation' && $pambRouting['applicable'] ? $this->pambMov->present($record) : ['applicable' => false];
+        $data['mov_processing'] = $sourceKey === 'conservation' && $pambRouting['applicable']
+            ? LocalNavigationTrace::measureCurrent('st_mov_presentation', fn () => $this->pambMov->present($record))
+            : ['applicable' => false];
         $data['mov_progress_display'] = $data['mov_processing']['applicable']
             ? trim(($data['mov_processing']['percent'] ?? '').'% '.($data['mov_processing']['status_label'] ?? ''))
             : 'Not Applicable';
         $data['turnaround_display'] = $this->semanticTurnaroundDisplay($record, $data, $data['mov_processing']);
-        $data['routing'] = $sourceKey === 'conservation' && $pambRouting['applicable']
-            ? ($documentRoutingPresenter ?? app(DocumentRoutingPresenter::class))->presentPamb($record, $pambRouting)
-            : ($documentRoutingPresenter ?? app(DocumentRoutingPresenter::class))->present($record, $sourceKey, $routingAudits, $routingEvents);
-        $latestPambOccurredAt = $pambRouting['applicable']
-            ? collect($pambRouting['timeline'] ?? [])
-                ->filter(fn (mixed $stage): bool => is_array($stage) && filled($stage['occurred_at'] ?? null))
-                ->max(fn (array $stage): string => (string) ($stage['occurred_at'] ?? ''))
-            : null;
-        if ($sourceKey === 'conservation' && $pambRouting['applicable'] && $routingEvents->isNotEmpty()) {
+        $data['routing'] = LocalNavigationTrace::measureCurrent('st_document_routing', fn () => $sourceKey === 'conservation' && $pambRouting['applicable'] && ! $canonicalMeetingRouting
+            ? ($documentRoutingPresenter ?? app(DocumentRoutingPresenter::class))->presentPamb($record, $pambRouting, $pambOverrides)
+            : ($documentRoutingPresenter ?? app(DocumentRoutingPresenter::class))->present($record, $sourceKey, $routingAudits, $routingEvents, $pambOverrides, $routingState, $documentAttachments));
+        $routingTailMark = LocalNavigationTrace::markCurrentStarted('st_routing_tail');
+        if ($sourceKey === 'conservation' && $pambRouting['applicable'] && ! $canonicalMeetingRouting && $routingEvents->isNotEmpty()) {
             $latest = $routingEvents->sortBy('id')->last();
             $genericIsAuthoritative = $latestPambOccurredAt === null
                 || $latest->occurred_at === null
@@ -1117,7 +1206,7 @@ final class SubmissionTrackingService
                     'occurred_at' => $latest->occurred_at?->toIso8601String(),
                     'recorded_by' => $latest->recordedBy?->name,
                     'remarks' => $latest->remarks,
-                    'attachment' => $this->routingAttachments->forDocumentEvents([$latest->id])[$latest->id] ?? null,
+                    'attachment' => $documentAttachments[$latest->id] ?? null,
                 ];
                 if ($data['routing']['last_action']['attachment'] instanceof \App\Models\SubmissionRoutingAttachment) {
                     $data['routing']['last_action']['attachment'] = $this->routingAttachments->descriptor($data['routing']['last_action']['attachment']);
@@ -1224,7 +1313,10 @@ final class SubmissionTrackingService
         if (! auth()->user() || $this->organization->isGlobal(auth()->user()) || ! $this->isCurrentOperationalOwner($data, auth()->user()) || ! $data['can_transition']) {
             $data['routing']['actions'] = [];
         }
-        $data['routing']['attachment_allowed'] = $this->canAttachRoutingCopy($sourceKey, $record, (string) ($data['routing']['current_stage'] ?? $data['stage']));
+        $routingStage = (string) ($data['routing']['current_stage'] ?? $data['stage']);
+        $data['routing']['attachment_allowed'] = $sourceKey === 'engp'
+            ? $this->canAttachRoutingCopy($sourceKey, $record, $routingStage, $routingEvents)
+            : $this->canAttachRoutingCopyForProjection($sourceKey, $record, $routingStage, $routingEvents, $routingState);
         if ($this->usesGenericRecord($sourceKey, $record)) {
             $data['current_document_location'] = $data['routing']['current_location'];
             $data['stage'] = $data['routing']['current_stage'] ?? $data['stage'];
@@ -1238,6 +1330,19 @@ final class SubmissionTrackingService
             null,
             data_get($data, 'mov_attachment.name', 'Original MOV / report'),
         );
+        if ($data['current_document']) {
+            $actor = auth()->user();
+            $definition = $this->attachments->officialDefinitionForRoutingSource($sourceKey);
+            $moduleAbility = $definition['definition']['ability'] ?? null;
+            $hasModuleAccess = $actor && $actor->is_active && is_string($moduleAbility) && $actor->can($moduleAbility);
+            $hasCurrentRoutingAccess = collect(data_get($data, 'routing.actions', []))->isNotEmpty();
+            $data['current_document']['can_preview'] = (bool) ($actor && $actor->is_active && (
+                $this->organization->isGlobal($actor)
+                || $hasModuleAccess
+                || $hasCurrentRoutingAccess
+            ));
+        }
+        LocalNavigationTrace::markCurrentFinished('st_routing_tail', $routingTailMark);
         return $data;
     }
 
@@ -1316,7 +1421,10 @@ final class SubmissionTrackingService
     private function usesGenericRecord(string $sourceKey, Model $record): bool
     {
         if ($sourceKey === 'conservation') {
-            return ! app(PambComplianceCalculator::class)->applies((string) $record->getAttribute('workflow_key'));
+            // Deadline/compliance applicability includes the manual PAMB
+            // workflow, but only meeting workflows use the separate PAMB
+            // custody-event path. Keep those two classifications distinct.
+            return true;
         }
         return true;
     }
@@ -1356,10 +1464,17 @@ final class SubmissionTrackingService
      * the next active queue. It intentionally does not treat intermediate
      * routing dates as completed workflow records.
      */
-    public function isRoutingComplete(Model $record): bool
+    public function isRoutingComplete(Model $record, ?Collection $routingEvents = null): bool
     {
         if ($record instanceof EngpReportSubmission) {
-            return $this->genericRouting->state($record, 'engp')['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
+            return $this->genericRouting->state($record, 'engp', $routingEvents)['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
+        }
+
+        if ($record instanceof ConservationReportSubmission && $this->pambRouting->applies($record) && ! $this->usesGenericRecord('conservation', $record)) {
+            return $this->pambRouting->isComplete($record);
+        }
+        if ($record instanceof ConservationReportSubmission && $this->usesGenericRecord('conservation', $record)) {
+            return $this->genericRouting->state($record, 'conservation', $routingEvents)['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
         }
 
         return $this->stage($record) === 'endorsed'
@@ -1383,15 +1498,45 @@ final class SubmissionTrackingService
      * event or a completed record. This is the server-side contract shared by
      * the routing endpoints and presentation layer.
      */
-    public function canAttachRoutingCopy(string $sourceKey, Model $record, string $stage): bool
+    public function canAttachRoutingCopy(string $sourceKey, Model $record, string $stage, ?Collection $routingEvents = null): bool
     {
-        if ($this->isRoutingComplete($record)) return false;
+        if ($this->isRoutingComplete($record, $routingEvents)) return false;
 
         if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $stage === 'receive_correction') return false;
-        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && ($this->pambRouting->isCorrectionStageKey($stage) || $this->pambRouting->isCorrectionActionKey($stage))) return false;
-        if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $this->genericRouting->isCorrectionAction($record, $sourceKey, $stage)) return false;
+        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && ! $this->usesGenericRecord($sourceKey, $record) && ($this->pambRouting->isCorrectionStageKey($stage) || $this->pambRouting->isCorrectionActionKey($stage))) return false;
+        if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $this->genericRouting->isCorrectionAction($record, $sourceKey, $stage, $routingEvents)) return false;
 
-        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && $this->pambRouting->applies($record)) {
+        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && $this->pambRouting->applies($record) && ! $this->usesGenericRecord($sourceKey, $record)) {
+            return $this->pambRouting->documentOperation($stage) === 'forward';
+        }
+
+        return $stage !== 'receive_at_penro_records_final';
+    }
+
+    /**
+     * Project many attachment flags from the state already resolved for this
+     * exact record and event collection. This state is local to normalize();
+     * it contains canonical routing facts only, never actor permissions.
+     *
+     * @param array<string,mixed>|null $routingState
+     */
+    private function canAttachRoutingCopyForProjection(string $sourceKey, Model $record, string $stage, ?Collection $routingEvents, ?array $routingState): bool
+    {
+        if ($routingState === null) {
+            return $this->canAttachRoutingCopy($sourceKey, $record, $stage, $routingEvents);
+        }
+
+        $routingComplete = $record instanceof ConservationReportSubmission && $sourceKey === 'conservation'
+            ? ($routingState['stage'] ?? null) === DocumentRoutingProfileRegistry::RELEASED_REGIONAL
+            : ($this->stage($record) === 'endorsed' && $this->routingCompletedAt($record) !== null);
+        if ($routingComplete) return false;
+        if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record) && $stage === 'receive_correction') return false;
+        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && ! $this->usesGenericRecord($sourceKey, $record) && ($this->pambRouting->isCorrectionStageKey($stage) || $this->pambRouting->isCorrectionActionKey($stage))) return false;
+        if ($sourceKey !== 'engp' && $this->usesGenericRecord($sourceKey, $record)) {
+            $action = collect($routingState['actions'] ?? [])->firstWhere('key', $stage);
+            if (is_array($action) && (bool) ($action['correction'] ?? false)) return false;
+        }
+        if ($sourceKey === 'conservation' && $record instanceof ConservationReportSubmission && $this->pambRouting->applies($record) && ! $this->usesGenericRecord($sourceKey, $record)) {
             return $this->pambRouting->documentOperation($stage) === 'forward';
         }
 
@@ -1609,21 +1754,12 @@ final class SubmissionTrackingService
     {
         if ($sourceKey === 'engp') {
             if ($status === RoutingStatusPresenter::COMPLETED) {
-                $query->where(static function ($completed) use ($table): void {
-                    $completed->whereExists(static function ($routingEvents) use ($table): void {
-                        $routingEvents->selectRaw('1')
-                            ->from('document_routing_events')
-                            ->where('document_routing_events.source_type', 'engp')
-                            ->whereColumn('document_routing_events.source_id', $table.'.id')
-                            ->where('document_routing_events.to_stage', DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
-                    })->orWhere(static function ($legacy) use ($table): void {
-                        $legacy->whereNotExists(static function ($routingEvents) use ($table): void {
-                            $routingEvents->selectRaw('1')
-                                ->from('document_routing_events')
-                                ->where('document_routing_events.source_type', 'engp')
-                                ->whereColumn('document_routing_events.source_id', $table.'.id');
-                        })->whereNotNull($table.'.date_endorsed_regional');
-                    });
+                $query->whereExists(static function ($routingEvents) use ($table): void {
+                    $routingEvents->selectRaw('1')
+                        ->from('document_routing_events')
+                        ->where('document_routing_events.source_type', 'engp')
+                        ->whereColumn('document_routing_events.source_id', $table.'.id')
+                        ->where('document_routing_events.to_stage', DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
                 });
             } elseif (in_array($status, [RoutingStatusPresenter::PENDING_CENRO, RoutingStatusPresenter::PENDING_PENRO], true)) {
                 $query->whereNull($table.'.date_received_penro')->where(function ($stageQuery) use ($sourceKey, $status): void {
@@ -1647,16 +1783,24 @@ final class SubmissionTrackingService
             $pambWorkflows = PambComplianceCalculator::MEETING_WORKFLOWS;
             $pambCandidates = (clone $query)
                 ->whereIn($table.'.workflow_key', $pambWorkflows)
-                ->where(function ($candidate): void {
+                ->where(function ($candidate) use ($table): void {
                     $candidate->whereNotNull('date_endorsed_regional')
                         // Cycle-suffixed event keys are interpreted by the canonical
                         // active-cycle resolver below; candidate discovery must not
                         // assume the terminal event is in cycle one.
-                        ->orWhereHas('routingEvents');
+                        ->orWhereHas('routingEvents')
+                        ->orWhereExists(function ($events) use ($table): void {
+                            $events->selectRaw('1')->from('document_routing_events')
+                                ->where('document_routing_events.source_type', 'conservation')
+                                ->whereColumn('document_routing_events.source_id', $table.'.id')
+                                ->where('document_routing_events.to_stage', DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
+                        });
                 })
                 ->with('routingEvents')
                 ->get()
-                ->filter(fn (ConservationReportSubmission $record): bool => $this->pambRouting->isComplete($record, $record->routingEvents))
+                ->filter(fn (ConservationReportSubmission $record): bool => $this->usesGenericRecord('conservation', $record) && isset($this->genericRouting)
+                    ? $this->genericRouting->state($record, 'conservation')['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL
+                    : $this->pambRouting->isComplete($record, $record->routingEvents))
                 ->modelKeys();
 
             $query->where(function ($completed) use ($table, $pambWorkflows, $pambCandidates): void {

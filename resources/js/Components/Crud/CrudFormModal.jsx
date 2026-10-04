@@ -6,7 +6,7 @@ import Button from '@/Components/Button';
 import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
 import CrudModalCardContext from './CrudModalCardContext';
 
-export default function CrudFormModal({ open, mode = 'create', icon, title, subtitle, onClose, onSubmit, processing = false, progress = null, errors = {}, systemNotice = null, children, preview, canDelete = false, onDelete, canSave = true, backLabel, saveLabel, deleteLabel = 'Delete Record', maxWidth = 'max-w-7xl' }) {
+export default function CrudFormModal({ open, mode = 'create', icon, title, subtitle, onClose, onSubmit, processing = false, progress = null, errors = {}, systemNotice = null, children, preview, canDelete = false, onDelete, canSave = true, backLabel, saveLabel, saveVariant = 'primary', deleteLabel = 'Delete Record', maxWidth = 'max-w-7xl' }) {
     const panelRef = useRef(null);
     const dropMessage = useModalFileDrop(panelRef, open);
     useEffect(() => { if (!open || processing) return; const onKey = event => event.key === 'Escape' && onClose?.(); document.addEventListener('keydown', onKey); return () => document.removeEventListener('keydown', onKey); }, [open, processing, onClose]);
@@ -25,7 +25,7 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
             </div></CrudModalCardContext.Provider>
             <CrudModalFooter left={canDelete && onDelete ? <Button type="button" size="compact" variant="danger" onClick={onDelete} disabled={processing} className="rounded-xl px-4 py-2.5 text-xs">{deleteLabel}</Button> : null}>
                 <Button type="button" size="compact" variant={backLabel?.toLowerCase().includes('back') || mode === 'edit' ? 'back' : 'cancel'} onClick={onClose} disabled={processing} className="rounded-xl px-4 py-2.5 text-xs">{backLabel || (mode === 'edit' ? '← Back' : 'Cancel')}</Button>
-                {canSave && <Button type="submit" size="compact" variant="primary" disabled={processing} className="rounded-xl px-5 py-2.5 text-xs">{processing ? (mode === 'edit' ? 'Updating…' : 'Saving…') : resolvedSaveLabel}</Button>}
+                {canSave && <Button type="submit" size="compact" variant={saveVariant} disabled={processing} className="rounded-xl px-5 py-2.5 text-xs">{processing ? (mode === 'edit' ? 'Updating…' : 'Saving…') : resolvedSaveLabel}</Button>}
             </CrudModalFooter>
         </form>
     </div>;

@@ -321,8 +321,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
             );
         }
 
+        const isTrackingViewLink = child.href?.startsWith('/submission-tracking?view=');
         const childCommon = `${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
-            isChildActive ? 'border-l-2 border-green-200 bg-gradient-to-r from-green-700 to-blue-900 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
+            isChildActive ? isTrackingViewLink ? 'cds-submission-tracking-nav-tab border-l-2 border-green-200 shadow-md' : 'border-l-2 border-green-200 bg-gradient-to-r from-green-700 to-blue-900 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
         }`;
         const href = child.externalConfig === 'engpIacGeneratorUrl' ? engpIacGeneratorUrl : child.href;
 

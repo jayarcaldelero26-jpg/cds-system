@@ -49,6 +49,29 @@ function performRouting(DocumentRoutingTransitionService $service, BmsReportSubm
     $service->transition($report, 'bms', $action, $actor->id);
 }
 
+test('reused canonical facts stay record and event scoped while action authorization follows the current actor', function (): void {
+    $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $report = routingReport('Resolved State Identity PA');
+    $service = app(DocumentRoutingTransitionService::class);
+    $events = collect();
+    $resolved = $service->state($report, 'bms', $events, $focal);
+
+    $focalView = $service->presentation($report, 'bms', $events, $focal, $resolved);
+    $chiefView = $service->presentation($report, 'bms', $events, $chief, $resolved);
+    expect($focalView['stage'])->toBe(DocumentRoutingProfileRegistry::PREPARATION)
+        ->and(collect($focalView['allowed_actions'])->pluck('key')->all())->toBe(['forward_to_cenro_chief'])
+        ->and($chiefView['stage'])->toBe(DocumentRoutingProfileRegistry::PREPARATION)
+        ->and($chiefView['allowed_actions'])->toBeEmpty();
+
+    performRouting($service, $report, 'forward_to_cenro_chief', $focal);
+    $updatedEvents = $service->events($report->fresh(), 'bms');
+    $afterStaleFacts = $service->presentation($report->fresh(), 'bms', $updatedEvents, $chief, $resolved);
+    expect($afterStaleFacts['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)
+        ->and(collect($afterStaleFacts['allowed_actions'])->pluck('key')->all())->toBe(['receive_at_cenro_chief'])
+        ->and(DocumentRoutingEvent::query()->count())->toBe(1);
+});
+
 test('a correction marker requires a real return event while genuine correction history stays visible', function (): void {
     $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
@@ -74,6 +97,7 @@ test('a correction marker requires a real return event while genuine correction 
 
 test('generic custody route requires an explicit PENRO Records forward after receipt', function (): void {
     config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $cenroRecords = routingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
@@ -83,6 +107,10 @@ test('generic custody route requires an explicit PENRO Records forward after rec
     $penroFocal = routingActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
     $penroChief = routingActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
     $report = routingReport();
+    Storage::fake('local');
+    $officialPath = 'bms-report-movs/office-receipt-authorization-'.$report->id.'.pdf';
+    $report->update(['mov_file_path' => $officialPath, 'mov_file_name' => 'Current official report.pdf']);
+    Storage::disk('local')->put($officialPath, "%PDF-1.4\nOffice receipt authorization fixture");
     $service = app(DocumentRoutingTransitionService::class);
     $deadline = $report->deadline_submission;
 
@@ -115,12 +143,28 @@ test('generic custody route requires an explicit PENRO Records forward after rec
     $ordinaryPenroActions = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
     expect($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
         ->and(collect($ordinaryPenroActions)->pluck('key')->all())->toBe(['forward_to_office_penro']);
-    expect(fn () => performRouting($service, $report, 'receive_at_office_penro', $penroFocal))
-        ->toThrow(ValidationException::class);
+    $eventsBeforeStaleOfficeReceipt = DocumentRoutingEvent::query()->count();
+    $this->actingAs($penroFocal)->post(route('submission-tracking.transition', [
+        'bms', $report->id, 'receive_at_office_penro',
+    ]), ['stage' => 'receive_at_office_penro'])->assertForbidden();
+    expect(DocumentRoutingEvent::query()->count())->toBe($eventsBeforeStaleOfficeReceipt);
+
+    // Office of the PENRO is authorized for this action, but the document is
+    // still at PENRO Records until that office explicitly forwards it.
+    $this->actingAs($officePenro)->post(route('submission-tracking.transition', [
+        'bms', $report->id, 'receive_at_office_penro',
+    ]), ['stage' => 'receive_at_office_penro'])
+        ->assertRedirect()->assertSessionHasErrors('stage');
+    expect(DocumentRoutingEvent::query()->count())->toBe($eventsBeforeStaleOfficeReceipt);
+
     expect(fn () => performRouting($service, $report, 'forward_to_office_penro', $officePenro))
         ->toThrow(HttpException::class);
-    performRouting($service, $report, 'forward_to_office_penro', $penroRecords);
-    performRouting($service, $report, 'receive_at_office_penro', $officePenro);
+    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', [
+        'bms', $report->id, 'forward_to_office_penro',
+    ]), ['stage' => 'forward_to_office_penro'])->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($officePenro)->post(route('submission-tracking.transition', [
+        'bms', $report->id, 'receive_at_office_penro',
+    ]), ['stage' => 'receive_at_office_penro'])->assertRedirect()->assertSessionHasNoErrors();
 
     expect(fn () => performRouting($service, $report, 'assign_to_tsd_chief', $tsdChief))
         ->toThrow(HttpException::class);

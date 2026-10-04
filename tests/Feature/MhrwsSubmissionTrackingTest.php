@@ -2,10 +2,12 @@
 
 use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 
@@ -53,15 +55,33 @@ function mhrwsConservationReport(object $test, array $overrides = []): Conservat
     return ConservationReportSubmission::create($data);
 }
 
+function mhrwsRoutingActor(string $category, string $office): User
+{
+    $actor = User::factory()->create([
+        'section' => $category,
+        'unit_assignment' => 'conservation',
+        'office_designated' => $office,
+        'is_active' => true,
+        'is_approved' => true,
+    ]);
+    $actor->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate('reports.view', 'web'));
+    $actor->givePermissionTo(\Spatie\Permission\Models\Permission::findOrCreate('technical-reports.update', 'web'));
+
+    return $actor;
+}
+
 test('MHRWS reports bypass CENRO and enter PENRO receipt directly', function () {
     $report = mhrwsConservationReport($this);
+    $penroRecords = mhrwsRoutingActor('PENRO_RECORDS', 'PENRO Davao Oriental');
+    $this->actingAs($penroRecords);
     $record = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    $queues = app(SubmissionTrackingService::class)->queues();
 
     expect($record['submission_origin'])->toBe('PENRO')
         ->and($record['cenro_release_applicable'])->toBeFalse()
-        ->and($record['stage'])->toBe(SubmissionTrackingService::PENRO_RECEIPT)
-        ->and(app(SubmissionTrackingService::class)->queues()[SubmissionTrackingService::CENRO_RELEASE]->pluck('source_id'))->not->toContain($report->id)
-        ->and(app(SubmissionTrackingService::class)->queues()[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->toContain($report->id);
+        ->and($record['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and($queues)->not->toHaveKey(SubmissionTrackingService::CENRO_RELEASE)
+        ->and($queues[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->toContain($report->id);
 });
 
 test('normal protected-area reports still enter CENRO release first', function () {
@@ -78,7 +98,7 @@ test('normal protected-area reports still enter CENRO release first', function (
     ]);
 
     expect(app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id)['stage'])
-        ->toBe(SubmissionTrackingService::CENRO_RELEASE);
+        ->toBe(DocumentRoutingProfileRegistry::PREPARATION);
 });
 
 test('MHRWS aliases and seeded display names resolve to the same PENRO origin', function () {
@@ -95,24 +115,49 @@ test('MHRWS aliases and seeded display names resolve to the same PENRO origin', 
     $report = mhrwsConservationReport($this, ['protected_area_id' => $variant->id]);
 
     expect(app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id)['stage'])
-        ->toBe(SubmissionTrackingService::PENRO_RECEIPT);
+        ->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS);
 });
 
 test('MHRWS receipt advances to endorsement and then history without requiring a CENRO date', function () {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 14:32:00', 'Asia/Manila'));
     $report = mhrwsConservationReport($this);
+    $records = mhrwsRoutingActor('PENRO_RECORDS', 'PENRO Davao Oriental');
+    $office = mhrwsRoutingActor('OFFICE_OF_THE_PENRO', 'PENRO Davao Oriental');
+    $tsd = mhrwsRoutingActor('PENRO_TSD_CHIEF', 'PENRO Davao Oriental');
+    $focal = mhrwsRoutingActor('PENRO_CDS_FOCAL', 'PENRO Davao Oriental');
+    $chief = mhrwsRoutingActor('PENRO_CDS_CHIEF', 'PENRO Davao Oriental');
     $tracking = app(SubmissionTrackingService::class);
 
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-06', $this->user->id);
+    $this->actingAs($records);
+    app(DocumentRoutingTransitionService::class)->transition($report, 'conservation', 'receive_at_penro_records', $records->id);
     $report->refresh();
     expect($report->date_report_released_cenro)->toBeNull()
         ->and($tracking->queues()[SubmissionTrackingService::PENRO_RECEIPT]->pluck('source_id'))->not->toContain($report->id)
-        ->and($tracking->queues()[SubmissionTrackingService::REGIONAL_ENDORSEMENT]->pluck('source_id'))->toContain($report->id)
+        ->and($tracking->queues()['penro_records_routing']->pluck('source_id'))->toContain($report->id)
         ->and($tracking->queues()['history']->where('source', 'conservation')->pluck('source_id'))->not->toContain($report->id);
 
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT, '2026-08-07', $this->user->id);
+    $routing = app(DocumentRoutingTransitionService::class);
+    foreach ([
+        [$records, 'forward_to_office_penro'], [$office, 'receive_at_office_penro'],
+        [$office, 'assign_to_tsd_chief'], [$tsd, 'receive_at_tsd_chief'],
+        [$tsd, 'forward_to_cds_focal'], [$focal, 'receive_at_cds_focal'],
+        [$focal, 'forward_to_cds_chief'], [$chief, 'receive_at_cds_chief'],
+        [$chief, 'recommend_to_office_penro'], [$office, 'receive_at_office_penro_final'],
+        [$office, 'approve_for_regional_release'], [$records, 'receive_at_penro_records_final'],
+        [$records, 'release_to_regional'],
+    ] as [$actor, $action]) {
+        $routing->transition($report->fresh(), 'conservation', $action, $actor->id);
+    }
+    $this->actingAs($records);
+    $regionalEvent = DocumentRoutingEvent::query()
+        ->where('source_type', 'conservation')->where('source_id', $report->id)
+        ->where('event_key', 'released')->where('to_stage', DocumentRoutingProfileRegistry::RELEASED_REGIONAL)
+        ->firstOrFail();
     $history = $tracking->queues()['history']->where('source', 'conservation');
     expect($history->pluck('source_id'))->toContain($report->id)
-        ->and($history->firstWhere('source_id', $report->id)['completed_at'])->toBe('2026-08-07');
+        ->and($report->fresh()->date_endorsed_regional->toDateString())->toBe('2026-08-29')
+        ->and($regionalEvent->occurred_at->toDateTimeString())->toBe('2026-08-29 14:32:00')
+        ->and($history->firstWhere('source_id', $report->id)['completed_at'])->toBe('2026-08-29T14:32:00+08:00');
 });
 
 test('the MHRWS routing rule applies to another protected-area report source', function () {

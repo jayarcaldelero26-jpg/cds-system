@@ -342,6 +342,7 @@ export default function PambRoutingTimeline({
                                                             "penro_final_returned_for_correction" +
                                                             verdictCycle,
                                                         label: "Return for Correction",
+                                                        correction: true,
                                                     },
                                                 ]
                                               : []),
@@ -408,7 +409,7 @@ export default function PambRoutingTimeline({
                                                         (action) => (
                                                             <Button
                                                                 size="compact"
-                                                                variant={action.correction ? "danger" : "primary"}
+                                                                variant={action.correction ? "warning" : "primary"}
                                                                 key={action.key}
                                                                 type="button"
                                                                 onClick={() =>
@@ -430,7 +431,7 @@ export default function PambRoutingTimeline({
                                                         (action) => (
                                                             <Button
                                                                 size="compact"
-                                                                variant="primary"
+                                                                variant={action.correction ? "warning" : "primary"}
                                                                 key={action.key}
                                                                 type="button"
                                                                 onClick={() =>

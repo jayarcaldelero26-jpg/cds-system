@@ -65,6 +65,54 @@ test('an authorized calendar manager can create, edit, deactivate, and delete a 
     expect(NonWorkingDay::query()->find($day->id))->toBeNull();
 });
 
+test('retained calendar calculations refresh after supported create update delete and activation changes', function (): void {
+    $manager = User::factory()->create();
+    $manager->givePermissionTo([
+        Permission::findOrCreate('reports.view', 'web'),
+        Permission::findOrCreate('compliance-alerts.manage', 'web'),
+    ]);
+    $calendar = new BusinessCalendarService();
+    $range = ['2026-08-24', '2026-08-27'];
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(3);
+
+    $payload = [
+        'date' => '2026-08-25', 'name' => 'Cache lifecycle fixture',
+        'type' => NonWorkingDay::TYPE_NATIONAL_HOLIDAY, 'scope' => NonWorkingDay::SCOPE_NATIONAL,
+        'location' => '', 'is_active' => true,
+    ];
+    $this->actingAs($manager)->post(route('compliance-alerts.non-working-days.store'), $payload)->assertRedirect();
+    $day = NonWorkingDay::query()->firstOrFail();
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(2);
+
+    $this->actingAs($manager)->put(route('compliance-alerts.non-working-days.update', $day), [
+        ...$payload, 'date' => '2026-08-26', 'type' => NonWorkingDay::TYPE_OFFICE_DECLARED_NON_WORKING_DAY,
+        'scope' => NonWorkingDay::SCOPE_OFFICE, 'location' => 'CENRO Mati',
+    ])->assertRedirect();
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(2)
+        ->and($calendar->workingDaysBetween(...$range, office: 'PENRO Davao Oriental'))->toBe(3)
+        ->and($calendar->workingDaysBetween(...$range, office: 'CENRO Baganga'))->toBe(3);
+
+    $this->actingAs($manager)->put(route('compliance-alerts.non-working-days.update', $day), [
+        ...$payload, 'date' => '2026-08-27', 'type' => NonWorkingDay::TYPE_OTHER,
+        'scope' => NonWorkingDay::SCOPE_DAVAO_ORIENTAL,
+    ])->assertRedirect();
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(2);
+
+    $this->actingAs($manager)->delete(route('compliance-alerts.non-working-days.destroy', $day))->assertRedirect();
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(3);
+
+    $this->actingAs($manager)->post(route('compliance-alerts.non-working-days.store'), [
+        ...$payload, 'date' => '2026-08-27', 'name' => 'Deactivation fixture',
+    ])->assertRedirect();
+    $activeDay = NonWorkingDay::query()->firstOrFail();
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(2);
+
+    $this->actingAs($manager)->put(route('compliance-alerts.non-working-days.update', $activeDay), [
+        ...$payload, 'date' => '2026-08-27', 'name' => 'Deactivation fixture', 'is_active' => false,
+    ])->assertRedirect();
+    expect($calendar->workingDaysBetween(...$range, office: 'CENRO Mati'))->toBe(3);
+});
+
 test('duplicate configured dates for the same scope and location are rejected by the calendar endpoint', function () {
     $manager = User::factory()->create();
     $manager->givePermissionTo(Permission::findOrCreate('compliance-alerts.manage', 'web'));

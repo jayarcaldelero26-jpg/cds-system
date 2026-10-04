@@ -5,12 +5,13 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
+import { viteReactInterop } from './helpers/viteReactInterop.mjs';
 
 let server;
 const load = async (path) => {
     server ??= await createServer({
         configFile: false,
-        plugins: [react()],
+        plugins: [viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
         server: { middlewareMode: true },
         appType: 'custom',
@@ -65,6 +66,32 @@ test('Protected Area compact field sizing leaves multiline notes multiline', asy
     assert.match(text, /h-10 px-3 py-2 text-sm leading-5/);
     assert.match(notes, /<textarea[^>]*rows="4"/);
     assert.match(notes, /min-h-28/);
+});
+
+test('incoming action categories keep filter semantics, selected state, and callbacks outside action styling', async () => {
+    const { IncomingActionFilters } = await load('Pages/SubmissionTracking/Index.jsx');
+    const callbacks = [];
+    const props = {
+        tabs: ['receive', 'forward'],
+        labels: { receive: 'Receive', forward: 'Forward' },
+        selected: 'receive',
+        onChange: value => callbacks.push(value),
+    };
+    const markup = renderToStaticMarkup(React.createElement(IncomingActionFilters, props));
+    assert.match(markup, /role="group" aria-label="Incoming action filters"/);
+    assert.match(markup, /aria-pressed="true"[^>]*>Receive<\/button>/);
+    assert.match(markup, /aria-pressed="false"[^>]*>All actions<\/button>/);
+    assert.doesNotMatch(markup, /data-cds-action/);
+    assert.match(markup, /focus-visible:ring-2/);
+
+    const tree = IncomingActionFilters(props);
+    const visit = node => {
+        if (!React.isValidElement(node)) return;
+        if (node.type === 'button') node.props.onClick();
+        React.Children.forEach(node.props.children, visit);
+    };
+    visit(tree);
+    assert.deepEqual(callbacks, [null, 'receive', 'forward']);
 });
 
 test('Executive report chips describe applied filters and preserve query parameter values', async () => {
@@ -210,6 +237,157 @@ test('PAMB review-history action remains canonical and the timeline does not dup
     const { default: PambRoutingTimeline } = await load('Components/SubmissionTracking/PambRoutingTimeline.jsx');
     const html = renderToStaticMarkup(React.createElement(PambRoutingTimeline, { row: { pamb_routing_applicable: false } }));
     assert.doesNotMatch(html, /View Review History/);
+});
+
+test('populated PAMB meeting timeline exposes the pending Office forwarding action', async () => {
+    const { default: PambRoutingTimeline } = await load('Components/SubmissionTracking/PambRoutingTimeline.jsx');
+    for (const workflow of ['regular_pamb', 'special_pamb', 'twc_meetings']) {
+        const html = renderToStaticMarkup(React.createElement(PambRoutingTimeline, {
+            row: {
+                workflow_key: workflow,
+                pamb_routing_applicable: true,
+                routing_timeline: [{
+                    key: 'forwarded_records_to_penro',
+                    stage_key: 'forwarded_records_to_penro',
+                    label: 'Forwarded to Office of the PENRO',
+                    status: 'current',
+                    held_at: 'PENRO Records',
+                    destination: 'Office of the PENRO',
+                    occurred_at: null,
+                    recorded_by: null,
+                    actor_office: null,
+                    is_internal: true,
+                    can_record: true,
+                    action_label: 'Record Forwarding to Office of the PENRO',
+                }],
+            },
+            actions: [],
+            onRecord: () => {},
+        }));
+
+        assert.match(html, /Forwarded to Office of the PENRO/);
+        assert.match(html, /<button[^>]*type="button"[^>]*>Forward<\/button>/);
+    }
+});
+
+test('projected focal custody action renders in sidebar and Full Details while MOV release stays separately scoped', async () => {
+    const { SubmissionDetailsPanel, IncomingActionFilters } = await load('Pages/SubmissionTracking/Index.jsx');
+    const { default: DocumentRoutingTimeline } = await load('Components/SubmissionTracking/DocumentRoutingTimeline.jsx');
+    const { default: PambMovActions } = await load('Components/SubmissionTracking/PambMovActions.jsx');
+    const { default: PambMovProgress } = await load('Components/SubmissionTracking/PambMovProgress.jsx');
+    const action = { key: 'forward_to_cenro_chief', label: 'forwarded', action_label: 'Forward to CENRO Chief', to: 'transit_to_cenro_chief' };
+    const row = {
+        source: 'conservation', source_id: 97, module: 'Regular PAMB', workflow_key: 'regular_pamb',
+        target_office: 'CENRO Mati', canonical_custody_applicable: true, can_transition: true,
+        routing: {
+            profile_key: 'canonical_conservation', profile_label: 'Conservation routing',
+            current_stage: 'cenro_preparation', responsible_user_category: 'CENRO CDS Focal Person',
+            responsible_office: 'CENRO Mati', next_expected_action: 'Forward to CENRO Chief',
+            actions: [action], timeline: [{ key: 'cenro_preparation', label: 'CENRO CDS Focal Person', status: 'current' }],
+        },
+        mov_processing: { applicable: true, status_key: 'ready_for_release', status_label: 'Ready for Release', workflow_status: 'Ready for Release', milestones: [] },
+        pamb_action_flags: { can_submit: false, can_review: false, can_release: false },
+        current_document: { name: 'Approved MOV.pdf', can_preview: true }, mov_url: '/storage/approved-mov.pdf',
+    };
+    const actionCalls = [];
+    const previewCalls = [];
+    const sidebar = React.createElement(SubmissionDetailsPanel, {
+        row, context: {}, onAction: (next) => actionCalls.push(next), onPreview: (next) => previewCalls.push(next),
+    });
+    const sidebarHtml = renderToStaticMarkup(sidebar);
+    const detailsHtml = renderToStaticMarkup(React.createElement(DocumentRoutingTimeline, { row, onAction: (next) => actionCalls.push(next) }));
+    assert.match(sidebarHtml, />Forward</);
+    assert.match(sidebarHtml, /Preview/);
+    assert.match(sidebarHtml, /data-cds-action-variant="cancel"[^>]*>Preview<\/button>/);
+    assert.match(detailsHtml, />Forward</);
+    assert.match(detailsHtml, /Canonical Routing Progress/);
+
+    const panelTree = SubmissionDetailsPanel({ row, onAction: (next) => actionCalls.push(next), onPreview: (next) => previewCalls.push(next) });
+    const walk = (node) => {
+        if (!React.isValidElement(node)) return;
+        if (node.props.onClick) {
+            if (node.props.children === 'Forward') node.props.onClick();
+            if (node.props.children === 'Preview') node.props.onClick();
+        }
+        React.Children.forEach(node.props.children, walk);
+    };
+    walk(panelTree);
+    assert.deepEqual(actionCalls, [action]);
+    assert.deepEqual(previewCalls, [row]);
+
+    const outgoingRow = { ...row, can_transition: false, routing: { ...row.routing, actions: [] }, current_document: { ...row.current_document, can_preview: false } };
+    const outgoingHtml = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: outgoingRow, onPreview: () => assert.fail('Preview callback must not be offered') }));
+    assert.match(outgoingHtml, /Preview unavailable for this account/);
+    assert.doesNotMatch(outgoingHtml, />Preview</);
+
+    const noPermissionRow = { ...row, can_transition: false };
+    assert.doesNotMatch(renderToStaticMarkup(React.createElement(DocumentRoutingTimeline, { row: noPermissionRow })), />Forward</);
+    const chiefMov = { ...row, mov_processing: { ...row.mov_processing, status_key: 'submitted_for_review' }, pamb_action_flags: { can_review: true } };
+    const movHtml = renderToStaticMarkup(React.createElement(PambMovActions, { row: chiefMov, onReview() {} }));
+    assert.match(movHtml, /Ready for Release/);
+    assert.match(movHtml, /Needs Correction/);
+    assert.match(movHtml, /data-cds-action-variant="warning"[^>]*>Needs Correction<\/button>/);
+    assert.doesNotMatch(renderToStaticMarkup(React.createElement(PambMovActions, { row, onRelease() {} })), /Release/);
+
+    const awaitingReceipt = {
+        ...chiefMov,
+        routing: { ...row.routing, current_stage: 'transit_to_cenro_chief', next_expected_action: 'Receive', actions: [{ key: 'receive_cenro_chief', label: 'Receive', action_label: 'Receive' }] },
+    };
+    const awaitingSidebar = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: awaitingReceipt, onAction() {}, onReviewMov() {} }));
+    const receivePosition = awaitingSidebar.indexOf('>Receive</button>');
+    const reviewPosition = awaitingSidebar.indexOf('MOV review and submission');
+    assert.ok(receivePosition >= 0 && reviewPosition > receivePosition, 'custody Receive is rendered before the separate MOV review controls');
+    assert.ok(awaitingSidebar.indexOf('>Ready for Release</button>') > reviewPosition);
+    assert.ok(awaitingSidebar.indexOf('>Needs Correction</button>') > reviewPosition);
+
+    const fullDetailsActions = renderToStaticMarkup(React.createElement(React.Fragment, null,
+        React.createElement(DocumentRoutingTimeline, { row: awaitingReceipt, onAction() {} }),
+        React.createElement(PambMovProgress, { row: awaitingReceipt, hideReleaseAction: true, onReview() {} }),
+    ));
+    assert.ok(fullDetailsActions.indexOf('>Receive</button>') < fullDetailsActions.indexOf('>Ready for Release</button>'));
+
+    const filterValues = [];
+    const filterTree = IncomingActionFilters({ tabs: ['receive', 'forward'], labels: { receive: 'Receive', forward: 'Forward' }, selected: 'forward', onChange: value => filterValues.push(value) });
+    const filtersHtml = renderToStaticMarkup(filterTree);
+    assert.match(filtersHtml, /cds-tab-active/);
+    React.Children.forEach(filterTree.props.children, button => button?.props?.onClick?.());
+    assert.deepEqual(filterValues, [null, 'receive', 'forward']);
+});
+
+test('Full Details renders the existing routing percentage with or without a document and respects preview access', async () => {
+    const { SubmissionTrackingDetailsProgressCard } = await load('Pages/SubmissionTracking/Index.jsx');
+    const details = {
+        routing_complete: false,
+        routing: { processing_percentage: 68 },
+        mov_processing: { applicable: true, percent: 100 },
+    };
+    const withoutDocument = renderToStaticMarkup(React.createElement(SubmissionTrackingDetailsProgressCard, { details }));
+    assert.match(withoutDocument, /aria-label="Routing progress and current official document"/);
+    assert.match(withoutDocument, /role="progressbar"[^>]*aria-valuenow="68"/);
+    assert.match(withoutDocument, />68%<\/span>/);
+    assert.doesNotMatch(withoutDocument, /Current Official Document/);
+
+    const withDocument = renderToStaticMarkup(React.createElement(SubmissionTrackingDetailsProgressCard, {
+        details: { ...details, current_document: { name: 'Current official report.pdf', can_preview: true } },
+        onPreview: () => {},
+    }));
+    assert.match(withDocument, />68%<\/span>/);
+    assert.match(withDocument, /Current Official Document/);
+    assert.match(withDocument, />Preview Current Document<\/button>/);
+    assert.match(withDocument, /data-cds-action-variant="cancel"[^>]*>Preview Current Document<\/button>/);
+    assert.doesNotMatch(withDocument, /100%/);
+});
+
+test('protected preview explains projected denial without offering download or a loading state', async () => {
+    const { default: DocumentPreviewDialog } = await load('Components/SubmissionTracking/DocumentPreviewDialog.jsx');
+    const html = renderToStaticMarkup(React.createElement(DocumentPreviewDialog, {
+        open: true,
+        row: { source: 'bms', id: 42, current_document: { name: 'Current report.pdf', preview_url: '/attachments/bms-report/42/mov?preview=1', download_url: '/attachments/bms-report/42/mov', mime_type: 'application/pdf', can_preview: false } },
+        onClose() {},
+    }));
+    assert.match(html, /Your current account is not authorized to access this document/);
+    assert.doesNotMatch(html, /Loading document preview|Download Current Copy|Retry Preview/);
+    assert.match(html, />Close Preview<\/button>/);
 });
 
 test('Create Module close control is a neutral accessible icon button and retains its callback', async () => {

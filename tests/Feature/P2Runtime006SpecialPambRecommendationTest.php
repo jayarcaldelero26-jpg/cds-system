@@ -97,9 +97,12 @@ test('Special PAMB recommendation is authorized only for the current PENRO CDS C
     ])->assertSessionHasNoErrors();
 
     $report = $report->fresh();
-    expect($report->routingEvents()->where('stage_key', PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO)->count())->toBe(1)
-        ->and(collect(app(PambRoutingTimelineService::class)->present($report)['timeline'])->firstWhere('status', 'current')['key'])
-        ->toBe(PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL)
+    expect(\App\Models\DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+        ->where('workflow_key', 'special_pamb')->where('event_key', 'recommended')
+        ->where('recorded_by', $chief->id)->where('metadata->action_key', 'recommend_to_office_penro')->count())->toBe(1)
+        ->and($report->routingEvents()->where('stage_key', PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO)->count())->toBe(0)
+        ->and(collect(app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id)['routing']['timeline'])->firstWhere('status', 'current')['key'])
+        ->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO_RETURN)
         ->and(app(SubmissionTrackingService::class)->workspaceQueues()['incoming']->pluck('source_id')->all())->not->toContain($report->id);
 
     $this->actingAs($office);

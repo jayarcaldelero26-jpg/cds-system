@@ -86,7 +86,12 @@ final class PambRoutingTimelineService
 
     public function applies(ConservationReportSubmission $report): bool
     {
-        return in_array($report->workflow_key, PambComplianceCalculator::MEETING_WORKFLOWS, true);
+        return self::appliesWorkflow($report->workflow_key);
+    }
+
+    public static function appliesWorkflow(?string $workflowKey): bool
+    {
+        return in_array($workflowKey, PambComplianceCalculator::MEETING_WORKFLOWS, true);
     }
 
     /** @return list<string> */

@@ -324,17 +324,28 @@ test('generic attachment links to the exact event and history presentation', fun
 test('PAMB Forward keeps supporting attachment separate and archives the resulting official document', function (): void {
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     Storage::fake('local');
+    $focal = attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = attachmentRoutingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $cenroRecords = attachmentRoutingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
     $user = User::factory()->create(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
     $user->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
     $user->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
     $user->assignRole(Role::findOrCreate('PENRO Records', 'web'));
     $currentPath = 'conservation-report-movs/pamb-current-'.$user->id.'.pdf';
-    $report = ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Attachment PAMB Internal', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'created_by' => $user->id, 'updated_by' => $user->id, 'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05', 'mov_file_path' => $currentPath, 'mov_file_name' => 'pamb-current.pdf']);
+    $report = ConservationReportSubmission::create(['workflow_key' => 'regular_pamb', 'target_office' => 'CENRO Mati', 'activity_name' => 'Attachment PAMB Internal', 'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3', 'date_conducted' => '2026-08-03', 'date_accomplished' => '2026-08-03', 'created_by' => $user->id, 'updated_by' => $user->id, 'mov_processing_status' => 'ready_for_release', 'mov_file_path' => $currentPath, 'mov_file_name' => 'pamb-current.pdf']);
     Storage::disk('local')->put($currentPath, '%PDF old PAMB current');
     $file = UploadedFile::fake()->create('internal-forward.pdf', 12, 'application/pdf');
     $updated = "%PDF-1.4\nupdated PAMB official";
     $gateway = new FinalArchiveWorkflowGateway();
     app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_cenro_chief', $focal->id);
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_cenro_records', $chief->id);
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_records', $cenroRecords->id);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_penro_records', $cenroRecords->id);
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_penro_records', $user->id);
 
     $this->actingAs($user)->post(route('submission-tracking.internal-routing', [
         'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
@@ -345,13 +356,13 @@ test('PAMB Forward keeps supporting attachment separate and archives the resulti
         'official_document' => UploadedFile::fake()->createWithContent('pamb-updated.pdf', $updated),
     ])->assertSessionHasNoErrors();
 
-    $event = $report->fresh()->routingEvents()->latest('id')->firstOrFail();
-    $attachment = SubmissionRoutingAttachment::query()->where('pamb_routing_event_id', $event->id)->firstOrFail();
+    $event = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->latest('id')->firstOrFail();
+    $attachment = SubmissionRoutingAttachment::query()->where('document_routing_event_id', $event->id)->firstOrFail();
 
     expect($attachment->source)->toBe('conservation')
         ->and($attachment->source_id)->toBe($report->id)
-        ->and($attachment->stage_key)->toBe(PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO)
-        ->and($attachment->action_key)->toBe(PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO)
+        ->and($attachment->stage_key)->toBe('forward_to_office_penro')
+        ->and($attachment->action_key)->toBe('forward_to_office_penro')
         ->and(Storage::disk('local')->exists($attachment->stored_path))->toBeTrue()
         ->and($report->fresh()->mov_file_name)->toBe('pamb-updated.pdf')
         ->and(Storage::disk('local')->exists($currentPath))->toBeFalse()
@@ -1267,7 +1278,7 @@ test('disabled checkpoint is presented as a system blocker instead of ordinary f
     $trackingPage = file_get_contents(resource_path('js/Pages/SubmissionTracking/Index.jsx'));
     $formModal = file_get_contents(resource_path('js/Components/Crud/CrudFormModal.jsx'));
     expect($trackingPage)->toContain('Archive checkpoint unavailable')
-        ->and($trackingPage)->toContain('Google Drive archiving is currently disabled.')
+        ->and($trackingPage)->toContain('Google Drive archiving is disabled.')
         ->and($formModal)->toContain('systemNotice &&')
         ->and($formModal)->toContain('dark:bg-amber-950/40');
 });

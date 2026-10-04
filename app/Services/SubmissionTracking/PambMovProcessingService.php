@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\ValidationException;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Support\LocalNavigationTrace;
 
 /** Additive CENRO MOV milestone monitoring; it never supplies compliance values. */
 final class PambMovProcessingService
@@ -42,8 +43,9 @@ final class PambMovProcessingService
     /** @return array<string, mixed> */
     public function present(ConservationReportSubmission $submission): array
     {
+        LocalNavigationTrace::incrementCurrent('mov_presentations');
         $submission->loadMissing('movReviewEvents.recordedBy');
-        $status = $this->status($submission);
+        $status = LocalNavigationTrace::measureCurrent('st_mov_status', fn () => $this->status($submission));
         $storedReviewStatus = $submission->getAttribute('mov_processing_status');
         $chiefVerdict = in_array($storedReviewStatus, [self::READY_FOR_RELEASE, self::NEEDS_CORRECTION], true)
             ? $storedReviewStatus
@@ -63,11 +65,16 @@ final class PambMovProcessingService
         };
         $today = CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->startOfDay();
         $workingDaysAtStage = $pendingSince
-            ? $this->calendar->workingDaysBetween($pendingSince, $today, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS)
+            ? LocalNavigationTrace::measureCurrent('st_mov_pending_days', fn () => $this->calendar->workingDaysBetween($pendingSince, $today, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS))
             : null;
         $reviewEvents = $submission->relationLoaded('movReviewEvents')
             ? $submission->movReviewEvents->sortBy('created_at')->values()
             : collect();
+        $turnaround = LocalNavigationTrace::measureCurrent('st_mov_turnaround', fn () => $this->turnaround(
+            $submission,
+            $status === self::ACTIVITY_CONDUCTED ? $workingDaysAtStage : null,
+            $status === self::ACTIVITY_CONDUCTED ? $today : null,
+        ));
 
         return [
             'applicable' => true,
@@ -93,7 +100,7 @@ final class PambMovProcessingService
                 ['key' => self::READY_FOR_RELEASE, 'label' => $this->routingPolicy->isDirectPenro($submission) ? 'Reviewed / Ready for PENRO Receipt' : 'Reviewed by CENRO CDS Chief - Ready for Release', 'complete' => in_array($status, [self::READY_FOR_RELEASE, self::RELEASED_BY_CENRO, self::RECEIVED_BY_PENRO], true), 'current' => $status === self::READY_FOR_RELEASE],
                 ['key' => $this->routingPolicy->isDirectPenro($submission) ? self::RECEIVED_BY_PENRO : self::RELEASED_BY_CENRO, 'label' => $this->routingPolicy->isDirectPenro($submission) ? 'Received by PENRO' : 'Released by CENRO to PENRO', 'complete' => in_array($status, [self::RELEASED_BY_CENRO, self::RECEIVED_BY_PENRO], true), 'current' => false],
             ],
-            'turnaround' => $this->turnaround($submission),
+            'turnaround' => $turnaround,
             'review_history' => $submission->relationLoaded('movReviewEvents')
                 ? $reviewEvents->map(function (PambMovReviewEvent $event) use ($submission): array {
                     $actor = $this->reviewActorContext($event->event_key, $submission);
@@ -247,7 +254,7 @@ final class PambMovProcessingService
     }
 
     /** @return array<string, mixed> */
-    private function turnaround(ConservationReportSubmission $submission): array
+    private function turnaround(ConservationReportSubmission $submission, ?int $elapsedActivityDays = null, ?CarbonImmutable $elapsedAsOf = null): array
     {
         $base = $this->compliance->authoritativeDate($submission);
         $deadline = $this->compliance->deadline($submission);
@@ -255,7 +262,15 @@ final class PambMovProcessingService
 
         $today = CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->startOfDay();
         $due = CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE)->startOfDay();
-        $elapsed = $this->calendar->workingDaysBetween($base, $today, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS);
+        // For an activity-conducted MOV, present() already computed the same
+        // base-to-today working-day value for the current-stage field. Reuse
+        // that pure, per-record result for this response only; no actor or
+        // authorization decision is cached.
+        $canReuseElapsed = $elapsedActivityDays !== null && $elapsedAsOf?->isSameDay($today);
+        $elapsed = $canReuseElapsed
+            ? $elapsedActivityDays
+            : $this->calendar->workingDaysBetween($base, $today, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS);
+        $remaining = 0;
         if ($today->equalTo($due)) $label = 'DUE TODAY';
         elseif ($today->greaterThan($due)) {
             $overdue = $this->calendar->workingDaysBetween($due, $today, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS);
@@ -264,7 +279,7 @@ final class PambMovProcessingService
             $remaining = $this->calendar->workingDaysBetween($today, $due, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS);
             $label = 'DAY '.min(7, $elapsed).' OF 7 · '.$remaining.' WORKING DAY'.($remaining === 1 ? '' : 'S').' REMAINING';
         }
-        return ['label' => $label, 'day' => min(7, $elapsed), 'remaining' => $today->lessThan($due) ? $this->calendar->workingDaysBetween($today, $due, 'after_through', $submission->target_office, BusinessCalendarService::PAMB_WORKING_WEEKDAYS) : 0, 'deadline' => $deadline];
+        return ['label' => $label, 'day' => min(7, $elapsed), 'remaining' => $remaining, 'deadline' => $deadline];
     }
 
     private function assertScoped(ConservationReportSubmission $submission, User $actor): void

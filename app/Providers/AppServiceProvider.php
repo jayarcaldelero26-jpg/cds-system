@@ -7,6 +7,7 @@ use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Modules\ModuleMetadataResolver;
 use App\Services\Reports\ReportRequirementRegistry;
+use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Gate;
@@ -27,6 +28,10 @@ class AppServiceProvider extends ServiceProvider
             };
         });
         $this->app->scoped(ReportRequirementRegistry::class, fn (): ReportRequirementRegistry => new ReportRequirementRegistry());
+        // This policy caches only the canonical direct-PENRO PA identity. Keep
+        // that lookup request-scoped so repeated presenters share it without
+        // retaining actor or record authorization state across requests.
+        $this->app->scoped(ProtectedAreaRoutingPolicy::class, fn (): ProtectedAreaRoutingPolicy => new ProtectedAreaRoutingPolicy());
         $this->app->scoped(ModuleMetadataResolver::class, function ($app): ModuleMetadataResolver {
             return new ModuleMetadataResolver(
                 $app->make(ConservationReportWorkflowRegistry::class),

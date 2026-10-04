@@ -1,13 +1,17 @@
 <?php
 
 use App\Models\BmsReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\EngpReportSubmission;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
+use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 
@@ -121,21 +125,30 @@ test('role-free routing retains distinct focal chief CENRO records and PENRO rec
 
 test('Development tracking remains office scoped and preserves routing boundaries', function () {
     $user = categoryTrackingUser('CENRO_CDS_FOCAL', 'development', ['office_designated' => 'CENRO Manay']);
+    $reports = [];
     foreach (['CENRO Manay', 'CENRO Mati'] as $office) {
-        EngpReportSubmission::create([
+        $reports[$office] = EngpReportSubmission::create([
             'workflow_key' => 'ngp_produce', 'office' => $office, 'section_name' => 'NGP', 'activity_name' => 'Office scope regression',
             'document_type' => 'Quarterly Report', 'reporting_year' => 2026, 'period_key' => 'Q1', 'period_label' => 'Quarter 1', 'deadline_submission' => '2026-03-10',
+        ]);
+        DocumentRoutingEvent::query()->create([
+            'source_type' => 'engp', 'source_id' => $reports[$office]->id, 'workflow_key' => 'ngp_produce',
+            'event_key' => 'released', 'from_stage' => 'penro_records_final', 'to_stage' => 'released_to_regional',
+            'occurred_at' => '2026-03-11 09:00:00', 'recorded_by' => $user->id,
         ]);
     }
     $this->actingAs($user);
     $rows = app(SubmissionTrackingService::class)->records();
     expect($rows)->toHaveCount(1)->and($rows->first()['target_office'])->toBe('CENRO Manay')->and($rows->first()['can_transition'])->toBeTrue();
+    $completed = app(SubmissionTrackingService::class)->records(['program' => 'engp', 'status' => 'Completed']);
+    expect($completed->pluck('source_id')->all())->toBe([$reports['CENRO Manay']->id]);
     $this->get('/submission-tracking')->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('trackingContext.is_cenro_user', true));
     $other = EngpReportSubmission::where('office', 'CENRO Mati')->firstOrFail();
     $this->post('/submission-tracking/engp/'.$other->id.'/forward_to_cenro_chief', ['stage' => 'forward_to_cenro_chief'])->assertForbidden();
     $this->actingAs(categoryTrackingUser('PENRO_RECORDS', 'development'));
-    expect(app(SubmissionTrackingService::class)->records())->toHaveCount(2);
+    expect(app(SubmissionTrackingService::class)->records())->toHaveCount(2)
+        ->and(app(SubmissionTrackingService::class)->records(['program' => 'engp', 'status' => 'Completed'])->pluck('source_id')->all())->toBe([$reports['CENRO Manay']->id, $reports['CENRO Mati']->id]);
 });
 
 test('sidebar uses the dedicated tracking capability', function () {
@@ -167,6 +180,18 @@ test('real CENRO Chief APL shape uses the displayed PA office fallback for track
 });
 
 test('role-free CENRO Chief reviews CENRO-managed PAMB while PENRO Chief is denied', function () {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    Storage::disk('local')->put('pamb/review.pdf', "%PDF-1.4\nIsolated role-scope checkpoint fixture");
+    $archiveGateway = \Mockery::mock(GoogleDriveArchiveGateway::class);
+    $archiveGateway->shouldReceive('findByIdentityAndHash')->once()->andReturnNull();
+    $archiveGateway->shouldReceive('upload')->once()->andReturn(['file_id' => 'role-scope-test-archive', 'folder_id' => 'role-scope-test-folder']);
+    $archiveGateway->shouldReceive('verify')->once()->with('role-scope-test-archive', \Mockery::type('string'), \Mockery::type('int'))->andReturnTrue();
+    $archiveGateway->shouldReceive('verifyAvailability')->once()->with('role-scope-test-archive', \Mockery::type('string'), \Mockery::type('int'))->andReturn('verified');
+    app()->instance(GoogleDriveArchiveGateway::class, $archiveGateway);
+
+    $focal = categoryTrackingUser('CENRO_CDS_FOCAL');
     $chief = categoryTrackingUser('CENRO_CDS_CHIEF');
     $penroChief = categoryTrackingUser('PENRO_CDS_CHIEF');
     $records = categoryTrackingUser('PENRO_RECORDS');
@@ -182,12 +207,32 @@ test('role-free CENRO Chief reviews CENRO-managed PAMB while PENRO Chief is deni
     $this->actingAs($penroChief)->post($review, ['decision' => 'ready_for_release'])->assertForbidden();
     $this->actingAs($chief)->post($review, ['decision' => 'ready_for_release'])->assertRedirect()->assertSessionHasNoErrors();
     expect($report->fresh()->mov_processing_status)->toBe('ready_for_release');
+
+    $transition = fn (User $actor, string $action) => $this->actingAs($actor)->post(
+        route('submission-tracking.transition', ['conservation', $report->id, $action]),
+        ['stage' => $action],
+    );
+    $transition($focal, 'forward_to_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+    $transition($chief, 'receive_at_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+    $transition($chief, 'forward_to_cenro_records')->assertRedirect()->assertSessionHasNoErrors();
+    $transition($cenroRecords, 'receive_at_cenro_records')->assertRedirect()->assertSessionHasNoErrors();
+
     $release = route('submission-tracking.transition', ['conservation', $report->id, 'cenro_release']);
-    $this->post($release, ['date' => '2026-08-04'])->assertForbidden();
-    $this->actingAs($cenroRecords)->post($release, ['date' => '2026-08-04'])->assertRedirect()->assertSessionHasNoErrors();
-    $this->actingAs($records)->post(route('submission-tracking.transition', ['conservation', $report->id, 'penro_receipt']), ['date' => '2026-08-05'])
+    $eventsBeforeDeniedRelease = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count();
+    $this->actingAs($chief)->post($release, ['stage' => 'cenro_release'])->assertForbidden();
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe($eventsBeforeDeniedRelease);
+    $transition($cenroRecords, 'cenro_release')->assertRedirect()->assertSessionHasNoErrors();
+
+    $eventsBeforeDeniedReceipt = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count();
+    $this->actingAs($penroChief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_penro_records']), ['stage' => 'receive_at_penro_records'])->assertForbidden();
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe($eventsBeforeDeniedReceipt);
+    $transition($records, 'receive_at_penro_records')
         ->assertRedirect()->assertSessionHasNoErrors();
-    expect($report->fresh()->date_received_penro?->toDateString())->toBe('2026-08-05');
+    expect($report->fresh()->date_received_penro)->not->toBeNull();
+    $forward = PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO;
+    $this->actingAs($records)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $forward]), [
+        'stage' => $forward,
+    ])->assertRedirect()->assertSessionHasNoErrors();
 });
 
 test('legacy role-owned operational categories do not bypass the category assignment model', function (): void {
@@ -199,4 +244,29 @@ test('legacy role-owned operational categories do not bypass the category assign
 
     expect(app(OrganizationalAccessService::class)->canViewSubmissionTracking($user))->toBeFalse();
     $this->actingAs($user)->get('/submission-tracking')->assertForbidden();
+});
+
+test('same tracking service reevaluates CENRO scope when the authenticated actor changes', function (): void {
+    $mati = categoryTrackingUser('CENRO_CDS_FOCAL', 'conservation', ['office_designated' => 'CENRO Mati']);
+    $baganga = categoryTrackingUser('CENRO_CDS_FOCAL', 'conservation', ['office_designated' => 'CENRO Baganga']);
+    $matiArea = categoryTrackingArea($mati, 'CENRO Mati', 'Mati lifecycle scope PA');
+    $bagangaArea = categoryTrackingArea($baganga, 'CENRO Baganga', 'Baganga lifecycle scope PA');
+    $matiReport = categoryTrackingReport($matiArea, 'CENRO Mati');
+    $bagangaReport = categoryTrackingReport($bagangaArea, 'CENRO Baganga');
+    $tracking = app(SubmissionTrackingService::class);
+
+    $this->actingAs($mati);
+    $matiRows = $tracking->records(['program' => 'conservation'], null, false);
+    $matiPage = $this->get('/submission-tracking')->assertOk()->inertiaProps();
+    $this->actingAs($baganga);
+    $bagangaRows = $tracking->records(['program' => 'conservation'], null, false);
+    $bagangaPage = $this->get('/submission-tracking')->assertOk()->inertiaProps();
+    $workspaceIds = fn (array $props) => collect($props['workspaceQueues'])->flatten(1)->pluck('source_id')->map(fn ($id): int => (int) $id);
+
+    expect($matiRows->pluck('source_id')->all())->toContain($matiReport->id)->not->toContain($bagangaReport->id)
+        ->and($bagangaRows->pluck('source_id')->all())->toContain($bagangaReport->id)->not->toContain($matiReport->id)
+        ->and($matiPage)->not->toHaveKey('queues')
+        ->and($workspaceIds($matiPage))->toContain($matiReport->id)->not->toContain($bagangaReport->id)
+        ->and($bagangaPage)->not->toHaveKey('queues')
+        ->and($workspaceIds($bagangaPage))->toContain($bagangaReport->id)->not->toContain($matiReport->id);
 });

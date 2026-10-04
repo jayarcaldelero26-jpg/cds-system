@@ -26,11 +26,16 @@ final class ProtectedAttachmentController extends Controller
         $sourceAuthorized = is_string($ability) && $ability !== ''
             && (bool) $user?->can($ability)
             && $this->organization->canViewSubmissionAttachment($user, $recordModel);
-        $routingSource = $definition['routing_source'] ?? null;
-        $isCurrentOfficialDocument = is_string($routingSource)
-            && ($definition['official_key'] ?? null) === $attachment
-            && $this->routing->canAccessCurrentDocument($recordModel, $routingSource, $user);
-        abort_unless($sourceAuthorized || $isCurrentOfficialDocument, 403);
+        // The live-routing fallback exists for official documents when the
+        // source ability is absent. Do not resolve routing state after the
+        // primary ability and record-scope check has already authorized access.
+        if (! $sourceAuthorized) {
+            $routingSource = $definition['routing_source'] ?? null;
+            $isCurrentOfficialDocument = is_string($routingSource)
+                && ($definition['official_key'] ?? null) === $attachment
+                && $this->routing->canAccessCurrentDocument($recordModel, $routingSource, $user);
+            abort_unless($isCurrentOfficialDocument, 403);
+        }
 
         return $this->attachments->response($source, $recordModel, $attachment);
     }

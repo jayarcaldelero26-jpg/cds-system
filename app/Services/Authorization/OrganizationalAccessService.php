@@ -291,11 +291,48 @@ final class OrganizationalAccessService
     {
         if ($record instanceof ProtectedArea) return $this->canAccessProtectedArea($user, $record->getKey());
         $protectedAreaId = $record->getAttribute('protected_area_id');
-        if ($protectedAreaId !== null) return $this->canAccessProtectedArea($user, $protectedAreaId);
+        if ($protectedAreaId !== null) {
+            $area = $record->relationLoaded('protectedArea') ? $record->getRelation('protectedArea') : null;
+            if ($area instanceof ProtectedArea
+                && $area->relationLoaded('supervisingOfficeAssignment')
+                && ($area->supervisingOfficeAssignment === null
+                    || $area->supervisingOfficeAssignment->relationLoaded('office'))) {
+                return $this->canAccessLoadedProtectedArea($user, $area);
+            }
+
+            return $this->canAccessProtectedArea($user, $protectedAreaId);
+        }
         if (! $user || ! $this->canAccessUnit($user, self::CONSERVATION)) return false;
         if ($this->isGlobal($user)) return true;
         if ($this->isCenroCategory($this->effectiveCategory($user))) return $this->same($user->office_designated, $record->getAttribute('target_office')) || (blank($record->getAttribute('target_office')) && (int) $record->getAttribute('created_by') === (int) $user->getKey());
         return true;
+    }
+
+    /** Evaluate the unchanged PA predicates against request-eager-loaded assignment facts. */
+    private function canAccessLoadedProtectedArea(?User $user, ProtectedArea $area): bool
+    {
+        if (! $user || ! $this->canAccessUnit($user, self::CONSERVATION)) return false;
+        if ($this->isGlobal($user)) return true;
+        $category = $this->effectiveCategory($user);
+        if ($this->isCenroCategory($category)) {
+            $officeCode = $this->officeCode($user->office_designated);
+            if ($officeCode === null) return false;
+            $assignment = $area->supervisingOfficeAssignment;
+            $office = $assignment?->office;
+            $hasAssignment = $assignment?->assignment_type === 'supervising'
+                && $office?->code === $officeCode
+                && $office?->office_type === 'cenro'
+                && (bool) $office?->is_active;
+            if ($hasAssignment) return true;
+            $supervisingOffice = filled($office?->name)
+                ? $this->normalizeOffice($office->name)
+                : $this->fallbackSupervisingOfficeForProtectedArea($area);
+            return $this->same($supervisingOffice, $user->office_designated);
+        }
+        if ($category === self::PAMO) {
+            return $user->protected_area_id !== null && (int) $user->protected_area_id === (int) $area->getKey();
+        }
+        return $this->isPenroCategory($category);
     }
 
     public function canActOnProtectedAreaRecord(?User $user, Model $record): bool { return $this->canAccessProtectedAreaRecord($user, $record); }
@@ -541,7 +578,19 @@ final class OrganizationalAccessService
         return collect($this->canonicalOffices())->first(fn (string $canonical): bool => mb_strtolower($canonical) === mb_strtolower($value)) ?? $value;
     }
 
-    public function activeOfficeNames(): array { return OrganizationalOffice::query()->where('is_active', true)->orderBy('name')->pluck('name')->all(); }
+    public function activeOfficeNames(): array
+    {
+        // Reuse only this pure catalog fact for the current HTTP request;
+        // actor, office, protected-area and permission decisions stay live.
+        $request = app('request');
+        $key = 'cds.active_organizational_office_names';
+        if (is_array($cached = $request->attributes->get($key))) return $cached;
+
+        $names = OrganizationalOffice::query()->where('is_active', true)->orderBy('name')->pluck('name')->all();
+        $request->attributes->set($key, $names);
+
+        return $names;
+    }
     public function cenroOffices(): array { return ['CENRO Baganga', 'CENRO Manay', 'CENRO Mati', 'CENRO Lupon']; }
     public function penroOffices(): array { return ['PENRO Davao Oriental']; }
 

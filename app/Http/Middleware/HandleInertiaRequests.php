@@ -7,6 +7,7 @@ use App\Models\ModuleDefinition;
 use App\Services\Notifications\EdatsInAppNotificationService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Support\LocalNavigationTrace;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -37,12 +38,14 @@ class HandleInertiaRequests extends Middleware
             return redirect()->route('login')->with('account_inactive', true);
         }
 
-        return parent::handle($request, $next);
+        return LocalNavigationTrace::measure($request, 'inertia_route_pipeline', fn () => parent::handle($request, $next));
     }
 
     public function share(Request $request): array
     {
+        $shareStarted = LocalNavigationTrace::markStarted($request, 'inertia_share_eager');
         $user = $request->user();
+        LocalNavigationTrace::activate($request);
 
         // CDS Admin is the only role with a global bypass. All other UI
         // visibility must follow the same named abilities enforced by routes.
@@ -73,7 +76,7 @@ class HandleInertiaRequests extends Middleware
             ? $engpIacGeneratorUrl
             : null;
 
-        return [
+        $sharedProps = [
             ...parent::share($request),
             'auth' => [
                 'user' => $user ? [
@@ -193,37 +196,43 @@ class HandleInertiaRequests extends Middleware
                 'canViewComplianceAlerts' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('compliance-alerts.manage'),
                 'canManageComplianceAlerts' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('compliance-alerts.manage'),
             ],
-            'managementPlanTypes' => fn () => $canViewManagementPlans
+            'managementPlanTypes' => fn () => LocalNavigationTrace::measure($request, 'shared_plan_types', fn () => $canViewManagementPlans
                 ? ManagementPlanType::query()
                     ->where('is_active', true)
                     ->orderByRaw('sort_order IS NULL')
                     ->orderBy('sort_order')
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
-                : [],
-            'genericModuleNavigation' => fn () => $canBrowseConservation && ! $isMes && $can('technical-reports.view')
+                : []),
+            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', fn () => $canBrowseConservation && ! $isMes && $can('technical-reports.view')
                 ? ModuleDefinition::query()->active()->generic()->notRetired()->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
                     ->get(['name', 'code', 'program_area'])
                     ->map(fn (ModuleDefinition $module): array => ['label' => $module->name, 'href' => route('conservation-reports.index', $module->code), 'program_area' => $module->program_area->value])
                     ->values()
-                : [],
+                : []),
             'engpIacGeneratorUrl' => $engpIacGeneratorUrl,
-            'notificationBell' => fn () => $user && Schema::hasTable('notifications') ? [
-                'unread_count' => $user->unreadNotifications()->latest()->get()->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))->take(8)->count(),
-                'notifications' => $user->unreadNotifications()->latest()->get()->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))->take(8)->map(fn ($notification): array => [
-                    'id' => $notification->id,
-                    'title' => $notification->data['title'] ?? 'System notification',
-                    'message' => $notification->data['message'] ?? '',
-                    'severity' => $notification->data['severity'] ?? 'info',
-                    'category' => $notification->data['category'] ?? 'submission_updates',
-                    'source_label' => $notification->data['source_label'] ?? 'Report',
-                    'office' => $notification->data['office'] ?? null,
-                    'protected_area' => $notification->data['protected_area'] ?? null,
-                    'url' => $notification->data['url'] ?? null,
-                    'read_at' => $notification->read_at?->toIso8601String(),
-                    'created_at' => $notification->created_at?->toIso8601String(),
-                ]),
-            ] : ['unread_count' => 0, 'notifications' => []],
+            'notificationBell' => fn () => LocalNavigationTrace::measure($request, 'shared_notification_bell', fn () => $user && Schema::hasTable('notifications') ? (function () use ($user): array {
+                $notifications = $user->unreadNotifications()->latest()->get()
+                    ->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))
+                    ->take(8);
+
+                return [
+                    'unread_count' => $notifications->count(),
+                    'notifications' => $notifications->map(fn ($notification): array => [
+                        'id' => $notification->id,
+                        'title' => $notification->data['title'] ?? 'System notification',
+                        'message' => $notification->data['message'] ?? '',
+                        'severity' => $notification->data['severity'] ?? 'info',
+                        'category' => $notification->data['category'] ?? 'submission_updates',
+                        'source_label' => $notification->data['source_label'] ?? 'Report',
+                        'office' => $notification->data['office'] ?? null,
+                        'protected_area' => $notification->data['protected_area'] ?? null,
+                        'url' => $notification->data['url'] ?? null,
+                        'read_at' => $notification->read_at?->toIso8601String(),
+                        'created_at' => $notification->created_at?->toIso8601String(),
+                    ]),
+                ];
+            })() : ['unread_count' => 0, 'notifications' => []]),
             'flash' => [
                 'status' => fn () => $request->session()->get('status'),
                 'success' => fn () => $request->session()->get('success'),
@@ -234,5 +243,9 @@ class HandleInertiaRequests extends Middleware
             ],
             'status' => fn (): ?string => $request->session()->get('status'),
         ];
+
+        LocalNavigationTrace::markFinished($request, 'inertia_share_eager', $shareStarted);
+
+        return $sharedProps;
     }
 }

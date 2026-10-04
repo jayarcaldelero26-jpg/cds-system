@@ -11,19 +11,19 @@ test("shared progress keeps valid routing progress and does not substitute a com
         mov_processing: { applicable: true, status_key: "released_by_cenro", percent: 100 },
         routing: { processing_percentage: 35 },
     });
-    assert.deepEqual(measure, { label: "Routing Progress", value: 35 });
+    assert.deepEqual(measure, { label: "Processing Progress", value: 35 });
 
     assert.deepEqual(
         progressMeasureForSubmission({
             mov_processing: { applicable: true, status_key: "released_by_cenro", percent: 100 },
             routing: { processing_percentage: 80 },
         }),
-        { label: "Routing Progress", value: 80 },
+        { label: "Processing Progress", value: 80 },
     );
 
     assert.deepEqual(
         progressMeasureForSubmission({ routing: { processing_percentage: 100 }, mov_processing: { applicable: true, percent: 35 } }),
-        { label: "Routing Progress", value: 100 },
+        { label: "Processing Progress", value: 100 },
     );
 
     const component = await readFile(
@@ -55,12 +55,19 @@ test("shared progress shimmer is clipped to the filled region and honors reduced
 test("non-MOV progress keeps its source routing value and zero remains hidden", () => {
     assert.deepEqual(
         progressMeasureForSubmission({ routing: { processing_percentage: 55 } }),
-        { label: "Routing Progress", value: 55 },
+        { label: "Processing Progress", value: 55 },
     );
     assert.equal(
         progressMeasureForSubmission({ routing: { processing_percentage: 0 } }),
         null,
     );
+});
+
+test("processing at 100 percent remains separate from terminal custody completion", () => {
+    assert.deepEqual(progressMeasureForSubmission({ routing_complete: false, routing: { processing_percentage: 100 } }), {
+        label: "Processing Progress",
+        value: 100,
+    });
 });
 
 test("timeline exposes the next step and dynamically counts the remaining hidden steps", () => {
@@ -116,10 +123,9 @@ test("shared modal footer and timeline controls keep existing guarded action han
     assert.match(page, /canAdminRoutingOverride && <Button/);
     assert.doesNotMatch(page, /\bdarkTheme\s*\n\s*open=\{Boolean\(showFullDetails/);
     assert.match(page, /bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900\/80/);
-    assert.match(page, /aria-label="Routing progress and current official document"/);
-    assert.match(page, /Routing Progress/);
     assert.match(page, /Current Official Document/);
     assert.match(page, /hideRoutingHistory/);
+    assert.match(page, /hideRoutingHistory\s+onAction=/);
     assert.match(pambTimeline, /Show \$\{hiddenSteps\.length\} more steps/);
     assert.match(genericTimeline, /Show \$\{hiddenSteps\.length\} more steps/);
     assert.doesNotMatch(pambTimeline, /onReviewHistory|View Review History/);

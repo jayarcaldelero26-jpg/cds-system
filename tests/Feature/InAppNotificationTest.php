@@ -21,6 +21,8 @@ use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -47,6 +49,29 @@ test('unread count, read state, and mark all as read are user-specific', functio
     $this->actingAs($this->user)->post(route('notifications.read-all'))->assertRedirect();
 
     expect($this->user->fresh()->unreadNotifications()->count())->toBe(0);
+});
+
+test('shared notification bell reads the capped unread alert collection once per page request', function (): void {
+    for ($index = 1; $index <= 10; $index++) {
+        $this->user->notify(new EdatsInAppNotification(notificationPayload('shared-bell-'.$index)));
+    }
+
+    $bellQueries = 0;
+    DB::listen(function (QueryExecuted $query) use (&$bellQueries): void {
+        $sql = strtolower($query->sql);
+        if (str_contains($sql, 'from "notifications"')
+            && str_contains($sql, '"read_at" is null')
+            && str_contains($sql, 'order by "created_at" desc')) {
+            $bellQueries++;
+        }
+    });
+
+    $response = $this->actingAs($this->user)->get(route('notifications.index'))->assertOk();
+    $props = $response->inertiaProps();
+
+    expect(data_get($props, 'notificationBell.unread_count'))->toBe(8)
+        ->and(data_get($props, 'notificationBell.notifications'))->toHaveCount(8)
+        ->and($bellQueries)->toBe(1);
 });
 
 test('authenticated user can mark their own notification as read', function () {
@@ -197,30 +222,49 @@ test('overdue and due soon in-app notifications are derived once from the live a
         ->and($this->user->notifications()->count())->toBe(2);
 });
 
-test('submission tracking records routing dates without creating bell notifications', function () {
-    $report = notificationConservationReport(notificationProtectedArea('Pujada Bay Protected Landscape', $this->user), $this->user);
-    $tracking = app(SubmissionTrackingService::class);
+test('submission tracking notifies the next owner at a canonical custody handoff', function () {
+    $area = notificationProtectedArea('Pujada Bay Protected Landscape', $this->user);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising', 'assigned_by' => $this->user->id,
+    ]);
+    $focal = User::factory()->create(['section' => OrganizationalAccessService::CENRO_FOCAL, 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
+    $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
+    foreach ([$focal, $chief] as $actor) {
+        foreach (['reports.view', 'technical-reports.update'] as $permission) $actor->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+    }
+    $report = notificationConservationReport($area, $focal, ['workflow_key' => 'homestay', 'target_office' => 'CENRO Mati']);
 
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::CENRO_RELEASE, '2026-08-10', $this->user->id);
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-11', $this->user->id);
-    $tracking->transition('conservation', $report->id, SubmissionTrackingService::REGIONAL_ENDORSEMENT, '2026-08-12', $this->user->id);
+    app(DocumentRoutingTransitionService::class)->transition($report, 'conservation', 'forward_to_cenro_chief', $focal->id);
 
-    $types = $this->user->notifications()->get()->pluck('data')->pluck('type');
-    expect($types)->not->toContain('cenro_released', 'penro_received', 'for_regional_endorsement', 'region_endorsed')
-        ->and($report->fresh()->date_endorsed_regional?->toDateString())->toBe('2026-08-12');
+    expect($chief->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toBe(['Submission Forwarded'])
+        ->and($focal->fresh()->notifications()->count())->toBe(0)
+        ->and($this->user->fresh()->notifications()->count())->toBe(0)
+        ->and($report->fresh()->date_report_released_cenro)->toBeNull()
+        ->and($report->fresh()->date_received_penro)->toBeNull()
+        ->and($report->fresh()->date_endorsed_regional)->toBeNull();
 });
 
 test('MHRWS bypasses CENRO routing and ENGP never generates regional endorsement routing', function () {
     $engpActor = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'unit_assignment' => null, 'office_designated' => 'CENRO Mati']);
+    foreach (['reports.view', 'technical-reports.update'] as $permission) $engpActor->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+    $penroRecords = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
+    foreach (['reports.view', 'technical-reports.update'] as $permission) $penroRecords->givePermissionTo(Permission::findOrCreate($permission, 'web'));
     $mhrws = notificationConservationReport(notificationProtectedArea('Mt. Hamiguitan Range Wildlife Sanctuary', $this->user, 'MHRWS'), $this->user);
     $engp = notificationEngpReport($this->user, ['workflow_key' => 'cbep']);
-    $tracking = app(SubmissionTrackingService::class);
+    $tracking = app(DocumentRoutingTransitionService::class);
 
-    $tracking->transition('conservation', $mhrws->id, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-10', $this->user->id);
-    $tracking->transition('engp', $engp->id, 'forward_to_cenro_chief', '2026-08-10', $engpActor->id);
+    $directEvent = $tracking->transition($mhrws, 'conservation', 'receive_at_penro_records', $penroRecords->id);
+    try {
+        $engpEvent = $tracking->transition($engp, 'engp', 'forward_to_cenro_chief', $engpActor->id);
+    } catch (\Throwable $exception) { throw new \RuntimeException('ENGP forward failed at '.json_encode($tracking->state($engp->fresh(), 'engp')['stage']).': '.$exception->getMessage(), previous: $exception); }
 
     expect($this->user->notifications()->count())->toBe(0)
-        ->and($tracking->queues()[SubmissionTrackingService::CENRO_RELEASE]->where('source_id', $mhrws->id))->toBeEmpty()
+        ->and($directEvent->from_stage)->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and($tracking->state($mhrws->fresh(), 'conservation')['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and(collect($tracking->state($mhrws->fresh(), 'conservation')['actions'])->pluck('key'))->toContain('forward_to_office_penro')->not->toContain('forward_to_cenro_chief')
+        ->and($engpEvent->to_stage)->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)
         ->and($engp->fresh()->date_received_penro)->toBeNull();
 });
 

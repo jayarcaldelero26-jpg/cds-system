@@ -89,12 +89,13 @@ test('assigned PAMO sees only Regular and Special PAMB submissions for its assig
         ->assertOk()
         ->assertInertia(fn ($page) => $page->has('submissions.data', 0));
 
-    $this->actingAs($pamo)
+    $trackingResponse = $this->actingAs($pamo)
         ->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $regular->id]))
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->where('trackingContext.selected_record.source_id', $regular->id)
-            ->where('queues.for_submission.0.source_id', $regular->id));
+        ->assertOk();
+    $trackingProps = $trackingResponse->inertiaProps();
+    expect($trackingProps)->not->toHaveKey('queues')
+        ->and($trackingProps['trackingContext']['selected_record']['source_id'])->toBe($regular->id)
+        ->and(collect($trackingProps['workspaceQueues'])->flatten(1)->pluck('source_id')->map(fn ($id): int => (int) $id))->toContain($regular->id);
 
     $this->actingAs($pamo)
         ->get(route('settings.index'))

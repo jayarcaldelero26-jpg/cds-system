@@ -32,19 +32,22 @@ test("shared buttons preserve variant semantics and apply restrained interaction
     assert.match(styles, /\.cds-button-interaction:disabled,[\s\S]*?transform: none/);
     assert.match(styles, /prefers-reduced-motion: reduce\)[\s\S]*?\.cds-button-interaction,[\s\S]*?\[data-cds-action="true"\]\s*\{\s*transform: none !important;\s*transition: none !important;/);
     assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="danger"\][\s\S]*?linear-gradient\(180deg, #b91c1c 0%, #f87171 100%\)/);
-    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="cancel"\]/);
+    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="cancel"\],[\s\S]*?background-image: none;[\s\S]*?color: #374151;/);
+    assert.match(styles, /\.dark \[data-cds-action="true"\]\[data-cds-action-variant="cancel"\][\s\S]*?background-color: #1f2937;[\s\S]*?color: #f3f4f6;/);
     assert.match(styles, /--cds-selected-tab-gradient:\s*linear-gradient\(105deg, #16a34a 0%, #86efac 100%\)/);
     assert.match(styles, /button\[role="tab"\]\[aria-selected="true"\][\s\S]*?background-image: var\(--cds-selected-tab-gradient\)/);
     assert.match(styles, /nav\[aria-label="Dashboard program tabs"\] button\[aria-current="page"\]/);
+    assert.match(styles, /\.cds-submission-tracking-nav-tab\[aria-current="page"\][\s\S]*?background-image: var\(--cds-selected-tab-gradient\)/);
 });
 
 test("shared modal, confirmation, export, and PAMB action controls retain their handlers through Button", async () => {
     const paths = [
         "../../resources/js/Components/Crud/CrudDetailsModal.jsx",
         "../../resources/js/Components/Crud/CrudFormModal.jsx",
+        "../../resources/js/Pages/SubmissionTracking/Index.jsx",
         "../../resources/js/Components/ConfirmDialog.jsx",
         "../../resources/js/Components/CurrentPasswordConfirmDialog.jsx",
-        "../../resources/js/Components/SubmissionTracking/PambMovProgress.jsx",
+        "../../resources/js/Components/SubmissionTracking/PambMovActions.jsx",
         "../../resources/js/Components/SubmissionTracking/PambRoutingTimeline.jsx",
         "../../resources/js/Components/SubmissionTracking/DocumentRoutingTimeline.jsx",
         "../../resources/js/Components/SubmissionTracking/RoutingAttachmentField.jsx",
@@ -60,21 +63,31 @@ test("shared modal, confirmation, export, and PAMB action controls retain their 
         "../../resources/js/Pages/ManagementPlans/PlanInformation.jsx",
     ];
     const sources = await Promise.all(paths.map((path) => readFile(new URL(path, import.meta.url), "utf8")));
-    const [details, form, confirm, password, pamb, pambTimeline, genericTimeline, attachmentField, attachmentLink, awsExport, spatialLayers, notifications, imea, diagnostics, layout, managementForm, managementIndex, planInformation] = sources;
+    const [details, form, submissionTracking, confirm, password, pamb, pambTimeline, genericTimeline, attachmentField, attachmentLink, awsExport, spatialLayers, notifications, imea, diagnostics, layout, managementForm, managementIndex, planInformation] = sources;
 
     assert.match(details, /<Button[^>]*onClick=\{onEdit\}/);
     assert.match(details, /<Button[^>]*onClick=\{onDelete\}/);
     assert.match(details, /<Button[^>]*onClick=\{onClose\}/);
-    assert.match(form, /<Button type="submit" size="compact" variant="primary" disabled=\{processing\}/);
+    assert.match(form, /saveVariant = 'primary'/);
+    assert.match(form, /<Button type="submit" size="compact" variant=\{saveVariant\} disabled=\{processing\}/);
+    assert.match(submissionTracking, /saveVariant=\{genericAction\?\.correction \? "warning" : "primary"\}/);
+    assert.match(submissionTracking, /reviewForm\.data\.decision === "needs_correction" \? "warning" : "primary"/);
+    assert.match(submissionTracking, /current_document\.can_preview \? <Button[^>]*variant="cancel"/);
+    assert.match(submissionTracking, /data-cds-action-variant="cancel"[\s\S]*?Preview MOV \/ Report/);
+    assert.match(submissionTracking, /selected === category \? "cds-tab-active/);
+    assert.match(submissionTracking, /selected === null \? "cds-tab-active/);
     assert.match(form, /<Button[^>]*variant="danger" onClick=\{onDelete\}/);
     assert.match(confirm, /variant="cancel" onClick=\{onCancel\}/);
     assert.match(confirm, /variant=\{variant === 'danger' \? 'danger' : 'primary'\} onClick=\{onConfirm\}/);
     assert.match(password, /<Button type="submit" size="compact" variant="primary" disabled=\{processing \|\| !password\}/);
     assert.match(pamb, /onClick=\{submitReview\} disabled=\{submitting\}/);
     assert.match(pamb, /onClick=\{\(\) => onReview\?\.\(row, 'ready_for_release'\)\}/);
+    assert.match(pamb, /variant="warning" onClick=\{\(\) => onReview\?\.\(row, 'needs_correction'\)\}/);
     assert.match(pamb, /onClick=\{\(\) => onRelease\?\.\(row\)\}/);
     assert.match(pambTimeline, /<Button[\s\S]*?onRecord\?\./);
+    assert.match(pambTimeline, /variant=\{action\.correction \? "warning" : "primary"\}/);
     assert.match(genericTimeline, /onClick=\{\(\) => onAction\?\.\(action\)\}/);
+    assert.match(genericTimeline, /variant=\{action\.correction \? "warning" : "primary"\}/);
     assert.match(attachmentField, /<Button[^>]*onClick=\{downloadCurrent\}/);
     assert.match(attachmentLink, /<Button[\s\S]*?onClick=\{download\}/);
     assert.match(awsExport, /onClick=\{exportFile\} disabled=\{!selectedFormat \|\| Boolean\(generating\)\}/);
@@ -82,13 +95,15 @@ test("shared modal, confirmation, export, and PAMB action controls retain their 
     assert.match(spatialLayers, /variant="danger" onClick=\{\(\) => setLayerToDelete\(layer\)\}/);
     assert.ok(notifications.includes('<UtilityIconButton'));
     assert.ok(notifications.includes('aria-label="Notifications"'));
-    assert.match(notifications, /onClick=\{\(\) => request\('\/notifications\/clear', 'POST'\)\}/);
+    assert.match(notifications, /onClear=\{\(\) => request\('\/notifications\/clear', 'POST'\)\}/);
     assert.doesNotMatch(notifications, /<Button[^>]*Clear Notifications/);
-    assert.match(notifications, /onClick=\{\(\) => openNotification\(notification\)\}/);
+    assert.match(notifications, /onClick=\{\(\) => onOpen\(notification\)\}/);
     assert.doesNotMatch(imea, /<button\b/);
     assert.match(diagnostics, /<Button[^>]*onClick=\{run\}/);
     assert.match(diagnostics, /<Button[^>]*onClick=\{copy\}/);
     assert.match(layout, /<Button[^>]*onClick=\{\(\) => router\.post\('\/logout'\)\}/);
+    assert.match(layout, /isTrackingViewLink = child\.href\?\.startsWith\('\/submission-tracking\?view='/);
+    assert.match(layout, /cds-submission-tracking-nav-tab border-l-2/);
     assert.match(managementForm, /<Button type="submit" size="compact" disabled=\{form\.processing\}/);
     assert.match(managementForm, /data-cds-action="true" data-cds-action-variant="cancel"/);
     assert.match(managementIndex, /const actionClass = 'cds-button-interaction rounded-xl bg-gradient-to-b from-green-800 to-green-950/);

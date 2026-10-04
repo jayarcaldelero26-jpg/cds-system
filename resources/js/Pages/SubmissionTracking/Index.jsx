@@ -17,9 +17,12 @@ import PageHeader from "@/Components/PageHeader";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import PambRoutingTimeline from "@/Components/SubmissionTracking/PambRoutingTimeline";
 import PambMovProgress from "@/Components/SubmissionTracking/PambMovProgress";
+import PambMovActions from "@/Components/SubmissionTracking/PambMovActions";
+import { custodyContext, movPrerequisiteFor, nextSubmissionAction, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
 import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
 import DocumentRoutingTimeline from "@/Components/SubmissionTracking/DocumentRoutingTimeline";
+import SubmissionReportContext from "@/Components/SubmissionTracking/SubmissionReportContext";
 import DocumentPreviewDialog from "@/Components/SubmissionTracking/DocumentPreviewDialog";
 import RoutingAttachmentField from "@/Components/SubmissionTracking/RoutingAttachmentField";
 import PremiumTimePicker from "@/Components/PremiumTimePicker";
@@ -37,7 +40,7 @@ import {
     filterIncomingRowsByAction,
     reconcileIncomingActionTab,
 } from "@/Utils/submissionTrackingQueues";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const operationalViewDescriptions = {
     incoming: "Documents currently requiring action from your office.",
@@ -51,6 +54,30 @@ const incomingActionLabels = {
     decision: "Review / Decision",
     correction: "For Correction",
 };
+
+export function IncomingActionFilters({ tabs, labels, selected, onChange }) {
+    if (!tabs?.length) return null;
+
+    return <div className="flex flex-wrap gap-2" role="group" aria-label="Incoming action filters">
+        <button
+            type="button"
+            aria-pressed={selected === null}
+            onClick={() => onChange(null)}
+            className={`rounded-lg border px-3 py-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${selected === null ? "cds-tab-active border-green-700 shadow-sm" : "border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
+        >
+            All actions
+        </button>
+        {tabs.map((category) => <button
+            key={category}
+            type="button"
+            aria-pressed={selected === category}
+            onClick={() => onChange(category)}
+            className={`rounded-lg border px-3 py-2 text-xs font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900 ${selected === category ? "cds-tab-active border-green-700 shadow-sm" : "border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
+        >
+            {labels[category]}
+        </button>)}
+    </div>;
+}
 const monitoringViewDescriptions = {
     incoming:
         "Active submissions currently owned by their respective accountable offices and categories.",
@@ -138,9 +165,9 @@ const responsibleOfficeFor = (row) =>
     routingFor(row).responsible_office || row?.target_office || null;
 const responsibleCategoryFor = (row) =>
     routingFor(row).responsible_user_category || null;
-const nextActionFor = (row) => routingFor(row).next_expected_action || null;
+const nextActionFor = nextSubmissionAction;
 const compactRoutingStatusFor = (row) => {
-    const status = routingStatusFor(row);
+    const status = String(routingStatusFor(row) || "");
     const receipt = status.match(/^Awaiting Receipt by (.+)$/i);
     if (receipt)
         return "Awaiting " + receipt[1].replace(/\s+Unit$/i, "") + " Receipt";
@@ -151,7 +178,7 @@ const compactRoutingStatusFor = (row) => {
 const compactProgressFor = (row) => {
     const routing = routingFor(row);
     const timeline =
-        (row?.pamb_routing_applicable
+        (row?.pamb_routing_applicable && !row?.canonical_custody_applicable
             ? row.routing_timeline
             : routing.timeline) || [];
     const currentIndex = timeline.findIndex(
@@ -188,7 +215,7 @@ const availableActionsFor = (row) =>
         .map((action) => standardActionLabel(action.action_label || action.label))
         .filter((label, index, labels) => label && labels.indexOf(label) === index);
 const requiredActionFor = (row) =>
-    availableActionsFor(row).join(" / ") || standardActionLabel(currentActionFor(row));
+    movPrerequisiteFor(row) || availableActionsFor(row).join(" / ") || standardActionLabel(currentActionFor(row));
 const compactStatusFor = (row) => {
     if (row?.routing_complete) return "Completed";
     const canonicalStatus = String(routingStatusFor(row) || "");
@@ -218,7 +245,7 @@ const formatActionDate = (value) =>
         : String(value).length <= 10
           ? plainDate(value)
           : formatReportDateTime(value, FALLBACK);
-const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
+export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPreview, context, onSubmitMov, onReviewMov }) => {
     if (!row)
         return (
             <aside className="rounded-xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
@@ -231,8 +258,9 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
             </aside>
         );
     const routing = routingFor(row);
+    const custody = custodyContext(row);
     const timeline =
-        (row.pamb_routing_applicable
+        (row.pamb_routing_applicable && !row.canonical_custody_applicable
             ? row.routing_timeline
             : routing.timeline) || [];
     const progress = compactProgressFor(row);
@@ -253,10 +281,10 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                         <Badge value={routingStatusFor(row) || "In Progress"} />
                     </div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                        <div>
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Current Holder / Office</p>
-                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{routing.current_location || routing.responsible_office || row.target_office || "Not yet assigned"}</p>
-                        </div>
+                        {custody.holder && <div>
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{custody.holderLabel}</p>
+                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{custody.holder}</p>
+                        </div>}
                         <div>
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Deadline</p>
                             <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{plainDate(row.deadline_submission) || "—"}</p>
@@ -267,62 +295,22 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                         </div>
                     </div>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
-                    <div>
-                        <p className="text-[10px] font-semibold text-gray-500">
-                            Protected Area
-                        </p>
-                        <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">
-                            {row.protected_area || null}
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Office
-                        </p>
-                        <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">
-                            {responsibleOfficeFor(row)}
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Module
-                        </p>
-                        <p className="mt-0.5 text-gray-700 dark:text-gray-200">
-                            {row.module || null}
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Report / Activity
-                        </p>
-                        <p className="mt-0.5 text-gray-700 dark:text-gray-200">
-                            {row.activity_name ||
-                                row.document_type ||
-                                row.report_type ||
-                                null}
-                        </p>
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Reporting Period
-                        </p>
-                        <p className="mt-0.5 text-gray-700 dark:text-gray-200">
-                            {row.reporting_period || null}
-                        </p>
-                    </div>
-                </div>
+                {!custody.officeMatchesOrigin && custody.office && <div>
+                    <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-500">Current Office</p>
+                    <p className="font-semibold text-gray-900 dark:text-white">{custody.office}</p>
+                </div>}
+                <SubmissionReportContext row={row} />
                 {row.can_transition && availableActionsFor(row).length > 0 && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                            Available Actions
+                            Available Custody Actions
                         </p>
                         <div className="mt-2 flex flex-wrap gap-2">
                             {(routing.actions || []).map((action) => (
                                 <Button
                                     type="button"
                                     size="compact"
-                                    variant={action.correction ? "danger" : "primary"}
+                                    variant={action.correction ? "warning" : "primary"}
                                     key={action.key}
                                     onClick={() => onAction?.(action)}
                                     className="rounded-lg px-3 py-2 text-xs"
@@ -333,6 +321,16 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                         </div>
                     </div>
                 )}
+                {row.current_document && (
+                    <div className="flex min-w-0 items-center justify-between gap-2 rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/50">
+                        <div className="min-w-0">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Current Official Document</p>
+                            <p className="mt-0.5 truncate font-semibold text-gray-900 dark:text-white" title={row.current_document.name || undefined}>{row.current_document.name || "Official document"}</p>
+                        </div>
+                        {row.current_document.can_preview ? <Button type="button" size="compact" variant="cancel" onClick={() => onPreview?.(row)} className="shrink-0 rounded-lg px-3 py-2 text-xs">Preview</Button> : <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">Preview unavailable for this account</span>}
+                    </div>
+                )}
+                {row.mov_processing?.applicable && <PambMovActions row={row} context={context} onSubmit={onSubmitMov} onReview={onReviewMov} hideReleaseAction showContextLabel />}
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-1">
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
@@ -346,19 +344,8 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
                             />
                         </p>
                     </div>
-                    <div>
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
-                            Responsible Category
-                        </p>
-                        <p className="mt-0.5 text-gray-800 dark:text-gray-200">
-                            {responsibleCategoryFor(row)}
-                        </p>
-                    </div>
                 </div>
                 <div>
-                    <p className="mb-2 text-[10px] text-gray-500 dark:text-gray-400">
-                        Current processing context: {routing.current_location || routing.current_stage || "Not yet assigned"}
-                    </p>
                     <SubmissionTrackingProgress row={row} />
                     <div className="space-y-2">
                         {progress.length ? (
@@ -431,8 +418,19 @@ const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction }) => {
     );
 };
 
+export const SubmissionTrackingDetailsProgressCard = ({ details, onPreview }) => (details?.routing || details?.current_document) && (
+    <section className="cds-card-surface space-y-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Routing progress and current official document">
+        {details?.routing && <div><h2 className="mb-3 text-sm font-extrabold text-gray-900 dark:text-white">Processing Progress</h2><SubmissionTrackingProgress row={details} /></div>}
+        {details?.current_document && <div className={`${details?.routing ? 'border-t border-gray-200 pt-4 dark:border-gray-700' : ''}`}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0"><h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Official Document</h2><p className="mt-1 truncate text-sm font-semibold text-gray-700 dark:text-gray-200" title={details.current_document.name || undefined}>{details.current_document.name || "Official document"}</p></div>
+                {details.current_document.can_preview ? <Button size="compact" variant="cancel" type="button" onClick={() => onPreview?.(details)} className="shrink-0 rounded-lg px-3 py-2 text-xs">Preview Current Document</Button> : <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">Preview unavailable for this account</span>}
+            </div>
+        </div>}
+    </section>
+);
+
 export default function Index({
-    queues = {},
     workspaceQueues = {},
     filters = {},
     filterOptions = {},
@@ -460,6 +458,7 @@ export default function Index({
         trackingContext.selected_record || null,
     );
     const [reviewHistoryRecord, setReviewHistoryRecord] = useState(null);
+    const lastLinkedKey = useRef(submissionKey(trackingContext.selected_record));
     const [showFullDetails, setShowFullDetails] = useState(false);
     const [expandFullTimeline, setExpandFullTimeline] = useState(false);
     useEffect(() => {
@@ -497,6 +496,15 @@ export default function Index({
     const [overrideProcessing, setOverrideProcessing] = useState(false);
     const [overrideError, setOverrideError] = useState("");
     const [reviewing, setReviewing] = useState(null);
+    const submitMovForReview = (row, options = {}) => router.post(
+        route("submission-tracking.mov.submit-review", [row.source, row.source_id]),
+        {}, { preserveScroll: true, ...options },
+    );
+    const reviewMov = (row, decision) => {
+        reviewForm.setData({ decision, remarks: "" });
+        reviewForm.clearErrors();
+        setReviewing(row);
+    };
     const openAdminOverride = async (row) => {
         setOverrideError("");
         setOverrideProcessing(true);
@@ -577,7 +585,6 @@ export default function Index({
             setDetails(null);
             router.reload({
                 only: [
-                    "queues",
                     "workspaceQueues",
                     "trackingContext",
                     "pagination",
@@ -598,9 +605,9 @@ export default function Index({
         return availableIncomingActionTabs(incomingRows, Object.keys(incomingActionLabels));
     }, [incomingRows, isGlobalMonitoring]);
     const queueRows = workspaceQueues[tab] || [];
-    const rows = tab === "incoming"
+    const rows = useMemo(() => tab === "incoming"
         ? filterIncomingRowsByAction(queueRows, incomingActionTab)
-        : queueRows;
+        : queueRows, [tab, queueRows, incomingActionTab]);
     const action = [
         "Action",
         "Record routing action",
@@ -617,12 +624,19 @@ export default function Index({
         ? genericAction.can_replace_document === true
         : selected?.routing?.document_update_capabilities?.[form.data.stage] === true;
     const requiresBusinessDate = selected?.routing?.business_date_actions?.includes(form.data.stage) === true;
+    const archiveError = String(form.errors.archive || '').toLowerCase();
     const archiveCheckpointNotice = form.errors.archive
         ? {
               title: "Archive checkpoint unavailable",
-              message: String(form.errors.archive).toLowerCase().includes("disabled")
-                  ? "Google Drive archiving is currently disabled. This submission cannot be forwarded from PENRO Records until the archive checkpoint is available. Contact an administrator."
-                  : "The required archive checkpoint is currently unavailable. This submission cannot be forwarded from PENRO Records until it is available. Contact an administrator.",
+              message: archiveError.includes("disabled")
+                  ? "Google Drive archiving is disabled. Ask an administrator to enable the existing archive checkpoint, then retry this forward."
+                  : archiveError.includes("not fully configured")
+                    ? "The existing archive integration is missing required configuration. Ask an administrator to complete its setup, then retry this forward."
+                    : archiveError.includes("not configured")
+                      ? "The existing archive provider is not configured. Ask an administrator to restore its approved configuration, then retry this forward."
+                      : archiveError.includes("official document")
+                        ? "The current official document is unavailable or unreadable. Restore a valid current copy before retrying this forward."
+                        : "The existing archive checkpoint could not be verified. Ask an administrator to check its private provider logs and connectivity before retrying.",
           }
         : null;
     const selectedActionLabel = standardActionLabel(
@@ -1022,73 +1036,28 @@ export default function Index({
         );
         return () => window.clearTimeout(timer);
     }, [search]);
-    const visibleDetails = useMemo(() => {
-        if (
-            details &&
-            ((trackingContext.selected_record?.source === details.source &&
-                trackingContext.selected_record?.source_id ===
-                    details.source_id) ||
-                rows.some(
-                    (row) =>
-                        row.source === details.source &&
-                        row.source_id === details.source_id,
-                ))
-        )
-            return details;
-        return rows[0] || null;
-    }, [rows, details, trackingContext.selected_record]);
-    const statusContext = details?.routing_summary?.status_context;
+    const visibleDetails = useMemo(
+        () => refreshSubmissionSelection(details, rows, trackingContext.selected_record, true, submissionKey(trackingContext.selected_record) !== lastLinkedKey.current),
+        [rows, details, trackingContext.selected_record],
+    );
+    const detailsCustody = custodyContext(details);
+    const statusContext = visibleDetails?.canonical_custody_applicable ? null : visibleDetails?.routing_summary?.status_context;
     useEffect(() => {
         const linked = trackingContext.selected_record;
-        const visibleKey =
-            details &&
-            rows.some(
-                (row) =>
-                    row.source === details.source &&
-                    row.source_id === details.source_id,
-            )
-                ? details.source + "-" + details.source_id
-                : "";
-        const next =
-            linked ||
-            rows.find(
-                (row) => row.source + "-" + row.source_id === visibleKey,
-            ) ||
-            rows[0] ||
-            null;
-        setDetails((previous) =>
-            previous?.source === next?.source &&
-            previous?.source_id === next?.source_id &&
-            previous === next
-                ? previous
-                : next,
-        );
-        const selectedIsLinkedRecord =
-            selected &&
-            trackingContext.selected_record?.source === selected.source &&
-            trackingContext.selected_record?.source_id === selected.source_id;
-        if (
-            selected &&
-            !selectedIsLinkedRecord &&
-            !rows.some(
-                (row) =>
-                    row.source === selected.source &&
-                    row.source_id === selected.source_id,
-            )
-        )
-            setSelected(null);
-        if (!next) setShowFullDetails(false);
-    }, [
-        rows,
-        incomingRows,
-        tab,
-        search,
-        module,
-        protectedAreaId,
-        status,
-        pagination.current_page,
-        trackingContext.selected_record,
-    ]);
+        const authorizedRows = Object.values(workspaceQueues).flat();
+        const linkChanged = submissionKey(linked) !== lastLinkedKey.current;
+        lastLinkedKey.current = submissionKey(linked);
+        if (details && !refreshSubmissionSelection(details, rows, linked, false)) setShowFullDetails(false);
+        setDetails((previous) => refreshSubmissionSelection(previous, rows, linked, true, linkChanged));
+        setPreviewRow((previous) => refreshSubmissionSelection(previous, authorizedRows, linked, false));
+        setSelected((previous) => {
+            const fresh = refreshSubmissionSelection(previous, authorizedRows, linked, false);
+            if (!fresh?.can_transition) return null;
+            if (fresh.routing?.profile_key?.startsWith("canonical_") && !fresh.routing?.actions?.some((candidate) => candidate.key === form.data.stage)) return null;
+            return fresh;
+        });
+        if (!rows.length && !linked) setShowFullDetails(false);
+    }, [rows, workspaceQueues, trackingContext.selected_record]);
     const continueWithFreshIncomingRow = (target, page) => {
         if (!target) return;
         const freshIncomingRows = page?.props?.workspaceQueues?.incoming || [];
@@ -1336,27 +1305,12 @@ export default function Index({
             <div className="submission-tracking-page">
                 <PageHeader title={tabLabel} description={queueHelper} />
                 <div className="mt-4 space-y-4 sm:mt-5">
-                    {tab === "incoming" && incomingActionTabs.length > 0 && (
-                        <div className="flex flex-wrap gap-2" aria-label="Incoming action filters">
-                            <button
-                                type="button"
-                                onClick={() => setIncomingActionTab(null)}
-                                className={`rounded-lg px-3 py-2 text-xs font-bold transition ${incomingActionTab === null ? "bg-green-700 text-white" : "border border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
-                             data-cds-action="true" data-cds-action-variant="primary">
-                                All actions
-                            </button>
-                            {incomingActionTabs.map((category) => (
-                                <button
-                                    key={category}
-                                    type="button"
-                                    onClick={() => setIncomingActionTab(category)}
-                                    className={`rounded-lg px-3 py-2 text-xs font-bold transition ${incomingActionTab === category ? "bg-green-700 text-white" : "border border-gray-200 bg-white text-gray-700 hover:border-green-300 hover:bg-green-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"}`}
-                                 data-cds-action="true" data-cds-action-variant="primary">
-                                    {incomingActionLabels[category]}
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    {tab === "incoming" && <IncomingActionFilters
+                        tabs={incomingActionTabs}
+                        labels={incomingActionLabels}
+                        selected={incomingActionTab}
+                        onChange={setIncomingActionTab}
+                    />}
                     <div className="submission-tracking-filterbar cds-card-surface flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:flex-row lg:items-center">
                         <div className="min-w-0 flex-1">
                             <FloatingInput
@@ -1501,6 +1455,10 @@ export default function Index({
                         <div className="xl:sticky xl:top-4">
                             <SubmissionDetailsPanel
                                 row={visibleDetails}
+                                context={trackingContext}
+                                onSubmitMov={submitMovForReview}
+                                onReviewMov={reviewMov}
+                                onPreview={setPreviewRow}
                                 onAction={(nextAction) => {
                                     form.setData({
                                         date: "",
@@ -1527,45 +1485,46 @@ export default function Index({
                 compact
                 open={Boolean(showFullDetails && details)}
                 title="Submission Details"
-                subtitle={
-                    details
-                        ? `${details.activity || details.activity_name || "Activity unavailable"} · ${details.module || "Report"} · ${details.protected_area || "Protected area unavailable"}`
-                        : ""
-                }
+                subtitle="Report identity, custody, and routing history"
                 onClose={() => setShowFullDetails(false)}
                 closeOnEscape={!reviewHistoryRecord}
                 footerActions={<>
                     {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="warning" onClick={() => openCorrection(details)} className="rounded-xl px-3 py-2 text-xs">Correct routing</Button>}
                     <Button type="button" size="compact" variant="cancel" onClick={() => setReviewHistoryRecord(details)} className="rounded-xl px-3 py-2 text-xs">Review history</Button>
-                    <Button type="button" size="compact" variant="cancel" onClick={() => scrollDetailsTo(details?.pamb_routing_applicable ? "#pamb-routing-timeline-stages" : "#document-routing-timeline-stages", true)} className="rounded-xl px-3 py-2 text-xs">Full timeline</Button>
+                    <Button type="button" size="compact" variant="cancel" onClick={() => scrollDetailsTo(details?.pamb_routing_applicable && !details?.canonical_custody_applicable ? "#pamb-routing-timeline-stages" : "#document-routing-timeline-stages", true)} className="rounded-xl px-3 py-2 text-xs">Full timeline</Button>
                 </>}
             >
+                {details && (
+                    <section className="cds-card-surface rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Report identity and context">
+                        <h2 className="mb-3 text-sm font-extrabold text-gray-900 dark:text-white">Report Identity and Context</h2>
+                        <SubmissionReportContext row={details} expanded />
+                    </section>
+                )}
                 {details && (
                     <section className="cds-card-surface rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-slate-700 dark:bg-slate-900/80" aria-label="Current status and processing">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100">Current Status &amp; Processing</h2>
                             <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{details.pamb_routing_applicable ? "Submission Status" : "Routing Status"}</span>
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Routing Status</span>
                                 <Badge value={details.routing?.current_status || details.routing_summary?.current_status || details.submission_status || "Unknown"} />
                             </div>
                         </div>
                         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            <div className="min-w-0">
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Current Holder</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{details.routing?.current_location || details.routing_summary?.current_location || details.current_document_location || details.target_office || "Not yet assigned"}</dd>
-                            </div>
-                            <div className="min-w-0">
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Office</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{details.routing?.responsible_office || details.target_office || "Not assigned"}</dd>
-                            </div>
+                            {detailsCustody.holder && <div className="min-w-0">
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{detailsCustody.holderLabel}</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{detailsCustody.holder}</dd>
+                            </div>}
+                            {!detailsCustody.officeMatchesOrigin && detailsCustody.office && <div className="min-w-0">
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Current Office</dt>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{detailsCustody.office}</dd>
+                            </div>}
                             <div>
                                 <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Deadline</dt>
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "—"}</dd>
                             </div>
-                            {details.reporting_period && <div><dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Reporting Period</dt><dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-slate-100">{details.reporting_period}</dd></div>}
                             <div>
                                 <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Next Expected Action</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.next_expected_action || "No action pending"}</dd>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{nextActionFor(details) || "No action pending"}</dd>
                             </div>
                             {(details.routing?.pending_since || details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined) && (
                                 <div>
@@ -1588,17 +1547,7 @@ export default function Index({
                         </dl>
                     </section>
                 )}
-                {(details?.routing || details?.current_document) && (
-                    <section className="cds-card-surface space-y-4 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Routing progress and current official document">
-                        {details?.routing && <div><h2 className="mb-3 text-sm font-extrabold text-gray-900 dark:text-white">Routing Progress</h2><SubmissionTrackingProgress row={details} /></div>}
-                        {details?.current_document && <div className={`${details?.routing ? 'border-t border-gray-200 pt-4 dark:border-gray-700' : ''}`}>
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="min-w-0"><h2 className="text-sm font-extrabold text-gray-900 dark:text-white">Current Official Document</h2><p className="mt-1 truncate text-sm font-semibold text-gray-700 dark:text-gray-200" title={details.current_document.name || undefined}>{details.current_document.name || "Official document"}</p></div>
-                                <Button size="compact" variant="primary" type="button" onClick={() => setPreviewRow(details)} className="shrink-0 rounded-lg px-3 py-2 text-xs">Preview Current Document</Button>
-                            </div>
-                        </div>}
-                    </section>
-                )}
+                <SubmissionTrackingDetailsProgressCard details={details} onPreview={setPreviewRow} />
                 {details?.storage_status && (
                     <div className="cds-card-surface mb-4 rounded-lg border border-slate-200 bg-slate-50/70 p-3 dark:border-slate-700 dark:bg-slate-900/40" aria-label="Document storage">
                         <p className="mb-2 text-xs font-extrabold uppercase tracking-wide text-slate-800 dark:text-slate-100">Document Storage</p>
@@ -1615,35 +1564,6 @@ export default function Index({
                         </div>
                     </div>
                 )}
-                {details?.mov_processing?.applicable && (
-                    <PambMovProgress
-                        row={details}
-                        context={trackingContext}
-                        onSubmit={(row, options = {}) =>
-                            router.post(
-                                route("submission-tracking.mov.submit-review", [
-                                    row.source,
-                                    row.source_id,
-                                ]),
-                                {},
-                                { preserveScroll: true, ...options },
-                            )
-                        }
-                        onReview={(row, decision) => {
-                            reviewForm.setData({ decision, remarks: "" });
-                            reviewForm.clearErrors();
-                            setReviewing(row);
-                        }}
-                        onRelease={(row) => {
-                            form.setData({
-                                date: localDateInputValue(),
-                                stage: "cenro_release",
-                            });
-                            form.clearErrors();
-                            setSelected(row);
-                        }}
-                    />
-                )}
                 {canAdminRoutingOverride && details && (
                     <details className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-800 dark:bg-slate-900/80 dark:text-slate-100">
                         <summary className="cursor-pointer rounded-md text-xs font-bold text-amber-900 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 dark:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-slate-900">Admin actions</summary>
@@ -1653,7 +1573,7 @@ export default function Index({
                         {canAdminRoutingOverride && <div className="mt-3 border-t border-amber-200 pt-3 dark:border-slate-700"><p className="text-xs text-amber-900 dark:text-slate-300">Administrative override requires a fresh passkey and records your account, reason, and accountable category. It does not impersonate another user.</p>{overrideError && !override && <p className="mt-2 text-xs font-semibold text-red-700 dark:text-red-300">{overrideError}</p>}</div>}
                     </details>
                 )}
-                {details?.pamb_routing_applicable ? (
+                {details?.pamb_routing_applicable && !details?.canonical_custody_applicable ? (
                     <PambRoutingTimeline
                         row={details}
                         actions={details.routing?.actions || []}
@@ -1718,6 +1638,23 @@ export default function Index({
                         }}
                     />
                 )}
+                {details?.mov_processing?.applicable && (
+                    <PambMovProgress
+                        row={details}
+                        hideReleaseAction={Boolean(details.canonical_custody_applicable)}
+                        context={trackingContext}
+                        onSubmit={submitMovForReview}
+                        onReview={reviewMov}
+                        onRelease={(row) => {
+                            form.setData({
+                                date: localDateInputValue(),
+                                stage: "cenro_release",
+                            });
+                            form.clearErrors();
+                            setSelected(row);
+                        }}
+                    />
+                )}
             </CrudDetailsModal>
             <CrudDetailsModal
                 compact
@@ -1743,6 +1680,7 @@ export default function Index({
                 errors={Object.fromEntries(Object.entries(form.errors).filter(([key]) => key !== "archive"))}
                 systemNotice={archiveCheckpointNotice}
                 saveLabel={selectedActionLabel}
+                saveVariant={genericAction?.correction ? "warning" : "primary"}
                 maxWidth="max-w-xl"
             >
                 {" "}
@@ -1766,12 +1704,12 @@ export default function Index({
                             : "Monitoring Event"
                     }
                 >
-                    {selected?.current_document && (
+                    {selected?.current_document?.can_preview && (
                         <button
                             type="button"
                             onClick={() => setPreviewRow(selected)}
-                            className="mb-3 rounded-lg border border-green-700 px-3 py-2 text-xs font-bold text-green-800 hover:bg-green-50 dark:text-green-200"
-                         data-cds-action="true" data-cds-action-variant="primary">
+                            className="mb-3 rounded-lg px-3 py-2 text-xs"
+                            data-cds-action="true" data-cds-action-variant="cancel">
                             Preview MOV / Report
                         </button>
                     )}
@@ -1913,6 +1851,7 @@ export default function Index({
                         routingStage?.label ||
                         "Routing Event",
                 )}
+                saveVariant={String(routingStage?.key || routingStage?.stage_key || "").includes("return_for_correction") || /return.*correction/i.test(routingStage?.action_label || routingStage?.label || "") ? "warning" : "primary"}
                 maxWidth="max-w-xl"
             >
                 <CrudSection title="Document / MOV">
@@ -1997,6 +1936,7 @@ export default function Index({
                         ? "Return for Correction"
                         : "Ready for Release"
                 }
+                saveVariant={reviewForm.data.decision === "needs_correction" ? "warning" : "primary"}
                 maxWidth="max-w-xl"
             >
                 <CrudSection title="Chief Review">
@@ -2209,6 +2149,7 @@ export default function Index({
             <DocumentPreviewDialog
                 open={Boolean(previewRow)}
                 row={previewRow}
+                accountKey={pageProps.auth?.user?.id}
                 onClose={() => setPreviewRow(null)}
             />
         </AuthenticatedLayout>

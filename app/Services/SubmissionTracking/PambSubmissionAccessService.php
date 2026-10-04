@@ -10,9 +10,6 @@ use App\Services\Authorization\OrganizationalAccessService;
 /** Category, capability, office, and PA scope for the additive CENRO/PAMO workflow. */
 final class PambSubmissionAccessService
 {
-    /** @var array<string, bool> */
-    private array $protectedAreaAccessCache = [];
-
     public const CENRO_RECORDS = OrganizationalAccessService::CENRO_RECORDS;
     public const CENRO_CHIEF = OrganizationalAccessService::CENRO_CHIEF;
     public const CENRO_FOCAL = OrganizationalAccessService::CENRO_FOCAL;
@@ -64,7 +61,14 @@ final class PambSubmissionAccessService
                 && (int) $user->protected_area_id === (int) $submission->protected_area_id;
         }
         if ($submission->protected_area_id !== null) {
-            if (! $this->canAccessProtectedAreaCached($organization, $user, (int) $submission->protected_area_id)) return false;
+            $area = $submission->relationLoaded('protectedArea') ? $submission->getRelation('protectedArea') : null;
+            $assignmentLoaded = $area instanceof \App\Models\ProtectedArea
+                && $area->relationLoaded('supervisingOfficeAssignment')
+                && ($area->supervisingOfficeAssignment === null || $area->supervisingOfficeAssignment->relationLoaded('office'));
+            $canAccess = $assignmentLoaded
+                ? $organization->canAccessProtectedAreaRecord($user, $submission)
+                : $organization->canAccessProtectedArea($user, (int) $submission->protected_area_id);
+            if (! $canAccess) return false;
         } elseif (! $organization->canAccessProtectedAreaRecord($user, $submission)) {
             return false;
         }
@@ -79,25 +83,6 @@ final class PambSubmissionAccessService
 
         // Preserve existing permission-based visibility for legacy categories.
         return true;
-    }
-
-    private function canAccessProtectedAreaCached(OrganizationalAccessService $organization, User $user, int $protectedAreaId): bool
-    {
-        $scope = [
-            $user->getKey(),
-            $this->isGlobal($user),
-            $organization->effectiveCategory($user),
-            $organization->effectiveUnits($user),
-            $organization->normalizeOffice($user->office_designated),
-            $user->protected_area_id,
-        ];
-        $key = hash('sha256', serialize([$scope, $protectedAreaId]));
-
-        if (! array_key_exists($key, $this->protectedAreaAccessCache)) {
-            $this->protectedAreaAccessCache[$key] = $organization->canAccessProtectedArea($user, $protectedAreaId);
-        }
-
-        return $this->protectedAreaAccessCache[$key];
     }
 
     public function scopeQuery(Builder $query, User $user, ?OrganizationalAccessService $organization = null): Builder

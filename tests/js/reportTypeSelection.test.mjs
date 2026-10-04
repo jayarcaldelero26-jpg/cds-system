@@ -4,13 +4,14 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
+import { viteReactInterop } from './helpers/viteReactInterop.mjs';
 import { resolve } from 'node:path';
 
 let server;
 const load = async path => {
     server ??= await createServer({
         configFile: false,
-        plugins: [react()],
+        plugins: [viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
         server: { middlewareMode: true },
         appType: 'custom',

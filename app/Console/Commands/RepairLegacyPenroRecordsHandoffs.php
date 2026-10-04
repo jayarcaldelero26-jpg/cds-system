@@ -4,7 +4,6 @@ namespace App\Console\Commands;
 
 use App\Models\ConservationReportSubmission;
 use App\Models\DocumentRoutingEvent;
-use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Console\Command;
@@ -33,7 +32,7 @@ class RepairLegacyPenroRecordsHandoffs extends Command
             if (! $source) continue;
             /** @var Model|null $record */
             $record = $source['model']::query()->find($candidate->source_id);
-            if (! $record || ($record instanceof ConservationReportSubmission && app(PambComplianceCalculator::class)->applies((string) $record->workflow_key))) continue;
+            if (! $record || ($record instanceof ConservationReportSubmission && \App\Services\SubmissionTracking\PambRoutingTimelineService::appliesWorkflow((string) $record->workflow_key))) continue;
 
             $latest = DocumentRoutingEvent::query()
                 ->where('source_type', $candidate->source_type)->where('source_id', $candidate->source_id)

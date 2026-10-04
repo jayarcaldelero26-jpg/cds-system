@@ -28,6 +28,7 @@ export default function SubmissionReviewHistory({ row }) {
                         {event.administrative_override && <span className="mr-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-900 dark:bg-amber-900/50 dark:text-amber-200">Admin Override</span>}
                         {event.label}
                     </p>
+                    {event.administrative_override && (event.override_for_category || event.override_for_office) && <p className="mt-1 text-gray-600 dark:text-gray-300">Override for: {[event.override_for_category, event.override_for_office].filter(Boolean).join(" Â· ")}</p>}
                     <p className="mt-1 text-gray-600 dark:text-gray-300">{event.occurred_at ? formatReportDateTime(event.occurred_at, FALLBACK) : FALLBACK}{event.recorded_by ? ` · ${event.recorded_by}` : ""}{event.actor_category ? ` · ${event.actor_category}` : ""}{event.actor_office ? ` · ${event.actor_office}` : ""}{event.remarks ? ` · ${event.remarks}` : ""}</p>
                     {event.correction && <p className="mt-1 text-gray-600 dark:text-gray-300">By: {event.from || "Records office"} · Reason: {event.correction_reason || "Correction required"}{event.correction_detail ? ` · Remarks: ${event.correction_detail}` : ""} · Returned To: {event.to || "Previous accountable sender"}</p>}
                     <RoutingAttachmentLink attachment={event.attachment} />

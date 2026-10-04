@@ -4,6 +4,7 @@ export default function SubmissionTrackingProgress({ row }) {
     const measure = progressMeasureForSubmission(row);
     if (!measure) return null;
     const { label, value: progress } = measure;
+    const custodyIsPendingAtFullProcessing = progress >= 100 && row?.routing_complete === false;
 
     return (
         <div className="w-full" aria-label={label}>
@@ -30,6 +31,7 @@ export default function SubmissionTrackingProgress({ row }) {
                     <span className="submission-tracking-progress__sweep" aria-hidden="true" />
                 </div>
             </div>
+            {custodyIsPendingAtFullProcessing && <p className="mt-1 text-[10px] text-gray-500 dark:text-slate-400">Processing is at 100%; final custody routing is still pending.</p>}
         </div>
     );
 }

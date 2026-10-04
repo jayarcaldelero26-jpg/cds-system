@@ -176,7 +176,7 @@ final class SubmissionTrackingProgressMappingTest extends TestCase
             PambMovProcessingService::RESUBMITTED_FOR_REVIEW => 20,
             PambMovProcessingService::NEEDS_CORRECTION => 0,
             PambMovProcessingService::READY_FOR_RELEASE => 50,
-            PambMovProcessingService::RELEASED_BY_CENRO => 80,
+            PambMovProcessingService::RELEASED_BY_CENRO => 35,
         ];
 
         foreach (['regular_pamb', 'special_pamb', 'twc_meetings'] as $workflow) {

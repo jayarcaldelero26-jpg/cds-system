@@ -14,6 +14,7 @@ use App\Services\BusinessCalendarService;
 use App\Services\Attachments\CurrentDocumentReplacementService;
 use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\SubmissionTracking\RoutingTransitionLifecycle;
+use App\Support\LocalNavigationTrace;
 use App\Services\SubmissionTracking\SubmissionStorageStatusPresenter;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -40,54 +41,67 @@ class SubmissionTrackingController extends Controller
             ? [...$filters, 'focus_source' => $focusSource, 'focus_id' => $focusId]
             : $filters;
         $page = max(1, $request->integer('page', 1));
-        $snapshot = $this->tracking->snapshot($trackingFilters, $page, 25);
-        $records = $snapshot['records'];
-        $queues = $snapshot['queues'];
+        $pagination = LocalNavigationTrace::measure($request, 'st_pagination', fn () => $this->tracking->pagination($trackingFilters, $page, 25));
+        $selectedSource = $request->string('source')->toString();
+        $selectedId = $request->integer('source_id');
+        $trackingRecords = null;
+        $selectedRecord = null;
+        if (filled($selectedSource) && $selectedId > 0) {
+            // A selected record must use the same authorized, normalized
+            // snapshot as the complete workspace. Reprojecting all sources
+            // here duplicated the largest part of an action's redirect GET.
+            $trackingRecords = LocalNavigationTrace::measure($request, 'st_selected_projection', fn () => $this->tracking->records($filters, null, false));
+            $selectedRecord = LocalNavigationTrace::measure($request, 'st_selected_match', fn () => $trackingRecords->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId));
+        }
         // Workspace queues must span the complete authorized filtered set.
         // The snapshot is intentionally paginated for the tracking table, so
         // using it here can hide an actionable record that is outside page 1.
-        $workspaceQueues = $this->tracking->workspaceQueues($filters);
-        $selectedRecord = null;
-        $selectedSource = $request->string('source')->toString();
-        $selectedId = $request->integer('source_id');
-        if (filled($selectedSource) && $selectedId > 0) {
-            $selectedRecord = $this->tracking->records($filters, null, false)->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId);
-            if ($selectedRecord && $request->user()?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN)) {
-                $sourceConfig = $this->tracking->source($selectedSource);
-                $selectedModel = $sourceConfig
-                    ? $sourceConfig['model']::query()->find($selectedId)
-                    : null;
-                if ($selectedModel) {
-                    $selectedRecord['storage_status'] = app(SubmissionStorageStatusPresenter::class)->present($selectedSource, $selectedModel);
-                }
+        $workspaceQueues = LocalNavigationTrace::measure($request, 'st_workspace_queues', fn () => $this->tracking->workspaceQueues($filters, $trackingRecords));
+        LocalNavigationTrace::context($request, [
+            'view' => $view,
+            'selected' => $selectedRecord !== null,
+            'incoming' => $workspaceQueues['incoming']->count(),
+            'outgoing' => $workspaceQueues['outgoing']->count(),
+            'history' => $workspaceQueues['history']->count(),
+        ]);
+        if ($selectedRecord && $request->user()?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN)) {
+            $sourceConfig = $this->tracking->source($selectedSource);
+            $selectedModel = $sourceConfig
+                ? $sourceConfig['model']::query()->find($selectedId)
+                : null;
+            if ($selectedModel) {
+                $selectedRecord['storage_status'] = app(SubmissionStorageStatusPresenter::class)->present($selectedSource, $selectedModel);
             }
         }
-        return Inertia::render('SubmissionTracking/Index', [
-            'queues' => $queues,
+        $filterOptions = LocalNavigationTrace::measure($request, 'st_filter_options', fn () => [
+            ...$this->tracking->filterOptions($filters),
+            'protectedAreas' => app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
+        ]);
+        $context = LocalNavigationTrace::measure($request, 'st_context', fn () => [
+            'archive_checkpoint_enabled' => (bool) config('services.google_drive_archive.enabled'),
+            'is_cenro_user' => $this->pambAccess->isCenro($request->user())
+                && app(OrganizationalAccessService::class)->canAccessUnit($request->user(), OrganizationalAccessService::CONSERVATION),
+            'is_pamo_user' => $this->pambAccess->isPamo($request->user()),
+            'is_global_user' => $this->pambAccess->isGlobal($request->user()),
+            'can_submit_mov' => $this->pambAccess->canPerform($request->user(), 'submit'),
+            'can_review_mov' => $this->pambAccess->canPerform($request->user(), 'review'),
+            'can_release_mov' => $this->pambAccess->canPerform($request->user(), 'release'),
+            'queue_tabs' => $this->tracking->queueTabs($request->user()),
+            'view' => $view,
+            'selected_record' => $selectedRecord,
+            'selected_source' => $selectedSource ?: null,
+            'selected_id' => $selectedId > 0 ? $selectedId : null,
+        ]);
+        $response = LocalNavigationTrace::measure($request, 'st_response_build', fn () => Inertia::render('SubmissionTracking/Index', [
             'workspaceQueues' => $workspaceQueues,
             'filters' => $filters,
             'focus' => ['source' => $focusSource, 'id' => $focusId],
-            'filterOptions' => [
-                ...$this->tracking->filterOptions($filters),
-                'protectedAreas' => app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
-            ],
-            'trackingContext' => [
-                'archive_checkpoint_enabled' => (bool) config('services.google_drive_archive.enabled'),
-                'is_cenro_user' => $this->pambAccess->isCenro($request->user())
-                    && app(OrganizationalAccessService::class)->canAccessUnit($request->user(), OrganizationalAccessService::CONSERVATION),
-                'is_pamo_user' => $this->pambAccess->isPamo($request->user()),
-                'is_global_user' => $this->pambAccess->isGlobal($request->user()),
-                'can_submit_mov' => $this->pambAccess->canPerform($request->user(), 'submit'),
-                'can_review_mov' => $this->pambAccess->canPerform($request->user(), 'review'),
-                'can_release_mov' => $this->pambAccess->canPerform($request->user(), 'release'),
-                'queue_tabs' => $this->tracking->queueTabs($request->user()),
-                'view' => $view,
-                'selected_record' => $selectedRecord,
-                'selected_source' => $selectedSource ?: null,
-                'selected_id' => $selectedId > 0 ? $selectedId : null,
-            ],
-            'pagination' => $snapshot['pagination'] ?? ['current_page' => 1, 'per_page' => 25, 'has_more' => false],
-        ]);
+            'filterOptions' => $filterOptions,
+            'trackingContext' => $context,
+            'pagination' => $pagination,
+        ]));
+
+        return $response;
     }
 
     public function transition(Request $request, string $source, int $record, string $stage): RedirectResponse
@@ -95,6 +109,16 @@ class SubmissionTrackingController extends Controller
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         abort_unless(app(OrganizationalAccessService::class)->canUseSubmissionTrackingSource($request->user(), $source, $sourceConfig['ability']), 403);
+        if ($source === 'conservation') {
+            $submission = \App\Models\ConservationReportSubmission::query()->findOrFail($record);
+            $compatibility = app(\App\Services\SubmissionTracking\ConservationMeetingRoutingCompatibilityAdapter::class);
+            if ($compatibility->applies($submission)) {
+                // Legacy PAMB stage URLs remain accepted, but resolve to an
+                // authorized action in the shared Conservation transition graph.
+                $stage = $compatibility->actionForLegacyStage($submission, $stage) ?? $stage;
+                $request->merge(['stage' => $stage]);
+            }
+        }
         if ($request->hasFile('official_document')) {
             validator($request->all(), ['official_document' => ['file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400']])->validate();
             $documentSource = $sourceConfig['model']::query()->findOrFail($record);
@@ -208,6 +232,17 @@ class SubmissionTrackingController extends Controller
         $baseStage = $timeline->canonicalStageKey($stage);
         if ($baseStage === \App\Services\SubmissionTracking\PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION) {
             validator($data, ['remarks' => ['required', 'string', 'min:5', 'max:2000']])->validate();
+        }
+
+        $compatibility = app(\App\Services\SubmissionTracking\ConservationMeetingRoutingCompatibilityAdapter::class);
+        if ($compatibility->applies($submission)) {
+            $sharedAction = $compatibility->actionForLegacyStage($submission, $stage);
+            abort_unless($sharedAction, 422, 'This legacy routing event is represented by the shared Conservation transition or is no longer current.');
+            // Old bookmarked/internal action URLs continue through the shared
+            // controller validation, lock, authorization, attachment, and
+            // archive lifecycle. No second PAMB custody transition is written.
+            $request->merge(['stage' => $sharedAction]);
+            return $this->transition($request, $source, $record, $sharedAction);
         }
 
         abort_unless($this->pambAccess->canRecordInternalRouting($request->user(), $submission, $stage), 403);
