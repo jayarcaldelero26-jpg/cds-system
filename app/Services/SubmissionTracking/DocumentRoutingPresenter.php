@@ -201,6 +201,7 @@ final class DocumentRoutingPresenter
                 : $eventByStage->get($stage);
             $action = $routeActions->firstWhere('to', $stage);
             $isCurrent = $stage === $currentStage;
+            $isCompletedTerminal = $isCurrent && $stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
             $timeline[] = [
                 'key' => $stage,
                 'label' => $this->stageLabel($stage, $action, $start),
@@ -215,8 +216,12 @@ final class DocumentRoutingPresenter
                 'occurred_at' => $event?->occurred_at?->toIso8601String(),
                 'recorded_at' => $event?->created_at?->toIso8601String(),
                 'status' => $isCurrent ? 'current' : ($event || ($stage === $start && $currentStage !== $start) ? 'completed' : 'pending'),
-                'pending_since' => $isCurrent ? $this->pendingSince($state, $record, $event) : null,
-                'working_days_pending' => $isCurrent ? $this->pendingDays($state, $record, $event, $sourceKey) : null,
+                // Keep the resolved stage current for route/location/action
+                // logic while exposing its terminal display state separately.
+                'display_status' => $isCompletedTerminal ? 'completed' : ($isCurrent ? 'current' : ($event || ($stage === $start && $currentStage !== $start) ? 'completed' : 'pending')),
+                'display_status_label' => $isCompletedTerminal ? 'Completed' : null,
+                'pending_since' => $isCurrent && ! $isCompletedTerminal ? $this->pendingSince($state, $record, $event) : null,
+                'working_days_pending' => $isCurrent && ! $isCompletedTerminal ? $this->pendingDays($state, $record, $event, $sourceKey) : null,
                 'recorded_by' => $event?->recordedBy?->name,
                 'actor_category' => $event?->recordedBy ? $this->organization->categoryLabel($this->organization->effectiveCategory($event->recordedBy)) : null,
                 'actor_category_code' => $event?->recordedBy ? $this->organization->effectiveCategory($event->recordedBy) : null,

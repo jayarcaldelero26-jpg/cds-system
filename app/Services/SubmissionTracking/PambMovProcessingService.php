@@ -72,6 +72,7 @@ final class PambMovProcessingService
             : collect();
         $turnaround = LocalNavigationTrace::measureCurrent('st_mov_turnaround', fn () => $this->turnaround(
             $submission,
+            $status,
             $status === self::ACTIVITY_CONDUCTED ? $workingDaysAtStage : null,
             $status === self::ACTIVITY_CONDUCTED ? $today : null,
         ));
@@ -254,11 +255,13 @@ final class PambMovProcessingService
     }
 
     /** @return array<string, mixed> */
-    private function turnaround(ConservationReportSubmission $submission, ?int $elapsedActivityDays = null, ?CarbonImmutable $elapsedAsOf = null): array
+    private function turnaround(ConservationReportSubmission $submission, string $status, ?int $elapsedActivityDays = null, ?CarbonImmutable $elapsedAsOf = null): array
     {
         $base = $this->compliance->authoritativeDate($submission);
         $deadline = $this->compliance->deadline($submission);
-        if (! $base || ! $deadline) return ['label' => 'Not started', 'day' => null, 'remaining' => null, 'deadline' => $deadline];
+        $finished = in_array($status, [self::RELEASED_BY_CENRO, self::RECEIVED_BY_PENRO], true);
+        if (! $base || ! $deadline) return ['label' => $finished ? 'Completed' : 'Not started', 'day' => null, 'remaining' => null, 'deadline' => $deadline];
+        if ($finished) return ['label' => 'Completed', 'day' => null, 'remaining' => null, 'deadline' => $deadline];
 
         $today = CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->startOfDay();
         $due = CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE)->startOfDay();

@@ -594,6 +594,93 @@ test('ENGP release event identifiers must belong to the exact source record', fu
         ->and(\App\Models\SubmissionRoutingCorrection::query()->where('source', 'engp')->where('source_id', $target->id)->count())->toBe(0);
 });
 
+test('ENGP parent receipt correction succeeds when no legacy component events exist', function (): void {
+    $admin = routingCorrectionAdmin();
+    $report = EngpReportSubmission::create([
+        'workflow_key' => 'cbep',
+        'office' => 'CENRO Mati',
+        'section_name' => 'NGP',
+        'activity_name' => 'ENGP parent receipt without components',
+        'document_type' => 'Monthly Report',
+        'reporting_year' => 2026,
+        'period_key' => '2026-03',
+        'period_label' => 'March 2026',
+        'deadline_submission' => '2026-03-20',
+        'date_received_penro' => '2026-03-20',
+        'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]);
+
+    expect($report->releaseEvents()->count())->toBe(0);
+
+    $this->actingAs($admin)->patch(route('submission-tracking.correct-routing', ['engp', $report->id]), [
+        'dates' => ['date_received_penro' => '2026-03-22'],
+        'release_events' => [],
+        'reason' => 'Correct the parent receipt date.',
+        'password' => 'secret-password',
+    ])->assertSessionHasNoErrors();
+
+    expect($report->fresh()->date_received_penro->toDateString())->toBe('2026-03-22')
+        ->and($report->fresh()->releaseEvents()->count())->toBe(0)
+        ->and(\App\Models\SubmissionRoutingCorrection::query()->where('source', 'engp')->where('source_id', $report->id)->pluck('field')->all())
+        ->toBe(['date_received_penro']);
+});
+
+test('ENGP correction keeps authorization, date validation, and completed receipt clearing protections', function (): void {
+    $admin = routingCorrectionAdmin();
+    $report = EngpReportSubmission::create([
+        'workflow_key' => 'cbep',
+        'office' => 'CENRO Mati',
+        'section_name' => 'NGP',
+        'activity_name' => 'ENGP protected receipt fixture',
+        'document_type' => 'Monthly Report',
+        'reporting_year' => 2026,
+        'period_key' => '2026-04',
+        'period_label' => 'April 2026',
+        'deadline_submission' => '2026-04-20',
+        'date_received_penro' => '2026-04-20',
+        'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]);
+    $terminalEvent = \App\Models\DocumentRoutingEvent::query()->create([
+        'source_type' => 'engp',
+        'source_id' => $report->id,
+        'workflow_key' => 'cbep',
+        'event_key' => 'released',
+        'from_stage' => \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS_FINAL,
+        'to_stage' => \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL,
+        'occurred_at' => '2026-04-21 09:00:00',
+        'recorded_by' => $this->user->id,
+    ]);
+    $snapshot = fn (): array => [
+        $report->fresh()->getRawOriginal('date_received_penro'),
+        $terminalEvent->fresh()->getRawOriginal('occurred_at'),
+        \App\Models\SubmissionRoutingCorrection::query()->where('source', 'engp')->where('source_id', $report->id)->count(),
+    ];
+    $before = $snapshot();
+
+    $this->actingAs($this->user)->patch(route('submission-tracking.correct-routing', ['engp', $report->id]), [
+        'dates' => ['date_received_penro' => '2026-04-22'],
+        'reason' => 'Reject an unauthorized correction.',
+        'password' => 'secret-password',
+    ])->assertForbidden();
+    expect($snapshot())->toBe($before);
+
+    $this->actingAs($admin)->patch(route('submission-tracking.correct-routing', ['engp', $report->id]), [
+        'dates' => ['date_received_penro' => 'not-a-date'],
+        'reason' => 'Reject an invalid date.',
+        'password' => 'secret-password',
+    ])->assertSessionHasErrors('dates.date_received_penro');
+    expect($snapshot())->toBe($before);
+
+    $this->patch(route('submission-tracking.correct-routing', ['engp', $report->id]), [
+        'dates' => ['date_received_penro' => null],
+        'reason' => 'Reject a completed receipt clear.',
+        'password' => 'secret-password',
+    ])->assertSessionHasErrors('dates.date_received_penro');
+    expect($snapshot())->toBe($before);
+});
+
 test('Super Admin correction is permitted only with the named ability while operational actors are denied', function (): void {
     $report = ConservationReportSubmission::create([
         'workflow_key' => 'homestay',

@@ -135,42 +135,43 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                     className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800"
                     aria-label="Document routing history"
                 >
-                    {visibleTimeline.map((event) => (
-                        <li
+                    {visibleTimeline.map((event) => {
+                        const displayStatus = event.display_status || event.status;
+                        return <li
                             key={event.key}
                             className="flex items-start gap-3 px-3 py-2.5"
                         >
-                            <Marker status={event.status} />
+                            <Marker status={displayStatus} />
                             <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-start justify-between gap-2">
                                     <p
-                                        className={`text-sm ${event.status === "completed" || event.status === "current" ? "font-semibold text-gray-900 dark:text-white" : "font-medium text-gray-500 dark:text-gray-400"}`}
+                                        className={`text-sm ${displayStatus === "completed" || displayStatus === "current" ? "font-semibold text-gray-900 dark:text-white" : "font-medium text-gray-500 dark:text-gray-400"}`}
                                     >
                                         {event.label}
                                     </p>
                                     <span
-                                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${event.status === "completed" ? "bg-green-50 text-green-800 dark:bg-green-950/50 dark:text-green-300" : event.status === "current" ? "bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"}`}
+                                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${displayStatus === "completed" ? "bg-green-50 text-green-800 dark:bg-green-950/50 dark:text-green-300" : displayStatus === "current" ? "bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300" : "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"}`}
                                     >
-                                        {event.status === "completed"
+                                        {event.display_status_label || (displayStatus === "completed"
                                             ? String(
                                                   event.event_type ||
                                                       "completed",
                                               ).replaceAll("_", " ")
-                                            : event.status === "current"
+                                            : displayStatus === "current"
                                               ? "Current"
-                                              : "Pending"}
+                                              : "Pending")}
                                     </span>
                                 </div>
                                 <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
                                     {event.occurred_at
                                         ? eventDate(event.occurred_at)
-                                        : event.status === "completed"
+                                        : displayStatus === "completed"
                                           ? "Completed"
-                                          : event.status === "current"
+                                          : displayStatus === "current"
                                             ? "Current checkpoint; next action shown above"
                                             : "Not yet reached"}
                                 </p>
-                                {event.status !== "completed" && event.status !== "current" &&
+                                {displayStatus !== "completed" && displayStatus !== "current" &&
                                     event.action_label && (
                                         <p className="mt-0.5 text-[11px] font-medium text-gray-600 dark:text-gray-300">
                                             Expected action:{" "}
@@ -200,8 +201,8 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                                     </p>
                                 )}
                             </div>
-                        </li>
-                    ))}
+                        </li>;
+                    })}
                 </ol>
                 {!hideRoutingHistory && (routing.routing_history || []).length > 0 && (
                     <div id="document-routing-history" className="scroll-mt-4 mt-3 rounded-xl border border-amber-100 bg-amber-50/50 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">

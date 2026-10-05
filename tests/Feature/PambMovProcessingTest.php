@@ -984,6 +984,68 @@ test('turnaround status uses the authoritative PAMB calendar and configured non-
     }
 });
 
+test('finished MOV milestones stop counting down at CENRO release or direct PENRO receipt', function (): void {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-05 12:00:00', 'Asia/Manila'));
+    $user = User::factory()->create();
+    $service = app(PambMovProcessingService::class);
+
+    foreach (['regular_pamb', 'special_pamb', 'twc_meetings'] as $workflow) {
+        $released = pambReport($user, [
+            'workflow_key' => $workflow,
+            'date_report_released_cenro' => '2026-10-03',
+            'date_received_penro' => null,
+            'mov_processing_status' => PambMovProcessingService::READY_FOR_RELEASE,
+            'mov_reviewed_at' => '2026-10-02 09:00:00',
+        ]);
+        $presented = $service->present($released);
+
+        expect($presented['status_key'])->toBe(PambMovProcessingService::RELEASED_BY_CENRO)
+            ->and($presented['cenro_review']['verdict'])->toBe('Ready for Release')
+            ->and(collect($presented['milestones'])->last()['complete'])->toBeTrue()
+            ->and($presented['turnaround']['label'])->toBe('Completed')
+            ->and($presented['turnaround']['remaining'])->toBeNull();
+    }
+
+    $mhrws = ProtectedArea::create([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary',
+        'short_name' => 'MHRWS',
+        'category' => 'Wildlife Sanctuary',
+        'municipality' => 'San Isidro',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'created_by' => $user->id,
+        'updated_by' => $user->id,
+    ]);
+    $received = pambReport($user, [
+        'workflow_key' => 'regular_pamb',
+        'protected_area_id' => $mhrws->id,
+        'target_office' => 'PENRO Davao Oriental',
+        'date_report_released_cenro' => null,
+        'date_received_penro' => '2026-10-03',
+        'mov_processing_status' => PambMovProcessingService::READY_FOR_RELEASE,
+        'mov_reviewed_at' => '2026-10-02 09:00:00',
+    ]);
+    $directPresented = $service->present($received);
+    expect($directPresented['status_key'])->toBe(PambMovProcessingService::RECEIVED_BY_PENRO)
+        ->and($directPresented['cenro_review']['applicable'])->toBeFalse()
+        ->and(collect($directPresented['milestones'])->last()['complete'])->toBeTrue()
+        ->and($directPresented['turnaround']['label'])->toBe('Completed')
+        ->and($directPresented['turnaround']['remaining'])->toBeNull();
+
+    $active = pambReport($user, [
+        'workflow_key' => 'twc_meetings',
+        'reporting_period' => 'Quarter 4',
+        'date_report_released_cenro' => null,
+        'date_received_penro' => null,
+        'mov_processing_status' => PambMovProcessingService::READY_FOR_RELEASE,
+        'mov_reviewed_at' => '2026-10-02 09:00:00',
+    ]);
+    $activePresented = $service->present($active);
+    expect($activePresented['status_key'])->toBe(PambMovProcessingService::READY_FOR_RELEASE)
+        ->and($activePresented['turnaround']['label'])->not->toBe('Completed')
+        ->and(collect($activePresented['milestones'])->last()['complete'])->toBeFalse();
+});
+
 
 test('PambSubmissionAccess enforces one actor per internal stage', function (): void {
     $records = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');

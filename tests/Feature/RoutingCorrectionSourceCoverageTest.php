@@ -183,11 +183,15 @@ test('ENGP endpoint corrects parent receipt and event-owned release columns and 
     $release = EngpReportReleaseEvent::query()->create([
         'engp_report_submission_id' => $report->id, 'period_component' => 'q3', 'component_label' => 'Q3', 'date_report_released_cenro' => '2026-08-14',
     ]);
+    $otherRelease = EngpReportReleaseEvent::query()->create([
+        'engp_report_submission_id' => $report->id, 'period_component' => 'q2', 'component_label' => 'Q2', 'date_report_released_cenro' => '2026-08-12',
+    ]);
     expect(Schema::hasColumn($report->getTable(), 'date_received_penro'))->toBeTrue()
         ->and(Schema::hasColumn($report->getTable(), 'date_report_released_cenro'))->toBeFalse()
         ->and(Schema::hasColumn($report->getTable(), 'date_endorsed_regional'))->toBeFalse()
         ->and(Schema::hasColumn($release->getTable(), 'date_report_released_cenro'))->toBeTrue();
     $routingEvent = correctionCoverageEvent('engp', (int) $report->id, (int) $this->corrector->id);
+    $releaseIdsBefore = $report->releaseEvents()->orderBy('id')->pluck('id')->all();
     $routingIdentity = [
         $routingEvent->id, $routingEvent->event_key, $routingEvent->from_stage, $routingEvent->to_stage,
         $routingEvent->getRawOriginal('occurred_at'), $routingEvent->recorded_by,
@@ -201,6 +205,10 @@ test('ENGP endpoint corrects parent receipt and event-owned release columns and 
     ])->assertSessionHasNoErrors();
     expect((string) $report->fresh()->getRawOriginal('date_received_penro'))->toBe('2026-08-16')
         ->and((string) $release->fresh()->getRawOriginal('date_report_released_cenro'))->toBe('2026-08-13')
+        ->and((string) $otherRelease->fresh()->getRawOriginal('date_report_released_cenro'))->toBe('2026-08-12')
+        ->and($report->fresh()->releaseEvents()->orderBy('id')->pluck('id')->all())->toBe($releaseIdsBefore)
+        ->and(SubmissionRoutingCorrection::query()->where('source', 'engp')->where('source_id', $report->id)->orderBy('id')->pluck('field')->all())
+        ->toBe(['release_events.'.$release->id.'.date_report_released_cenro', 'date_received_penro'])
         ->and([
             $routingEvent->fresh()->id, $routingEvent->fresh()->event_key, $routingEvent->fresh()->from_stage, $routingEvent->fresh()->to_stage,
             $routingEvent->fresh()->getRawOriginal('occurred_at'), $routingEvent->fresh()->recorded_by,
@@ -209,12 +217,13 @@ test('ENGP endpoint corrects parent receipt and event-owned release columns and 
     $engpResponse = $this->get(route('submission-tracking.index', ['source' => 'engp', 'source_id' => $report->id, 'view' => 'history']))->assertOk();
     $engpProps = $engpResponse->inertiaProps();
     $engpSelected = data_get($engpProps, 'trackingContext.selected_record');
+    $engpRelease = collect(data_get($engpSelected, 'release_events', []))->firstWhere('id', $release->id);
     $engpQueues = data_get($engpProps, 'workspaceQueues', []);
     $engpQueueContains = fn (string $queue): bool => collect(data_get($engpQueues, $queue, []))
         ->contains(fn (array $row): bool => $row['source'] === 'engp' && (int) $row['source_id'] === (int) $report->id);
     expect(data_get($engpSelected, 'date_received_penro'))->toBe('2026-08-16')
-        ->and(data_get($engpSelected, 'release_events.0.id'))->toBe($release->id)
-        ->and(data_get($engpSelected, 'release_events.0.date_report_released_cenro'))->toBe('2026-08-13')
+        ->and(data_get($engpRelease, 'id'))->toBe($release->id)
+        ->and(data_get($engpRelease, 'date_report_released_cenro'))->toBe('2026-08-13')
         ->and(data_get($engpSelected, 'routing_complete'))->toBeTrue()
         ->and($engpQueueContains('history'))->toBeTrue()
         ->and($engpQueueContains('incoming'))->toBeFalse()

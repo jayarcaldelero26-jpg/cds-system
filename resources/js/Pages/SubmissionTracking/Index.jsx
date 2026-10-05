@@ -35,6 +35,7 @@ import { localDateInputValue } from "@/Utils/dateInput";
 import DatePicker from "@/Components/DatePicker";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 import { localDateTimeInputValue } from "@/Utils/timePicker";
+import { routingCorrectionDates, routingCorrectionPayload } from "@/Utils/routingCorrectionForm";
 import {
     availableIncomingActionTabs,
     filterIncomingRowsByAction,
@@ -1151,6 +1152,9 @@ export default function Index({
     };
     const submitCorrection = (event) => {
         event.preventDefault();
+        correctionForm.transform((data) =>
+            routingCorrectionPayload(data, correction),
+        );
         correctionForm.patch(
             route("submission-tracking.correct-routing", [
                 correction.source,
@@ -1166,15 +1170,7 @@ export default function Index({
         );
     };
     const openCorrection = (row) => {
-        const dates = {};
-        [
-            "date_report_released_cenro",
-            "date_received_penro",
-            "date_endorsed_regional",
-        ].forEach((field) => {
-            if (Object.prototype.hasOwnProperty.call(row, field))
-                dates[field] = row[field] || "";
-        });
+        const dates = routingCorrectionDates(row);
         const releaseEvents = Object.fromEntries(
             (row.release_events || []).map((event) => [
                 event.id,
@@ -1564,7 +1560,7 @@ export default function Index({
                         </div>
                     </div>
                 )}
-                {canAdminRoutingOverride && details && (
+                {canAdminRoutingOverride && details && details.routing?.actions?.length > 0 && (
                     <details className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-amber-950 dark:border-amber-800 dark:bg-slate-900/80 dark:text-slate-100">
                         <summary className="cursor-pointer rounded-md text-xs font-bold text-amber-900 outline-none focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2 dark:text-amber-200 dark:focus-visible:ring-amber-400 dark:focus-visible:ring-offset-slate-900">Admin actions</summary>
                         <div className="mt-3 flex flex-wrap gap-2">
@@ -1987,6 +1983,18 @@ export default function Index({
                 </CrudSection>
                 <CrudSection title="Current Routing Dates">
                     <div className="space-y-3">
+                        {correction?.source === "engp" && (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <div>
+                                    <span className="block text-xs text-gray-500">CENRO Release (components)</span>
+                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{plainDate(correction.date_report_released_cenro) || FALLBACK}</span>
+                                </div>
+                                <div>
+                                    <span className="block text-xs text-gray-500">Regional Endorsement (routing event)</span>
+                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{plainDate(correction.date_endorsed_regional) || FALLBACK}</span>
+                                </div>
+                            </div>
+                        )}
                         {Object.prototype.hasOwnProperty.call(
                             correctionForm.data.dates,
                             "date_report_released_cenro",

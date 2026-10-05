@@ -57,6 +57,7 @@ const CrudFormModal = await component('Crud/CrudFormModal');
 const UserManagement = await component('Pages/Admin/Users/Index');
 const appStyles = readFileSync(resolve('resources/css/app.css'), 'utf8');
 const previewDialogSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
+const submissionTrackingSource = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
 const render = row => renderToStaticMarkup(React.createElement(Preview, { open: true, row }));
 
 test('supported protected previews wait for a validated response before embedding a blob URL', () => {
@@ -260,6 +261,78 @@ test('routing timeline omits absent summary values and wraps long office destina
     assert.match(markup, new RegExp(destination));
     assert.match(markup, /break-words/);
     assert.doesNotMatch(markup, /Last Updated|Recorded By/);
+});
+
+test('terminal release presents Completed without a Current badge, pending age, or routing action', () => {
+    const markup = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+        row: {
+            can_transition: true,
+            routing: {
+                profile_label: 'CENRO-to-PENRO canonical routing',
+                current_stage: 'released_to_regional',
+                current_location: 'Regional Office',
+                current_status: 'Completed',
+                pending_since: null,
+                working_days_pending: null,
+                actions: [],
+                routing_history: [],
+                timeline: [{
+                    key: 'released_to_regional',
+                    label: 'Released / Endorsed to Regional Office',
+                    status: 'current',
+                    display_status: 'completed',
+                    display_status_label: 'Completed',
+                    event_type: 'released',
+                    occurred_at: '2026-10-03T18:08:15+08:00',
+                    pending_since: null,
+                    working_days_pending: null,
+                }],
+            },
+        },
+    }));
+
+    assert.match(markup, /Released \/ Endorsed to Regional Office/);
+    assert.match(markup, /bg-green-50 text-green-800[^>]*>Completed<\/span>/);
+    assert.doesNotMatch(markup, />Current<|Pending Since|Pending:|>Pending<|<button/);
+    assert.match(submissionTrackingSource, /canAdminRoutingOverride && details && details\.routing\?\.actions\?\.length > 0/);
+});
+
+test('active one-hundred-percent stages remain Current and Ready for Release remains an active MOV phase', () => {
+    const activeRouting = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+        row: {
+            can_transition: true,
+            routing: {
+                profile_label: 'CENRO-to-PENRO canonical routing',
+                current_stage: 'penro_cds_chief',
+                processing_percentage: 100,
+                actions: [],
+                routing_history: [],
+                timeline: [{
+                    key: 'penro_cds_chief', label: 'PENRO CDS Chief', status: 'current', display_status: 'current',
+                    occurred_at: '2026-10-02T09:00:00+08:00', pending_since: '2026-10-02', working_days_pending: 1,
+                }],
+            },
+        },
+    }));
+    const readyMov = renderToStaticMarkup(React.createElement(PambProgress, {
+        row: {
+            mov_processing: {
+                applicable: true,
+                status_key: 'ready_for_release',
+                workflow_status: 'Ready for CENRO Records Release',
+                status_label: 'Reviewed by CENRO CDS Chief - Ready for Release',
+                milestones: [{ key: 'released_by_cenro', label: 'Released by CENRO to PENRO', complete: false, current: false }],
+                turnaround: { label: 'DAY 0 OF 7 · 9 WORKING DAYS REMAINING', deadline: '2026-10-20', remaining: 9 },
+            },
+            pamb_action_flags: {},
+        },
+    }));
+
+    assert.match(activeRouting, />Current<|Current checkpoint/);
+    assert.doesNotMatch(activeRouting, />Completed<|Pending Since/);
+    assert.match(readyMov, /Ready for CENRO Records Release/);
+    assert.match(readyMov, /DAY 0 OF 7/);
+    assert.doesNotMatch(readyMov, />Completed</);
 });
 
 test('Manual PAMB canonical workspace payload renders through the shared details timeline', () => {
