@@ -23,7 +23,8 @@ class AdminRoutingOverrideController extends Controller
         abort_unless($available['available'], 422);
         $options = $generate($request->user());
         $request->session()->put('submission_tracking.override_passkey_options', WebAuthn::toJson($options));
-        $request->session()->put('submission_tracking.override_context', ['source' => $source, 'record' => $record, 'stage' => $available['current_stage']]);
+        $request->session()->put('submission_tracking.override_context', ['source' => $source, 'record' => $record, 'stage' => $available['current_stage'], 'state_token' => $available['state_token']]);
+        unset($available['state_token']);
         return response()->json(['options' => WebAuthn::toBrowserArray($options), 'override' => $available]);
     }
 
@@ -42,14 +43,14 @@ class AdminRoutingOverrideController extends Controller
         if (trim($data['reason']) === '') throw ValidationException::withMessages(['reason' => 'An override reason is required.']);
         $context = $request->session()->pull('submission_tracking.override_context');
         $serialized = $request->session()->pull('submission_tracking.override_passkey_options');
-        if (! is_array($context) || $context['source'] !== $source || (int) $context['record'] !== $record || ! is_string($serialized)) throw ValidationException::withMessages(['credential' => 'Passkey verification expired. Start the override again.']);
+        if (! is_array($context) || ($context['source'] ?? null) !== $source || (int) ($context['record'] ?? 0) !== $record || ! is_string($context['stage'] ?? null) || ! is_string($context['state_token'] ?? null) || ! is_string($serialized)) throw ValidationException::withMessages(['credential' => 'Passkey verification expired. Start the override again.']);
         try {
             $options = WebAuthn::fromJson($serialized, PublicKeyCredentialRequestOptions::class);
             $credential = WebAuthn::fromJson(json_encode($data['credential'], JSON_THROW_ON_ERROR), PublicKeyCredential::class);
         } catch (\Throwable) {
             throw ValidationException::withMessages(['credential' => 'Invalid passkey verification data.']);
         }
-        $override = $this->overrides->execute($source, $record, $data['action'], $request->user(), $data['reason'], $credential, $options);
+        $override = $this->overrides->execute($source, $record, $data['action'], $request->user(), $data['reason'], $credential, $options, $context['stage'], $context['state_token']);
         return response()->json(['message' => 'Administrative override recorded.', 'override_id' => $override->id]);
     }
 }

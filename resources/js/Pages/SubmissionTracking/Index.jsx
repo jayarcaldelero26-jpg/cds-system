@@ -1970,6 +1970,7 @@ export default function Index({
                 onSubmit={submitCorrection}
                 processing={correctionForm.processing}
                 errors={correctionForm.errors}
+                summaryErrors={correctionForm.errors.internal_events ? { internal_events: correctionForm.errors.internal_events } : null}
                 saveLabel="Confirm Correction"
                 maxWidth="max-w-xl"
             >
@@ -2066,6 +2067,7 @@ export default function Index({
                                 id={`correction-release-event-${id}`}
                                 label={`CENRO Release Event ${id}`}
                                 value={value || ""}
+                                error={correctionForm.errors[`release_events.${id}`]}
                                 onChange={(nextValue) =>
                                     correctionForm.setData("release_events", {
                                         ...correctionForm.data.release_events,

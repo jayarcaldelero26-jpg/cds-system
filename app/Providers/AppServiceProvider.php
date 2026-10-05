@@ -101,6 +101,14 @@ class AppServiceProvider extends ServiceProvider
                 }
             }
 
+            // Routing correction and emergency override are explicitly
+            // permission-gated even for global administrator roles. The
+            // PermissionSeeder grants these abilities to approved admins;
+            // the broad global-role fallback below must not replace them.
+            if (in_array($ability, ['submission-tracking.correct-routing', 'submission-tracking.admin-override'], true)) {
+                return null;
+            }
+
             return $user->hasAnyRole(['CDS Admin', 'Super Admin']) ? true : null;
         });
    }

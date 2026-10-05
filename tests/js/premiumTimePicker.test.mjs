@@ -16,5 +16,6 @@ assert.deepEqual(initialDraft('', new Date('2026-09-04T00:23:00Z')), { date: '',
 assert.deepEqual(initialDraft('', new Date('2026-09-04T12:23:00Z')), { date: '', hasDate: false, hour: 8, minute: 23, period: 'PM' });
 assert.deepEqual(initialDraft('2026-09-03T14:35', new Date('2026-09-04T00:23:00Z')), { date: '2026-09-03', hasDate: true, hour: 2, minute: 35, period: 'PM' });
 assert.equal(localDateTimeInputValue('2026-09-03T00:35:00+08:00'), '2026-09-03T00:35');
+assert.equal(localDateTimeInputValue('2026-09-30T12:00:37+08:00'), '2026-09-30T12:00');
 
 console.log('premium time picker utility tests passed');

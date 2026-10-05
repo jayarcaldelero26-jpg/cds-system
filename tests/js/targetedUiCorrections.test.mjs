@@ -55,6 +55,7 @@ test('canonical routing correction remains; the duplicate admin disclosure actio
     const source = await readFile(new URL('../..//resources/js/Pages/SubmissionTracking/Index.jsx', import.meta.url), 'utf8');
     assert.ok(source.includes('canCorrectSubmissionRouting && details && <Button'));
     assert.ok(source.includes('>Correct routing</Button>'));
+    assert.match(source, /summaryErrors=\{correctionForm\.errors\.internal_events \? \{ internal_events: correctionForm\.errors\.internal_events \} : null\}/);
     assert.doesNotMatch(source, /<Button[^>]*>Correct Routing Record<\/Button>/);
     assert.ok(source.includes('canAdminRoutingOverride && <Button'));
     assert.ok(source.includes('>Admin Override</Button>'));

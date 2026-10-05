@@ -30,7 +30,17 @@ final class AdminRoutingOverrideService
         if ($record instanceof ConservationReportSubmission && $this->pamb->applies($record) && ! $this->tracking->usesGenericRouting($source, $recordId)) return $this->pambOptions($record);
         $state = $this->generic->state($record, $source, null, null); $current = (string) $state['stage'];
         $actions = collect($state['actions'])->filter(fn (array $action): bool => $action['from'] === $current && ! ($action['receipt_correction_context'] ?? false))->map(fn (array $action): array => $this->action($action['key'], $action['label'], $action['action_label'], $action['correction'] ?? false, $action['categories'][0] ?? null, $action['from_office'] ?? null))->values()->all();
-        return ['available' => $actions !== [], 'engine' => 'generic', 'source' => $source, 'source_id' => $record->getKey(), 'current_stage' => $current, 'current_location' => str_starts_with($current, 'transit_') ? 'In transit' : $record->getAttribute('target_office'), 'accountable_category' => $actions[0]['accountable_category'] ?? null, 'accountable_office' => $actions[0]['accountable_office'] ?? null, 'actions' => $actions, 'protected_area_id' => $record->getAttribute('protected_area_id')];
+        $stateToken = hash('sha256', json_encode([
+            'source' => $source,
+            'record' => $record->getKey(),
+            'stage' => $current,
+            'active_cycle' => $state['active_cycle'] ?? null,
+            'events' => collect($state['events'] ?? [])->map(fn ($event): array => [
+                $event->id, $event->event_key, $event->from_stage, $event->to_stage,
+                $event->occurred_at?->toIso8601String(), $event->recorded_by, $event->metadata,
+            ])->all(),
+        ], JSON_THROW_ON_ERROR));
+        return ['available' => $actions !== [], 'engine' => 'generic', 'source' => $source, 'source_id' => $record->getKey(), 'current_stage' => $current, 'state_token' => $stateToken, 'current_location' => str_starts_with($current, 'transit_') ? 'In transit' : $record->getAttribute('target_office'), 'accountable_category' => $actions[0]['accountable_category'] ?? null, 'accountable_office' => $actions[0]['accountable_office'] ?? null, 'actions' => $actions, 'protected_area_id' => $record->getAttribute('protected_area_id')];
     }
 
     /** @return array<string,mixed> */
@@ -48,7 +58,18 @@ final class AdminRoutingOverrideService
             $key = $canonical === PambRoutingTimelineService::RECORDS_RECEIVED ? SubmissionTrackingService::PENRO_RECEIPT : ($canonical === PambRoutingTimelineService::RELEASED_TO_REGIONAL ? SubmissionTrackingService::REGIONAL_ENDORSEMENT : SubmissionTrackingService::CENRO_RELEASE);
             $actions[] = $this->action($key, $current['label'] ?? 'Record Routing Event', $current['action_label'] ?? 'Record Routing Event', false, $category, $this->pambOffice($record, $category));
         }
-        return ['available' => $actions !== [], 'engine' => 'pamb', 'source' => 'conservation', 'source_id' => $record->getKey(), 'current_stage' => $stage, 'current_location' => $presentation['current_document_location'], 'accountable_category' => $actions[0]['accountable_category'] ?? null, 'accountable_office' => $actions[0]['accountable_office'] ?? null, 'actions' => $actions, 'protected_area_id' => $record->getAttribute('protected_area_id')];
+        $stateToken = hash('sha256', json_encode([
+            'source' => 'conservation',
+            'record' => $record->getKey(),
+            'stage' => $stage,
+            'timeline' => collect($presentation['timeline'] ?? [])->map(fn (array $item): array => [
+                $item['stage_key'] ?? $item['key'] ?? null,
+                $item['routing_event_id'] ?? null,
+                $item['occurred_at'] ?? null,
+                $item['recorded_by'] ?? null,
+            ])->all(),
+        ], JSON_THROW_ON_ERROR));
+        return ['available' => $actions !== [], 'engine' => 'pamb', 'source' => 'conservation', 'source_id' => $record->getKey(), 'current_stage' => $stage, 'state_token' => $stateToken, 'current_location' => $presentation['current_document_location'], 'accountable_category' => $actions[0]['accountable_category'] ?? null, 'accountable_office' => $actions[0]['accountable_office'] ?? null, 'actions' => $actions, 'protected_area_id' => $record->getAttribute('protected_area_id')];
     }
 
     private function action(string $key, string $label, string $actionLabel, bool $correction, ?string $category, ?string $office): array { return ['key' => $key, 'label' => $label, 'action_label' => $actionLabel, 'correction' => $correction, 'remarks_required' => $correction, 'accountable_category' => $this->organization->categoryLabel($category), 'accountable_category_key' => $category, 'accountable_office' => $office]; }
@@ -62,12 +83,18 @@ final class AdminRoutingOverrideService
     }; }
     private function pambOffice(ConservationReportSubmission $record, string $category): string { return in_array($category, [OrganizationalAccessService::CENRO_FOCAL, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_RECORDS], true) ? (string) $record->target_office : 'PENRO'; }
 
-    public function execute(string $source, int $recordId, string $actionKey, User $admin, string $reason, PublicKeyCredential $credential, PublicKeyCredentialRequestOptions $options): SubmissionRoutingOverride
+    public function execute(string $source, int $recordId, string $actionKey, User $admin, string $reason, PublicKeyCredential $credential, PublicKeyCredentialRequestOptions $options, ?string $expectedStage = null, ?string $expectedStateToken = null): SubmissionRoutingOverride
     {
         abort_unless($this->canUse($admin), 403); $reason = trim($reason); if ($reason === '') throw ValidationException::withMessages(['reason' => 'An override reason is required.']);
-        $passkey = ($this->verifyPasskey)($credential, $options, $admin); $before = $this->available($source, $recordId, $admin); $selected = collect($before['actions'])->firstWhere('key', $actionKey); if (! $selected) throw ValidationException::withMessages(['action' => 'That override action is no longer valid.']); $record = $this->tracking->source($source)['model']::query()->findOrFail($recordId);
+        $before = $this->available($source, $recordId, $admin);
+        if (($expectedStage !== null && $before['current_stage'] !== $expectedStage)
+            || ($expectedStateToken !== null && ! hash_equals($expectedStateToken, $before['state_token']))) {
+            throw ValidationException::withMessages(['stage' => 'The record changed while passkey verification was in progress. Refresh and try again.']);
+        }
+        $selected = collect($before['actions'])->firstWhere('key', $actionKey); if (! $selected) throw ValidationException::withMessages(['action' => 'That override action is no longer valid.']);
+        $passkey = ($this->verifyPasskey)($credential, $options, $admin); $record = $this->tracking->source($source)['model']::query()->findOrFail($recordId);
         return DB::transaction(function () use ($source, $recordId, $actionKey, $admin, $reason, $passkey, $before, $selected, $record): SubmissionRoutingOverride {
-            $fresh = $this->available($source, $recordId, $admin); if ($fresh['current_stage'] !== $before['current_stage'] || ! collect($fresh['actions'])->contains('key', $actionKey)) throw ValidationException::withMessages(['stage' => 'The record changed while passkey verification was in progress. Refresh and try again.']);
+            $fresh = $this->available($source, $recordId, $admin); if ($fresh['current_stage'] !== $before['current_stage'] || $fresh['state_token'] !== $before['state_token'] || ! collect($fresh['actions'])->contains('key', $actionKey)) throw ValidationException::withMessages(['stage' => 'The record changed while passkey verification was in progress. Refresh and try again.']);
             $eventKey = null; $resulting = null; $event = null;
             if ($before['engine'] === 'generic') { $event = $this->generic->transitionAsOverride($record, $source, $actionKey, $admin, ['override_for_category' => $selected['accountable_category_key'], 'override_for_office' => $selected['accountable_office'], 'override_reason' => $reason], $reason); $eventKey = $event->event_key; $resulting = $event->to_stage; }
             elseif ($this->pamb->isInternalStageKey($actionKey)) { $event = $this->pamb->record($record, $actionKey, CarbonImmutable::now()->toDateTimeString(), $admin->id, $reason); $eventKey = $event->stage_key; $resulting = $event->stage_key; }

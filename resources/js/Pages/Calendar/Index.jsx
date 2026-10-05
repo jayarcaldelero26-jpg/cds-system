@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Head, useForm, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import BusinessCalendarMonth from '@/Components/BusinessCalendarMonth';
@@ -9,6 +9,7 @@ import ConfirmDialog from '@/Components/ConfirmDialog';
 import { formatReportDate } from '@/Utils/dateFormatters';
 import DatePicker from '@/Components/DatePicker';
 import FloatingSelect from '@/Components/Form/FloatingSelect';
+import UtilityIconButton from '@/Components/UtilityIconButton';
 
 const initialForm = { date: '', name: '', type: 'NATIONAL_HOLIDAY', scope: 'NATIONAL', location: '', reference: '', remarks: '', is_active: true };
 const typeLabels = {
@@ -23,7 +24,7 @@ function CalendarIcon() {
     return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M7.5 3.5v3M16.5 3.5v3M3.5 9.5h17M7.5 13h.01M11.5 13h.01M15.5 13h.01M7.5 16.5h.01M11.5 16.5h.01" /></svg>;
 }
 
-function CalendarEventFormModal({ open, editing, form, onClose, onSubmit }) {
+export function CalendarEventFormModal({ open, editing, form, onClose, onSubmit }) {
     useEffect(() => {
         if (!open || form.processing) return undefined;
         const onKeyDown = event => event.key === 'Escape' && onClose();
@@ -41,7 +42,7 @@ function CalendarEventFormModal({ open, editing, form, onClose, onSubmit }) {
                     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-green-100 text-green-700 dark:bg-green-950/60 dark:text-green-300"><CalendarIcon /></span>
                     <div className="min-w-0"><h2 className="truncate text-sm font-semibold text-gray-900 dark:text-white">{title}</h2><p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">Business calendar configuration</p></div>
                 </div>
-                <button type="button" onClick={onClose} disabled={form.processing} className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gray-200 text-gray-400 transition hover:bg-gray-50 hover:text-gray-700 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200" aria-label="Close form" data-cds-action="true" data-cds-action-variant="primary">&times;</button>
+                <CalendarFormCloseButton onClose={onClose} disabled={form.processing} />
             </header>
 
             <div className="custom-table-scrollbar min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
@@ -60,6 +61,10 @@ function CalendarEventFormModal({ open, editing, form, onClose, onSubmit }) {
             <footer className="flex items-center justify-end gap-2 border-t border-gray-100 px-5 py-3.5 dark:border-gray-800 sm:px-6"><button type="button" onClick={onClose} disabled={form.processing} className="h-10 rounded-lg border border-gray-300 bg-white px-4 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button><button type="submit" disabled={form.processing} className="h-10 rounded-lg bg-green-700 px-4 text-xs font-semibold text-white shadow-sm transition hover:bg-green-800 disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600" data-cds-action="true" data-cds-action-variant="primary">{form.processing ? (editing ? 'Saving Changes...' : 'Saving...') : (editing ? 'Save Changes' : 'Save Non-Working Day')}</button></footer>
         </form>
     </div>;
+}
+
+export function CalendarFormCloseButton({ onClose, disabled = false }) {
+    return <UtilityIconButton compact type="button" onClick={onClose} disabled={disabled} aria-label="Close form" className="shrink-0 border border-gray-200 text-gray-400 hover:bg-gray-50 hover:text-gray-700 dark:border-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200">&times;</UtilityIconButton>;
 }
 
 function CalendarField({ label, required = false, error, className = '', children }) {
@@ -83,8 +88,8 @@ export default function CalendarIndex({ view = 'month', year, month, filters = {
     const [formOpen, setFormOpen] = useState(false);
     const [deleteTarget, setDeleteTarget] = useState(null);
     const form = useForm(initialForm);
-    const resetForm = () => { setEditing(null); setFormOpen(false); form.reset(); form.clearErrors(); };
-    const openCreate = date => { setEditing(null); form.setData({ ...initialForm, date: date || '' }); form.clearErrors(); setFormOpen(true); };
+    const resetForm = useCallback(() => { setEditing(null); setFormOpen(false); form.reset(); form.clearErrors(); }, [form.reset, form.clearErrors]);
+    const openCreate = useCallback(date => { setEditing(null); form.setData({ ...initialForm, date: date || '' }); form.clearErrors(); setFormOpen(true); }, [form.setData, form.clearErrors]);
     const openEdit = day => { setSelected(null); setEditing(day); form.setData({ date: day.date || '', name: day.name || '', type: day.type || 'NATIONAL_HOLIDAY', scope: day.scope || 'NATIONAL', location: day.location || '', reference: day.reference || '', remarks: day.remarks || '', is_active: Boolean(day.is_active) }); form.clearErrors(); setFormOpen(true); };
     const toggleActive = day => {
         if (!day || form.processing) return;

@@ -9,15 +9,15 @@ const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
 // One presentation map is shared by Month chips, Year markers, and the legend.
 const CALENDAR_GROUPS = {
-    national_holiday: { label: 'National Holiday', chip: 'from-rose-500 to-red-700' },
-    local_holiday: { label: 'Local Holiday', chip: 'from-amber-400 to-orange-600' },
-    engp_report: { label: 'ENGP Report', chip: 'from-emerald-500 to-green-700' },
-    protected_area_management: { label: 'Protected Area Management and Development', chip: 'from-teal-500 to-emerald-700' },
-    wildlife_conservation: { label: 'Wildlife Conservation and Protection', chip: 'from-blue-500 to-blue-700' },
-    cbfm: { label: 'Community-Based Forest Management', chip: 'from-lime-500 to-green-600' },
-    integrated_watershed: { label: 'Integrated Watershed Management', chip: 'from-cyan-500 to-sky-700' },
-    conservation_report: { label: 'Conservation Report', chip: 'from-violet-500 to-purple-700' },
-    development_report: { label: 'Development Report', chip: 'from-indigo-500 to-indigo-700' },
+    national_holiday: { label: 'National holiday', chip: 'from-rose-500 to-red-700' },
+    local_holiday: { label: 'Other non-working day', description: 'Local holidays, special non-working days, office-declared non-working days, and other configured non-working days use this color.', chip: 'from-amber-400 to-orange-600' },
+    engp_report: { label: 'ENGP report', chip: 'from-emerald-500 to-green-700' },
+    protected_area_management: { label: 'Protected area management', chip: 'from-teal-500 to-emerald-700' },
+    wildlife_conservation: { label: 'Wildlife conservation', chip: 'from-blue-500 to-blue-700' },
+    cbfm: { label: 'Community-based forest management', chip: 'from-lime-500 to-green-600' },
+    integrated_watershed: { label: 'Watershed management', chip: 'from-cyan-500 to-sky-700' },
+    conservation_report: { label: 'Conservation report', chip: 'from-violet-500 to-purple-700' },
+    development_report: { label: 'Development report', chip: 'from-indigo-500 to-indigo-700' },
 };
 const LEGEND_GROUPS = ['national_holiday', 'local_holiday', 'engp_report', 'protected_area_management', 'wildlife_conservation', 'cbfm', 'integrated_watershed', 'conservation_report', 'development_report'];
 const PAMD_SOURCES = new Set(['bms', 'bams', 'imea', 'imea-maintenance', 'conservation-reports', 'ipaf', 'revenue']);
@@ -39,6 +39,7 @@ export default function BusinessCalendarMonth({
     const [moreDate, setMoreDate] = useState(null);
     const parsedMonth = parseMonth(month);
     const selectedYear = Number(year || parsedMonth.year);
+    const selectedMonth = parsedMonth.year === selectedYear ? parsedMonth.index + 1 : null;
     const days = useMemo(() => monthDays(parsedMonth.year, parsedMonth.index), [parsedMonth.year, parsedMonth.index]);
     const movByDate = useMemo(() => groupBy(movEvents, 'submission_date'), [movEvents]);
     const holidaysByDate = useMemo(() => groupBy(nonWorkingDays, 'date'), [nonWorkingDays]);
@@ -92,7 +93,7 @@ export default function BusinessCalendarMonth({
                         setView={targetView => navigate(targetView === 'year' ? { view: 'year', year: selectedYear } : { view: 'month', month })}
                     />
                     {view === 'year'
-                        ? <YearView year={selectedYear} summary={yearSummary} nonWorkingDays={nonWorkingDays} showMovs={showMovs} onOpenMonth={openMonth} />
+                        ? <YearView year={selectedYear} selectedMonth={selectedMonth} summary={yearSummary} nonWorkingDays={nonWorkingDays} showMovs={showMovs} onOpenMonth={openMonth} />
                         : <MonthView days={days} today={today} movByDate={movByDate} holidaysByDate={holidaysByDate} showMovs={showMovs} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={setMoreDate} />}
                 </div>
             </div>
@@ -101,7 +102,7 @@ export default function BusinessCalendarMonth({
     </section>;
 }
 
-function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd }) {
+export function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd }) {
     return <div className="flex w-full flex-col sm:grid sm:grid-cols-2 sm:gap-5 xl:min-h-[520px] xl:flex-1 xl:flex xl:flex-col xl:gap-0">
         <div className="xl:mb-6">
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/65 dark:text-emerald-300/70">Show on calendar</p>
@@ -174,12 +175,12 @@ function MonthView({ days, today, movByDate, holidaysByDate, showMovs, canManage
 function CalendarDay({ day, today, movEvents, holidays, canManage, onAdd, onSelectMov, onSelectHoliday, onMore }) {
     const visible = movEvents.slice(0, 3);
     const remaining = movEvents.length - visible.length;
-    const surface = day.inMonth ? 'border-slate-200/80 bg-white/80 shadow-sm hover:-translate-y-px hover:shadow-md dark:border-gray-700 dark:bg-gray-900/85' : 'border-slate-200/55 bg-slate-100/65 opacity-80 dark:border-gray-800 dark:bg-gray-950/55';
+    const surface = day.inMonth ? 'border-slate-200/80 bg-white/80 shadow-sm hover:shadow-md dark:border-gray-700 dark:bg-gray-900/85' : 'border-slate-200/55 bg-slate-100/65 opacity-80 dark:border-gray-800 dark:bg-gray-950/55';
 
-    return <div className={`group relative min-h-[118px] rounded-xl border p-2.5 backdrop-blur-sm transition duration-150 ${surface} ${today ? 'border-emerald-400 bg-emerald-50/75 shadow-[0_0_0_1px_rgba(16,185,129,0.12)] dark:border-emerald-700 dark:bg-emerald-950/20' : ''}`}>
+    return <div className={`group relative min-h-[118px] rounded-xl border p-2.5 transition duration-150 ${surface} ${today ? 'border-emerald-400 bg-emerald-50/75 shadow-[0_0_0_1px_rgba(16,185,129,0.12)] dark:border-emerald-700 dark:bg-emerald-950/20' : ''}`}>
         <div className="mb-2 flex items-center justify-between">
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold ${today ? 'bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-sm' : day.inMonth ? 'text-slate-800 dark:text-gray-100' : 'text-slate-400 dark:text-gray-600'}`}>{day.number}</span>
-            {canManage && day.inMonth && <button type="button" onClick={() => onAdd(day.key)} className="invisible rounded-md px-1.5 text-sm leading-5 text-emerald-700 transition hover:bg-emerald-50 group-hover:visible focus:visible dark:text-emerald-300 dark:hover:bg-emerald-950/40" aria-label={`Add non-working day on ${formatReportDate(day.key)}`} data-cds-action="true" data-cds-action-variant="primary">+</button>}
+            {canManage && day.inMonth && <CalendarAddButton onAdd={onAdd} date={day.key} label={`Add non-working day on ${formatReportDate(day.key)}`} compact="tight" className="invisible rounded-md text-emerald-700 group-hover:visible focus:visible hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40"><PlusIcon /></CalendarAddButton>}
         </div>
         <div className="space-y-1">
             {holidays.map(holiday => <HolidayChip key={holiday.id} holiday={holiday} onSelect={onSelectHoliday} />)}
@@ -201,7 +202,7 @@ function MovChip({ event, onSelect }) {
     return <button type="button" onClick={() => onSelect(event)} title={`${label} — ${event.title}`} className={`block h-[22px] w-full truncate rounded-md bg-gradient-to-r px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${style.chip}`}>{label}</button>;
 }
 
-function YearView({ year, summary, nonWorkingDays, showMovs, onOpenMonth }) {
+function YearView({ year, selectedMonth, summary, nonWorkingDays, showMovs, onOpenMonth }) {
     const months = summary?.months || {};
     const overview = summary?.overview || {};
     const holidaysByMonth = groupHolidaysByMonth(nonWorkingDays);
@@ -216,17 +217,21 @@ function YearView({ year, summary, nonWorkingDays, showMovs, onOpenMonth }) {
             </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 12 }, (_, index) => <YearMiniCalendar key={index} year={year} month={index + 1} eventDays={months[String(index + 1).padStart(2, '0')]?.days || {}} holidayDays={holidaysByMonth[index + 1] || {}} showMovs={showMovs} onOpenMonth={onOpenMonth} />)}
+            {Array.from({ length: 12 }, (_, index) => <YearMiniCalendar key={index} year={year} month={index + 1} selected={selectedMonth === index + 1} eventDays={months[String(index + 1).padStart(2, '0')]?.days || {}} holidayDays={holidaysByMonth[index + 1] || {}} showMovs={showMovs} onOpenMonth={onOpenMonth} />)}
         </div>
     </div>;
 }
 
-function YearMiniCalendar({ year, month, eventDays, holidayDays, showMovs, onOpenMonth }) {
+export function YearMiniCalendar({ year, month, selected = false, eventDays, holidayDays, showMovs, onOpenMonth }) {
     const calendarDays = miniMonthDays(year, month - 1);
     const title = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date(year, month - 1, 1)).toUpperCase();
+    const readableTitle = `${title[0]}${title.slice(1).toLowerCase()}`;
+    const headingStyle = selected
+        ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200'
+        : 'border-slate-200/80 bg-slate-50/65 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 dark:border-gray-700 dark:bg-gray-800/60 dark:text-gray-200 dark:hover:border-emerald-800 dark:hover:bg-emerald-950/30';
 
-    return <article className="rounded-xl border border-slate-200/80 bg-white/80 p-3 shadow-sm backdrop-blur-sm transition hover:border-emerald-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-900/85 dark:hover:border-emerald-800">
-        <button type="button" onClick={() => onOpenMonth(month)} className="cds-button-interaction mb-2 block min-h-9 w-full rounded-md px-2 text-left text-xs font-bold tracking-wide" data-cds-action="true" data-cds-action-variant="primary">{title}</button>
+    return <article className="rounded-xl border border-slate-200/80 bg-white/80 p-3 shadow-sm transition hover:border-emerald-200 hover:shadow-md dark:border-gray-700 dark:bg-gray-900/85 dark:hover:border-emerald-800">
+        <button type="button" onClick={() => onOpenMonth(month)} aria-label={`Open ${readableTitle} ${year}`} aria-current={selected ? 'date' : undefined} className={`mb-2 block min-h-9 w-full rounded-md border px-2 text-left text-xs font-bold tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-1 dark:focus-visible:ring-offset-gray-900 ${headingStyle}`}>{title}</button>
         <div className="mb-1 grid grid-cols-7 text-center text-[8px] font-semibold tracking-[0.08em] text-slate-400 dark:text-gray-500">
             {WEEKDAYS.map(day => <span key={day}>{day.slice(0, 1)}</span>)}
         </div>
@@ -254,14 +259,20 @@ function YearMiniCalendar({ year, month, eventDays, holidayDays, showMovs, onOpe
     </article>;
 }
 
-function CalendarLegend() {
-    return <div className="mx-2 mb-2 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2.5 text-[10px] font-medium text-slate-600 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/80 dark:text-gray-300 sm:mx-3 sm:mb-3">
-        <span className="font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-gray-400">Legend</span>
-        {LEGEND_GROUPS.map(group => {
-            const style = getCalendarGroupStyle(group);
-            return <span key={group} className="inline-flex items-center gap-1.5 whitespace-nowrap"><i className={`h-2.5 w-2.5 rounded-full bg-gradient-to-br shadow-sm ${style.chip}`} aria-hidden="true" />{style.label}</span>;
-        })}
+export function CalendarLegend() {
+    return <div role="group" aria-label="Calendar legend" className="mx-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-[11px] font-medium leading-4 text-slate-700 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/80 dark:text-gray-200 sm:mx-3 sm:mb-3">
+        <span className="shrink-0 font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-gray-400">Legend</span>
+        <ul aria-label="Calendar event categories" className="flex min-w-0 flex-1 list-none flex-wrap items-center gap-x-3 gap-y-1 p-0">
+            {LEGEND_GROUPS.map(group => {
+                const style = getCalendarGroupStyle(group);
+                return <li key={group} aria-label={style.description ? `Non-working-day group: ${style.description}` : style.label} title={style.description || style.label} className="inline-flex min-w-0 items-center gap-1.5"><span className={`h-2.5 w-2.5 shrink-0 rounded-full bg-gradient-to-br ${style.chip}`} aria-hidden="true" /><span>{style.label}</span></li>;
+            })}
+        </ul>
     </div>;
+}
+
+export function CalendarAddButton({ onAdd, date = '', label, compact = false, className = '', children = <PlusIcon />, disabled = false }) {
+    return <UtilityIconButton type="button" compact={compact} onClick={() => onAdd(date)} disabled={disabled} aria-label={label} title={label} className={className}>{children}</UtilityIconButton>;
 }
 
 function DateEventsModal({ date, events, onClose, onSelect }) {

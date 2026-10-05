@@ -135,7 +135,43 @@ test('Google Drive provider normalizes quota and handles missing finite limits',
     $unlimited = Mockery::mock(GoogleDriveDocumentArchiveGateway::class);
     $unlimited->shouldReceive('storageQuota')->once()->andReturn(['usage' => '250']);
     $result = (new GoogleDriveStorageCapacityProvider($unlimited))->measure();
-    expect($result['status'])->toBe('unavailable')->and($result['total_bytes'])->toBeNull();
+    expect($result['status'])->toBe('available')
+        ->and($result['used_bytes'])->toBe(250)
+        ->and($result['total_bytes'])->toBeNull()
+        ->and($result['free_bytes'])->toBeNull()
+        ->and($result['used_percentage'])->toBeNull()
+        ->and($result['message'])->toContain('without a storage limit');
+});
+
+test('Google Drive capacity fails closed for missing usage and an invalid or zero reported limit', function (): void {
+    foreach ([
+        ['limit' => '1000'],
+        ['limit' => '1000', 'usage' => 'not-a-number'],
+        ['limit' => '0', 'usage' => '250'],
+        ['limit' => null, 'usage' => '250'],
+    ] as $quota) {
+        $gateway = Mockery::mock(GoogleDriveDocumentArchiveGateway::class);
+        $gateway->shouldReceive('storageQuota')->once()->andReturn($quota);
+        $result = (new GoogleDriveStorageCapacityProvider($gateway))->measure();
+        expect($result['status'])->toBe('unavailable')
+            ->and($result['used_bytes'])->toBeNull()
+            ->and($result['total_bytes'])->toBeNull()
+            ->and($result['free_bytes'])->toBeNull();
+    }
+});
+
+test('Google Drive capacity hides provider failures and reports no fabricated values', function (): void {
+    $gateway = Mockery::mock(GoogleDriveDocumentArchiveGateway::class);
+    $gateway->shouldReceive('storageQuota')->once()->andThrow(new \App\Services\Archive\GoogleDriveArchiveException('private provider details', 400));
+
+    $result = (new GoogleDriveStorageCapacityProvider($gateway))->measure();
+
+    expect($result['status'])->toBe('unavailable')
+        ->and($result['used_bytes'])->toBeNull()
+        ->and($result['total_bytes'])->toBeNull()
+        ->and($result['free_bytes'])->toBeNull()
+        ->and($result['message'])->toBe('Google Drive capacity could not be retrieved safely.')
+        ->and($result['message'])->not->toContain('private provider details');
 });
 
 test('capacity formatter supports MB GB and TB without raw byte presentation', function (): void {
@@ -149,13 +185,33 @@ test('capacity cache prevents repeated provider reads and refresh invalidates on
     config()->set('cache.default', 'array');
     Cache::flush();
     $server = Mockery::mock(ServerStorageCapacityProvider::class);
-    $server->shouldReceive('measure')->once()->andReturn(['provider' => 'server', 'status' => 'available', 'used_bytes' => 10, 'total_bytes' => 100, 'free_bytes' => 90, 'used_percentage' => 10, 'measured_at' => now()->toIso8601String(), 'source' => 'fake', 'message' => null]);
+    $server->shouldReceive('measure')->twice()->andReturn(
+        ['provider' => 'server', 'status' => 'available', 'used_bytes' => 10, 'total_bytes' => 100, 'free_bytes' => 90, 'used_percentage' => 10, 'measured_at' => now()->toIso8601String(), 'source' => 'fake', 'message' => null],
+        ['provider' => 'server', 'status' => 'available', 'used_bytes' => 11, 'total_bytes' => 100, 'free_bytes' => 89, 'used_percentage' => 11, 'measured_at' => now()->toIso8601String(), 'source' => 'fake', 'message' => null],
+    );
     $drive = Mockery::mock(\App\Services\Storage\GoogleDriveStorageCapacityProvider::class);
-    $drive->shouldReceive('measure')->once()->andReturn(['provider' => 'google_drive', 'status' => 'available', 'used_bytes' => 20, 'total_bytes' => 100, 'free_bytes' => 80, 'used_percentage' => 20, 'measured_at' => now()->toIso8601String(), 'source' => 'fake', 'message' => null]);
+    $drive->shouldReceive('measure')->twice()->andReturn(
+        ['provider' => 'google_drive', 'status' => 'available', 'used_bytes' => 20, 'total_bytes' => 100, 'free_bytes' => 80, 'used_percentage' => 20, 'measured_at' => now()->toIso8601String(), 'source' => 'fake', 'message' => null],
+        ['provider' => 'google_drive', 'status' => 'available', 'used_bytes' => 21, 'total_bytes' => 100, 'free_bytes' => 79, 'used_percentage' => 21, 'measured_at' => now()->toIso8601String(), 'source' => 'fake', 'message' => null],
+    );
     $service = new StorageCapacityService($server, $drive);
-    $service->current();
-    $service->current();
-    expect(Cache::has('settings.storage_capacity.v1'))->toBeTrue();
+    expect(data_get($service->current(), 'providers.server.used_bytes'))->toBe(10)
+        ->and(data_get($service->current(), 'providers.server.used_bytes'))->toBe(10)
+        ->and(data_get($service->refresh(), 'providers.server.used_bytes'))->toBe(11)
+        ->and(data_get($service->current(), 'providers.google_drive.used_bytes'))->toBe(21)
+        ->and(Cache::has('settings.storage_capacity.v1'))->toBeTrue();
+});
+
+test('only an authorized Super Admin can refresh Storage capacity', function (): void {
+    $admin = User::factory()->create(['section' => 'CDS', 'is_active' => true, 'is_approved' => true]);
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $server = Mockery::mock(ServerStorageCapacityProvider::class);
+    $server->shouldNotReceive('measure');
+    $drive = Mockery::mock(\App\Services\Storage\GoogleDriveStorageCapacityProvider::class);
+    $drive->shouldNotReceive('measure');
+    app()->instance(StorageCapacityService::class, new StorageCapacityService($server, $drive));
+
+    $this->actingAs($admin)->post(route('settings.storage.refresh'))->assertForbidden();
 });
 
 test('Storage page uses semantic warning and critical thresholds without hard-coded capacity values', function (): void {

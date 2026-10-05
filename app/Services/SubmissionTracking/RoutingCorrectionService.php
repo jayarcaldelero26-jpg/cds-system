@@ -4,9 +4,11 @@ namespace App\Services\SubmissionTracking;
 
 use App\Models\EngpReportSubmission;
 use App\Models\SubmissionRoutingCorrection;
+use App\Services\BusinessCalendarService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use App\Services\AuditLogService;
 
@@ -16,6 +18,7 @@ final class RoutingCorrectionService
         private readonly SubmissionTrackingService $tracking,
         private readonly ProtectedAreaRoutingPolicy $routingPolicy,
         private readonly PambRoutingTimelineService $pambRouting,
+        private readonly DocumentRoutingTransitionService $genericRouting,
     ) {}
 
     /**
@@ -25,28 +28,57 @@ final class RoutingCorrectionService
      */
     public function correct(string $sourceKey, int $id, array $dates, array $releaseEvents, string $reason, int $userId, array $internalEvents = []): void
     {
+        DB::transaction(fn () => $this->correctWithinTransaction($sourceKey, $id, $dates, $releaseEvents, $reason, $userId, $internalEvents));
+    }
+
+    /** @param array<string, mixed> $dates @param array<string, mixed> $releaseEvents @param array<string, mixed> $internalEvents */
+    private function correctWithinTransaction(string $sourceKey, int $id, array $dates, array $releaseEvents, string $reason, int $userId, array $internalEvents): void
+    {
         $source = $this->tracking->source($sourceKey);
         abort_unless($source, 404);
-        $record = $source['model']::query()->with($sourceKey === 'engp' ? 'releaseEvents' : 'protectedArea')->findOrFail($id);
+        $query = $source['model']::query()->with($sourceKey === 'engp' ? 'releaseEvents' : 'protectedArea');
+        $record = $query->lockForUpdate()->findOrFail($id);
+        $completed = ($this->genericRouting->state($record, $sourceKey)['stage'] ?? null) === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
         $changes = [];
         $audits = [];
 
         if ($record instanceof EngpReportSubmission) {
+            foreach ($dates as $field => $_value) {
+                if ($field !== 'date_received_penro') {
+                    throw ValidationException::withMessages(['dates.'.$field => 'This routing date is not available for ENGP reports.']);
+                }
+            }
             $events = $record->releaseEvents->keyBy('id');
             $releases = $events->mapWithKeys(fn ($event): array => [(int) $event->id => $this->date($event, 'date_report_released_cenro')]);
             foreach ($releaseEvents as $eventId => $value) {
-                $event = $events->get((int) $eventId);
+                $normalizedEventId = filter_var($eventId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+                if ($normalizedEventId === false) {
+                    throw ValidationException::withMessages(['release_events' => 'A release event identifier is not valid.']);
+                }
+                $event = $events->get($normalizedEventId);
                 if (! $event) throw ValidationException::withMessages(['release_events' => 'A release event does not belong to this report.']);
                 $new = $this->nullableDate($value);
                 $old = $this->date($event, 'date_report_released_cenro');
-                $releases[(int) $eventId] = $new;
+                if ($new === null && $old !== null) {
+                    throw ValidationException::withMessages([
+                        'release_events.'.$normalizedEventId => $completed
+                            ? 'A completed ENGP release date cannot be cleared.'
+                            : 'An ENGP component release date is required and cannot be cleared.',
+                    ]);
+                }
+                $releases[$normalizedEventId] = $new;
                 if ($old !== $new) {
                     $changes[] = [$event, 'date_report_released_cenro', $new];
-                    $audits[] = ['field' => 'release_events.'.(int) $eventId.'.date_report_released_cenro', 'original_value' => $old, 'corrected_value' => $new];
+                    $audits[] = ['field' => 'release_events.'.$normalizedEventId.'.date_report_released_cenro', 'original_value' => $old, 'corrected_value' => $new];
                 }
             }
             $oldReceipt = $this->date($record, 'date_received_penro');
             $newReceipt = array_key_exists('date_received_penro', $dates) ? $this->nullableDate($dates['date_received_penro']) : $oldReceipt;
+            if ($completed && $oldReceipt !== null && $newReceipt === null) {
+                throw ValidationException::withMessages([
+                    'dates.date_received_penro' => 'A completed routing milestone date cannot be cleared. Enter a corrected date instead.',
+                ]);
+            }
             if ($oldReceipt !== $newReceipt) {
                 $changes[] = [$record, 'date_received_penro', $newReceipt];
                 $audits[] = ['field' => 'date_received_penro', 'original_value' => $oldReceipt, 'corrected_value' => $newReceipt];
@@ -56,19 +88,37 @@ final class RoutingCorrectionService
                 throw ValidationException::withMessages(['dates.date_received_penro' => 'PENRO receipt cannot be earlier than the latest CENRO release.']);
             }
         } else {
+            if ($releaseEvents !== []) {
+                throw ValidationException::withMessages(['release_events' => 'Per-event release corrections are available only for ENGP workflows.']);
+            }
             $receiptField = ($source['receipt_field'] ?? 'date_received_penro');
-            $current = [
-                'date_report_released_cenro' => $this->date($record, 'date_report_released_cenro'),
-                'date_received_penro' => $this->date($record, $receiptField),
-                'date_endorsed_regional' => $this->date($record, 'date_endorsed_regional'),
+            $dateColumns = [
+                'date_report_released_cenro' => 'date_report_released_cenro',
+                'date_received_penro' => $receiptField,
+                'date_endorsed_regional' => 'date_endorsed_regional',
             ];
+            $current = [];
+            foreach ($dateColumns as $field => $column) {
+                if (Schema::connection($record->getConnectionName())->hasColumn($record->getTable(), $column)) {
+                    $current[$field] = $this->date($record, $column);
+                }
+            }
+            $directPenro = $sourceKey !== 'engp' && $this->routingPolicy->isDirectPenro($record);
             foreach ($dates as $field => $value) {
-                if (! array_key_exists($field, $current)) throw ValidationException::withMessages(['dates' => 'A routing field is not valid for this workflow.']);
-                if ($field === 'date_report_released_cenro' && $this->routingPolicy->isDirectPenro($record) && $value !== null && $value !== '') {
+                if (! array_key_exists($field, $current)) {
+                    throw ValidationException::withMessages(['dates.'.$field => 'This routing date is not available for this report source.']);
+                }
+                if ($field === 'date_report_released_cenro' && $directPenro && $value !== null && $value !== '') {
                     throw ValidationException::withMessages(['dates.date_report_released_cenro' => 'CENRO release is not applicable to this PENRO-managed protected area.']);
                 }
                 $new = $this->nullableDate($value);
                 $old = $current[$field];
+                $applicable = $field !== 'date_report_released_cenro' || ! $directPenro;
+                if ($completed && $applicable && $old !== null && $new === null) {
+                    throw ValidationException::withMessages([
+                        'dates.'.$field => 'A completed routing milestone date cannot be cleared. Enter a corrected date instead.',
+                    ]);
+                }
                 $current[$field] = $new;
                 if ($old !== $new) {
                     $audits[] = ['field' => $field, 'original_value' => $old, 'corrected_value' => $new];
@@ -80,49 +130,58 @@ final class RoutingCorrectionService
                 if ($sourceKey !== 'conservation' || ! $this->pambRouting->applies($record)) {
                     throw ValidationException::withMessages(['internal_events' => 'Internal routing corrections are available only for PAMB meeting workflows.']);
                 }
-                $events = $record->routingEvents()->get()->mapWithKeys(fn ($event): array => [$this->pambRouting->canonicalStageKey((string) $event->stage_key) => $event]);
-                $internalDates = $events->mapWithKeys(fn ($event, string $stageKey): array => [$stageKey => $event->occurred_at?->toDateTimeString()])->all();
+                $events = $record->routingEvents()->get()->keyBy(fn ($event): string => (string) $event->stage_key);
+                $internalDates = $events->mapWithKeys(fn ($event, string $stageKey): array => [
+                    $stageKey => $event->occurred_at?->copy()->setTimezone(BusinessCalendarService::TIMEZONE)->toDateTimeString(),
+                ])->all();
                 foreach ($internalEvents as $stageKey => $value) {
-                    $stageKey = $this->pambRouting->canonicalStageKey((string) $stageKey);
-                    if (! in_array($stageKey, $this->pambRouting->internalStageKeys(), true) || ! $events->has($stageKey)) {
+                    $stageKey = (string) $stageKey;
+                    if (! $this->pambRouting->isInternalStageKey($stageKey) || ! $events->has($stageKey)) {
                         throw ValidationException::withMessages(['internal_events' => 'An internal routing event does not belong to this report.']);
                     }
                     $event = $events->get($stageKey);
                     $new = $this->nullableDateTime($value);
-                    $old = $event->occurred_at?->toDateTimeString();
+                    $old = $event->occurred_at?->copy()->setTimezone(BusinessCalendarService::TIMEZONE)->toDateTimeString();
+                    if ($completed && $old !== null && $new === null) {
+                        throw ValidationException::withMessages([
+                            'internal_events.'.$stageKey => 'A completed routing event timestamp cannot be cleared. Enter a corrected time instead.',
+                        ]);
+                    }
+                    if ($old !== null && $new !== null && substr($old, 0, 16) === substr($new, 0, 16)) {
+                        // The correction picker displays minute precision. Keep stored seconds when that displayed minute is unchanged.
+                        $new = $old;
+                    }
                     $internalDates[$stageKey] = $new;
                     if ($old !== $new) {
                         $changes[] = [$event, 'occurred_at', $new];
                         $audits[] = ['field' => 'internal_events.'.$stageKey.'.occurred_at', 'original_value' => $old, 'corrected_value' => $new];
                     }
                 }
-                $this->validateInternalChronology($record, $current, $internalDates);
+                $this->validateInternalChronology($current, $internalDates);
             }
         }
 
         if ($audits === []) throw ValidationException::withMessages(['dates' => 'At least one routing date must be changed.']);
 
-        DB::transaction(function () use ($record, $changes, $audits, $sourceKey, $reason, $userId): void {
-            foreach ($changes as [$target, $field, $value]) {
-                $target->update([$field => $value, ...($target === $record && $record->getConnection()->getSchemaBuilder()->hasColumn($record->getTable(), 'updated_by') ? ['updated_by' => $userId] : [])]);
-            }
-            foreach ($audits as $audit) {
-                $correction = SubmissionRoutingCorrection::create([
-                    'source' => $sourceKey,
-                    'source_id' => $record->getKey(),
-                    'field' => $audit['field'],
-                    'original_value' => $audit['original_value'],
-                    'corrected_value' => $audit['corrected_value'],
-                    'reason' => $reason,
-                    'corrected_by' => $userId,
-                    'corrected_at' => now(),
-                ]);
-                app(AuditLogService::class)->record('submission_tracking', 'Routing Date Corrected', $sourceKey, $record->getKey(), $sourceKey, 'Corrected '.$audit['field'].' for '.$sourceKey.' record #'.$record->getKey().'.', [
-                    'field' => $audit['field'], 'old' => $audit['original_value'], 'new' => $audit['corrected_value'], 'reason' => $reason,
-                    'correction_id' => $correction->id,
-                ], $userId);
-            }
-        });
+        foreach ($changes as [$target, $field, $value]) {
+            $target->update([$field => $value, ...($target === $record && $record->getConnection()->getSchemaBuilder()->hasColumn($record->getTable(), 'updated_by') ? ['updated_by' => $userId] : [])]);
+        }
+        foreach ($audits as $audit) {
+            $correction = SubmissionRoutingCorrection::create([
+                'source' => $sourceKey,
+                'source_id' => $record->getKey(),
+                'field' => $audit['field'],
+                'original_value' => $audit['original_value'],
+                'corrected_value' => $audit['corrected_value'],
+                'reason' => $reason,
+                'corrected_by' => $userId,
+                'corrected_at' => now(),
+            ]);
+            app(AuditLogService::class)->record('submission_tracking', 'Routing Date Corrected', $sourceKey, $record->getKey(), $sourceKey, 'Corrected '.$audit['field'].' for '.$sourceKey.' record #'.$record->getKey().'.', [
+                'field' => $audit['field'], 'old' => $audit['original_value'], 'new' => $audit['corrected_value'], 'reason' => $reason,
+                'correction_id' => $correction->id,
+            ], $userId);
+        }
     }
 
     private function validateChronology(Model $record, array $dates): void
@@ -139,37 +198,136 @@ final class RoutingCorrectionService
     private function date(Model $record, string $field): ?string
     {
         $value = $record->getAttribute($field);
-        return $value ? Carbon::parse($value)->toDateString() : null;
+        return $value ? Carbon::parse($value, BusinessCalendarService::TIMEZONE)->setTimezone(BusinessCalendarService::TIMEZONE)->toDateString() : null;
     }
 
     private function nullableDate(mixed $value): ?string
     {
-        return $value === null || $value === '' ? null : Carbon::parse($value)->toDateString();
+        return $value === null || $value === '' ? null : Carbon::parse($value, BusinessCalendarService::TIMEZONE)->setTimezone(BusinessCalendarService::TIMEZONE)->toDateString();
     }
 
     private function nullableDateTime(mixed $value): ?string
     {
-        return $value === null || $value === '' ? null : Carbon::parse($value)->toDateTimeString();
+        return $value === null || $value === '' ? null : Carbon::parse($value, BusinessCalendarService::TIMEZONE)->setTimezone(BusinessCalendarService::TIMEZONE)->toDateTimeString();
     }
 
-    /** @param array<string, ?string> $canonical @param array<string, ?string> $internal */
-    private function validateInternalChronology(Model $record, array $canonical, array $internal): void
+    /** @param array<string, ?string> $canonical @param array<string, ?string> $internal Full persisted stage keys retain their cycle suffix. */
+    private function validateInternalChronology(array $canonical, array $internal): void
     {
-        $dates = ['receipt' => $canonical['date_received_penro'] ?? null];
-        foreach ($this->pambRouting->internalStageKeys() as $stageKey) {
-            $dates[$stageKey] = $internal[$stageKey] ?? null;
-        }
-        $dates['regional'] = $canonical['date_endorsed_regional'] ?? null;
-        $previous = null;
-        foreach ($dates as $key => $value) {
-            if ($value === null) {
-                continue;
+        $cycles = collect(array_keys($internal))
+            ->map(fn (string $stageKey): int => $this->pambRouting->stageCycle($stageKey));
+        $lastCycle = max(1, (int) $cycles->max());
+        $stageOrder = array_values(array_unique(array_map(
+            fn (string $stageKey): string => $this->pambRouting->canonicalStageKey($stageKey),
+            $this->pambRouting->internalStageKeys(),
+        )));
+        $eventFor = function (int $cycle, string $baseStage) use ($internal): ?array {
+            $found = null;
+            foreach ($internal as $eventKey => $value) {
+                if ($this->pambRouting->stageCycle((string) $eventKey) === $cycle
+                    && $this->pambRouting->canonicalStageKey((string) $eventKey) === $baseStage) {
+                    $found = ['stage_key' => (string) $eventKey, 'value' => $value];
+                }
             }
-            $date = Carbon::parse($value);
-            if ($previous && $date->lessThan($previous)) {
-                throw ValidationException::withMessages(['internal_events' => 'Internal routing events must remain in chronological order.']);
+
+            return $found;
+        };
+
+        for ($cycle = 1; $cycle <= $lastCycle; $cycle++) {
+            $previous = $cycle === 1
+                ? (filled($canonical['date_received_penro'] ?? null) ? [
+                    'type' => 'business_date',
+                    'value' => $canonical['date_received_penro'],
+                    'label' => 'PENRO Received date',
+                ] : null)
+                : $eventFor($cycle - 1, PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION);
+            if ($cycle > 1 && $previous !== null && $previous['value'] !== null) {
+                $previous['type'] = 'event';
+                $previous['cycle'] = $cycle - 1;
+            } elseif ($cycle > 1) {
+                $previous = null;
             }
-            $previous = $date;
+            $sequence = $stageOrder;
+            if ($cycle > 1) {
+                $start = array_search(PambRoutingTimelineService::RECEIVED_BY_CDS, $sequence, true);
+                $sequence = $start === false ? [] : array_slice($sequence, $start);
+            }
+
+            foreach ($sequence as $stageKey) {
+                $event = $eventFor($cycle, $stageKey);
+                if ($event === null || $event['value'] === null) continue;
+                $event['type'] = 'event';
+                $event['cycle'] = $cycle;
+
+                if ($previous !== null) {
+                    if ($previous['type'] === 'business_date') {
+                        $beforeReceipt = $this->businessDate($event['value']) < $this->businessDate($previous['value']);
+                        if ($beforeReceipt) {
+                            $this->throwInternalChronologyError(
+                                $event['stage_key'],
+                                $this->eventDescription($event).' is before '.$previous['label'].' ('.$this->formatBusinessDate($previous['value']).'). The action date must be on or after the receipt date.',
+                            );
+                        }
+                    } elseif (Carbon::parse($event['value'], BusinessCalendarService::TIMEZONE)
+                        ->lessThan(Carbon::parse($previous['value'], BusinessCalendarService::TIMEZONE))) {
+                        $this->throwInternalChronologyError(
+                            $event['stage_key'],
+                            $this->eventDescription($event).' is earlier than '.$this->eventDescription($previous).'. Set this action time to the previous action\'s time or later.',
+                        );
+                    }
+                }
+                $previous = $event;
+            }
+
+            $regional = $canonical['date_endorsed_regional'] ?? null;
+            if ($regional !== null && $previous !== null && $previous['type'] === 'event'
+                && $this->businessDate($previous['value']) > $this->businessDate($regional)) {
+                $this->throwInternalChronologyError(
+                    $previous['stage_key'],
+                    $this->eventDescription($previous).' is after Regional Endorsed date ('.$this->formatBusinessDate($regional).'). Set the action date on or before the endorsement date.',
+                );
+            }
         }
+    }
+
+    private function throwInternalChronologyError(string $stageKey, string $detail): never
+    {
+        throw ValidationException::withMessages([
+            'internal_events' => 'A routing event conflicts with an adjacent milestone. Review the highlighted event and compare the named values.',
+            'internal_events.'.$stageKey => $detail,
+        ]);
+    }
+
+    /** @param array{stage_key:string,value:string,cycle?:int,type?:string} $event */
+    private function eventDescription(array $event): string
+    {
+        $cycle = $event['cycle'] ?? $this->pambRouting->stageCycle($event['stage_key']);
+        $label = $this->pambRouting->stageLabel($event['stage_key']);
+        if ($cycle > 1) $label .= ' (cycle '.$cycle.')';
+
+        return $label.' ('.$this->formatDateTime($event['value']).')';
+    }
+
+    private function businessDate(string $value): string
+    {
+        return Carbon::parse($value, BusinessCalendarService::TIMEZONE)
+            ->setTimezone(BusinessCalendarService::TIMEZONE)
+            ->toDateString();
+    }
+
+    private function formatBusinessDate(string $value): string
+    {
+        return Carbon::parse($value, BusinessCalendarService::TIMEZONE)
+            ->setTimezone(BusinessCalendarService::TIMEZONE)
+            ->format('F j, Y');
+    }
+
+    private function formatDateTime(string $value): string
+    {
+        $dateTime = Carbon::parse($value, BusinessCalendarService::TIMEZONE)
+            ->setTimezone(BusinessCalendarService::TIMEZONE);
+        $time = $dateTime->format('g:i').($dateTime->second === 0 ? '' : ':'.$dateTime->format('s'));
+
+        return $dateTime->format('F j, Y \\a\\t ').$time.' '.$dateTime->format('A').' Asia/Manila';
     }
 }

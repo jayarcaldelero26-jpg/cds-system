@@ -106,6 +106,13 @@ final class PambRoutingTimelineService
         return in_array($baseStage, self::INTERNAL_STAGE_KEYS, true);
     }
 
+    public function stageLabel(string $stageKey): string
+    {
+        $baseStage = $this->canonicalStageKey($stageKey);
+
+        return $this->stageDefinition($baseStage)['label'] ?? str_replace('_', ' ', ucfirst($baseStage));
+    }
+
     /** Explicit PAMB routing semantics; receipt and correction stages are not document handoffs. */
     public function documentOperation(string $stageKey): ?string
     {
@@ -555,7 +562,7 @@ final class PambRoutingTimelineService
                 'remarks' => $event->remarks,
                 'routing_event_id' => $event->id,
                 'attachment' => isset($attachments[$event->id]) ? $this->routingAttachments->descriptor($attachments[$event->id]) : null,
-                'is_internal' => true,
+                'is_internal' => $this->isInternalStageKey((string) $event->stage_key),
                 'can_record' => false,
                 'action_label' => $definition['action_label'] ?? null,
             ];
@@ -1154,6 +1161,8 @@ final class PambRoutingTimelineService
     private function stageDefinition(string $key): array
     {
         return collect([
+            SubmissionTrackingService::CENRO_RELEASE => 'Released by CENRO',
+            self::RECORDS_RECEIVED => 'Received by PENRO Records',
             self::RELEASED_TO_REGIONAL => 'Released/Endorsed to Regional Office',
             self::FORWARDED_RECORDS_TO_PENRO => 'Forwarded to Office of the PENRO',
             self::RECEIVED_BY_PENRO => 'Received by Office of the PENRO',

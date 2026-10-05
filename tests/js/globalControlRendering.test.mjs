@@ -190,6 +190,21 @@ test('real form modal with Cancel retains its top close control', async () => {
     assert.match(html, />Cancel<\/button>/);
 });
 
+test('form modal can summarize a routing conflict without repeating its field detail', async () => {
+    const { default: CrudFormModal } = await load('Components/Crud/CrudFormModal.jsx');
+    const html = renderToStaticMarkup(React.createElement(CrudFormModal, {
+        open: true, title: 'Correct Routing Record', onClose: () => {}, onSubmit: () => {},
+        errors: {
+            internal_events: 'A routing event conflicts with an adjacent milestone. Review the highlighted event.',
+            'internal_events.received_by_records_final__cycle_2': 'Received by PENRO Records (cycle 2) occurs after Regional Endorsed date.',
+        },
+        summaryErrors: { internal_events: 'A routing event conflicts with an adjacent milestone. Review the highlighted event.' },
+        children: React.createElement('p', null, 'Field error: Received by PENRO Records (cycle 2) occurs after Regional Endorsed date.'),
+    }));
+    assert.equal((html.match(/A routing event conflicts with an adjacent milestone/g) || []).length, 1);
+    assert.equal((html.match(/Received by PENRO Records \(cycle 2\) occurs after Regional Endorsed date/g) || []).length, 1);
+});
+
 test('shared data table preserves row activation, keyboard access, and supplied pagination', async () => {
     const { default: CrudTable } = await load('Components/Crud/CrudTable.jsx');
     const selected = [];

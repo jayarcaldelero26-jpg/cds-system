@@ -6,12 +6,15 @@ use App\Models\DocumentArchive;
 use App\Models\PambRoutingEvent;
 use App\Models\User;
 use App\Services\Archive\GoogleDriveArchiveGateway;
+use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -480,6 +483,200 @@ test('OfficePenroFinalReviewGatingTest: receipt precedes final review and approv
     expect($report->fresh()->date_endorsed_regional?->toDateString())->toBe(CarbonImmutable::now('Asia/Manila')->toDateString())
         ->and($queues['history']->pluck('source_id')->all())->toContain($report->id)
         ->and($queues['processed']->pluck('source_id')->all())->not->toContain($report->id);
+});
+
+test('current canonical Regular Special and TWC routes reject completed-date clearing atomically', function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    Notification::fake();
+    $actors = [
+        OrganizationalAccessService::CENRO_FOCAL => batch1bActor('CENRO CDS Focal Person', OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati'),
+        OrganizationalAccessService::CENRO_CHIEF => batch1bActor('CENRO CDS Chief', OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati'),
+        OrganizationalAccessService::CENRO_RECORDS => batch1bActor('CENRO Records Unit', OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati'),
+        OrganizationalAccessService::PENRO_RECORDS => batch1bActor('PENRO Records Unit', OrganizationalAccessService::PENRO_RECORDS),
+        OrganizationalAccessService::OFFICE_PENRO => batch1bActor('Office of the PENRO', OrganizationalAccessService::OFFICE_PENRO),
+        OrganizationalAccessService::PENRO_TSD_CHIEF => batch1bActor('PENRO TSD Chief', OrganizationalAccessService::PENRO_TSD_CHIEF),
+        OrganizationalAccessService::PENRO_FOCAL => batch1bActor('PENRO CDS Focal Person', OrganizationalAccessService::PENRO_FOCAL),
+        OrganizationalAccessService::PENRO_CHIEF => batch1bActor('PENRO CDS Chief', OrganizationalAccessService::PENRO_CHIEF),
+    ];
+    $admin = batch1bActor('CDS Admin', 'CDS', 'PENRO Davao Oriental', ['password' => 'secret-password']);
+    $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $transition = app(DocumentRoutingTransitionService::class);
+    $actions = [
+        ['forward_to_cenro_chief', OrganizationalAccessService::CENRO_FOCAL], ['receive_at_cenro_chief', OrganizationalAccessService::CENRO_CHIEF],
+        ['forward_to_cenro_records', OrganizationalAccessService::CENRO_CHIEF], ['receive_at_cenro_records', OrganizationalAccessService::CENRO_RECORDS],
+        ['forward_to_penro_records', OrganizationalAccessService::CENRO_RECORDS], ['receive_at_penro_records', OrganizationalAccessService::PENRO_RECORDS],
+        ['forward_to_office_penro', OrganizationalAccessService::PENRO_RECORDS], ['receive_at_office_penro', OrganizationalAccessService::OFFICE_PENRO],
+        ['assign_to_tsd_chief', OrganizationalAccessService::OFFICE_PENRO], ['receive_at_tsd_chief', OrganizationalAccessService::PENRO_TSD_CHIEF],
+        ['forward_to_cds_focal', OrganizationalAccessService::PENRO_TSD_CHIEF], ['receive_at_cds_focal', OrganizationalAccessService::PENRO_FOCAL],
+        ['forward_to_cds_chief', OrganizationalAccessService::PENRO_FOCAL], ['receive_at_cds_chief', OrganizationalAccessService::PENRO_CHIEF],
+        ['recommend_to_office_penro', OrganizationalAccessService::PENRO_CHIEF], ['receive_at_office_penro_final', OrganizationalAccessService::OFFICE_PENRO],
+        ['approve_for_regional_release', OrganizationalAccessService::OFFICE_PENRO], ['receive_at_penro_records_final', OrganizationalAccessService::PENRO_RECORDS],
+        ['release_to_regional', OrganizationalAccessService::PENRO_RECORDS],
+    ];
+    $tracking = app(SubmissionTrackingService::class);
+
+    foreach (['regular_pamb', 'special_pamb', 'twc_meetings'] as $workflow) {
+        $report = batch1bReport($actors[OrganizationalAccessService::CENRO_FOCAL], [
+            'workflow_key' => $workflow,
+            'activity_name' => 'Canonical completed-date guard '.$workflow,
+            'date_report_released_cenro' => null,
+            'date_received_penro' => null,
+            'date_endorsed_regional' => null,
+            'mov_processing_status' => \App\Services\SubmissionTracking\PambMovProcessingService::READY_FOR_RELEASE,
+            'mov_file_name' => 'minutes.pdf',
+            'mov_file_path' => 'canonical-route/'.$workflow.'.pdf',
+        ]);
+        Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\ncanonical isolated fixture");
+        foreach ($actions as [$action, $category]) {
+            $transition->transition($report->fresh()->load('protectedArea'), 'conservation', $action, $actors[$category]->id);
+        }
+
+        $canonicalEvents = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+            ->orderBy('id')->get()->map(fn (DocumentRoutingEvent $event): array => [
+                $event->id, $event->event_key, $event->from_stage, $event->to_stage,
+                $event->occurred_at?->toDateTimeString(), $event->recorded_by,
+            ])->all();
+        expect(count($canonicalEvents))->toBe(count($actions))
+            ->and($report->fresh()->routingEvents()->count())->toBe(0)
+            ->and($transition->state($report->fresh()->load('protectedArea'), 'conservation')['stage'])
+                ->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
+
+        $this->actingAs($admin)->patch(route('submission-tracking.correct-routing', ['conservation', $report->id]), [
+            'dates' => ['date_report_released_cenro' => '2026-08-19'],
+            'reason' => 'Correct the completed CENRO business date.',
+            'password' => 'secret-password',
+        ])->assertSessionHasNoErrors();
+
+        $afterValid = $report->fresh();
+        $eventsAfterValid = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+            ->orderBy('id')->get()->map(fn (DocumentRoutingEvent $event): array => [
+                $event->id, $event->event_key, $event->from_stage, $event->to_stage,
+                $event->occurred_at?->toDateTimeString(), $event->recorded_by,
+            ])->all();
+        $beforeRejected = [
+            'dates' => [$afterValid->date_report_released_cenro?->toDateString(), $afterValid->date_received_penro?->toDateString(), $afterValid->date_endorsed_regional?->toDateString()],
+            'events' => $eventsAfterValid,
+            'corrections' => \App\Models\SubmissionRoutingCorrection::query()->where('source', 'conservation')->where('source_id', $report->id)->get()->toArray(),
+            'audits' => \App\Models\AuditLog::query()->where('entity_type', 'conservation')->where('entity_id', (string) $report->id)->where('action', 'Routing Date Corrected')->get()->toArray(),
+        ];
+        $this->patch(route('submission-tracking.correct-routing', ['conservation', $report->id]), [
+            'dates' => ['date_received_penro' => '2026-08-18', 'date_report_released_cenro' => null],
+            'reason' => 'Reject mixed valid and invalid completed-date edits.',
+            'password' => 'secret-password',
+        ])->assertSessionHasErrors('dates.date_report_released_cenro');
+
+        $props = $this->actingAs($admin)->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $report->id]))->assertOk()->inertiaProps();
+        $selected = data_get($props, 'trackingContext.selected_record');
+        $history = collect(data_get($props, 'workspaceQueues.history', []))->contains(fn (array $row): bool => $row['source'] === 'conservation' && (int) $row['source_id'] === $report->id);
+        $queues = data_get($props, 'workspaceQueues', []);
+        $contains = fn (string $queue): bool => collect(data_get($queues, $queue, []))->contains(fn (array $row): bool => $row['source'] === 'conservation' && (int) $row['source_id'] === $report->id);
+        $finalRecord = $report->fresh();
+        $eventsAfterRejected = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+            ->orderBy('id')->get()->map(fn (DocumentRoutingEvent $event): array => [
+                $event->id, $event->event_key, $event->from_stage, $event->to_stage,
+                $event->occurred_at?->toDateTimeString(), $event->recorded_by,
+            ])->all();
+        expect([$finalRecord->date_report_released_cenro?->toDateString(), $finalRecord->date_received_penro?->toDateString(), $finalRecord->date_endorsed_regional?->toDateString()])
+            ->toBe($beforeRejected['dates'])
+            ->and($eventsAfterRejected)->toBe($beforeRejected['events'])
+            ->and(\App\Models\SubmissionRoutingCorrection::query()->where('source', 'conservation')->where('source_id', $report->id)->get()->toArray())->toBe($beforeRejected['corrections'])
+            ->and(\App\Models\AuditLog::query()->where('entity_type', 'conservation')->where('entity_id', (string) $report->id)->where('action', 'Routing Date Corrected')->get()->toArray())->toBe($beforeRejected['audits'])
+            ->and($selected['date_report_released_cenro'])->toBe('2026-08-19')
+            ->and($selected['routing_complete'])->toBeTrue()
+            ->and($selected['routing']['actions'])->toBeEmpty()
+            ->and($selected['mov_processing']['status_key'])->toBe(\App\Services\SubmissionTracking\PambMovProcessingService::RELEASED_BY_CENRO)
+            ->and($selected['mov_processing']['percent'])->toBe(100)
+            ->and($history)->toBeTrue()
+            ->and($contains('incoming'))->toBeFalse()
+            ->and($contains('outgoing'))->toBeFalse();
+    }
+});
+
+test('completed legacy mixed PAMB histories reject clearing exposed cycle-aware internal timestamps atomically', function (): void {
+    Storage::fake('local');
+    Notification::fake();
+    $actors = [
+        OrganizationalAccessService::CENRO_FOCAL => batch1bActor('CENRO CDS Focal Person', OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati'),
+        OrganizationalAccessService::CENRO_RECORDS => batch1bActor('CENRO Records Unit', OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati'),
+        OrganizationalAccessService::PENRO_RECORDS => batch1bActor('PENRO Records Unit', OrganizationalAccessService::PENRO_RECORDS),
+        OrganizationalAccessService::OFFICE_PENRO => batch1bActor('Office of the PENRO', OrganizationalAccessService::OFFICE_PENRO),
+        OrganizationalAccessService::PENRO_TSD_CHIEF => batch1bActor('PENRO TSD Chief', OrganizationalAccessService::PENRO_TSD_CHIEF),
+        OrganizationalAccessService::PENRO_FOCAL => batch1bActor('PENRO CDS Focal Person', OrganizationalAccessService::PENRO_FOCAL),
+        OrganizationalAccessService::PENRO_CHIEF => batch1bActor('PENRO CDS Chief', OrganizationalAccessService::PENRO_CHIEF),
+    ];
+    $admin = batch1bActor('CDS Admin', 'CDS', 'PENRO Davao Oriental', ['password' => 'secret-password']);
+    $admin->givePermissionTo(Permission::findOrCreate('submission-tracking.correct-routing', 'web'));
+    $report = batch1bReport($actors[OrganizationalAccessService::CENRO_FOCAL], [
+        'date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05',
+        'date_endorsed_regional' => null,
+        'mov_processing_status' => \App\Services\SubmissionTracking\PambMovProcessingService::READY_FOR_RELEASE,
+        'mov_file_name' => 'legacy-meeting-minutes.pdf', 'mov_file_path' => 'legacy-routing/full-complete-pamb.pdf',
+    ]);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\nlegacy isolated fixture");
+    $timeline = app(PambRoutingTimelineService::class);
+    $timeline->recordCanonical($report, SubmissionTrackingService::CENRO_RELEASE, '2026-08-04', $actors[OrganizationalAccessService::CENRO_RECORDS]->id, CarbonImmutable::parse('2026-08-04 09:00:00', 'Asia/Manila'));
+    $timeline->recordCanonical($report, SubmissionTrackingService::PENRO_RECEIPT, '2026-08-05', $actors[OrganizationalAccessService::PENRO_RECORDS]->id, CarbonImmutable::parse('2026-08-05 09:00:00', 'Asia/Manila'));
+
+    $legacyEvents = [
+        [PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO, OrganizationalAccessService::PENRO_RECORDS, '2026-08-05 10:00:00'],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO, OrganizationalAccessService::OFFICE_PENRO, '2026-08-05 11:00:00'],
+        [PambRoutingTimelineService::FORWARDED_PENRO_TO_TSD, OrganizationalAccessService::OFFICE_PENRO, '2026-08-05 12:00:00'],
+        [PambRoutingTimelineService::RECEIVED_BY_TSD, OrganizationalAccessService::PENRO_TSD_CHIEF, '2026-08-05 13:00:00'],
+        [PambRoutingTimelineService::FORWARDED_TSD_TO_CDS, OrganizationalAccessService::PENRO_TSD_CHIEF, '2026-08-05 14:00:00'],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS, OrganizationalAccessService::PENRO_FOCAL, '2026-08-05 15:00:00'],
+        [PambRoutingTimelineService::FORWARDED_CDS_FOCAL_TO_CHIEF, OrganizationalAccessService::PENRO_FOCAL, '2026-08-05 16:00:00'],
+        [PambRoutingTimelineService::RECEIVED_BY_CDS_CHIEF, OrganizationalAccessService::PENRO_CHIEF, '2026-08-05 17:00:00'],
+        [PambRoutingTimelineService::FORWARDED_CDS_TO_PENRO, OrganizationalAccessService::PENRO_CHIEF, '2026-08-05 18:00:00'],
+        [PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL, OrganizationalAccessService::OFFICE_PENRO, '2026-08-05 19:00:00'],
+        [PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, OrganizationalAccessService::OFFICE_PENRO, '2026-08-06 09:00:00'],
+        [PambRoutingTimelineService::RECEIVED_BY_RECORDS_FINAL, OrganizationalAccessService::PENRO_RECORDS, '2026-08-06 11:00:00'],
+    ];
+    foreach ($legacyEvents as [$stage, $category, $occurredAt]) {
+        $timeline->record($report, $stage, $occurredAt, $actors[$category]->id);
+    }
+    $timeline->recordCanonical($report, SubmissionTrackingService::REGIONAL_ENDORSEMENT, '2026-08-07', $actors[OrganizationalAccessService::PENRO_RECORDS]->id, CarbonImmutable::parse('2026-08-07 09:00:00', 'Asia/Manila'));
+
+    $this->actingAs($admin);
+    $fresh = $report->fresh()->load('protectedArea');
+    $sharedState = app(DocumentRoutingTransitionService::class)->state($fresh, 'conservation');
+    $presentation = $timeline->present($fresh);
+    expect($sharedState['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL)
+        ->and($presentation['routing_complete'])->toBeTrue()
+        ->and($presentation['actions'])->toBeEmpty()
+        ->and($fresh->routingEvents()->count())->toBe(count($legacyEvents) + 4);
+
+    $tracking = app(SubmissionTrackingService::class);
+    $queueSnapshot = fn (): array => collect($tracking->workspaceQueues())
+        ->map(fn ($queue): array => $queue->values()->all())
+        ->all();
+    $mov = app(\App\Services\SubmissionTracking\PambMovProcessingService::class)->present($fresh);
+    $before = [
+        'record' => $fresh->getRawOriginal(),
+        'legacy_events' => $fresh->routingEvents()->orderBy('id')->get()->toArray(),
+        'shared_events' => DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $fresh->id)->orderBy('id')->get()->toArray(),
+        'corrections' => \App\Models\SubmissionRoutingCorrection::query()->where('source', 'conservation')->where('source_id', $fresh->id)->get()->toArray(),
+        'audits' => \App\Models\AuditLog::query()->where('entity_type', 'conservation')->where('entity_id', (string) $fresh->id)->where('action', 'Routing Date Corrected')->get()->toArray(),
+        'queues' => $queueSnapshot(),
+        'mov' => $mov,
+    ];
+    $this->patch(route('submission-tracking.correct-routing', ['conservation', $fresh->id]), [
+        'dates' => ['date_received_penro' => '2026-08-06'],
+        'internal_events' => [PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO => null],
+        'reason' => 'Reject a completed internal timestamp clear.',
+        'password' => 'secret-password',
+    ])->assertSessionHasErrors('internal_events.'.PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO);
+
+    $after = $fresh->fresh()->load('protectedArea');
+    $afterMov = app(\App\Services\SubmissionTracking\PambMovProcessingService::class)->present($after);
+    expect($after->getRawOriginal())->toBe($before['record'])
+        ->and($after->routingEvents()->orderBy('id')->get()->toArray())->toBe($before['legacy_events'])
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $fresh->id)->orderBy('id')->get()->toArray())->toBe($before['shared_events'])
+        ->and(\App\Models\SubmissionRoutingCorrection::query()->where('source', 'conservation')->where('source_id', $fresh->id)->get()->toArray())->toBe($before['corrections'])
+        ->and(\App\Models\AuditLog::query()->where('entity_type', 'conservation')->where('entity_id', (string) $fresh->id)->where('action', 'Routing Date Corrected')->get()->toArray())->toBe($before['audits'])
+        ->and($queueSnapshot())->toBe($before['queues'])
+        ->and($afterMov)->toBe($before['mov'])
+        ->and($timeline->present($after)['routing_complete'])->toBeTrue();
 });
 
 test('RoutingTerminologyTest: generic workspace navigation uses Incoming, Outgoing, and History with action filters inside Incoming', function (): void {
