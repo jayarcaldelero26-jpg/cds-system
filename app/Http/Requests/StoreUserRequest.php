@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\RoutingPositionSettingsService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -49,6 +50,9 @@ class StoreUserRequest extends FormRequest
                     null,
                     $data['operational_group'] ?? null,
                 );
+                if (! app(RoutingPositionSettingsService::class)->categoryAvailableForAccount($data['section'] ?? null)) {
+                    $validator->errors()->add('section', 'This category is unavailable while its routing position is disabled.');
+                }
             } catch (\Illuminate\Validation\ValidationException $exception) {
                 foreach ($exception->errors() as $key => $messages) {
                     foreach ($messages as $message) $validator->errors()->add($key, $message);

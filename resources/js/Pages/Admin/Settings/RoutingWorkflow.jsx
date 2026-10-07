@@ -10,7 +10,7 @@ export default function RoutingWorkflow({ settings, canUpdate }) {
         reason: '',
     });
 
-    return <SettingsShell active="Routing Workflow">
+    return <SettingsShell active="Report Routing">
         <RoutingPositionControlsPanel
             settings={settings}
             canUpdate={canUpdate}

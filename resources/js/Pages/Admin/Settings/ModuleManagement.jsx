@@ -1,4 +1,4 @@
-import { Head, router, useForm, usePage } from '@inertiajs/react';
+import { Head, router, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import { Icon } from '@iconify/react';
 import SettingsShell from '@/Components/Admin/SettingsShell';
@@ -10,7 +10,6 @@ const empty = { name: '', program_area: '', module_type: 'regular_target', repor
 const deadlineLabels = { standard_working_days: 'Standard Working Days', calendar_days: 'Calendar Days', custom: 'Custom Deadline', none: 'No Deadline' };
 
 export default function ModuleManagement({ definitions = [], filters = {}, programAreas = [], frequencies = [] }) {
-    const { props } = usePage();
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
     const form = useForm(empty);
@@ -30,7 +29,7 @@ export default function ModuleManagement({ definitions = [], filters = {}, progr
         ...(filters.status ? [{ key: 'status', label: 'Status', value: filters.status === 'active' ? 'Active' : 'Inactive', onRemove: () => setFilter('status', '') }] : []),
     ];
 
-    return <SettingsShell active="Module Management" canViewStorage={props.auth?.canViewStorage} canViewDiagnostics={props.auth?.canViewSystemDiagnostics}>
+    return <SettingsShell active="Module Management">
         <Head title="Module Management" />
         <SettingsPageHeader title="Module Management" description="Manage CDS-SMART modules and availability." />
         <section className="cds-card-surface mt-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 sm:p-5">

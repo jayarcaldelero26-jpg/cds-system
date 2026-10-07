@@ -24,6 +24,8 @@ test('Settings uses a premium navigation shell and preserves current settings ro
     $this->actingAs($admin)->get(route('settings.index'))->assertOk()->assertInertia(fn ($page) => $page
         ->component('Admin/Settings/Index')
         ->where('auth.canViewStorage', true)
+        ->where('auth.canViewModuleManagement', true)
+        ->where('auth.canManageComplianceAlerts', true)
         ->has('auth.canViewSystemDiagnostics'));
 
     $source = file_get_contents(resource_path('js/Components/Admin/SettingsShell.jsx'));
@@ -40,6 +42,9 @@ test('CDS Admin receives no Storage navigation authorization and cannot open Sto
     $this->actingAs($admin)->get(route('settings.index'))->assertOk()->assertInertia(fn ($page) => $page
         ->component('Admin/Settings/Index')
         ->where('auth.canViewStorage', false)
+        ->where('auth.canViewSystemDiagnostics', true)
+        ->where('auth.canViewModuleManagement', true)
+        ->where('auth.canManageComplianceAlerts', true)
         ->where('auth.user.account_role', 'CDS Admin')
         ->where('auth.user.roles', ['CDS Admin'])
         ->where('auth.unitVisibility.isGlobal', true)
@@ -58,14 +63,26 @@ test('Super Admin keeps its canonical shared identity and exact Storage capabili
         ->where('auth.unitVisibility.isGlobal', true));
 });
 
-test('Settings navigation uses shared authorization data for Storage and active state', function (): void {
+test('every Settings page reads menu authorization from shared authenticated props', function (): void {
     $shell = file_get_contents(resource_path('js/Components/Admin/SettingsShell.jsx'));
-    $index = file_get_contents(resource_path('js/Pages/Admin/Settings/Index.jsx'));
-    $storage = file_get_contents(resource_path('js/Pages/Admin/Settings/Storage.jsx'));
+    expect($shell)->toContain('usePage()')
+        ->toContain('props.auth?.[item.capability] === true')
+        ->toContain("capability: 'canViewStorage'")
+        ->toContain("capability: 'canViewSystemDiagnostics'")
+        ->toContain('aria-current')->toContain("active === item.title");
 
-    expect($index)->toContain('props.auth?.canViewStorage')
-        ->and($storage)->toContain('props.auth?.canViewStorage')
-        ->and($shell)->toContain('aria-current')->toContain("active === item.title");
+    foreach ([
+        resource_path('js/Pages/Admin/Settings/Index.jsx'),
+        resource_path('js/Pages/Admin/Settings/ModuleManagement.jsx'),
+        resource_path('js/Pages/Admin/Settings/Storage.jsx'),
+        resource_path('js/Pages/Admin/Settings/SystemDiagnostics.jsx'),
+        resource_path('js/Pages/Admin/Settings/RoutingWorkflow.jsx'),
+        resource_path('js/Pages/ComplianceAlerts/Index.jsx'),
+    ] as $path) {
+        $source = file_get_contents($path);
+        expect($source)->not->toContain('canViewStorage=')
+            ->not->toContain('canViewDiagnostics=');
+    }
 });
 
 test('Settings child pages share the accessible Settings header and keep their navigation item active', function (): void {

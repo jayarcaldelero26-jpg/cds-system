@@ -376,11 +376,15 @@ final class OrganizationalAccessService
      * Operational Group is presentation metadata; category, office and unit
      * remain the authoritative effective-access inputs.
      */
-    public function operationalGroups(): array
+    public function operationalGroups(array $disabledPositionCategories = [], ?string $preservedCategory = null): array
     {
         return [
             ['value' => self::OPERATIONAL_GROUP_CENRO, 'label' => 'CENRO Office', 'categories' => $this->optionsFor([self::CENRO_FOCAL, self::CENRO_CHIEF, self::CENRO_RECORDS]), 'unit_assignment' => null],
-            ['value' => self::OPERATIONAL_GROUP_PENRO, 'label' => 'PENRO Office', 'categories' => $this->optionsFor([self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF, self::PENRO_FOCAL, self::PENRO_CHIEF]), 'unit_assignment' => null],
+            ['value' => self::OPERATIONAL_GROUP_PENRO, 'label' => 'PENRO Office', 'categories' => $this->optionsFor(
+                [self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF, self::PENRO_FOCAL, self::PENRO_CHIEF],
+                $disabledPositionCategories,
+                $preservedCategory,
+            ), 'unit_assignment' => null],
         ];
     }
 
@@ -437,9 +441,13 @@ final class OrganizationalAccessService
         };
     }
 
-    private function optionsFor(array $categories): array
+    private function optionsFor(array $categories, array $disabledPositionCategories = [], ?string $preservedCategory = null): array
     {
-        return array_map(fn (string $category): array => ['value' => $category, 'label' => self::CATEGORY_LABELS[$category]], $categories);
+        $available = array_values(array_filter($categories, fn (string $category): bool =>
+            ! in_array($category, $disabledPositionCategories, true) || $category === $preservedCategory
+        ));
+
+        return array_map(fn (string $category): array => ['value' => $category, 'label' => self::CATEGORY_LABELS[$category]], $available);
     }
     public function categoryLabel(?string $category): ?string
     {

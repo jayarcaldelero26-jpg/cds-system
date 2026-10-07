@@ -24,7 +24,7 @@ const load = async (path) => {
 
 test.after(async () => { await server?.close(); });
 
-test('routing settings panel renders the saved context, all four route previews, and invokes authorized callbacks', async () => {
+test('Report Routing panel renders the saved context, all four profile previews, and invokes authorized callbacks', async () => {
     const { default: Panel } = await load('Components/Admin/RoutingPositionControlsPanel.jsx');
     const settings = { available: true, version: 7, office_penro_enabled: true, penro_tsd_chief_enabled: true, saved_at: null, saved_by: null, reason: null };
     const base = {
@@ -41,10 +41,15 @@ test('routing settings panel renders the saved context, all four route previews,
     assert.match(markup(false, true), /PENRO Records → TSD Chief → CDS Focal/);
     assert.match(markup(true, false), /PENRO Records → Office of the PENRO → CDS Focal/);
     assert.match(markup(false, false), /PENRO Records → CDS Focal/);
+    assert.match(markup(false, false), /CENRO-origin profile/);
+    assert.match(markup(false, false), /Direct-to-PENRO profile/);
+    assert.match(markup(false, false), /PENRO CDS Focal \u2192 PENRO Records \u2192 CDS Focal/);
     assert.match(markup(false, false), /This recommendation is not an Office approval/);
-    assert.match(markup(true, true), /Current settings version/);
-    assert.match(markup(true, true), /Existing reports retain their previous flow, including pre-cutover reports/);
-    assert.match(markup(true, true), /Re-enabling a position does not bring back tasks/);
+    assert.match(markup(true, true), /Settings revision 7/);
+    assert.match(markup(true, true), /Reports with a captured route keep that route/);
+    assert.match(markup(true, true), /Include Office of the PENRO in routing/);
+    assert.match(markup(true, true), /Include PENRO TSD Chief in routing/);
+    assert.match(markup(true, true), /Route for new reports/);
 
     const callbacks = [];
     const tree = Panel({

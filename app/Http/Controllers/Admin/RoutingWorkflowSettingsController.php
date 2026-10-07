@@ -35,6 +35,6 @@ final class RoutingWorkflowSettingsController extends Controller
             $request->user(),
         );
 
-        return back()->with('success', 'Routing position settings saved. They apply only to eligible new routing.');
+        return back()->with('success', 'Report routing settings saved. They apply only to eligible new routes.');
     }
 }

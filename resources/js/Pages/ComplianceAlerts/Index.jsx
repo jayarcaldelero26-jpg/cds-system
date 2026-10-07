@@ -165,7 +165,7 @@ export default function ComplianceAlertsIndex({ view = 'operational', groups = [
     const pageDescription = isSettingsPage ? 'Configure compliance monitoring and alert behavior.' : view === 'recipients' ? 'Manage exact Protected Area and Target Office recipient routing mappings.' : view === 'calendar' ? 'Manage holidays and declared non-working days used in report deadline and timeliness calculations.' : 'Separate operational views for Protected Area and ENGP / Development compliance contexts.';
     const Layout = isSettingsPage ? SettingsShell : AuthenticatedLayout;
     const layoutProps = isSettingsPage
-        ? { active: 'Compliance Alerts', canViewStorage: auth?.canViewStorage, canViewDiagnostics: auth?.canViewSystemDiagnostics }
+        ? { active: 'Compliance Alerts' }
         : { title: pageTitle };
 
     return <Layout {...layoutProps}><Head title={pageTitle} />

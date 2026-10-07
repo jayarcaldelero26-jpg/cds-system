@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\RoutingPositionSettingsService;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Role;
 
@@ -24,6 +25,13 @@ function operationalGroupUser(string $category, ?string $unit = null, string $of
     return $user;
 }
 
+function saveOperationalAccountRoutingFlags(User $actor, bool $office, bool $tsd): array
+{
+    $settings = app(RoutingPositionSettingsService::class);
+
+    return $settings->save($settings->current()['version'], $office, $tsd, 'Isolated registration test', $actor);
+}
+
 test('registration exposes the supported operational group catalog without duplicate categories', function (): void {
     $this->get('/register')->assertInertia(fn (Assert $page) => $page
         ->component('Auth/Register')
@@ -41,6 +49,122 @@ test('registration exposes the supported operational group catalog without dupli
             OrganizationalAccessService::PENRO_FOCAL,
             OrganizationalAccessService::PENRO_CHIEF,
         ]);
+});
+
+test('registration choices follow all four routing-position combinations and return when re-enabled', function (): void {
+    $actor = User::factory()->create(['is_active' => true]);
+    $actor->assignRole('Super Admin');
+    $allCategories = [
+        OrganizationalAccessService::PENRO_RECORDS,
+        OrganizationalAccessService::OFFICE_PENRO,
+        OrganizationalAccessService::PENRO_TSD_CHIEF,
+        OrganizationalAccessService::PENRO_FOCAL,
+        OrganizationalAccessService::PENRO_CHIEF,
+    ];
+
+    foreach ([[true, true], [false, true], [true, false], [false, false]] as [$office, $tsd]) {
+        saveOperationalAccountRoutingFlags($actor, $office, $tsd);
+        $expected = array_values(array_filter($allCategories, fn (string $category): bool =>
+            ($category !== OrganizationalAccessService::OFFICE_PENRO || $office)
+            && ($category !== OrganizationalAccessService::PENRO_TSD_CHIEF || $tsd)
+        ));
+
+        $this->get('/register')->assertInertia(fn (Assert $page) => $page
+            ->where('registrationOptions.operationalGroups.1.categories', fn ($categories) => collect($categories)->pluck('value')->all() === $expected));
+    }
+});
+
+test('disabled position categories are hidden and rejected by public registration even when posted directly', function (): void {
+    $actor = User::factory()->create(['is_active' => true]);
+    $actor->assignRole('Super Admin');
+    saveOperationalAccountRoutingFlags($actor, false, false);
+
+    $this->get('/register')->assertInertia(fn (Assert $page) => $page
+        ->where('registrationOptions.operationalGroups.1.categories', fn ($categories) => ! collect($categories)->pluck('value')->contains(OrganizationalAccessService::OFFICE_PENRO)
+            && ! collect($categories)->pluck('value')->contains(OrganizationalAccessService::PENRO_TSD_CHIEF)));
+
+    foreach ([OrganizationalAccessService::OFFICE_PENRO, OrganizationalAccessService::PENRO_TSD_CHIEF] as $index => $category) {
+        $email = "disabled-position-{$index}@example.test";
+        $this->from('/register')->post('/register', [
+            'name' => 'Disabled Position Request',
+            'email' => $email,
+            'operational_group' => 'penro',
+            'office_designated' => 'PENRO Davao Oriental',
+            'section' => $category,
+            'password' => 'Passw0rd!123',
+            'password_confirmation' => 'Passw0rd!123',
+        ])->assertSessionHasErrors('section');
+
+        $this->assertDatabaseMissing('users', ['email' => $email]);
+    }
+});
+
+test('admin account creation hides disabled categories and rejects a tampered category', function (): void {
+    $actor = User::factory()->create(['is_active' => true]);
+    $actor->assignRole('Super Admin');
+    saveOperationalAccountRoutingFlags($actor, false, false);
+
+    $this->actingAs($actor)->get(route('admin.users.create'))->assertInertia(fn (Assert $page) => $page
+        ->where('operationalGroups.1.categories', fn ($categories) => ! collect($categories)->pluck('value')->contains(OrganizationalAccessService::OFFICE_PENRO)
+            && ! collect($categories)->pluck('value')->contains(OrganizationalAccessService::PENRO_TSD_CHIEF)));
+
+    $this->from(route('admin.users.create'))->post(route('admin.users.store'), [
+        'name' => 'Disabled TSD Request',
+        'email' => 'disabled-tsd-admin@example.test',
+        'account_role' => 'User',
+        'operational_group' => 'penro',
+        'office_designated' => 'PENRO Davao Oriental',
+        'section' => OrganizationalAccessService::PENRO_TSD_CHIEF,
+        'password' => 'Passw0rd!123',
+        'password_confirmation' => 'Passw0rd!123',
+    ])->assertSessionHasErrors('section');
+
+    $this->assertDatabaseMissing('users', ['email' => 'disabled-tsd-admin@example.test']);
+});
+
+test('existing disabled-position category remains visible and valid when editing that account', function (): void {
+    $admin = User::factory()->create(['is_active' => true]);
+    $admin->assignRole('Super Admin');
+    saveOperationalAccountRoutingFlags($admin, false, false);
+    $existing = operationalGroupUser(OrganizationalAccessService::OFFICE_PENRO, null, 'PENRO Davao Oriental');
+
+    $this->actingAs($admin)->get(route('admin.users.edit', $existing))->assertInertia(fn (Assert $page) => $page
+        ->where('user.effective_category', OrganizationalAccessService::OFFICE_PENRO)
+        ->where('operationalGroups.1.categories', fn ($categories) => collect($categories)->pluck('value')->contains(OrganizationalAccessService::OFFICE_PENRO)
+            && ! collect($categories)->pluck('value')->contains(OrganizationalAccessService::PENRO_TSD_CHIEF)));
+
+    $this->put(route('admin.users.update', $existing), [
+        'name' => 'Existing Office Account',
+        'email' => $existing->email,
+        'account_role' => 'User',
+        'operational_group' => 'penro',
+        'office_designated' => 'PENRO Davao Oriental',
+        'section' => OrganizationalAccessService::OFFICE_PENRO,
+    ])->assertRedirect(route('admin.users.index'));
+
+    expect($existing->fresh()->section)->toBe(OrganizationalAccessService::OFFICE_PENRO);
+});
+
+test('public registration still accepts a position category when routing includes it', function (): void {
+    $actor = User::factory()->create(['is_active' => true]);
+    $actor->assignRole('Super Admin');
+    saveOperationalAccountRoutingFlags($actor, true, true);
+
+    $this->post('/register', [
+        'name' => 'Enabled Office Request',
+        'email' => 'enabled-office@example.test',
+        'operational_group' => 'penro',
+        'office_designated' => 'PENRO Davao Oriental',
+        'section' => OrganizationalAccessService::OFFICE_PENRO,
+        'password' => 'Passw0rd!123',
+        'password_confirmation' => 'Passw0rd!123',
+    ])->assertRedirect(route('login'));
+
+    $this->assertDatabaseHas('users', [
+        'email' => 'enabled-office@example.test',
+        'section' => OrganizationalAccessService::OFFICE_PENRO,
+        'is_active' => false,
+    ]);
 });
 
 test('public and admin account forms expose the canonical CENRO office options', function (): void {

@@ -1,5 +1,5 @@
 import { Icon } from '@iconify/react';
-import { router, usePage } from '@inertiajs/react';
+import { router } from '@inertiajs/react';
 import SettingsShell from '@/Components/Admin/SettingsShell';
 import SettingsPageHeader from '@/Components/Admin/SettingsPageHeader';
 
@@ -14,9 +14,8 @@ function ProviderPanel({ item }) {
 }
 
 export default function Storage({ capacity }) {
-    const { props } = usePage();
     const providers = capacity ? capacity.providers || {} : {};
-    return <SettingsShell active="Storage" canViewStorage={props.auth?.canViewStorage} canViewDiagnostics={props.auth?.canViewSystemDiagnostics}>
+    return <SettingsShell active="Storage">
         <SettingsPageHeader title="Storage" description="Monitor application and cloud storage capacity." actions={<button type="button" onClick={() => router.post('/settings/storage/refresh', {}, { preserveScroll: true })} className="inline-flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-xs font-bold text-gray-700 hover:border-green-600 hover:text-green-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 dark:border-gray-700 dark:text-gray-200 dark:hover:border-green-400 dark:hover:text-green-300 dark:focus-visible:ring-offset-gray-900" data-cds-action="true" data-cds-action-variant="primary"><Icon icon="lucide:refresh-cw" width="14" height="14" aria-hidden="true" /> Refresh</button>} />
         <p className="text-xs leading-5 text-gray-500 dark:text-gray-400">Capacity values are retrieved automatically from the configured storage providers. Cached for {Math.round((capacity?.cache_seconds || 600) / 60)} minutes.</p>
         <p className="mt-2 text-xs leading-5 text-gray-600 dark:text-gray-300">Google Drive archive root: <span className="font-semibold text-gray-800 dark:text-gray-100">CDS-SMART Final Reports</span>. Capacity quota is reported separately and may be unavailable.</p>

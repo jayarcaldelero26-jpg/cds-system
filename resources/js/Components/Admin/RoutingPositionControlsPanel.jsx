@@ -5,38 +5,47 @@ function Toggle({ id, label, description, checked, disabled, onChange }) {
     </label>;
 }
 
-const routeFor = (office, tsd) => {
-    if (office && tsd) return 'PENRO Records → Office of the PENRO → TSD Chief → CDS Focal';
-    if (!office && tsd) return 'PENRO Records → TSD Chief → CDS Focal';
-    if (office && !tsd) return 'PENRO Records → Office of the PENRO → CDS Focal';
-    return 'PENRO Records → CDS Focal';
+const routeFor = (office, tsd, direct = false) => {
+    const penroSegment = ['PENRO Records', ...(office ? ['Office of the PENRO'] : []), ...(tsd ? ['TSD Chief'] : []), 'CDS Focal'].join(' → ');
+    const finalSegment = office
+        ? 'PENRO CDS Chief → Office of the PENRO → PENRO Records → Regional Office'
+        : 'PENRO CDS Chief → PENRO Records → Regional Office';
+    const start = direct
+        ? `PENRO CDS Focal → ${penroSegment}`
+        : `CENRO CDS Focal → CENRO CDS Chief → CENRO Records → ${penroSegment}`;
+
+    return `${start} → ${finalSegment}`;
 };
 
 export default function RoutingPositionControlsPanel({ settings, canUpdate, data, errors = {}, processing = false, onToggle, onReason, onSave }) {
     const disabled = !canUpdate || !settings.available || processing;
     return <div className="max-w-3xl">
-        <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">Routing Workflow Settings</p>
+        <p className="text-xs font-extrabold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">Report Routing</p>
         <h2 className="mt-1 text-xl font-extrabold text-gray-900 dark:text-white">Routing Position Controls</h2>
-        <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">Choose whether the Office of the PENRO and PENRO TSD Chief take part in newly started routing.</p>
+        <p className="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-gray-300">Choose which routing positions are included in eligible new routes.</p>
 
         <div className="mt-5 rounded-xl bg-blue-50 p-4 text-sm leading-6 text-blue-950 dark:bg-blue-950/30 dark:text-blue-100">
-            Changes apply only to eligible new routing. Existing reports retain their previous flow, including pre-cutover reports. Re-enabling a position does not bring back tasks in completed reports.
+            These settings apply when an eligible report starts routing. Reports with a captured route keep that route. Reports from before routing controls were activated continue to use the all-enabled baseline.
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700"><p className="text-xs font-semibold text-gray-500 dark:text-gray-400">Current settings version</p><p className="mt-1 text-lg font-extrabold text-gray-900 dark:text-white">{settings.available ? `v${settings.version}` : 'Schema unavailable'}</p></div>
-            <div className="rounded-xl border border-gray-200 p-4 dark:border-gray-700"><p className="text-xs font-semibold text-gray-500 dark:text-gray-400">Last saved</p><p className="mt-1 text-sm font-bold text-gray-900 dark:text-white">{settings.saved_at ? new Date(settings.saved_at).toLocaleString() : 'Initial all-enabled baseline'}</p><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{settings.saved_by || 'System'}{settings.reason ? ` · ${settings.reason}` : ''}</p></div>
-        </div>
+        <p className="mt-3 text-xs text-gray-500 dark:text-gray-400">
+            {settings.available ? `Settings revision ${settings.version}` : 'Settings revision unavailable'}
+            {' · '}{settings.saved_at ? `Last saved ${new Date(settings.saved_at).toLocaleString()}` : 'Initial all-enabled baseline'}
+            {' · '}{settings.saved_by || 'System'}{settings.reason ? ` · ${settings.reason}` : ''}
+        </p>
 
         {!settings.available ? <p role="status" className="mt-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">Routing settings are unavailable until the approved feature schema is deployed. Routing continues with the existing all-enabled behavior.</p> : <>
             <div className="mt-6 space-y-3">
-                <Toggle id="office-penro-enabled" label="Office of the PENRO" description="Controls both initial Office routing and final Office review for routes that start after this setting is saved." checked={data.office_penro_enabled} disabled={disabled} onChange={value => onToggle('office_penro_enabled', value)} />
-                <Toggle id="penro-tsd-enabled" label="PENRO TSD Chief" description="Controls the TSD Chief receipt and forwarding steps during initial routing." checked={data.penro_tsd_chief_enabled} disabled={disabled} onChange={value => onToggle('penro_tsd_chief_enabled', value)} />
+                <Toggle id="office-penro-enabled" label="Include Office of the PENRO in routing" description="When unchecked, eligible new routes skip the initial Office handoff and final Office review." checked={data.office_penro_enabled} disabled={disabled} onChange={value => onToggle('office_penro_enabled', value)} />
+                <Toggle id="penro-tsd-enabled" label="Include PENRO TSD Chief in routing" description="When unchecked, eligible new routes skip the TSD receipt and forwarding steps." checked={data.penro_tsd_chief_enabled} disabled={disabled} onChange={value => onToggle('penro_tsd_chief_enabled', value)} />
             </div>
             <div className="mt-5 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Preview for new routing</h3>
-                <p className="mt-2 text-sm leading-6 text-gray-700 dark:text-gray-300">{routeFor(data.office_penro_enabled, data.penro_tsd_chief_enabled)}</p>
-                <p className="mt-2 text-xs leading-5 text-gray-500 dark:text-gray-400">When Office participation is disabled, the CDS Chief recommends directly to PENRO Records for receipt and regional release. This recommendation is not an Office approval.</p>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white">Route for new reports</h3>
+                <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-gray-400">CENRO-origin profile</p>
+                <p className="mt-1 text-sm leading-6 text-gray-700 dark:text-gray-300">{routeFor(data.office_penro_enabled, data.penro_tsd_chief_enabled)}</p>
+                <p className="mt-3 text-xs font-semibold text-gray-500 dark:text-gray-400">Direct-to-PENRO profile</p>
+                <p className="mt-1 text-sm leading-6 text-gray-700 dark:text-gray-300">{routeFor(data.office_penro_enabled, data.penro_tsd_chief_enabled, true)}</p>
+                <p className="mt-3 text-xs leading-5 text-gray-500 dark:text-gray-400">When Office is not included, the CDS Chief recommends directly to PENRO Records for receipt and regional release. This recommendation is not an Office approval.</p>
             </div>
             {canUpdate ? <>
                 <label htmlFor="routing-change-reason" className="mt-5 block text-xs font-bold text-gray-700 dark:text-gray-300">Change note (optional)</label>

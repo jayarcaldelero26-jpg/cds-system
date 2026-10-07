@@ -6,6 +6,7 @@ use App\Models\RoutingPositionSetting;
 use App\Models\RoutingPositionSettingVersion;
 use App\Models\User;
 use App\Services\AuditLogService;
+use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
@@ -45,6 +46,36 @@ final class RoutingPositionSettingsService
             'saved_by' => $version->savedBy?->name,
             'reason' => $version->reason,
         ];
+    }
+
+    /** Categories tied to routing positions that are disabled for new accounts. */
+    public function disabledAccountCategories(): array
+    {
+        $settings = $this->current();
+        $disabled = [];
+
+        if (! $settings['office_penro_enabled']) $disabled[] = OrganizationalAccessService::OFFICE_PENRO;
+        if (! $settings['penro_tsd_chief_enabled']) $disabled[] = OrganizationalAccessService::PENRO_TSD_CHIEF;
+
+        return $disabled;
+    }
+
+    /** Existing users may retain their own disabled-position category while editing their account. */
+    public function categoryAvailableForAccount(?string $category, ?string $preservedCategory = null): bool
+    {
+        $organization = app(OrganizationalAccessService::class);
+        $category = $organization->normalizeCategory($category);
+        $preservedCategory = $organization->normalizeCategory($preservedCategory);
+
+        if (! $category) return true;
+        if ($category === OrganizationalAccessService::OFFICE_PENRO) {
+            return (bool) $this->current()['office_penro_enabled'] || $category === $preservedCategory;
+        }
+        if ($category === OrganizationalAccessService::PENRO_TSD_CHIEF) {
+            return (bool) $this->current()['penro_tsd_chief_enabled'] || $category === $preservedCategory;
+        }
+
+        return true;
     }
 
     /** @return array<string,mixed> */

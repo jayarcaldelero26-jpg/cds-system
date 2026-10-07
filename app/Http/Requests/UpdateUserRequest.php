@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\RoutingPositionSettingsService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Password;
@@ -61,6 +62,10 @@ class UpdateUserRequest extends FormRequest
                     $data['protected_area_id'] ?? null,
                     null,
                 );
+                $existingCategory = app(OrganizationalAccessService::class)->normalizeCategory($this->route('user')?->section);
+                if (! app(RoutingPositionSettingsService::class)->categoryAvailableForAccount($data['section'] ?? null, $existingCategory)) {
+                    $validator->errors()->add('section', 'This routing-position category is unavailable for new assignments while disabled.');
+                }
             } catch (\Illuminate\Validation\ValidationException $exception) {
                 foreach ($exception->errors() as $key => $messages) {
                     foreach ($messages as $message) $validator->errors()->add($key, $message);

@@ -19,6 +19,7 @@ use Spatie\Permission\Models\Role;
 use App\Services\AuditLogService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Authorization\AdministratorPreservationService;
+use App\Services\SubmissionTracking\RoutingPositionSettingsService;
 
 class UserController extends Controller
 {
@@ -67,9 +68,10 @@ class UserController extends Controller
     {
         $this->authorize('create', User::class);
         $organization = app(OrganizationalAccessService::class);
+        $routingSettings = app(RoutingPositionSettingsService::class);
 
         return Inertia::render('Admin/Users/Create', [
-            'operationalGroups' => $organization->operationalGroups(),
+            'operationalGroups' => $organization->operationalGroups($routingSettings->disabledAccountCategories()),
             'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name']),
             'offices' => app(OrganizationalAccessService::class)->officeOptions(),
             'accountRoles' => $organization->accountRoleOptions(),
@@ -108,6 +110,7 @@ class UserController extends Controller
     {
         $this->authorize('update', $user);
         $organization = app(OrganizationalAccessService::class);
+        $routingSettings = app(RoutingPositionSettingsService::class);
 
         return Inertia::render('Admin/Users/Edit', [
             'user' => [
@@ -125,7 +128,10 @@ class UserController extends Controller
                 'is_approved' => (bool) $user->is_approved,
                 'is_active' => (bool) $user->is_active,
             ],
-            'operationalGroups' => $organization->operationalGroups(),
+            'operationalGroups' => $organization->operationalGroups(
+                $routingSettings->disabledAccountCategories(),
+                $organization->normalizeCategory($user->section),
+            ),
             'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name']),
             'offices' => app(OrganizationalAccessService::class)->officeOptions(),
             'accountRoles' => $organization->accountRoleOptions(),

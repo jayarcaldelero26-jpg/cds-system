@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\RoutingPositionSettingsService;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,11 +20,12 @@ class RegisteredUserController extends Controller
     public function create(): Response
     {
         $organization = app(OrganizationalAccessService::class);
+        $routingSettings = app(RoutingPositionSettingsService::class);
 
         return Inertia::render('Auth/Register', [
             'registrationOptions' => [
                 'accountRole' => OrganizationalAccessService::ACCOUNT_ROLE_USER,
-                'operationalGroups' => $organization->operationalGroups(),
+                'operationalGroups' => $organization->operationalGroups($routingSettings->disabledAccountCategories()),
                 'offices' => $organization->officeOptions(),
                 'protectedAreas' => ProtectedArea::query()
                     ->orderBy('name')
@@ -56,6 +58,11 @@ class RegisteredUserController extends Controller
             null,
             $data['operational_group'] ?? null,
         );
+        if (! app(RoutingPositionSettingsService::class)->categoryAvailableForAccount($data['section'] ?? null)) {
+            throw \Illuminate\Validation\ValidationException::withMessages([
+                'section' => 'This category is unavailable while its routing position is disabled.',
+            ]);
+        }
 
         $user = User::create([
             'name' => $data['name'],

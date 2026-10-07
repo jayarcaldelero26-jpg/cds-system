@@ -3,16 +3,16 @@ import { Head, Link, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 
 const items = [
-    { title: 'Module Management', subtitle: 'Reporting configuration', href: '/settings/module-management', icon: 'lucide:blocks' },
-    { title: 'Compliance Alerts', subtitle: 'Operational notifications', href: '/settings/compliance-alerts', icon: 'lucide:triangle-alert' },
-    { title: 'Routing Workflow', subtitle: 'Position controls', href: '/settings/routing-workflow', icon: 'lucide:route', routingWorkflow: true },
-    { title: 'Storage', subtitle: 'Capacity and availability', href: '/settings/storage', icon: 'lucide:hard-drive', superAdmin: true },
-    { title: 'System Diagnostics', subtitle: 'Runtime health checks', href: '/settings/system-diagnostics', icon: 'lucide:activity' },
+    { title: 'Module Management', subtitle: 'Reporting configuration', href: '/settings/module-management', icon: 'lucide:blocks', capability: 'canViewModuleManagement' },
+    { title: 'Compliance Alerts', subtitle: 'Operational notifications', href: '/settings/compliance-alerts', icon: 'lucide:triangle-alert', capability: 'canManageComplianceAlerts' },
+    { title: 'Report Routing', subtitle: 'Position controls', href: '/settings/routing-workflow', icon: 'lucide:route', capability: 'canViewRoutingWorkflow' },
+    { title: 'Storage', subtitle: 'Capacity and availability', href: '/settings/storage', icon: 'lucide:hard-drive', capability: 'canViewStorage' },
+    { title: 'System Diagnostics', subtitle: 'Runtime health checks', href: '/settings/system-diagnostics', icon: 'lucide:activity', capability: 'canViewSystemDiagnostics' },
 ];
 
-export default function SettingsShell({ children, active, canViewStorage = false, canViewDiagnostics = false }) {
+export default function SettingsShell({ children, active }) {
     const { props } = usePage();
-    const visible = items.filter(item => (!item.superAdmin || canViewStorage) && (item.title !== 'System Diagnostics' || canViewDiagnostics) && (!item.routingWorkflow || props.auth?.canViewRoutingWorkflow));
+    const visible = items.filter(item => props.auth?.[item.capability] === true);
     return <AuthenticatedLayout title="Settings">
         <Head title={active ? `${active} · Settings` : 'Settings'} />
         <header className="flex flex-wrap items-center gap-3 border-b border-gray-200 pb-4 dark:border-gray-800">
