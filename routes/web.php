@@ -31,6 +31,7 @@ use App\Http\Controllers\ModuleDefinitionController;
 use App\Http\Controllers\SystemDiagnosticsController;
 use App\Http\Controllers\StorageSettingsController;
 use App\Http\Controllers\Admin\AuditLogController;
+use App\Http\Controllers\Admin\RoutingWorkflowSettingsController;
 use App\Services\Dashboard\DashboardMonitoringService;
 
 use Illuminate\Support\Facades\Route;
@@ -92,6 +93,8 @@ Route::middleware('auth')->group(function () {
     Route::patch('submission-tracking/{source}/{record}/correction', [SubmissionTrackingController::class, 'correctRouting'])->middleware(['admin', 'can:submission-tracking.correct-routing'])->name('submission-tracking.correct-routing');
     Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.index');
     Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
+    Route::get('settings/routing-workflow', [RoutingWorkflowSettingsController::class, 'index'])->middleware('can:submission-tracking.routing-settings.view')->name('settings.routing-workflow');
+    Route::put('settings/routing-workflow', [RoutingWorkflowSettingsController::class, 'update'])->middleware('can:submission-tracking.routing-settings.update')->name('settings.routing-workflow.update');
     Route::get('admin/audit-logs', [AuditLogController::class, 'index'])->middleware('can:audit-logs.view')->name('audit-logs.index');
     Route::get('admin/audit-logs/{auditLog}', [AuditLogController::class, 'show'])->middleware('can:audit-logs.view')->name('audit-logs.show');
     Route::get('settings/general', fn () => Inertia::render('Admin/Settings/General'))->middleware('admin')->name('settings.general');

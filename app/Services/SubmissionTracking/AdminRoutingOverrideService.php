@@ -35,6 +35,14 @@ final class AdminRoutingOverrideService
             'record' => $record->getKey(),
             'stage' => $current,
             'active_cycle' => $state['active_cycle'] ?? null,
+            'route_position' => [
+                'snapshot_id' => data_get($state, 'route_position.snapshot_id'),
+                'version' => data_get($state, 'route_position.version'),
+                'setting_version_id' => data_get($state, 'route_position.setting_version_id'),
+                'graph_version' => data_get($state, 'route_position.graph_version'),
+                'office_penro_enabled' => data_get($state, 'route_position.office_penro_enabled'),
+                'penro_tsd_chief_enabled' => data_get($state, 'route_position.penro_tsd_chief_enabled'),
+            ],
             'events' => collect($state['events'] ?? [])->map(fn ($event): array => [
                 $event->id, $event->event_key, $event->from_stage, $event->to_stage,
                 $event->occurred_at?->toIso8601String(), $event->recorded_by, $event->metadata,

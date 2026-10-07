@@ -7,6 +7,19 @@ final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
 {
     private array $objects = [];
     private int $nextId = 0;
+    private array $archiveContexts = [];
+    private int $uploadAttempts = 0;
+    private bool $rejectNextUpload = false;
+
+    public function rejectNextUpload(): void
+    {
+        $this->rejectNextUpload = true;
+    }
+
+    public function uploadAttempts(): int
+    {
+        return $this->uploadAttempts;
+    }
 
     public function findByIdentityAndHash(array $identity, string $sha256): ?array
     {
@@ -20,8 +33,14 @@ final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
 
     public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
+        $this->uploadAttempts++;
+        if ($this->rejectNextUpload) {
+            $this->rejectNextUpload = false;
+            throw new \RuntimeException('Injected fake archive rejection.');
+        }
         $id = 'fake-archive-'.(++$this->nextId);
         $this->objects[$id] = ['identity' => $identity, 'sha256' => $sha256, 'bytes' => file_get_contents($localPath), 'folder_id' => $folderId];
+        $this->archiveContexts[] = ['filename' => $filename, 'identity' => $identity, 'context' => $archiveContext];
         return ['file_id' => $id, 'folder_id' => $folderId];
     }
 
@@ -41,7 +60,14 @@ final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
     public function replace(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
         $this->objects[$fileId] = ['identity' => $identity, 'sha256' => $sha256, 'bytes' => file_get_contents($localPath), 'folder_id' => $folderId];
+        $this->archiveContexts[] = ['filename' => $filename, 'identity' => $identity, 'context' => $archiveContext];
         return ['file_id' => $fileId, 'folder_id' => $folderId];
+    }
+
+    /** @return list<array{filename:string,identity:array,context:array}> */
+    public function archiveContexts(): array
+    {
+        return $this->archiveContexts;
     }
 
     public function retrieve(string $fileId)

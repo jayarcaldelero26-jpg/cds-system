@@ -31,9 +31,9 @@ final class RoutingStatusPresenter
         private readonly DocumentRoutingTransitionService $genericRouting,
     ) {}
 
-    public function status(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null): string
+    public function status(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null, ?string $routeProfile = null): string
     {
-        return match ($this->stage($record, $sourceKey, $routingEvents)) {
+        return match ($this->stage($record, $sourceKey, $routingEvents, $routeProfile)) {
             'not_ready' => self::NO_ACTIVITY,
             SubmissionTrackingService::CENRO_RELEASE => self::PENDING_CENRO,
             SubmissionTrackingService::PENRO_RECEIPT => self::PENDING_PENRO,
@@ -42,7 +42,7 @@ final class RoutingStatusPresenter
         };
     }
 
-    public function stage(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null): string
+    public function stage(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null, ?string $routeProfile = null): string
     {
         $sourceKey ??= $this->sourceKey($record);
 
@@ -94,7 +94,9 @@ final class RoutingStatusPresenter
             return 'not_ready';
         }
 
-        if (! $this->routingPolicy->isDirectPenro($record) && ! $this->date($record, 'date_report_released_cenro')) {
+        $isDirectPenro = $routeProfile === 'direct'
+            || ($routeProfile === null && $this->routingPolicy->isDirectPenro($record));
+        if (! $isDirectPenro && ! $this->date($record, 'date_report_released_cenro')) {
             return SubmissionTrackingService::CENRO_RELEASE;
         }
         if (! $this->date($record, 'date_received_penro')) {

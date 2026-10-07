@@ -49,6 +49,8 @@ const PambActions = await component('PambMovActions');
 const ReviewHistory = await component('SubmissionReviewHistory');
 const AttachmentDropzone = await component('Attachments/AttachmentDropzone');
 const RoutingTimeline = await component('DocumentRoutingTimeline');
+const SubmissionTrackingPage = await component('Pages/SubmissionTracking/Index');
+const SidebarDetails = SubmissionTrackingPage.SubmissionDetailsPanel;
 const Progress = await component('SubmissionTrackingProgress');
 const ReportContext = await component('SubmissionReportContext');
 const NotificationComponents = await component('Notifications/NotificationBell');
@@ -59,6 +61,53 @@ const appStyles = readFileSync(resolve('resources/css/app.css'), 'utf8');
 const previewDialogSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
 const submissionTrackingSource = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
 const render = row => renderToStaticMarkup(React.createElement(Preview, { open: true, row }));
+
+const skippedPositionStep = (key, label) => ({
+    key,
+    label,
+    status: 'skipped',
+    display_status: 'skipped',
+    display_status_label: 'Skipped by Routing Workflow Settings',
+    event_type: null,
+});
+
+function capturedRouteRow(officeEnabled, tsdEnabled, version = 4) {
+    const timeline = [
+        { key: 'penro_records', label: 'PENRO Records', status: 'completed' },
+        officeEnabled
+            ? { key: 'office_penro', label: 'Office of the PENRO', status: 'completed' }
+            : skippedPositionStep('office_initial_skipped', 'Office of the PENRO (initial routing)'),
+        tsdEnabled
+            ? { key: 'tsd_chief', label: 'PENRO TSD Chief', status: 'completed' }
+            : skippedPositionStep('tsd_initial_skipped', 'PENRO TSD Chief'),
+        ...(!officeEnabled
+            ? [skippedPositionStep('office_final_skipped', 'Office of the PENRO (final review)')]
+            : []),
+        { key: 'transit_to_cds_focal', label: 'Forwarded to CDS Focal', status: 'current', display_status: 'current' },
+        { key: 'penro_cds_focal', label: 'PENRO CDS Focal', status: 'pending' },
+    ];
+
+    return {
+        source: 'bms',
+        source_id: 2,
+        can_transition: false,
+        routing: {
+            profile_label: 'Captured BMS route',
+            current_stage: 'transit_to_cds_focal',
+            current_status: 'In Transit',
+            processing_percentage: 92,
+            actions: [],
+            routing_history: [],
+            route_position: {
+                version,
+                office_penro_enabled: officeEnabled,
+                penro_tsd_chief_enabled: tsdEnabled,
+                snapshot_id: version === 1 ? 1 : 2,
+            },
+            timeline,
+        },
+    };
+}
 
 test('supported protected previews wait for a validated response before embedding a blob URL', () => {
     for (const mime_type of ['application/pdf', 'image/jpeg', 'image/png']) {
@@ -295,6 +344,135 @@ test('terminal release presents Completed without a Current badge, pending age, 
     assert.match(markup, /bg-green-50 text-green-800[^>]*>Completed<\/span>/);
     assert.doesNotMatch(markup, />Current<|Pending Since|Pending:|>Pending<|<button/);
     assert.match(submissionTrackingSource, /canAdminRoutingOverride && details && details\.routing\?\.actions\?\.length > 0/);
+});
+
+test('captured Office and TSD settings hide only synthetic skipped rows in the sidebar, Full Details, and Full Timeline', () => {
+    for (const [officeEnabled, tsdEnabled] of [[true, true], [false, true], [true, false], [false, false]]) {
+        const row = capturedRouteRow(officeEnabled, tsdEnabled);
+        const detailsMarkup = renderToStaticMarkup(React.createElement(RoutingTimeline, { row }));
+        const fullTimelineMarkup = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+            row,
+            expandAll: true,
+            onExpandAllChange: () => {},
+        }));
+        const skipped = row.routing.timeline.filter(step => step.status === 'skipped');
+        const sidebarRow = {
+            ...row,
+            routing: {
+                ...row.routing,
+                current_stage: 'sidebar-current',
+                timeline: [
+                    { key: 'sidebar-previous', label: 'Previous real checkpoint', status: 'completed' },
+                    ...skipped,
+                    { key: 'sidebar-current', label: 'Current timeline stage', status: 'current' },
+                    { key: 'sidebar-next', label: 'Next real checkpoint', status: 'pending' },
+                ],
+            },
+        };
+        const sidebarMarkup = renderToStaticMarkup(React.createElement(SidebarDetails, {
+            row: sidebarRow,
+            onViewFullDetails: () => {},
+        }));
+
+        for (const markup of [detailsMarkup, fullTimelineMarkup, sidebarMarkup]) {
+            assert.doesNotMatch(markup, /Skipped by Routing Workflow Settings/);
+        }
+        assert.match(sidebarMarkup, /Previous real checkpoint/);
+        assert.match(sidebarMarkup, /Current timeline stage/);
+        assert.match(sidebarMarkup, /Next real checkpoint/);
+        assert.equal(detailsMarkup.includes('Office of the PENRO'), officeEnabled);
+        assert.equal(detailsMarkup.includes('PENRO TSD Chief'), tsdEnabled);
+        assert.equal(fullTimelineMarkup.includes('Office of the PENRO'), officeEnabled);
+        assert.equal(fullTimelineMarkup.includes('PENRO TSD Chief'), tsdEnabled);
+    }
+
+    const olderAllEnabledSnapshot = capturedRouteRow(true, true, 1);
+    olderAllEnabledSnapshot.current_routing_settings = {
+        version: 4,
+        office_penro_enabled: false,
+        penro_tsd_chief_enabled: false,
+    };
+    const olderMarkup = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+        row: olderAllEnabledSnapshot,
+        expandAll: true,
+        onExpandAllChange: () => {},
+    }));
+    assert.match(olderMarkup, /Office of the PENRO/);
+    assert.match(olderMarkup, /PENRO TSD Chief/);
+    assert.match(submissionTrackingSource, /This report uses routing version \{details\.routing\.route_position\.version\}/);
+
+    const historicalEventsOnDisabledRoute = capturedRouteRow(false, false);
+    historicalEventsOnDisabledRoute.routing.timeline.push(
+        {
+            key: 'historical-office-receipt',
+            label: 'Historical Office of the PENRO receipt',
+            status: 'completed',
+            display_status: 'completed',
+            event_type: 'received',
+        },
+        {
+            key: 'historical-tsd-forward',
+            label: 'Historical PENRO TSD Chief forwarding',
+            status: 'completed',
+            display_status: 'completed',
+            event_type: 'forwarded',
+        },
+    );
+    const historicalMarkup = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+        row: historicalEventsOnDisabledRoute,
+        expandAll: true,
+        onExpandAllChange: () => {},
+    }));
+    assert.match(historicalMarkup, /Historical Office of the PENRO receipt/);
+    assert.match(historicalMarkup, /Historical PENRO TSD Chief forwarding/);
+    assert.doesNotMatch(historicalMarkup, /Skipped by Routing Workflow Settings/);
+});
+
+test('disabled skipped rows are filtered before sidebar slicing and full timeline expansion counts', () => {
+    const row = capturedRouteRow(false, false);
+    const officeSkipped = skippedPositionStep('office_initial_skipped', 'Office of the PENRO (initial routing)');
+    const tsdSkipped = skippedPositionStep('tsd_initial_skipped', 'PENRO TSD Chief');
+    const fullTimelineRow = {
+        ...row,
+        routing: {
+            ...row.routing,
+            current_stage: 'current',
+            timeline: [
+                { key: 'current', label: 'Current timeline stage', status: 'current' },
+                { key: 'next', label: 'Next checkpoint', status: 'pending' },
+                officeSkipped,
+                tsdSkipped,
+                skippedPositionStep('office_final_skipped', 'Office of the PENRO (final review)'),
+                { key: 'later-1', label: 'Later checkpoint one', status: 'pending' },
+                { key: 'later-2', label: 'Later checkpoint two', status: 'pending' },
+                { key: 'later-3', label: 'Later checkpoint three', status: 'pending' },
+            ],
+        },
+    };
+    const fullTimelineMarkup = renderToStaticMarkup(React.createElement(RoutingTimeline, { row: fullTimelineRow }));
+    assert.doesNotMatch(fullTimelineMarkup, /Skipped by Routing Workflow Settings/);
+    assert.match(fullTimelineMarkup, /Show 3 more steps/);
+
+    const sidebarRow = {
+        ...row,
+        routing: {
+            ...row.routing,
+            current_stage: 'sidebar-current',
+            timeline: [
+                { key: 'sidebar-previous', label: 'Previous real checkpoint', status: 'completed' },
+                officeSkipped,
+                tsdSkipped,
+                { key: 'sidebar-current', label: 'Current timeline stage', status: 'current' },
+                { key: 'sidebar-next', label: 'Next real checkpoint', status: 'pending' },
+            ],
+        },
+    };
+    const sidebarMarkup = renderToStaticMarkup(React.createElement(SidebarDetails, {
+        row: sidebarRow,
+        onViewFullDetails: () => {},
+    }));
+    assert.doesNotMatch(sidebarMarkup, /Skipped by Routing Workflow Settings/);
+    assert.match(sidebarMarkup, /Previous real checkpoint/);
 });
 
 test('active one-hundred-percent stages remain Current and Ready for Release remains an active MOV phase', () => {

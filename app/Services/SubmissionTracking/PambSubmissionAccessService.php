@@ -20,6 +20,8 @@ final class PambSubmissionAccessService
     public const PENRO_TSD_CHIEF = OrganizationalAccessService::PENRO_TSD_CHIEF;
     public const PAMO = OrganizationalAccessService::PAMO;
 
+    public function __construct(private readonly RoutingPositionSnapshotService $routePositions) {}
+
     /** @var list<string> */
     public const CENRO_CATEGORIES = [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL];
 
@@ -78,11 +80,17 @@ final class PambSubmissionAccessService
 
         if ($this->isCenro($user)) {
             return ($this->same($user->office_designated, $submission->target_office) || (blank($submission->target_office) && (int) $submission->created_by === (int) $user->getKey()))
-                && ! app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
+                && $this->routeProfile($submission) !== 'direct';
         }
 
         // Preserve existing permission-based visibility for legacy categories.
         return true;
+    }
+
+    /** Resolve only the immutable custody profile; actor scope stays live. */
+    public function routeProfile(ConservationReportSubmission $submission): string
+    {
+        return $this->routePositions->effectiveProfile($submission, 'conservation', true);
     }
 
     public function scopeQuery(Builder $query, User $user, ?OrganizationalAccessService $organization = null): Builder
@@ -92,13 +100,16 @@ final class PambSubmissionAccessService
         if ($this->isGlobal($user) || $this->isPenro($user)) return $query;
         if ($this->isCenro($user)) {
             $office = $organization->normalizeOffice($user->office_designated) ?: '__no_office_scope__';
-            return $query->where(function (Builder $scoped) use ($organization, $user, $office): void {
+            $query->where(function (Builder $scoped) use ($organization, $user, $office): void {
                 $organization->scopeProtectedAreaQuery($scoped, $user);
                 $scoped->orWhere(function (Builder $officeScoped) use ($office): void {
                     $officeScoped->whereNull('protected_area_id')
                         ->whereRaw('LOWER(target_office) = ?', [mb_strtolower($office)]);
                 });
             })->whereRaw('LOWER(target_office) = ?', [mb_strtolower($office)]);
+
+            $table = $query->getModel()->getTable();
+            return $this->routePositions->scopeEffectiveProfileQuery($query, 'conservation', $table, 'regular');
         }
         if ($this->isPamo($user)) {
             return $user->protected_area_id === null
@@ -137,11 +148,11 @@ final class PambSubmissionAccessService
                 && in_array(app(PambMovProcessingService::class)->status($submission), [PambMovProcessingService::ACTIVITY_CONDUCTED, PambMovProcessingService::NEEDS_CORRECTION], true),
             // Direct-PENRO PAMB submissions enter the explicit PENRO Records
             // receipt queue before the shared PENRO internal chain.
-            'review' => ! app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission)
+            'review' => $this->routeProfile($submission) !== 'direct'
                 && $this->reviewCategoryFor($submission) === $category
                 && app(PambMovProcessingService::class)->status($submission) === PambMovProcessingService::SUBMITTED_FOR_REVIEW,
             'release' => $category === self::CENRO_RECORDS
-                && ! app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission)
+                && $this->routeProfile($submission) !== 'direct'
                 && $this->isAwaitingCenroRelease($submission),
             'penro_receipt', 'penro_records_receive' => $category === self::PENRO_RECORDS
                 && $this->isAwaitingPenroReceipt($submission),
@@ -205,7 +216,7 @@ final class PambSubmissionAccessService
 
     private function isAwaitingCenroRelease(ConservationReportSubmission $submission): bool
     {
-        return ! app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission)
+        return $this->routeProfile($submission) !== 'direct'
             && $submission->date_report_released_cenro === null
             && $submission->date_endorsed_regional === null
             && app(PambMovProcessingService::class)->status($submission) === PambMovProcessingService::READY_FOR_RELEASE;
@@ -213,7 +224,7 @@ final class PambSubmissionAccessService
 
     private function isAwaitingPenroReceipt(ConservationReportSubmission $submission): bool
     {
-        $direct = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
+        $direct = $this->routeProfile($submission) === 'direct';
 
         return $submission->date_received_penro === null
             && ($direct || $submission->date_report_released_cenro !== null);

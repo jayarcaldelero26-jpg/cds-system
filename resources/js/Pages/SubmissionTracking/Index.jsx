@@ -21,6 +21,7 @@ import PambMovActions from "@/Components/SubmissionTracking/PambMovActions";
 import { custodyContext, movPrerequisiteFor, nextSubmissionAction, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
 import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
+import { visibleTimelineForCapturedRoute } from "@/Utils/submissionTrackingPresentation";
 import DocumentRoutingTimeline from "@/Components/SubmissionTracking/DocumentRoutingTimeline";
 import SubmissionReportContext from "@/Components/SubmissionTracking/SubmissionReportContext";
 import DocumentPreviewDialog from "@/Components/SubmissionTracking/DocumentPreviewDialog";
@@ -178,10 +179,12 @@ const compactRoutingStatusFor = (row) => {
 };
 const compactProgressFor = (row) => {
     const routing = routingFor(row);
-    const timeline =
+    const timeline = visibleTimelineForCapturedRoute(
+        row,
         (row?.pamb_routing_applicable && !row?.canonical_custody_applicable
             ? row.routing_timeline
-            : routing.timeline) || [];
+            : routing.timeline) || [],
+    );
     const currentIndex = timeline.findIndex(
         (item) =>
             item?.status === "current" || item?.key === routing.current_stage,
@@ -1541,6 +1544,9 @@ export default function Index({
                                 </div>
                             )}
                         </dl>
+                        {details.routing?.route_position && <p className="mt-3 rounded-lg border border-gray-200 bg-white/70 px-3 py-2 text-xs leading-5 text-gray-600 dark:border-gray-700 dark:bg-gray-900/50 dark:text-gray-300">
+                            This report uses routing version {details.routing.route_position.version}: Office of the PENRO {details.routing.route_position.office_penro_enabled ? "included" : "skipped"}; PENRO TSD Chief {details.routing.route_position.penro_tsd_chief_enabled ? "included" : "skipped"}.{details.routing.route_position.preview ? " This is a preview until its first successful routing action." : ""}
+                        </p>}
                     </section>
                 )}
                 <SubmissionTrackingDetailsProgressCard details={details} onPreview={setPreviewRow} />

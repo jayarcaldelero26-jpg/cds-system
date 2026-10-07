@@ -97,6 +97,8 @@ class HandleInertiaRequests extends Middleware
                 'canManageUsers' => $isAdmin,
                 'canViewStorage' => $user?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN) ?? false,
                 'canViewSystemDiagnostics' => $isAdmin || ($user?->can('system-diagnostics.view') ?? false),
+                'canViewRoutingWorkflow' => $user?->can('submission-tracking.routing-settings.view') ?? false,
+                'canUpdateRoutingWorkflow' => $user?->can('submission-tracking.routing-settings.update') ?? false,
                 'canManagePasskeys' => $isAdmin,
                 'organizationalUnit' => $userUnit,
                 'unitVisibility' => [

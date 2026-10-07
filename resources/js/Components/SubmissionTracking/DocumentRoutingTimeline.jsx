@@ -3,7 +3,10 @@ import { standardActionLabel } from "@/Utils/routingLabels";
 import CrudSection from "@/Components/Crud/CrudSection";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 import RoutingAttachmentLink from "@/Components/SubmissionTracking/RoutingAttachmentLink";
-import { timelinePresentation } from "@/Utils/submissionTrackingPresentation";
+import {
+    timelinePresentation,
+    visibleTimelineForCapturedRoute,
+} from "@/Utils/submissionTrackingPresentation";
 import Button from "@/Components/Button";
 
 const FALLBACK = "\u2014";
@@ -62,7 +65,10 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
     const routing = row?.routing;
     if (!routing) return null;
     const actions = row.can_transition ? routing.actions || [] : [];
-    const timeline = routing.timeline || [];
+    const timeline = visibleTimelineForCapturedRoute(
+        row,
+        routing.timeline || [],
+    );
     const { hiddenSteps, visibleSteps: visibleTimeline, hasToggle } =
         timelinePresentation(timeline, showRemainingSteps);
 
@@ -169,7 +175,9 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                                           ? "Completed"
                                           : displayStatus === "current"
                                             ? "Current checkpoint; next action shown above"
-                                            : "Not yet reached"}
+                                            : displayStatus === "skipped"
+                                              ? "No routing event was created for this position"
+                                              : "Not yet reached"}
                                 </p>
                                 {displayStatus !== "completed" && displayStatus !== "current" &&
                                     event.action_label && (

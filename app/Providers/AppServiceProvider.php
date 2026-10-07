@@ -32,6 +32,7 @@ class AppServiceProvider extends ServiceProvider
         // that lookup request-scoped so repeated presenters share it without
         // retaining actor or record authorization state across requests.
         $this->app->scoped(ProtectedAreaRoutingPolicy::class, fn (): ProtectedAreaRoutingPolicy => new ProtectedAreaRoutingPolicy());
+        $this->app->scoped(\App\Services\SubmissionTracking\RoutingPositionSnapshotService::class, fn (): \App\Services\SubmissionTracking\RoutingPositionSnapshotService => new \App\Services\SubmissionTracking\RoutingPositionSnapshotService());
         $this->app->scoped(ModuleMetadataResolver::class, function ($app): ModuleMetadataResolver {
             return new ModuleMetadataResolver(
                 $app->make(ConservationReportWorkflowRegistry::class),
@@ -105,7 +106,10 @@ class AppServiceProvider extends ServiceProvider
             // permission-gated even for global administrator roles. The
             // PermissionSeeder grants these abilities to approved admins;
             // the broad global-role fallback below must not replace them.
-            if (in_array($ability, ['submission-tracking.correct-routing', 'submission-tracking.admin-override'], true)) {
+            if (in_array($ability, [
+                'submission-tracking.correct-routing', 'submission-tracking.admin-override',
+                'submission-tracking.routing-settings.view', 'submission-tracking.routing-settings.update',
+            ], true)) {
                 return null;
             }
 

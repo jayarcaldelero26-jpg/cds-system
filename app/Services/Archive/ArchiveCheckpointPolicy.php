@@ -4,14 +4,18 @@ namespace App\Services\Archive;
 
 use Illuminate\Validation\ValidationException;
 
-/** Shared gate for the mandatory PENRO Records → Office of the PENRO checkpoint. */
+/** Shared gate for the mandatory initial PENRO Records dispatch checkpoint. */
 final class ArchiveCheckpointPolicy
 {
     public function isCheckpoint(string $action, string $from, string $to): bool
     {
-        return $action === 'forward_to_office_penro'
-            && $from === 'penro_records'
-            && $to === 'transit_to_office_of_penro';
+        if ($from !== 'penro_records') return false;
+        return match ($action) {
+            'forward_to_office_penro' => $to === 'transit_to_office_of_penro',
+            'dispatch_penro_records_to_tsd' => $to === 'transit_to_tsd_chief',
+            'dispatch_penro_records_to_cds_focal' => $to === 'transit_to_cds_focal',
+            default => false,
+        };
     }
 
     public function assertTransitionAllowed(string $action, string $from, string $to): void

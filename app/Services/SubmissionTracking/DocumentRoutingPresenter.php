@@ -170,7 +170,7 @@ final class DocumentRoutingPresenter
         // Correction acknowledgement temporarily replaces executable actions.
         // Keep the displayed route on the existing profile graph; otherwise a
         // self-loop acknowledgement hides the current PENRO correction stage.
-        $routeActions = collect($this->profiles->actionProfile(
+        $routeActions = collect($state['route_actions'] ?? $this->profiles->actionProfile(
             $sourceKey, $profile['key'] === 'canonical_direct_penro'
         )['actions']);
         $path = [$pathStart];
@@ -233,10 +233,30 @@ final class DocumentRoutingPresenter
         if ($state['bootstrapped']) {
             $timeline = array_merge($this->legacyTimeline($record), $timeline);
         }
+        $position = $state['route_position'] ?? ['office_penro_enabled' => true, 'penro_tsd_chief_enabled' => true];
+        $afterRecords = [];
+        if (! ($position['office_penro_enabled'] ?? true)) {
+            $afterRecords[] = $this->skippedStage('office_initial_skipped', 'Office of the PENRO (initial routing)');
+        }
+        if (! ($position['penro_tsd_chief_enabled'] ?? true) && ! ($position['office_penro_enabled'] ?? true)) {
+            $afterRecords[] = $this->skippedStage('tsd_initial_skipped', 'PENRO TSD Chief');
+        }
+        $recordsIndex = collect($timeline)->search(fn (array $item): bool => ($item['key'] ?? null) === DocumentRoutingProfileRegistry::PENRO_RECORDS);
+        if ($afterRecords !== [] && $recordsIndex !== false) array_splice($timeline, $recordsIndex + 1, 0, $afterRecords);
+        if (($position['office_penro_enabled'] ?? true) && ! ($position['penro_tsd_chief_enabled'] ?? true)) {
+            $officeIndex = collect($timeline)->search(fn (array $item): bool => ($item['key'] ?? null) === DocumentRoutingProfileRegistry::OFFICE_PENRO);
+            if ($officeIndex !== false) array_splice($timeline, $officeIndex + 1, 0, [$this->skippedStage('tsd_initial_skipped', 'PENRO TSD Chief')]);
+        }
+        if (! ($position['office_penro_enabled'] ?? true)) {
+            $finalIndex = collect($timeline)->search(fn (array $item): bool => ($item['key'] ?? null) === DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS_FINAL);
+            if ($finalIndex !== false) array_splice($timeline, $finalIndex, 0, [$this->skippedStage('office_final_skipped', 'Office of the PENRO (final review)')]);
+        }
         $current = collect($timeline)->firstWhere('status', 'current');
         $last = collect($timeline)->filter(fn (array $item): bool => filled($item['occurred_at']))->last();
         $nextAction = $state['allowed_actions'][0] ?? null;
-        $informationalAction = $actions->first(fn (array $action): bool => $action['from'] === $currentStage && ! ($action['internal_only'] ?? false));
+        $currentStageActions = $actions->filter(fn (array $action): bool => $action['from'] === $currentStage && ! ($action['internal_only'] ?? false));
+        $informationalAction = $currentStageActions->first(fn (array $action): bool => ! ($action['correction'] ?? false))
+            ?? $currentStageActions->first();
         // Canonical custody ownership comes from the current route graph. MOV
         // review and release ownership is presented in its separate MOV
         // context and must not replace custody ownership before a handoff.
@@ -314,6 +334,40 @@ final class DocumentRoutingPresenter
             'correction_reason' => data_get($state, 'correction_event.metadata.correction_reason') ?? data_get($state, 'correction_event.remarks'),
             'correction_detail' => data_get($state, 'correction_event.metadata.correction_detail') ?? data_get($state, 'correction_event.remarks'),
             'actions' => $allowed, 'capabilities' => $state['capabilities'], 'timeline' => $timeline, 'routing_history' => $history,
+            'route_position' => [
+                'version' => (int) ($position['version'] ?? 1),
+                'office_penro_enabled' => (bool) ($position['office_penro_enabled'] ?? true),
+                'penro_tsd_chief_enabled' => (bool) ($position['penro_tsd_chief_enabled'] ?? true),
+                'preview' => (bool) ($position['preview'] ?? false),
+                'snapshot_id' => $position['snapshot_id'] ?? null,
+                'graph_version' => $position['graph_version'] ?? null,
+            ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function skippedStage(string $key, string $position): array
+    {
+        return [
+            'key' => $key,
+            'label' => $position,
+            'display_status_label' => 'Skipped by Routing Workflow Settings',
+            'status' => 'skipped',
+            'display_status' => 'skipped',
+            'event_type' => null,
+            'action_label' => null,
+            'from' => null,
+            'to' => null,
+            'office' => null,
+            'occurred_at' => null,
+            'recorded_at' => null,
+            'recorded_by' => null,
+            'actor_category' => null,
+            'actor_category_code' => null,
+            'actor_office' => null,
+            'remarks' => null,
+            'pending_since' => null,
+            'working_days_pending' => null,
         ];
     }
 

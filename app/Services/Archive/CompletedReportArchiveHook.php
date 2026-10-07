@@ -6,6 +6,8 @@ use App\Models\ConservationReportSubmission;
 use App\Models\DocumentRoutingEvent;
 use App\Models\ModuleDefinition;
 use App\Models\PambRoutingEvent;
+use App\Models\RoutingPositionSettingVersion;
+use App\Models\SubmissionRoutingSnapshot;
 use App\Models\User;
 use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Authorization\OrganizationalAccessService;
@@ -34,7 +36,10 @@ final class CompletedReportArchiveHook
     /** Generic checkpoint lifecycle is mandatory and must run inside its routing transaction. */
     public function afterRoutingEvent(DocumentRoutingEvent $event, ?User $actor): array
     {
-        if (! $this->isGenericCheckpoint($event)) return ['status' => 'not_records_checkpoint'];
+        $semanticCheckpoint = $this->checkpointPolicy->isCheckpoint((string) data_get($event->metadata, 'action_key'), (string) $event->from_stage, (string) $event->to_stage)
+            && $event->event_key === 'forwarded';
+        if (! $semanticCheckpoint) return ['status' => 'not_records_checkpoint'];
+        if (! $this->isGenericCheckpoint($event)) throw ValidationException::withMessages(['archive' => 'The PENRO Records dispatch checkpoint identity is invalid. Routing was not advanced.']);
         if (! $actor) throw ValidationException::withMessages(['archive' => 'The archive checkpoint requires an authenticated routing actor.']);
 
         $this->checkpointPolicy->assertEnabledAndConfigured();
@@ -150,17 +155,46 @@ final class CompletedReportArchiveHook
 
     private function isGenericCheckpoint(DocumentRoutingEvent $event): bool
     {
-        return $this->checkpointPolicy->isCheckpoint((string) data_get($event->metadata, 'action_key'), (string) $event->from_stage, (string) $event->to_stage)
-            && $event->event_key === 'forwarded';
+        if (! $this->checkpointPolicy->isCheckpoint((string) data_get($event->metadata, 'action_key'), (string) $event->from_stage, (string) $event->to_stage)
+            || $event->event_key !== 'forwarded') return false;
+        $legacyOfficeDispatch = data_get($event->metadata, 'action_key') === 'forward_to_office_penro'
+            && $event->to_stage === 'transit_to_office_of_penro';
+        return $legacyOfficeDispatch || data_get($event->metadata, 'routing_checkpoint') === 'penro_records_initial_dispatch';
     }
 
     private function hasCheckpointEvent(DocumentRoutingEvent $event): bool
     {
-        return $event->exists && $this->isGenericCheckpoint($event)
-            && DocumentRoutingEvent::query()->whereKey($event->getKey())
-                ->where('source_type', $event->source_type)->where('source_id', $event->source_id)
-                ->where('event_key', 'forwarded')->where('from_stage', 'penro_records')
-                ->where('to_stage', 'transit_to_office_of_penro')->exists();
+        if (! $event->exists || ! $this->isGenericCheckpoint($event)) return false;
+        $persisted = DocumentRoutingEvent::query()->whereKey($event->getKey())
+            ->where('source_type', $event->source_type)->where('source_id', $event->source_id)
+            ->where('event_key', 'forwarded')->where('from_stage', 'penro_records')->first();
+        if (! $persisted || $persisted->to_stage !== $event->to_stage
+            || data_get($persisted->metadata, 'action_key') !== data_get($event->metadata, 'action_key')) return false;
+
+        // The historical Office edge predates sidecar route identity and remains
+        // readable. Every newly introduced destination must bind to its exact
+        // source, record, snapshot, setting version, and graph version.
+        if ($persisted->to_stage === 'transit_to_office_of_penro'
+            && data_get($persisted->metadata, 'action_key') === 'forward_to_office_penro'
+            && data_get($persisted->metadata, 'route_snapshot_id') === null) return true;
+
+        $snapshot = SubmissionRoutingSnapshot::query()
+            ->whereKey(data_get($persisted->metadata, 'route_snapshot_id'))
+            ->where('source_key', $persisted->source_type)->where('source_id', $persisted->source_id)
+            ->where('setting_version_id', data_get($persisted->metadata, 'route_setting_version_id'))
+            ->where('graph_version', data_get($persisted->metadata, 'route_graph_version'))
+            ->where('graph_version', \App\Services\SubmissionTracking\RoutingPositionSnapshotService::GRAPH_VERSION)
+            ->where('profile', data_get($persisted->metadata, 'route_profile'))->first();
+        if (! $snapshot || (int) data_get($persisted->metadata, 'route_setting_version', 0) < 1) return false;
+        $settings = RoutingPositionSettingVersion::query()->find($snapshot->setting_version_id);
+        if (! $settings || (int) $settings->version !== (int) data_get($persisted->metadata, 'route_setting_version')) return false;
+
+        return match ((string) data_get($persisted->metadata, 'action_key')) {
+            'dispatch_penro_records_to_tsd' => ! $settings->office_penro_enabled && $settings->penro_tsd_chief_enabled && $persisted->to_stage === 'transit_to_tsd_chief',
+            'dispatch_penro_records_to_cds_focal' => ! $settings->office_penro_enabled && ! $settings->penro_tsd_chief_enabled && $persisted->to_stage === 'transit_to_cds_focal',
+            'forward_to_office_penro' => (bool) $settings->office_penro_enabled && $persisted->to_stage === 'transit_to_office_of_penro',
+            default => false,
+        };
     }
 
     private function checkpointAction(string $source, string $actionKey): ?string

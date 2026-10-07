@@ -22,13 +22,16 @@ final class DocumentRoutingTransitionService
         private readonly DocumentRoutingProfileRegistry $profiles,
         private readonly DocumentRoutingAccessService $access,
         private readonly ArchiveCheckpointPolicy $checkpointPolicy,
+        private readonly RoutingPositionSnapshotService $positionSnapshots,
+        private readonly EffectiveRoutingGraphResolver $graphResolver,
     ) {}
 
     /** @param Collection<int,DocumentRoutingEvent>|null $events */
-    public function state(EloquentModel $record, string $sourceKey, ?Collection $events = null, ?User $actor = null): array
+    public function state(EloquentModel $record, string $sourceKey, ?Collection $events = null, ?User $actor = null, ?array $resolvedPosition = null): array
     {
         LocalNavigationTrace::incrementCurrent('canonical_state_builds');
         $events ??= $this->events($record, $sourceKey);
+        $hasHistory = $events->isNotEmpty();
         $projectionIdentity = $this->projectionIdentity($record, $sourceKey, $events);
         if ($record instanceof \App\Models\ConservationReportSubmission && $sourceKey === 'conservation') {
             $events = app(ConservationMeetingRoutingCompatibilityAdapter::class)->events($record, $events);
@@ -36,8 +39,12 @@ final class DocumentRoutingTransitionService
         if (method_exists($record, 'protectedArea') && ! $record->relationLoaded('protectedArea')) {
             $record->load('protectedArea');
         }
-        $direct = $sourceKey !== 'engp' && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record);
-        $profile = $this->profiles->actionProfile($sourceKey, $direct);
+        $position = $resolvedPosition ?? $this->positionSnapshots->resolve($record, $sourceKey, $hasHistory);
+        $direct = in_array($position['profile'] ?? null, ['regular', 'direct'], true)
+            ? $position['profile'] === 'direct'
+            : ($sourceKey !== 'engp' && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record));
+        $graph = $this->graphResolver->resolve($sourceKey, $direct, $position);
+        $profile = ['profile' => $graph['profile'], 'actions' => $graph['actions']];
             // Compatibility events already carry deterministic source-local order.
         $last = $events->last();
         $activeCycle = $record instanceof \App\Models\ConservationReportSubmission
@@ -86,6 +93,11 @@ final class DocumentRoutingTransitionService
                 return $action;
             }, $actions);
         }
+        if ($direct
+            && $stage === DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS
+            && ! $this->supportedIncomingSender($graph['actions'], $events, (string) $stage)) {
+            $actions = array_values(array_filter($actions, fn (array $action): bool => ($action['key'] ?? null) !== 'return_for_correction_penro_records'));
+        }
 
         return [
             'stage' => $stage,
@@ -98,7 +110,10 @@ final class DocumentRoutingTransitionService
             'events' => $events->values(),
             '_projection_identity' => $projectionIdentity,
             'profile' => $profile['profile'],
+            'route_profile' => $direct ? 'direct' : 'regular',
             'actions' => $actions,
+            'route_actions' => $graph['actions'],
+            'route_position' => $graph['route_position'],
             // correction_cycle is historical metadata carried forward with the
             // routing chain. Only a latest unresolved return is current state;
             // correction receipt and later routing resolve it.
@@ -107,26 +122,74 @@ final class DocumentRoutingTransitionService
         ];
     }
 
+    /** @param Collection<int,array{record:EloquentModel,key:string}> $loaded
+     *  @param array<string,Collection<int,DocumentRoutingEvent>> $eventsByRecord */
+    public function primeRoutingPositions(Collection $loaded, array $eventsByRecord): void
+    {
+        $this->positionSnapshots->prime($loaded->map(function (array $item) use ($eventsByRecord): array {
+            $record = $item['record'];
+            $source = (string) $item['key'];
+            return [
+                'record' => $record,
+                'source' => $source,
+                'has_history' => ($eventsByRecord[$source.':'.$record->getKey()] ?? collect())->isNotEmpty(),
+            ];
+        }));
+    }
+
+    public function clearPrimedRoutingPositions(): void
+    {
+        $this->positionSnapshots->clearPrimed();
+    }
+
     private function categoryForStage(string $stage): string
     {
         if ($stage === DocumentRoutingProfileRegistry::CENRO_RECORDS) return OrganizationalAccessService::CENRO_RECORDS;
         if ($stage === DocumentRoutingProfileRegistry::PENRO_RECORDS) return OrganizationalAccessService::PENRO_RECORDS;
         if ($stage === DocumentRoutingProfileRegistry::PREPARATION) return OrganizationalAccessService::CENRO_FOCAL;
+        if ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) return OrganizationalAccessService::PAMO;
+        if ($stage === DocumentRoutingProfileRegistry::PENRO_ORIGIN) return OrganizationalAccessService::PENRO_FOCAL;
         if ($stage === DocumentRoutingProfileRegistry::CDS_FOCAL) return OrganizationalAccessService::PENRO_FOCAL;
         $action = collect($this->profiles->actionProfile('conservation')['actions'])->firstWhere('to', $stage);
         return (string) ($action['categories'][0] ?? OrganizationalAccessService::CENRO_RECORDS);
     }
 
+    /** Return the latest sender only when that handoff belongs to this route graph. */
+    private function supportedIncomingSender(array $routeActions, Collection $events, string $stage): ?DocumentRoutingEvent
+    {
+        $sender = $events->reverse()->first(fn (DocumentRoutingEvent $event): bool => $event->to_stage === $stage);
+        if (! $sender || blank($sender->from_stage)) return null;
+
+        return collect($routeActions)->contains(fn (array $action): bool =>
+            ($action['from'] ?? null) === $sender->from_stage
+            && ($action['to'] ?? null) === $sender->to_stage)
+                ? $sender
+                : null;
+    }
+
     /** @return Collection<int,DocumentRoutingEvent> */
     public function events(EloquentModel $record, string $sourceKey): Collection
     {
-        $events = DocumentRoutingEvent::query()
+        return $this->loadEvents($record, $sourceKey, false);
+    }
+
+    /** Read authoritative history after the source row lock for a transition. */
+    private function eventsForTransition(EloquentModel $record, string $sourceKey): Collection
+    {
+        return $this->loadEvents($record, $sourceKey, true);
+    }
+
+    /** @return Collection<int,DocumentRoutingEvent> */
+    private function loadEvents(EloquentModel $record, string $sourceKey, bool $lockForUpdate): Collection
+    {
+        $query = DocumentRoutingEvent::query()
             ->where('source_type', $sourceKey)
             ->where('source_id', $record->getKey())
             ->with('recordedBy:id,name,section,office_designated')
             ->orderBy('occurred_at')
-            ->orderBy('id')
-            ->get();
+            ->orderBy('id');
+        if ($lockForUpdate) $query->lockForUpdate();
+        $events = $query->get();
 
         return $record instanceof \App\Models\ConservationReportSubmission && $sourceKey === 'conservation'
             ? app(ConservationMeetingRoutingCompatibilityAdapter::class)->events($record, $events)
@@ -190,19 +253,23 @@ final class DocumentRoutingTransitionService
         $event = DB::transaction(function () use ($record, $sourceKey, $actionKey, $actor, $remarks, $correctionReasonKey, $correctionDetail): DocumentRoutingEvent {
             /** @var EloquentModel $locked */
             $locked = $record->newQuery()->lockForUpdate()->findOrFail($record->getKey());
-            // A known action must be authorized independently of whether it is
-            // still current. This keeps an out-of-scope actor from learning or
-            // probing a record's current stage through the stale-action path.
-            // The state check still runs for authorized actors and continues to
-            // reject stale or repeated requests without writing an event.
-            $direct = $sourceKey !== 'engp'
-                && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($locked);
-            $profileAction = collect($this->profiles->actionProfile($sourceKey, $direct)['actions'])
-                ->firstWhere('key', $actionKey);
-            if ($profileAction) {
-                abort_unless($this->access->canPerform($actor, $locked, $sourceKey, $profileAction, $this->ability($sourceKey)), 403);
+            $lockedEvents = $this->eventsForTransition($locked, $sourceKey);
+            $position = $this->positionSnapshots->resolve($locked, $sourceKey, $lockedEvents->isNotEmpty(), $lockedEvents->isEmpty(), true);
+            $state = $this->state($locked, $sourceKey, $lockedEvents, $actor, $position);
+            // Authorize known effective actions before checking whether they
+            // are still current. Custom position-dependent dispatches must use
+            // the captured graph and current actor scope just like base actions.
+            $knownAction = collect($state['route_actions'])->firstWhere('key', $actionKey);
+            if ($knownAction) {
+                abort_unless($this->access->canPerform($actor, $locked, $sourceKey, $knownAction, $this->ability($sourceKey)), 403);
             }
-            $state = $this->state($locked, $sourceKey, $this->events($locked, $sourceKey), $actor);
+            if ($actionKey === 'return_for_correction_penro_records'
+                && ($knownAction['receipt_correction_context'] ?? null) === 'penro_records'
+                && $state['route_profile'] === 'direct'
+                && $state['stage'] === DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS
+                && ! $this->supportedIncomingSender($state['route_actions'], $state['events'], (string) $state['stage'])) {
+                throw ValidationException::withMessages(['stage' => 'A correction return cannot be recorded because no verified sender is recorded in the captured direct route.']);
+            }
             $action = collect($state['actions'])->firstWhere('key', $actionKey);
             if (! $action || $action['from'] !== $state['stage']) {
                 throw ValidationException::withMessages(['stage' => 'This document is no longer awaiting that routing action.']);
@@ -219,7 +286,7 @@ final class DocumentRoutingTransitionService
                     : ['missing_endorsement', 'missing_attachment', 'missing_received_copy', 'incomplete_document', 'other'];
                 if (! in_array($correctionReasonKey, $validReasons, true)) throw ValidationException::withMessages(['correction_reason_key' => 'Select a correction reason.']);
                 if ($correctionReasonKey === 'other' && blank(trim((string) $correctionDetail))) throw ValidationException::withMessages(['correction_detail' => 'Explain the reason when Other is selected.']);
-                $senderEvent = $state['events']->filter(fn (DocumentRoutingEvent $event): bool => $event->to_stage === $state['stage'])->last();
+                $senderEvent = $this->supportedIncomingSender($state['route_actions'], $state['events'], (string) $state['stage']);
                 if ($senderEvent) {
                     $action['to'] = $senderEvent->from_stage;
                     $action['to_office'] = $senderEvent->from_office;
@@ -232,11 +299,12 @@ final class DocumentRoutingTransitionService
             if ($locked instanceof \App\Models\ConservationReportSubmission
                 && $sourceKey === 'conservation'
                 && PambRoutingTimelineService::appliesWorkflow((string) $locked->workflow_key)
-                && ! $this->pambMovAllowsAction($locked, (string) $action['key'])) {
+                && ! $this->pambMovAllowsAction($locked, (string) $action['key'], (string) $state['route_profile'])) {
                 throw ValidationException::withMessages(['stage' => 'The PAMB MOV/review gate does not allow this custody transition yet.']);
             }
 
             $this->checkpointPolicy->assertTransitionAllowed($action['key'], $action['from'], $action['to']);
+            $snapshot = $this->positionSnapshots->capture($locked, $sourceKey, $state['route_position'], (string) $state['route_profile'], $actor);
 
             $event = DocumentRoutingEvent::query()->create([
                 'source_type' => $sourceKey,
@@ -253,6 +321,12 @@ final class DocumentRoutingTransitionService
                 'metadata' => [
                     'state_source' => $state['bootstrapped'] ? 'imported_existing_milestones' : 'routing_events',
                     'action_key' => $action['key'],
+                    'route_setting_version' => (int) ($state['route_position']['version'] ?? 1),
+                    'route_setting_version_id' => $state['route_position']['setting_version_id'] ?? null,
+                    'route_snapshot_id' => $snapshot?->getKey() ?? $state['route_position']['snapshot_id'] ?? null,
+                    'route_graph_version' => $state['route_position']['graph_version'],
+                    'route_profile' => $state['route_profile'],
+                    ...($this->checkpointPolicy->isCheckpoint($action['key'], $action['from'], $action['to']) ? ['routing_checkpoint' => 'penro_records_initial_dispatch'] : []),
                     'correction' => (bool) ($action['correction'] ?? false),
                     'correction_cycle' => (bool) (($action['correction'] ?? false) || ($action['correction_cycle'] ?? false) || $state['correction']),
                     ...($state['active_cycle'] !== null ? ['pamb_cycle' => (int) $state['active_cycle'] + (($action['correction'] ?? false) ? 1 : 0)] : []),
@@ -267,11 +341,14 @@ final class DocumentRoutingTransitionService
             $this->syncCompatibilityMilestone($locked, $sourceKey, $action['key']);
             return $event->load('recordedBy:id,name,section');
         });
-        $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
-        try {
-            app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, $action);
-        } catch (\Throwable $exception) {
-            report($exception);
+        if (! $this->checkpointPolicy->isCheckpoint($actionKey, (string) $event->from_stage, (string) $event->to_stage)) {
+            try {
+                app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, [
+                    'key' => data_get($event->metadata, 'action_key'), 'event_key' => $event->event_key, 'to_office' => $event->to_office,
+                ]);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
         }
         return $event;
     }
@@ -288,7 +365,9 @@ final class DocumentRoutingTransitionService
         $event = DB::transaction(function () use ($record, $sourceKey, $actionKey, $actor, $override, $remarks): DocumentRoutingEvent {
             /** @var EloquentModel $locked */
             $locked = $record->newQuery()->lockForUpdate()->findOrFail($record->getKey());
-            $state = $this->state($locked, $sourceKey, $this->events($locked, $sourceKey), null);
+            $lockedEvents = $this->eventsForTransition($locked, $sourceKey);
+            $position = $this->positionSnapshots->resolve($locked, $sourceKey, $lockedEvents->isNotEmpty(), $lockedEvents->isEmpty(), true);
+            $state = $this->state($locked, $sourceKey, $lockedEvents, null, $position);
             $action = collect($state['actions'])->firstWhere('key', $actionKey);
             if (! $action || $action['from'] !== $state['stage']) {
                 throw ValidationException::withMessages(['stage' => 'This document is no longer awaiting that routing action.']);
@@ -299,10 +378,11 @@ final class DocumentRoutingTransitionService
             if ($locked instanceof \App\Models\ConservationReportSubmission
                 && $sourceKey === 'conservation'
                 && PambRoutingTimelineService::appliesWorkflow((string) $locked->workflow_key)
-                && ! $this->pambMovAllowsAction($locked, (string) $action['key'])) {
+                && ! $this->pambMovAllowsAction($locked, (string) $action['key'], (string) $state['route_profile'])) {
                 throw ValidationException::withMessages(['stage' => 'The PAMB MOV/review gate does not allow this custody transition yet.']);
             }
             $this->checkpointPolicy->assertTransitionAllowed($action['key'], $action['from'], $action['to']);
+            $snapshot = $this->positionSnapshots->capture($locked, $sourceKey, $state['route_position'], (string) $state['route_profile'], $actor);
             $event = DocumentRoutingEvent::query()->create([
                 'source_type' => $sourceKey,
                 'source_id' => $locked->getKey(),
@@ -315,16 +395,19 @@ final class DocumentRoutingTransitionService
                 'occurred_at' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
                 'recorded_by' => $actor->getKey(),
                 'remarks' => $remarks,
-                'metadata' => ['state_source' => 'routing_events', 'action_key' => $action['key'], 'correction' => (bool) ($action['correction'] ?? false), 'administrative_override' => true, ...($state['active_cycle'] !== null ? ['pamb_cycle' => (int) $state['active_cycle'] + (($action['correction'] ?? false) ? 1 : 0)] : []), ...$override],
+                'metadata' => ['state_source' => 'routing_events', 'action_key' => $action['key'], 'route_setting_version' => (int) ($state['route_position']['version'] ?? 1), 'route_setting_version_id' => $state['route_position']['setting_version_id'] ?? null, 'route_snapshot_id' => $snapshot?->getKey() ?? $state['route_position']['snapshot_id'] ?? null, 'route_graph_version' => $state['route_position']['graph_version'], 'route_profile' => $state['route_profile'], ...($this->checkpointPolicy->isCheckpoint($action['key'], $action['from'], $action['to']) ? ['routing_checkpoint' => 'penro_records_initial_dispatch'] : []), 'correction' => (bool) ($action['correction'] ?? false), 'administrative_override' => true, ...($state['active_cycle'] !== null ? ['pamb_cycle' => (int) $state['active_cycle'] + (($action['correction'] ?? false) ? 1 : 0)] : []), ...$override],
             ]);
             $this->syncCompatibilityMilestone($locked, $sourceKey, $action['key']);
             return $event->load('recordedBy:id,name,section');
         });
-        $action = collect($this->profiles->actionProfile($sourceKey, false)['actions'])->firstWhere('key', $actionKey) ?: [];
-        try {
-            app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, $action);
-        } catch (\Throwable $exception) {
-            report($exception);
+        if (! $this->checkpointPolicy->isCheckpoint($actionKey, (string) $event->from_stage, (string) $event->to_stage)) {
+            try {
+                app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, [
+                    'key' => data_get($event->metadata, 'action_key'), 'event_key' => $event->event_key, 'to_office' => $event->to_office,
+                ]);
+            } catch (\Throwable $exception) {
+                report($exception);
+            }
         }
         return $event;
     }
@@ -335,13 +418,13 @@ final class DocumentRoutingTransitionService
         $state = $canReuseState ? $resolvedState : $this->state($record, $sourceKey, $events, $actor);
         $current = (string) $state['stage'];
         $actions = collect($state['actions']);
-        $allowed = $actor ? $actions->filter(function (array $action) use ($current, $actor, $record, $sourceKey): bool {
+        $allowed = $actor ? $actions->filter(function (array $action) use ($current, $actor, $record, $sourceKey, $state): bool {
             if (($action['internal_only'] ?? false) || $action['from'] !== $current
                 || ! $this->access->canPerform($actor, $record, $sourceKey, $action, $this->ability($sourceKey))) return false;
             if ($record instanceof \App\Models\ConservationReportSubmission
                 && $sourceKey === 'conservation'
                 && PambRoutingTimelineService::appliesWorkflow((string) $record->workflow_key)
-                && ! $this->pambMovAllowsAction($record, (string) $action['key'])) {
+                && ! $this->pambMovAllowsAction($record, (string) $action['key'], (string) $state['route_profile'])) {
                 return false;
             }
             return true;
@@ -350,9 +433,10 @@ final class DocumentRoutingTransitionService
         return [...$state, 'allowed_actions' => $allowed->all(), 'capabilities' => $actor ? $this->access->capabilities($actor, $record, $sourceKey, $allowed->all(), $this->ability($sourceKey)) : []];
     }
 
-    private function pambMovAllowsAction(\App\Models\ConservationReportSubmission $record, string $actionKey): bool
+    private function pambMovAllowsAction(\App\Models\ConservationReportSubmission $record, string $actionKey, ?string $routeProfile = null): bool
     {
-        if (app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record) || $record->date_report_released_cenro !== null) return true;
+        $routeProfile ??= app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record) ? 'direct' : 'regular';
+        if ($routeProfile === 'direct' || $record->date_report_released_cenro !== null) return true;
         $status = app(PambMovProcessingService::class)->status($record);
         return match ($actionKey) {
             // A legacy MOV may already carry the Chief's approval before

@@ -44,7 +44,7 @@ final class SubmissionTrackingService
     /** @var array<string, list<string>> */
     private array $tableColumns = [];
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingAttachmentService $routingAttachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting, private readonly ReportTrackingNumberService $trackingNumbers) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly RoutingPositionSnapshotService $routePositions, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingAttachmentService $routingAttachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting, private readonly ReportTrackingNumberService $trackingNumbers) {}
 
     /** @return Collection<int, array<string, mixed>> */
     public function records(array $filters = [], ?int $limitPerSource = null, bool $assignTrackingNumbers = false): Collection
@@ -63,18 +63,6 @@ final class SubmissionTrackingService
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
             }));
         LocalNavigationTrace::incrementCurrent('source_rows_loaded', $loaded->count());
-
-        // sourceQuery applies office/PA scope before hydration. CENRO visibility
-        // has one additional direct-PENRO exclusion; apply it to the already
-        // eager-loaded PA instead of re-fetching every conservation row by ID.
-        $user = auth()->user();
-        $loaded = LocalNavigationTrace::measureCurrent('st_scope_filter', function () use ($loaded, $user) {
-            if ($user && $this->pambAccess->isCenro($user)) {
-                return $loaded->reject(fn (array $item): bool => $item['key'] === 'conservation'
-                    && $this->routingPolicy->isDirectPenro($item['record']))->values();
-            }
-            return $loaded;
-        });
 
         [$trackingNumbers, $correctionCounts] = LocalNavigationTrace::measureCurrent('st_metadata', function () use ($loaded, $assignTrackingNumbers) {
             $this->moduleResolver->prime($loaded->pluck('record'));
@@ -110,14 +98,19 @@ final class SubmissionTrackingService
         $documentRoutingPresenter = app(DocumentRoutingPresenter::class);
 
         LocalNavigationTrace::incrementCurrent('workspace_source_rows', $loaded->count());
-        $normalized = LocalNavigationTrace::measureCurrent('st_routing_presentation', fn () => $loaded
-            ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers, $pambAttachments, $documentRoutingPresenter, collect($pambOverrides[$item['key'].':'.$item['record']->getKey()] ?? []), $documentAttachments)));
-        LocalNavigationTrace::incrementCurrent('projected_rows', $normalized->count());
+        try {
+            $this->genericRouting->primeRoutingPositions($loaded, $routingEvents);
+            $normalized = LocalNavigationTrace::measureCurrent('st_routing_presentation', fn () => $loaded
+                ->map(fn (array $item): array => $this->normalize($item['record'], $item['key'], $item['source'], $correctionCounts, $routingAudits[$item['key'].':'.$item['record']->getKey()] ?? collect(), $routingEvents[$item['key'].':'.$item['record']->getKey()] ?? collect(), $trackingNumbers, $pambAttachments, $documentRoutingPresenter, collect($pambOverrides[$item['key'].':'.$item['record']->getKey()] ?? []), $documentAttachments)));
+            LocalNavigationTrace::incrementCurrent('projected_rows', $normalized->count());
 
-        return LocalNavigationTrace::measureCurrent('st_filter_sort', fn () => $normalized
-            ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
-            ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
-            ->values());
+            return LocalNavigationTrace::measureCurrent('st_filter_sort', fn () => $normalized
+                ->filter(fn (array $record) => $this->matchesFilters($record, $filters))
+                ->sortByDesc(fn (array $record) => $record['date_accomplished'] ?? $record['date_conducted'] ?? '')
+                ->values());
+        } finally {
+            $this->genericRouting->clearPrimedRoutingPositions();
+        }
     }
 
     /** Lightweight bounded search for global-search consumers. */
@@ -136,8 +129,6 @@ final class SubmissionTrackingService
     public function receivedDateValues(int $chunkSize = 500): \Generator
     {
         $chunkSize = max(1, min(2000, $chunkSize));
-        $user = auth()->user();
-
         foreach ($this->sources() as $key => $source) {
             $model = new $source['model'];
             $schema = Schema::connection($model->getConnectionName());
@@ -148,16 +139,7 @@ final class SubmissionTrackingService
                 ->whereNotNull($table.'.date_received_penro')
                 ->select([$table.'.id', $table.'.date_received_penro']);
 
-            if ($key === 'conservation' && $user && $this->pambAccess->isCenro($user)) {
-                $query->with('protectedArea:id,name,short_name');
-            }
-
             foreach ($query->lazyById($chunkSize, $table.'.id', 'id') as $record) {
-                if ($key === 'conservation' && $user && $this->pambAccess->isCenro($user)
-                    && $this->routingPolicy->isDirectPenro($record)) {
-                    continue;
-                }
-
                 yield $record->getAttribute('date_received_penro');
             }
         }
@@ -503,12 +485,12 @@ final class SubmissionTrackingService
             'cenro_chief' => ['receive_at_cenro_chief', 'forward_to_cenro_records'],
             'cenro_records' => ['receive_at_cenro_records', 'forward_to_penro_records'],
             'penro_receipt' => ['receive_at_penro_records'],
-            'penro_records_routing' => ['forward_to_office_penro'],
-            'office_initial_routing' => ['receive_at_office_penro', 'assign_to_tsd_chief'],
+            'penro_records_routing' => ['forward_to_office_penro', 'dispatch_penro_records_to_tsd', 'dispatch_penro_records_to_cds_focal'],
+            'office_initial_routing' => ['receive_at_office_penro', 'assign_to_tsd_chief', 'dispatch_office_to_cds_focal'],
             'tsd_routing' => ['receive_at_tsd_chief', 'forward_to_cds_focal'],
             'cds_processing' => ['receive_at_cds_focal', 'forward_to_cds_chief'],
             'cds_correction' => ['receive_correction', 'forward_to_cds_chief'],
-            'cds_review' => ['receive_at_cds_chief', 'recommend_to_office_penro'],
+            'cds_review' => ['receive_at_cds_chief', 'recommend_to_office_penro', 'recommend_to_penro_records_final'],
             'office_final_verdict' => ['receive_at_office_penro_final', 'approve_for_regional_release'],
             'penro_records_final' => ['receive_at_penro_records_final', 'release_to_regional'],
             'regional_endorsement' => ['release_to_regional'],
@@ -790,7 +772,7 @@ final class SubmissionTrackingService
         if ($record instanceof ConservationReportSubmission && ($user = auth()->user())) {
             abort_unless($this->pambAccess->canView($user, $record), 403);
             abort_unless($this->pambAccess->canPerformCanonical($user, $record, $stage), 403);
-            if ($stage === self::CENRO_RELEASE && $this->pambAccess->isCenro($user) && ! $this->routingPolicy->isDirectPenro($record)) {
+            if ($stage === self::CENRO_RELEASE && $this->pambAccess->isCenro($user) && $this->pambAccess->routeProfile($record) !== 'direct') {
                 abort_unless($this->pambAccess->canPerform($user, 'release'), 403);
                 abort_unless(app(PambMovProcessingService::class)->status($record) === PambMovProcessingService::READY_FOR_RELEASE, 422);
             }
@@ -999,7 +981,12 @@ final class SubmissionTrackingService
         if (! $period && $record->getAttribute('reporting_month')) {
             $period = Carbon::create()->month((int) $record->getAttribute('reporting_month'))->format('F').' '.$record->getAttribute('reporting_year');
         }
-        $directPenro = ! $isEngp && $this->routingPolicy->isDirectPenro($record);
+        $usesGenericRouting = $this->usesGenericRecord($sourceKey, $record);
+        $routingState = $usesGenericRouting
+            ? $this->genericRouting->state($record, $sourceKey, $routingEvents)
+            : null;
+        $directPenro = ! $isEngp && (($routingState['route_profile'] ?? null) === 'direct'
+            || (($routingState['route_profile'] ?? null) !== 'regular' && $this->routingPolicy->isDirectPenro($record)));
         $releaseDate = $isEngp ? $record->releaseEvents->map(fn (Model $event): ?string => DatePresentationNormalizer::toDateString($event->getRawOriginal('date_report_released_cenro')))->filter()->sort()->last() : $this->date($record, 'date_report_released_cenro');
         $dates = $isEngp
             ? ['date_received_penro']
@@ -1019,10 +1006,6 @@ final class SubmissionTrackingService
                 $record,
                 (string) $officialDocumentDefinition['definition']['official_key'],
             )
-            : null;
-        $usesGenericRouting = $this->usesGenericRecord($sourceKey, $record);
-        $routingState = $usesGenericRouting
-            ? $this->genericRouting->state($record, $sourceKey, $routingEvents)
             : null;
         $canonicalMeetingRouting = $sourceKey === 'conservation'
             && $usesGenericRouting
@@ -1061,7 +1044,7 @@ final class SubmissionTrackingService
                 $record->getRawOriginal('deadline_submission') ?? $record->getAttribute('deadline_submission')
             ),
             'days_complied' => $record->getAttribute('days_complied') ?? $record->getAttribute('number_days_complied'),
-            'submission_status' => $this->statusPresenter->status($record, $sourceKey, $routingEvents),
+            'submission_status' => $this->statusPresenter->status($record, $sourceKey, $routingEvents, $routingState['route_profile'] ?? null),
             'timeliness' => $record->getAttribute($isEngp ? 'timeliness_rating' : 'timeliness'),
             'penro_delay_days' => $record->getAttribute('penro_delay') ?? $record->getAttribute('total_days_delayed_penro'),
             'mov_status' => ($record->getAttribute('mov_file_path') || $record->getAttribute('report_file_path') || $record->getAttribute('mov_external_url') || ! empty($record->getAttribute('attachments'))) ? 'Complete' : ($record->getAttribute('date_received_penro') ? 'MOV Not Yet Submitted' : 'Not Yet Available'),
@@ -1079,9 +1062,7 @@ final class SubmissionTrackingService
         $data['date_endorsed_regional'] = $isEngp ? $this->routingCompletedAt($record, $routingEvents) : ($data['date_endorsed_regional'] ?? null);
         $data['release_events'] = $isEngp ? $record->releaseEvents->map(fn ($event) => ['id' => $event->id, 'period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values()->all() : [];
         $data['routing_corrections_count'] = $correctionCounts[$sourceKey.':'.$record->getKey()] ?? 0;
-        $data['stage'] = $isEngp
-            ? $this->statusPresenter->stage($record, $sourceKey, $routingEvents)
-            : $this->stage($record);
+        $data['stage'] = $this->statusPresenter->stage($record, $sourceKey, $routingEvents, $routingState['route_profile'] ?? null);
         $data['routing_complete'] = $routingState !== null
             ? $routingState['stage'] === DocumentRoutingProfileRegistry::RELEASED_REGIONAL
             : $this->isRoutingComplete($record, $routingEvents);
@@ -1817,8 +1798,10 @@ final class SubmissionTrackingService
         match ($status) {
             RoutingStatusPresenter::COMPLETED => $query->whereNotNull($table.'.date_received_penro')->whereNotNull($table.'.date_endorsed_regional'),
             RoutingStatusPresenter::PENDING_REGIONAL => $query->whereNotNull($table.'.date_received_penro')->whereNull($table.'.date_endorsed_regional'),
-            RoutingStatusPresenter::PENDING_PENRO => $query->whereNull($table.'.date_received_penro')->where(function ($stage) use ($table): void { $stage->whereNotNull($table.'.date_report_released_cenro')->orWhere(fn ($direct) => $this->routingPolicy->scopeDirectPenroQuery($direct)); }),
-            RoutingStatusPresenter::PENDING_CENRO => $query->whereNull($table.'.date_received_penro')->whereNull($table.'.date_report_released_cenro')->where(fn ($notDirect) => $this->routingPolicy->scopeNotDirectPenroQuery($notDirect)),
+            RoutingStatusPresenter::PENDING_PENRO => $query->whereNull($table.'.date_received_penro')->where(function ($stage) use ($sourceKey, $table): void {
+                $stage->whereNotNull($table.'.date_report_released_cenro')->orWhere(fn ($direct) => $this->routePositions->scopeEffectiveProfileQuery($direct, $sourceKey, $table, 'direct'));
+            }),
+            RoutingStatusPresenter::PENDING_CENRO => $query->whereNull($table.'.date_received_penro')->whereNull($table.'.date_report_released_cenro')->where(fn ($regular) => $this->routePositions->scopeEffectiveProfileQuery($regular, $sourceKey, $table, 'regular')),
             RoutingStatusPresenter::NO_ACTIVITY => $query->whereNull($table.'.date_received_penro')->whereNull($table.'.date_report_released_cenro')->whereNull($table.'.date_endorsed_regional'),
             default => null,
         };
