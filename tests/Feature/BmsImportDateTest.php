@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\BmsRecord;
+use App\Models\BmsAnnexHeader;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
@@ -80,4 +81,40 @@ test('BMS import rejects all missing or invalid dates without substituting today
     ])->assertRedirect()->assertSessionHasErrors('file');
 
     expect(BmsRecord::query()->where('protected_area_id', $area->id)->count())->toBe(0);
+});
+
+test('BMS Annex header rejects a future Date Conducted before creating metadata', function (): void {
+    \Carbon\CarbonImmutable::setTestNow(\Carbon\CarbonImmutable::parse('2026-10-08 12:00:00', 'Asia/Manila'));
+    $user = bmsImportDateActor();
+    $user->givePermissionTo(Permission::findOrCreate('bms.update', 'web'));
+    $area = bmsImportDateArea($user);
+
+    $this->actingAs($user)->post(route('bms.bulk-update-header'), [
+        'protected_area_id' => $area->id,
+        'category' => 'Birds',
+        'start_date' => '2026-08-01',
+        'end_date' => '2026-08-31',
+        'date_conducted' => '2026-10-09',
+    ])->assertSessionHasErrors('date_conducted');
+
+    expect(BmsAnnexHeader::query()->count())->toBe(0);
+});
+
+test('BMS Annex header can retain an unchanged legacy future Date Conducted during another edit', function (): void {
+    \Carbon\CarbonImmutable::setTestNow(\Carbon\CarbonImmutable::parse('2026-10-08 12:00:00', 'Asia/Manila'));
+    $user = bmsImportDateActor();
+    $user->givePermissionTo(Permission::findOrCreate('bms.update', 'web'));
+    $area = bmsImportDateArea($user);
+    $identity = ['protected_area_id' => $area->id, 'category' => 'Birds', 'start_date' => '2026-08-01', 'end_date' => '2026-08-31'];
+    $header = BmsAnnexHeader::query()->create([...$identity, 'date_conducted' => '2026-10-22']);
+
+    $this->actingAs($user)->post(route('bms.bulk-update-header'), [
+        ...$identity,
+        'date_conducted' => '2026-10-22',
+        'location' => 'Synthetic location correction',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    expect($header->fresh()->date_conducted)->toBe('2026-10-22')
+        ->and($header->fresh()->location)->toBe('Synthetic location correction')
+        ->and(BmsAnnexHeader::query()->count())->toBe(1);
 });

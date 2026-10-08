@@ -192,6 +192,11 @@ class IpafController extends Controller
             $record = $this->organization->scopeProtectedAreaQuery($record::query(), $request->user())->findOrFail($record->id);
             app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->assertMutable($record);
         }
+        if ($record instanceof IpafManagementReport) {
+            $dates = app(\App\Services\ActualActivityDateGuard::class);
+            $dates->assertNotFuture($data['date_conducted'] ?? null, 'date_conducted', 'Date Conducted', $record->exists ? $record->date_conducted : null);
+            $dates->assertNotFuture($data['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $record->exists ? $record->date_accomplished : null);
+        }
         $exists = $record->exists;
         $file = $request->file('mov');
         unset($data['mov']);

@@ -94,7 +94,7 @@ final class DocumentRoutingTransitionService
             }, $actions);
         }
         if ($direct
-            && $stage === DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS
+            && $stage === DocumentRoutingProfileRegistry::PENRO_RECORDS
             && ! $this->supportedIncomingSender($graph['actions'], $events, (string) $stage)) {
             $actions = array_values(array_filter($actions, fn (array $action): bool => ($action['key'] ?? null) !== 'return_for_correction_penro_records'));
         }
@@ -157,7 +157,15 @@ final class DocumentRoutingTransitionService
     /** Return the latest sender only when that handoff belongs to this route graph. */
     private function supportedIncomingSender(array $routeActions, Collection $events, string $stage): ?DocumentRoutingEvent
     {
-        $sender = $events->reverse()->first(fn (DocumentRoutingEvent $event): bool => $event->to_stage === $stage);
+        // Records now acknowledges transit before it may return a document.
+        // Resolve the actual outbound dispatch that led to that receipt, so a
+        // correction still goes to the correct previous sender.
+        $dispatchStage = match ($stage) {
+            DocumentRoutingProfileRegistry::CENRO_RECORDS => DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS,
+            DocumentRoutingProfileRegistry::PENRO_RECORDS => DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS,
+            default => $stage,
+        };
+        $sender = $events->reverse()->first(fn (DocumentRoutingEvent $event): bool => $event->to_stage === $dispatchStage);
         if (! $sender || blank($sender->from_stage)) return null;
 
         return collect($routeActions)->contains(fn (array $action): bool =>
@@ -231,21 +239,74 @@ final class DocumentRoutingTransitionService
     }
 
     /** Current official documents are available to users authorized for an action at the live routing stage. */
-    public function canAccessCurrentDocument(EloquentModel $record, string $sourceKey, ?User $actor): bool
+    public function canAccessCurrentDocument(EloquentModel $record, string $sourceKey, ?User $actor, ?array $resolvedState = null): bool
     {
         if (! $actor || ! $actor->is_active) return false;
         if (app(OrganizationalAccessService::class)->isGlobal($actor)) return true;
 
-        $state = $this->state($record, $sourceKey, null, $actor);
+        $resolvedEvents = $resolvedState['events'] ?? null;
+        $state = $resolvedEvents instanceof Collection && $this->stateMatches($record, $sourceKey, $resolvedEvents, $resolvedState)
+            ? $resolvedState
+            : $this->state($record, $sourceKey, null, $actor);
+        $moduleDefinition = app(\App\Services\Attachments\ProtectedAttachmentService::class)
+            ->officialDefinitionForRoutingSource($sourceKey);
+        $moduleAbility = data_get($moduleDefinition, 'definition.ability');
+        if (is_string($moduleAbility) && $actor->can($moduleAbility)
+            && app(OrganizationalAccessService::class)->canViewSubmissionAttachment($actor, $record)) {
+            return true;
+        }
+
         foreach ($state['actions'] as $action) {
             if (($action['internal_only'] ?? false) || ($action['from'] ?? null) !== $state['stage']) continue;
             if ($this->access->canPerform($actor, $record, $sourceKey, $action)) return true;
         }
 
-        return false;
+        return $this->canAccessAsPriorRecordsCustodian($record, $sourceKey, $actor, $state);
     }
 
-    public function transition(EloquentModel $record, string $sourceKey, string $actionKey, ?int $userId, ?string $remarks = null, ?string $correctionReasonKey = null, ?string $correctionDetail = null): DocumentRoutingEvent
+    /**
+     * A Records user who handed off or returned this exact source record may
+     * keep viewing its official copy after custody moves on. The event identity,
+     * actor, office, account approval, and protected-area scope are checked here.
+     * @param array<string,mixed> $state
+     */
+    private function canAccessAsPriorRecordsCustodian(EloquentModel $record, string $sourceKey, User $actor, array $state): bool
+    {
+        $organization = app(OrganizationalAccessService::class);
+        if (! $actor->is_approved || ! $organization->canViewSubmissionTracking($actor)) return false;
+
+        $category = $organization->effectiveCategory($actor);
+        $expectedOffice = match ($category) {
+            OrganizationalAccessService::CENRO_RECORDS => 'CENRO Records Unit',
+            OrganizationalAccessService::PENRO_RECORDS => 'PENRO Records Unit',
+            default => null,
+        };
+        if ($expectedOffice === null || ! $this->access->canView($actor, $record, $sourceKey, $this->ability($sourceKey))) return false;
+
+        if ($category === OrganizationalAccessService::CENRO_RECORDS
+            && ! $this->same($actor->office_designated, $record->getAttribute('target_office'))) return false;
+        if ($category === OrganizationalAccessService::PENRO_RECORDS
+            && ! str_starts_with(mb_strtolower(trim((string) $actor->office_designated)), 'penro ')) return false;
+
+        $actionsByKey = collect($state['route_actions'] ?? [])->keyBy('key');
+        $events = $state['events'] ?? $this->events($record, $sourceKey);
+
+        return $events->contains(function (DocumentRoutingEvent $event) use ($actionsByKey, $actor, $category, $expectedOffice, $sourceKey, $record): bool {
+            if ($event->source_type !== $sourceKey || (int) $event->source_id !== (int) $record->getKey()
+                || (int) $event->recorded_by !== (int) $actor->getKey()
+                || ! in_array($event->event_key, ['forwarded', 'endorsed', 'recommended', 'released', 'returned_for_correction'], true)
+                || ! $this->same($event->from_office, $expectedOffice)) return false;
+
+            $actionKey = data_get($event->metadata, 'action_key');
+            $action = is_string($actionKey) ? $actionsByKey->get($actionKey) : null;
+            if (! is_array($action) || ! $this->same($action['from_office'] ?? null, $expectedOffice)) return false;
+
+            return $category !== OrganizationalAccessService::CENRO_RECORDS
+                || $this->same($actor->office_designated, $record->getAttribute('target_office'));
+        });
+    }
+
+    public function transition(EloquentModel $record, string $sourceKey, string $actionKey, ?int $userId, ?string $remarks = null, ?string $correctionReasonKey = null, ?string $correctionDetail = null, bool $deferNotificationUntilCommit = false): DocumentRoutingEvent
     {
         $actor = $userId ? User::query()->findOrFail($userId) : auth()->user();
         abort_unless($actor, 403);
@@ -266,7 +327,7 @@ final class DocumentRoutingTransitionService
             if ($actionKey === 'return_for_correction_penro_records'
                 && ($knownAction['receipt_correction_context'] ?? null) === 'penro_records'
                 && $state['route_profile'] === 'direct'
-                && $state['stage'] === DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS
+                && $state['stage'] === DocumentRoutingProfileRegistry::PENRO_RECORDS
                 && ! $this->supportedIncomingSender($state['route_actions'], $state['events'], (string) $state['stage'])) {
                 throw ValidationException::withMessages(['stage' => 'A correction return cannot be recorded because no verified sender is recorded in the captured direct route.']);
             }
@@ -342,15 +403,56 @@ final class DocumentRoutingTransitionService
             return $event->load('recordedBy:id,name,section');
         });
         if (! $this->checkpointPolicy->isCheckpoint($actionKey, (string) $event->from_stage, (string) $event->to_stage)) {
-            try {
-                app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, [
-                    'key' => data_get($event->metadata, 'action_key'), 'event_key' => $event->event_key, 'to_office' => $event->to_office,
-                ]);
-            } catch (\Throwable $exception) {
-                report($exception);
-            }
+            $notify = fn () => $this->notifyTransition($record, $sourceKey, $event);
+            if ($deferNotificationUntilCommit) DB::afterCommit($notify);
+            else $notify();
         }
         return $event;
+    }
+
+    /** Check an initial dispatch action before taking its cross-worker in-progress lock. */
+    public function assertCanAttemptCheckpoint(EloquentModel $record, string $sourceKey, string $actionKey, ?User $actor): void
+    {
+        abort_unless($actor, 403);
+
+        // Keep this read non-locking so a duplicate can reach the distributed
+        // in-progress guard while the active archive transaction holds rows.
+        // The transition repeats these checks after acquiring its row locks.
+        $events = $this->events($record, $sourceKey);
+        $position = $this->positionSnapshots->resolve($record, $sourceKey, $events->isNotEmpty());
+        $state = $this->state($record, $sourceKey, $events, $actor, $position);
+
+        $knownAction = collect($state['route_actions'])->firstWhere('key', $actionKey);
+        if ($knownAction) {
+            abort_unless($this->access->canPerform($actor, $record, $sourceKey, $knownAction, $this->ability($sourceKey)), 403);
+        }
+
+        $action = collect($state['actions'])->firstWhere('key', $actionKey);
+        if (! $action || $action['from'] !== $state['stage']) {
+            throw ValidationException::withMessages(['stage' => 'This document is no longer awaiting that routing action.']);
+        }
+
+        abort_unless($this->access->canPerform($actor, $record, $sourceKey, $action, $this->ability($sourceKey)), 403);
+
+        if ($record instanceof \App\Models\ConservationReportSubmission
+            && $sourceKey === 'conservation'
+            && PambRoutingTimelineService::appliesWorkflow((string) $record->workflow_key)
+            && ! $this->pambMovAllowsAction($record, (string) $action['key'], (string) $state['route_profile'])) {
+            throw ValidationException::withMessages(['stage' => 'The PAMB MOV/review gate does not allow this custody transition yet.']);
+        }
+
+        $this->checkpointPolicy->assertTransitionAllowed($action['key'], $action['from'], $action['to']);
+    }
+
+    private function notifyTransition(EloquentModel $record, string $sourceKey, DocumentRoutingEvent $event): void
+    {
+        try {
+            app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, [
+                'key' => data_get($event->metadata, 'action_key'), 'event_key' => $event->event_key, 'to_office' => $event->to_office,
+            ]);
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
     }
 
     private function correctionReasonLabel(string $key): string
@@ -534,5 +636,10 @@ final class DocumentRoutingTransitionService
             'bms' => 'bms.update', 'bams' => 'bams.update', 'imea', 'imea-maintenance' => 'imea.update', 'aws' => 'aws.update',
             'management-plans' => 'management-plans.update', default => 'technical-reports.update',
         };
+    }
+
+    private function same(mixed $left, mixed $right): bool
+    {
+        return mb_strtolower(trim((string) $left)) === mb_strtolower(trim((string) $right));
     }
 }

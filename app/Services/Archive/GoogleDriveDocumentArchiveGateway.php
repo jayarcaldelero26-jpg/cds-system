@@ -6,6 +6,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
+use App\Support\ArchiveRequestTrace;
 use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
@@ -110,17 +111,25 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
     {
         $stream = null;
         try {
+            $phaseStartedAt = hrtime(true);
             $metadata = $this->json($this->driveRequest('GET', self::API.'/files/'.rawurlencode($fileId), [
                 'query' => ['fields' => 'id,size,trashed,appProperties'],
             ]));
-            if (($metadata['id'] ?? null) !== $fileId || ($metadata['trashed'] ?? false)
-                || (int) ($metadata['size'] ?? -1) !== $size) return 'content_mismatch';
+            $metadataMatches = ($metadata['id'] ?? null) === $fileId && ! ($metadata['trashed'] ?? false)
+                && (int) ($metadata['size'] ?? -1) === $size;
+            $this->logArchivePhase('verification_metadata', $phaseStartedAt, ['verified' => $metadataMatches]);
+            if (! $metadataMatches) return 'content_mismatch';
 
+            $phaseStartedAt = hrtime(true);
             $stream = $this->retrieve($fileId);
+            $this->logArchivePhase('verification_download', $phaseStartedAt, ['opened' => is_resource($stream)]);
             if (! is_resource($stream)) return 'unknown';
+            $phaseStartedAt = hrtime(true);
             $context = hash_init('sha256');
             $bytes = hash_update_stream($context, $stream);
-            return $bytes === $size && hash_equals($sha256, hash_final($context)) ? 'verified' : 'content_mismatch';
+            $matches = $bytes === $size && hash_equals($sha256, hash_final($context));
+            $this->logArchivePhase('verification_download_hash', $phaseStartedAt, ['verified' => $matches, 'bytes' => $bytes]);
+            return $matches ? 'verified' : 'content_mismatch';
         } catch (GoogleDriveArchiveException $exception) {
             return $exception->httpStatus === 404 ? 'unavailable' : 'unknown';
         } catch (Throwable) {
@@ -346,7 +355,12 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
             'json' => $metadata,
             'headers' => ['X-Upload-Content-Type' => $mime, 'X-Upload-Content-Length' => (string) $size],
         ]);
+        $phaseStartedAt = hrtime(true);
         $location = $response->getHeaderLine('Location');
+        $this->logArchivePhase('upload_session_response_parse', $phaseStartedAt, [
+            'http_status' => $response->getStatusCode(),
+            'location_present' => trim($location) !== '',
+        ]);
         if (! $this->isGoogleUploadLocation($location)) throw new GoogleDriveArchiveException('Google Drive did not provide a valid upload session.', $response->getStatusCode());
 
         $stream = fopen($localPath, 'rb');
@@ -365,7 +379,12 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
         }
 
         $this->uploadPhase = 'RESPONSE_PARSE';
-        $data = $this->json($uploaded);
+        $phaseStartedAt = hrtime(true);
+        try {
+            $data = $this->json($uploaded);
+        } finally {
+            $this->logArchivePhase('upload_provider_response_parse', $phaseStartedAt, ['http_status' => $uploaded->getStatusCode()]);
+        }
         if (! is_string($data['id'] ?? null)) throw new GoogleDriveArchiveException('Google Drive upload returned no file identity.', $uploaded->getStatusCode());
         return ['file_id' => $data['id'], 'folder_id' => $data['parents'][0] ?? ($metadata['parents'][0] ?? null)];
     }
@@ -464,7 +483,9 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
     private function assertLocalContent(string $path, string $sha256): void
     {
         if (! is_file($path) || ! is_readable($path)) throw new GoogleDriveArchiveException('Archive file is unavailable.');
+        $startedAt = hrtime(true);
         $actual = hash_file('sha256', $path);
+        $this->logArchivePhase('local_preupload_hash', $startedAt);
         if (! is_string($actual) || ! hash_equals($sha256, $actual)) throw new GoogleDriveArchiveException('Archive file checksum does not match.');
     }
 
@@ -498,10 +519,10 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
                 ],
             ]);
         } catch (Throwable) {
-            Log::debug('Google Drive OAuth refresh failed.', ['duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
+            Log::debug('Google Drive OAuth refresh failed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'oauth_refresh', 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
             throw new GoogleDriveArchiveException('Google Drive OAuth token request failed.');
         }
-        Log::debug('Google Drive OAuth refresh completed.', ['duration_ms' => (hrtime(true) - $startedAt) / 1_000_000, 'http_status' => $response->getStatusCode()]);
+        Log::debug('Google Drive OAuth refresh completed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'oauth_refresh', 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000, 'http_status' => $response->getStatusCode()]);
         if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 300) {
             throw new GoogleDriveArchiveException('Google Drive OAuth token request failed.', $response->getStatusCode());
         }
@@ -537,10 +558,10 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
         try {
             $response = $this->client->request($method, $url, $options);
         } catch (Throwable) {
-            Log::debug('Google Drive archive API request failed.', ['operation' => $operation, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
+            Log::debug('Google Drive archive API request failed.', ['request_id' => ArchiveRequestTrace::currentId(), 'operation' => $operation, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
             throw new GoogleDriveArchiveException('Google Drive API request failed.');
         }
-        Log::debug('Google Drive archive API request completed.', ['operation' => $operation, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000, 'http_status' => $response->getStatusCode()]);
+        Log::debug('Google Drive archive API request completed.', ['request_id' => ArchiveRequestTrace::currentId(), 'operation' => $operation, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000, 'http_status' => $response->getStatusCode()]);
         if ($this->uploadPhase !== '' && ($this->isGoogleUploadLocation($url) || str_starts_with($url, self::UPLOAD_API.'/'))) {
             $this->captureUploadResponse($this->uploadPhase, $response);
         }
@@ -647,6 +668,17 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
         $name = basename(str_replace('\\', '/', $filename));
         $name = preg_replace('/[\x00-\x1F\x7F"<>:|?*]+/', '-', $name);
         return trim((string) $name) !== '' ? trim((string) $name) : 'Final Document.pdf';
+    }
+
+    /** @param array<string,bool|int|string|null> $details */
+    private function logArchivePhase(string $phase, int $startedAt, array $details = []): void
+    {
+        Log::debug('Google Drive archive phase completed.', [
+            'request_id' => ArchiveRequestTrace::currentId(),
+            'phase' => $phase,
+            'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000,
+            ...$details,
+        ]);
     }
 
     private function isGoogleUploadLocation(string $url): bool

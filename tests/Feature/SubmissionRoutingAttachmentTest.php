@@ -720,6 +720,7 @@ test('corrected official document replacement preserves the existing correction 
     $routing->transition($report, 'bms', 'forward_to_cenro_records', $chief->id);
     $routing->transition($report, 'bms', 'receive_at_cenro_records', $records->id);
     $routing->transition($report, 'bms', 'forward_to_penro_records', $records->id);
+    $routing->transition($report->fresh(), 'bms', 'receive_at_penro_records', $penroRecords->id);
     $routing->transition($report, 'bms', 'return_for_correction_penro_records', $penroRecords->id, null, 'missing_received_copy');
     $routing->transition($report, 'bms', 'receive_correction', $records->id);
 
@@ -898,6 +899,7 @@ test('structured official document correction resubmission replaces only the can
     $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
     $routing->transition($plan, 'management-plans', 'forward_to_penro_records', $records->id);
     $penroRecords = officialSlotManagementPlanActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $routing->transition($plan->fresh(), 'management-plans', 'receive_at_penro_records', $penroRecords->id);
     $routing->transition($plan, 'management-plans', 'return_for_correction_penro_records', $penroRecords->id, null, 'missing_received_copy');
     $routing->transition($plan, 'management-plans', 'receive_correction', $records->id);
     $originalSiblings = array_slice($plan->fresh()->attachments, 1, null, true);

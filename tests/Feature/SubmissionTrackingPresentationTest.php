@@ -43,15 +43,18 @@ test('shared active routing profiles declare document replacement by semantic op
         ->and($field)->toContain('canReplaceDocument');
 });
 
-test('routing action normalization preserves receive correction before broad correction matching', function (): void {
+test('routing action normalization preserves receive correction and recipient-specific return labels', function (): void {
     $labels = file_get_contents(base_path('resources/js/Utils/routingLabels.js'));
     expect($labels)->toContain("if (/receive\\s+correction/i.test(value)) return 'Receive Correction';");
     $receive = strpos($labels, "if (/receive|receipt/i.test(value)) return 'Receive';");
+    $specificReturn = strpos($labels, "if (/^return(?:ed)?\\s+(?:(?:report|document)\\s+)?to\\b|^return\\s+to\\s+previous\\b/i.test(value)) return value;");
     $return = strpos($labels, "if (/return|correction/i.test(value)) return 'Return for Correction';");
 
     expect($receive)->not->toBeFalse()
+        ->and($specificReturn)->not->toBeFalse()
         ->and($return)->not->toBeFalse()
-        ->and($receive)->toBeLessThan($return);
+        ->and($receive)->toBeLessThan($specificReturn)
+        ->and($specificReturn)->toBeLessThan($return);
 });
 
 test('Submission Tracking labels Super Admin queues as global monitoring without changing operational labels', function (): void {

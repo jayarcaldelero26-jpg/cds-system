@@ -1105,9 +1105,9 @@ final class SubmissionTrackingService
         $pambActionsMark = LocalNavigationTrace::markCurrentStarted('st_pamb_action_projection');
         if ($pambRouting['applicable'] && ($user = auth()->user())) {
             $data['pamb_action_flags'] = [
-                'can_submit' => $this->pambAccess->canPerformForSubmission($user, 'submit', $record),
-                'can_review' => $this->pambAccess->canPerformForSubmission($user, 'review', $record),
-                'can_release' => $this->pambAccess->canPerformForSubmission($user, 'release', $record),
+                'can_submit' => $this->pambAccess->canPerformForSubmission($user, 'submit', $record, $sharedState),
+                'can_review' => $this->pambAccess->canPerformForSubmission($user, 'review', $record, $sharedState),
+                'can_release' => $this->pambAccess->canPerformForSubmission($user, 'release', $record, $sharedState),
                 'can_return_for_penro_correction' => $this->pambAccess->canRecordInternalRouting($user, $record, PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION),
                 'can_approve_for_regional_release' => $this->pambAccess->canRecordInternalRouting($user, $record, PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL),
             ];
@@ -1143,6 +1143,10 @@ final class SubmissionTrackingService
         $data['mov_processing'] = $sourceKey === 'conservation' && $pambRouting['applicable']
             ? LocalNavigationTrace::measureCurrent('st_mov_presentation', fn () => $this->pambMov->present($record))
             : ['applicable' => false];
+        if ($record instanceof ConservationReportSubmission
+            && ($data['mov_processing']['status_key'] ?? null) === PambMovProcessingService::NEEDS_CORRECTION) {
+            $data['mov_processing']['cenro_review']['custody_return_recorded'] = $this->currentPambCorrectionReturnRecorded($record, $routingEvents);
+        }
         $data['mov_progress_display'] = $data['mov_processing']['applicable']
             ? trim(($data['mov_processing']['percent'] ?? '').'% '.($data['mov_processing']['status_label'] ?? ''))
             : 'Not Applicable';
@@ -1248,7 +1252,7 @@ final class SubmissionTrackingService
                     ], [
                         'key' => 'return_for_correction_penro_records',
                         'label' => 'Returned by PENRO Records for Correction',
-                        'action_label' => 'Return for Correction',
+                        'action_label' => 'Return to Previous Sender',
                         'to' => $targetStage,
                         'to_office' => $targetOffice,
                         'correction' => true,
@@ -1313,15 +1317,12 @@ final class SubmissionTrackingService
         );
         if ($data['current_document']) {
             $actor = auth()->user();
-            $definition = $this->attachments->officialDefinitionForRoutingSource($sourceKey);
-            $moduleAbility = $definition['definition']['ability'] ?? null;
-            $hasModuleAccess = $actor && $actor->is_active && is_string($moduleAbility) && $actor->can($moduleAbility);
-            $hasCurrentRoutingAccess = collect(data_get($data, 'routing.actions', []))->isNotEmpty();
-            $data['current_document']['can_preview'] = (bool) ($actor && $actor->is_active && (
-                $this->organization->isGlobal($actor)
-                || $hasModuleAccess
-                || $hasCurrentRoutingAccess
-            ));
+            $data['current_document']['can_preview'] = $this->genericRouting->canAccessCurrentDocument(
+                $record,
+                $sourceKey,
+                $actor,
+                $routingState,
+            );
         }
         LocalNavigationTrace::markCurrentFinished('st_routing_tail', $routingTailMark);
         return $data;
@@ -1704,6 +1705,26 @@ final class SubmissionTrackingService
     private function isTrackingNumber(string $value): bool
     {
         return preg_match('/^(?:EDATS-(?:PA|ENGP)-\d{4}-\d+|\d{4}-CDS-\d{6})$/i', trim($value)) === 1;
+    }
+
+    private function currentPambCorrectionReturnRecorded(ConservationReportSubmission $record, Collection $routingEvents): bool
+    {
+        $latestCorrection = $record->movReviewEvents
+            ->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)
+            ->sortBy('id')
+            ->last();
+        if (! $latestCorrection?->created_at) return false;
+
+        return $routingEvents->contains(function (mixed $event) use ($latestCorrection): bool {
+            if (! $event instanceof DocumentRoutingEvent
+                || $event->event_key !== 'returned_for_correction'
+                || (int) $event->recorded_by !== (int) $latestCorrection->recorded_by
+                || ! $event->occurred_at) {
+                return false;
+            }
+
+            return $event->occurred_at->greaterThanOrEqualTo($latestCorrection->created_at);
+        });
     }
 
     /** Cache immutable schema metadata for the lifetime of this service instance. */

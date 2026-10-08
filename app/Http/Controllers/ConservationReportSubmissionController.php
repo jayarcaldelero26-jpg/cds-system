@@ -70,6 +70,7 @@ class ConservationReportSubmissionController extends Controller
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
+        $this->assertNoFutureActualDates($validated, $request, $workflow);
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? null);
         if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? null);
@@ -98,10 +99,15 @@ class ConservationReportSubmissionController extends Controller
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $this->ensureWorkflow($workflow, $submission);
+        if ($this->pambCompliance->isMeeting($submission->workflow_key)
+            && $this->pambMov->status($submission) === PambMovProcessingService::NEEDS_CORRECTION) {
+            abort_unless($this->pambAccess->canPerformForSubmission($request->user(), 'submit', $submission), 403);
+        }
         if (app(SubmissionTrackingService::class)->isRoutingComplete($submission)) {
             throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
         }
         $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
+        $this->assertNoFutureActualDates($validated, $request, $workflow, $submission);
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? $submission->target_office);
         if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? $submission->protected_area_id);
@@ -168,6 +174,32 @@ class ConservationReportSubmissionController extends Controller
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];
+    }
+
+    /** @param array<string, mixed> $validated */
+    private function assertNoFutureActualDates(array $validated, Request $request, string $workflow, ?ConservationReportSubmission $existing = null): void
+    {
+        $dates = app(\App\Services\ActualActivityDateGuard::class);
+        if ($this->dateConductedRanges->supportsWorkflow($workflow)) {
+            $dates->assertDateConductedRanges(
+                $request->input('date_conducted_ranges'),
+                $existing?->date_conducted_ranges,
+                $existing?->date_conducted,
+            );
+        } else {
+            $dates->assertNotFuture(
+                $validated['date_conducted'] ?? null,
+                'date_conducted',
+                'Date Conducted',
+                $existing?->date_conducted,
+            );
+        }
+        $dates->assertNotFuture(
+            $validated['date_accomplished'] ?? null,
+            'date_accomplished',
+            'Date Accomplished',
+            $existing?->date_accomplished,
+        );
     }
 
     /** @return array<string, string> */

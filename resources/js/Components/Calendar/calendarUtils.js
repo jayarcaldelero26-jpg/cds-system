@@ -27,6 +27,14 @@ export function todayDate() {
     return createDateOnly(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
+export function philippinesTodayDate() {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date());
+    const value = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+    return createDateOnly(Number(value.year), Number(value.month) - 1, Number(value.day));
+}
+
 export function monthStart(value) {
     const date = parseDateOnly(value) || todayDate();
     return createDateOnly(date.getFullYear(), date.getMonth(), 1);

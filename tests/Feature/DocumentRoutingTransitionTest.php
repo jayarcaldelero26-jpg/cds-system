@@ -142,7 +142,7 @@ test('generic custody route requires an explicit PENRO Records forward after rec
     expect($report->fresh()->date_received_penro)->not->toBeNull();
     $ordinaryPenroActions = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
     expect($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
-        ->and(collect($ordinaryPenroActions)->pluck('key')->all())->toBe(['forward_to_office_penro']);
+        ->and(collect($ordinaryPenroActions)->pluck('key')->all())->toBe(['return_for_correction_penro_records', 'forward_to_office_penro']);
     $eventsBeforeStaleOfficeReceipt = DocumentRoutingEvent::query()->count();
     $this->actingAs($penroFocal)->post(route('submission-tracking.transition', [
         'bms', $report->id, 'receive_at_office_penro',
@@ -211,10 +211,57 @@ test('generic custody route requires an explicit PENRO Records forward after rec
     performRouting($service, $report, 'release_to_regional', $penroRecords);
 
     $state = $service->state($report->fresh(), 'bms');
+    $terminalPresentation = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)
+        ->present($report->fresh(), 'bms', null, $service->events($report->fresh(), 'bms'));
     expect($state['stage'])->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL)
         ->and($report->fresh()->date_endorsed_regional)->not->toBeNull()
         ->and($report->fresh()->deadline_submission)->toBe($deadline)
+        ->and($terminalPresentation['next_expected_action'])->toBe('No further routing action')
         ->and(DocumentRoutingEvent::query()->count())->toBe(19);
+});
+
+test('selected-record GET shows the normal next action without changing route state or observer authority', function (): void {
+    $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = routingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $chief->givePermissionTo(Permission::findOrCreate('submission-tracking.view', 'web'));
+    $report = routingReport('Next expected action presentation PA');
+    $service = app(DocumentRoutingTransitionService::class);
+    $presenter = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class);
+
+    performRouting($service, $report, 'forward_to_cenro_chief', $focal);
+    performRouting($service, $report, 'receive_at_cenro_chief', $chief);
+
+    $record = $report->fresh();
+    $eventsBefore = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $record->id)->orderBy('id')->get()->toArray();
+    $snapshotBefore = \App\Models\SubmissionRoutingSnapshot::query()->where('source_key', 'bms')->where('source_id', $record->id)->firstOrFail()->getAttributes();
+    $sourceBefore = $record->getAttributes();
+    $this->actingAs($chief);
+    $beforePresentation = $presenter->present($record, 'bms', null, $service->events($record, 'bms'));
+    $beforeActionKeys = collect($beforePresentation['actions'])->pluck('key')->all();
+
+    $selectedUrl = route('submission-tracking.index', ['view' => 'incoming', 'source' => 'bms', 'source_id' => $record->id]);
+    $chiefProps = $this->actingAs($chief)->get($selectedUrl)->assertOk()->inertiaProps();
+    $chiefRow = data_get($chiefProps, 'trackingContext.selected_record');
+    $chiefIncoming = app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->workspaceQueues()['incoming']
+        ->firstWhere(fn (array $row): bool => $row['source'] === 'bms' && (int) $row['source_id'] === (int) $record->id);
+
+    expect(data_get($chiefRow, 'routing.next_expected_action'))->toBe('Forward to CENRO Records')
+        ->and(data_get($chiefRow, 'routing.current_stage'))->toBe($beforePresentation['current_stage'])
+        ->and(data_get($chiefRow, 'routing.responsible_user_category'))->toBe($beforePresentation['responsible_user_category'])
+        ->and(data_get($chiefRow, 'routing.processing_percentage'))->toBe($beforePresentation['processing_percentage'])
+        ->and(collect(data_get($chiefRow, 'routing.actions'))->pluck('key')->all())->toBe($beforeActionKeys)
+        ->and($chiefIncoming['incoming_action_category'])->toBe('forward');
+
+    $observer = User::factory()->create(['section' => 'CDS', 'unit_assignment' => 'conservation']);
+    $observer->assignRole(\Spatie\Permission\Models\Role::findOrCreate('Super Admin', 'web'));
+    $observerProps = $this->actingAs($observer)->get($selectedUrl)->assertOk()->inertiaProps();
+    $observerRow = data_get($observerProps, 'trackingContext.selected_record');
+    expect(data_get($observerRow, 'routing.next_expected_action'))->toBe('Forward to CENRO Records')
+        ->and(data_get($observerRow, 'routing.actions'))->toBeEmpty();
+
+    expect(DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $record->id)->orderBy('id')->get()->toArray())->toBe($eventsBefore)
+        ->and(\App\Models\SubmissionRoutingSnapshot::query()->where('source_key', 'bms')->where('source_id', $record->id)->firstOrFail()->getAttributes())->toBe($snapshotBefore)
+        ->and($record->fresh()->getAttributes())->toBe($sourceBefore);
 });
 
 test('correction recipient must receive before corrected resubmission', function (): void {
@@ -230,6 +277,9 @@ test('correction recipient must receive before corrected resubmission', function
     performRouting($service, $report, 'forward_to_cenro_records', $chief);
     performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     performRouting($service, $report, 'forward_to_penro_records', $cenroRecords);
+    $awaitingPenroReceipt = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
+    expect(collect($awaitingPenroReceipt)->pluck('key')->all())->toBe(['receive_at_penro_records']);
+    performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
     $service->transition($report, 'bms', 'return_for_correction_penro_records', $penroRecords->id, null, 'missing_received_copy');
     $returned = $service->presentation($report->fresh(), 'bms', null, $cenroRecords)['allowed_actions'];
     expect(collect($returned)->pluck('key')->all())->toBe(['receive_correction']);
@@ -254,11 +304,15 @@ test('correction recipient must receive before corrected resubmission', function
     $receivedRow = $tracking->workspaceQueues()['incoming']
         ->firstWhere(fn (array $row): bool => $row['source'] === 'bms' && (int) $row['source_id'] === $report->id);
     expect($receivedRow['routing']['next_expected_action'])->toBe('Resubmit Corrected Copy')
-        ->and(collect($receivedRow['routing']['actions'])->pluck('key')->all())->toBe(['forward_to_penro_records']);
+        ->and(collect($receivedRow['routing']['actions'])->pluck('key')->all())->toBe(['return_for_correction_cenro_records', 'forward_to_penro_records']);
 
     $service->transition($report, 'bms', 'forward_to_penro_records', $cenroRecords->id);
+    $penroTransitActions = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
+    expect(collect($penroTransitActions)->pluck('key')->all())->toBe(['receive_at_penro_records']);
+    $service->transition($report, 'bms', 'receive_at_penro_records', $penroRecords->id);
     $penroActions = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
-    expect(collect($penroActions)->pluck('key')->all())->toContain('receive_at_penro_records', 'return_for_correction_penro_records');
+    expect(collect($penroActions)->pluck('key')->all())->toContain('return_for_correction_penro_records')
+        ->and(collect($penroActions)->pluck('key'))->not->toContain('receive_at_penro_records');
 });
 
 test('generic transition endpoint records a server-timestamped action without a user date', function (): void {
@@ -357,8 +411,11 @@ test('Records correction returns to the immediate sender and resubmission preser
     performRouting($service, $report, 'forward_to_cenro_chief', $focal);
     performRouting($service, $report, 'receive_at_cenro_chief', $chief);
     performRouting($service, $report, 'forward_to_cenro_records', $chief);
+    $cenroTransitActions = $service->presentation($report->fresh(), 'bms', null, $cenroRecords)['allowed_actions'];
+    expect(collect($cenroTransitActions)->pluck('key')->all())->toBe(['receive_at_cenro_records']);
+    performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     $cenroActions = $service->presentation($report->fresh(), 'bms', null, $cenroRecords)['allowed_actions'];
-    expect(collect($cenroActions)->pluck('key'))->toContain('receive_at_cenro_records', 'return_for_correction_cenro_records');
+    expect(collect($cenroActions)->pluck('key'))->toContain('return_for_correction_cenro_records');
     $returned = $service->transition($report, 'bms', 'return_for_correction_cenro_records', $cenroRecords->id, null, 'missing_signature', 'Signature page missing');
     expect($returned->to_stage)->toBe(DocumentRoutingProfileRegistry::CENRO_CHIEF)
         ->and(data_get($returned->metadata, 'correction_reason_key'))->toBe('missing_signature')
@@ -372,21 +429,23 @@ test('Records correction returns to the immediate sender and resubmission preser
 
     performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     performRouting($service, $report, 'forward_to_penro_records', $cenroRecords);
+    performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
     $penroActions = $service->presentation($report->fresh(), 'bms', null, $penroRecords)['allowed_actions'];
-    expect(collect($penroActions)->pluck('key'))->toContain('receive_at_penro_records', 'return_for_correction_penro_records');
+    expect(collect($penroActions)->pluck('key'))->toContain('return_for_correction_penro_records')
+        ->and(collect($penroActions)->pluck('key'))->not->toContain('receive_at_penro_records');
     test()->actingAs($penroRecords);
     $normalized = app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->records()
         ->first(fn (array $row): bool => $row['source'] === 'bms' && (int) $row['source_id'] === $report->id);
     expect($normalized)->not->toBeNull()
-        ->and($normalized['routing']['current_stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and($normalized['routing']['current_stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
         ->and($normalized['routing']['responsible_user_category'])->toBe('PENRO Records Unit')
         ->and($normalized['can_transition'])->toBeTrue()
-        ->and(collect($normalized['routing']['actions'])->pluck('key')->all())->toContain('receive_at_penro_records', 'return_for_correction_penro_records')
+        ->and(collect($normalized['routing']['actions'])->pluck('key')->all())->toContain('return_for_correction_penro_records')
         ->and(collect($normalized['routing']['actions'])->firstWhere('key', 'return_for_correction_penro_records')['attachment_allowed'])->toBeFalse();
     $returnedToCenro = $service->transition($report, 'bms', 'return_for_correction_penro_records', $penroRecords->id, null, 'missing_received_copy');
     expect($returnedToCenro->to_stage)->toBe(DocumentRoutingProfileRegistry::CENRO_RECORDS)
         ->and(data_get($returnedToCenro->metadata, 'correction_reason_key'))->toBe('missing_received_copy')
-        ->and($report->fresh()->date_received_penro)->toBeNull()
+        ->and($report->fresh()->date_received_penro)->not->toBeNull()
         ->and($service->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::CENRO_RECORDS);
     performRouting($service, $report, 'receive_correction', $cenroRecords);
     $resolved = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)
@@ -409,6 +468,7 @@ test('Records correction HTTP action accepts server-timed reasoned requests with
     performRouting($service, $report, 'forward_to_cenro_records', $chief);
     performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     performRouting($service, $report, 'forward_to_penro_records', $cenroRecords);
+    performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
 
     $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['source' => 'bms', 'record' => $report->id, 'stage' => 'return_for_correction_penro_records']), [
         'stage' => 'return_for_correction_penro_records',
@@ -435,6 +495,7 @@ test('Records correction accepts an optional reference attachment without replac
     performRouting($service, $report, 'forward_to_cenro_records', $chief);
     performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     performRouting($service, $report, 'forward_to_penro_records', $cenroRecords);
+    performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
     test()->actingAs($penroRecords);
     $beforeReturn = app(\App\Services\SubmissionTracking\SubmissionTrackingService::class)->records()
         ->firstWhere(fn (array $row): bool => $row['source'] === 'bms' && (int) $row['source_id'] === $report->id);
@@ -467,6 +528,7 @@ test('Records correction HTTP action validates reason detail and rejects attachm
     performRouting($service, $report, 'forward_to_cenro_records', $chief);
     performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
     performRouting($service, $report, 'forward_to_penro_records', $cenroRecords);
+    performRouting($service, $report, 'receive_at_penro_records', $penroRecords);
 
     $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['source' => 'bms', 'record' => $report->id, 'stage' => 'return_for_correction_penro_records']), [
         'stage' => 'return_for_correction_penro_records',
@@ -483,6 +545,7 @@ test('CENRO Records correction HTTP action uses the shared reasoned contract', f
     performRouting($service, $report, 'forward_to_cenro_chief', $focal);
     performRouting($service, $report, 'receive_at_cenro_chief', $chief);
     performRouting($service, $report, 'forward_to_cenro_records', $chief);
+    performRouting($service, $report, 'receive_at_cenro_records', $cenroRecords);
 
     $this->actingAs($cenroRecords)->post(route('submission-tracking.transition', ['source' => 'bms', 'record' => $report->id, 'stage' => 'return_for_correction_cenro_records']), [
         'stage' => 'return_for_correction_cenro_records',

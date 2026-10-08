@@ -2,6 +2,7 @@ export function standardActionLabel(action = '') {
     const value = String(action || '').trim();
     if (/receive\s+correction/i.test(value)) return 'Receive Correction';
     if (/receive|receipt/i.test(value)) return 'Receive';
+    if (/^return(?:ed)?\s+(?:(?:report|document)\s+)?to\b|^return\s+to\s+previous\b/i.test(value)) return value;
     if (/return|correction/i.test(value)) return 'Return for Correction';
     if (/approv/i.test(value)) return 'Approve';
     if (/recommend/i.test(value)) return 'Recommend';

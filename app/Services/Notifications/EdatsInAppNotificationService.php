@@ -163,6 +163,7 @@ final class EdatsInAppNotificationService
         if (str_contains($value, 'PENRO RECORDS')) return OrganizationalAccessService::PENRO_RECORDS;
         if (str_contains($value, 'OFFICE') && str_contains($value, 'PENRO')) return OrganizationalAccessService::OFFICE_PENRO;
         if (str_contains($value, 'TSD')) return OrganizationalAccessService::PENRO_TSD_CHIEF;
+        if (str_contains($value, 'PENRO ORIGIN')) return OrganizationalAccessService::PENRO_FOCAL;
         if (str_contains($value, 'CDS FOCAL')) return OrganizationalAccessService::PENRO_FOCAL;
         if (str_contains($value, 'CDS CHIEF')) return OrganizationalAccessService::PENRO_CHIEF;
         return null;

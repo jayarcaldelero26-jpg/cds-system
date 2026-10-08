@@ -1315,7 +1315,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                         <form onSubmit={submitHeaderEdit} className="space-y-4 text-sm">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div><FloatingInput id="index-location" label="Location" type="text" value={annexHeaderForm.data.location} onChange={(e) => annexHeaderForm.setData('location', e.target.value)} /></div>
-                                <div><DatePicker id="index-date-conducted" label="Date Conducted" value={annexHeaderForm.data.date_conducted} onChange={(value) => annexHeaderForm.setData('date_conducted', value)} /></div>
+                                <div><DatePicker id="index-date-conducted" label="Date Conducted" actualDate value={annexHeaderForm.data.date_conducted} onChange={(value) => annexHeaderForm.setData('date_conducted', value)} /></div>
                                 <div><FloatingInput id="index-start-end-time" label="Start / End Time" type="text" value={annexHeaderForm.data.start_end_time} onChange={(e) => annexHeaderForm.setData('start_end_time', e.target.value)} placeholder="e.g. 07:00 AM - 11:00 AM" /></div>
                                 <div><FloatingInput id="index-length-of-transect" label="Length of Transect" type="text" value={annexHeaderForm.data.length_of_transect} onChange={(e) => annexHeaderForm.setData('length_of_transect', e.target.value)} /></div>
                                 <div><FloatingInput id="index-start-gps-reading" label="Start GPS Reading" type="text" value={annexHeaderForm.data.start_gps} onChange={(e) => annexHeaderForm.setData('start_gps', e.target.value)} /></div>

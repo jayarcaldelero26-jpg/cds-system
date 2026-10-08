@@ -129,6 +129,7 @@ class ManagementPlanController extends Controller
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $this->rejectRoutingFields($request);
         $data = $request->validate($this->reportRules(requireAttachments: true));
+        $this->assertNoFutureActualDates($data);
         $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id']);
         $files = $request->file('attachments', []);
         $plan = DB::transaction(fn () => ManagementPlan::query()->create([
@@ -185,6 +186,7 @@ class ManagementPlanController extends Controller
             'removed_attachments' => ['nullable', 'array'],
             'removed_attachments.*' => ['string', 'distinct'],
         ]);
+        $this->assertNoFutureActualDates($data, $managementPlan);
         $this->organization->assertCanAccessProtectedArea($request->user(), $data['protected_area_id'] ?? $managementPlan->protected_area_id);
 
         $currentAttachments = array_filter($managementPlan->attachments ?? [], fn ($attachment) => $this->attachmentPath($attachment) !== null);
@@ -332,6 +334,14 @@ class ManagementPlanController extends Controller
             'attachments' => [$requireAttachments ? 'required' : 'nullable', 'array', ...($requireAttachments ? ['min:1'] : [])],
             'attachments.*' => ['nullable', 'file', 'mimes:pdf,docx,zip,jpeg,jpg,png', 'max:20480'],
         ];
+    }
+
+    /** @param array<string, mixed> $data */
+    private function assertNoFutureActualDates(array $data, ?ManagementPlan $existing = null): void
+    {
+        $dates = app(\App\Services\ActualActivityDateGuard::class);
+        $dates->assertNotFuture($data['date_conducted'] ?? null, 'date_conducted', 'Date Conducted', $existing?->date_conducted);
+        $dates->assertNotFuture($data['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $existing?->date_accomplished);
     }
 
     private function rejectRoutingFields(Request $request): void

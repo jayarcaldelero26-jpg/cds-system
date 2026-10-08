@@ -26,15 +26,16 @@ final class ProtectedAttachmentController extends Controller
         $sourceAuthorized = is_string($ability) && $ability !== ''
             && (bool) $user?->can($ability)
             && $this->organization->canViewSubmissionAttachment($user, $recordModel);
-        // The live-routing fallback exists for official documents when the
-        // source ability is absent. Do not resolve routing state after the
-        // primary ability and record-scope check has already authorized access.
-        if (! $sourceAuthorized) {
-            $routingSource = $definition['routing_source'] ?? null;
-            $isCurrentOfficialDocument = is_string($routingSource)
-                && ($definition['official_key'] ?? null) === $attachment
-                && $this->routing->canAccessCurrentDocument($recordModel, $routingSource, $user);
-            abort_unless($isCurrentOfficialDocument, 403);
+        $routingSource = $definition['routing_source'] ?? null;
+        $isCurrentOfficialDocument = is_string($routingSource)
+            && ($definition['official_key'] ?? null) === $attachment;
+        if ($isCurrentOfficialDocument) {
+            // Preview projection and protected delivery share the same
+            // server policy so an Outgoing button cannot promise bytes that
+            // this endpoint later rejects (or embed an error page as a PDF).
+            abort_unless($this->routing->canAccessCurrentDocument($recordModel, $routingSource, $user), 403);
+        } else {
+            abort_unless($sourceAuthorized, 403);
         }
 
         return $this->attachments->response($source, $recordModel, $attachment);

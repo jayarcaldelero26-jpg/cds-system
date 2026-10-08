@@ -341,7 +341,7 @@ export default function PambRoutingTimeline({
                                                         key:
                                                             "penro_final_returned_for_correction" +
                                                             verdictCycle,
-                                                        label: "Return for Correction",
+                                                        label: "Return Report to PENRO CDS Focal",
                                                         correction: true,
                                                     },
                                                 ]

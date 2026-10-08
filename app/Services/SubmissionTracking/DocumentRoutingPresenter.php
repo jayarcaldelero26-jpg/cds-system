@@ -255,7 +255,15 @@ final class DocumentRoutingPresenter
         $last = collect($timeline)->filter(fn (array $item): bool => filled($item['occurred_at']))->last();
         $nextAction = $state['allowed_actions'][0] ?? null;
         $currentStageActions = $actions->filter(fn (array $action): bool => $action['from'] === $currentStage && ! ($action['internal_only'] ?? false));
-        $informationalAction = $currentStageActions->first(fn (array $action): bool => ! ($action['correction'] ?? false))
+        $movCorrectionReturn = $record instanceof \App\Models\ConservationReportSubmission
+            && $sourceKey === 'conservation'
+            && PambRoutingTimelineService::appliesWorkflow((string) $record->workflow_key)
+            && $currentStage === DocumentRoutingProfileRegistry::CENRO_CHIEF
+            && app(PambMovProcessingService::class)->status($record) === PambMovProcessingService::NEEDS_CORRECTION;
+        $informationalAction = ($movCorrectionReturn
+            ? $currentStageActions->firstWhere('key', 'return_to_cenro_focal')
+            : null)
+            ?? $currentStageActions->first(fn (array $action): bool => ! ($action['correction'] ?? false))
             ?? $currentStageActions->first();
         // Canonical custody ownership comes from the current route graph. MOV
         // review and release ownership is presented in its separate MOV

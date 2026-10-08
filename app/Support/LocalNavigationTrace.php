@@ -3,9 +3,11 @@
 namespace App\Support;
 
 use Closure;
+use App\Support\ArchiveRequestTrace;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -70,7 +72,9 @@ final class LocalNavigationTrace
         $started = hrtime(true);
 
         $state = (object) [
-            'id' => bin2hex(random_bytes(8)),
+            'id' => ArchiveRequestTrace::validId($request->query('__cds_trace'))
+                ? strtolower((string) $request->query('__cds_trace'))
+                : bin2hex(random_bytes(8)),
             'started' => $started,
             'pre_trace_ms' => defined('LARAVEL_START')
                 ? max(0.0, (microtime(true) - LARAVEL_START) * 1000)
@@ -281,6 +285,15 @@ final class LocalNavigationTrace
         ]));
 
         $response->headers->set('X-CDS-Perf-Actor-Category', $category);
+        if ($route === 'submission-tracking.index'
+            && ArchiveRequestTrace::validId($request->query('__cds_trace'))) {
+            Log::debug('Local archive dispatch redirect GET completed.', [
+                'request_id' => $state->id,
+                'phase' => 'redirect_get',
+                'duration_ms' => $pipelineMs,
+                'status' => $response->getStatusCode(),
+            ]);
+        }
         if ($state->context !== []) {
             $parts = [];
             foreach ($state->context as $name => $value) {

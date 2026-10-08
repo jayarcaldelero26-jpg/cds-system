@@ -18,6 +18,9 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import PambRoutingTimeline from "@/Components/SubmissionTracking/PambRoutingTimeline";
 import PambMovProgress from "@/Components/SubmissionTracking/PambMovProgress";
 import PambMovActions from "@/Components/SubmissionTracking/PambMovActions";
+import PambMovCorrectionNotice from "@/Components/SubmissionTracking/PambMovCorrectionNotice";
+import CorrectionReferenceAttachment from "@/Components/SubmissionTracking/CorrectionReferenceAttachment";
+import { archiveCheckpointPendingNotice } from "@/Utils/archiveCheckpointNotice";
 import { custodyContext, movPrerequisiteFor, nextSubmissionAction, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
 import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
@@ -37,6 +40,11 @@ import DatePicker from "@/Components/DatePicker";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 import { localDateTimeInputValue } from "@/Utils/timePicker";
 import { routingCorrectionDates, routingCorrectionPayload } from "@/Utils/routingCorrectionForm";
+import { pambMovReviewPayload } from "@/Utils/pambMovReviewRequest";
+import {
+    beginInitialPenroDispatch,
+    finishInitialPenroDispatch,
+} from "@/Utils/dispatchSubmissionGate";
 import {
     availableIncomingActionTabs,
     filterIncomingRowsByAction,
@@ -89,6 +97,32 @@ const monitoringViewDescriptions = {
         "Completed routing records across your authorized monitoring scope.",
 };
 const FALLBACK = "\u2014";
+function createArchiveTraceId() {
+    if (!globalThis.crypto?.getRandomValues) return null;
+    const bytes = new Uint8Array(16);
+    globalThis.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+function finishArchiveTrace(traceId, startedAt) {
+    const completedAt = performance.now();
+    requestAnimationFrame(() => {
+        console.info("[CDS perf]", {
+            request_id: traceId,
+            phase: "browser_action_cycle",
+            duration_ms: Number((completedAt - startedAt).toFixed(1)),
+        });
+        console.info("[CDS perf]", {
+            request_id: traceId,
+            phase: "inertia_page_paint",
+            duration_ms: Number((performance.now() - completedAt).toFixed(1)),
+        });
+        const url = new URL(window.location.href);
+        if (url.searchParams.get("__cds_trace") === traceId) {
+            url.searchParams.delete("__cds_trace");
+            window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+        }
+    });
+}
 const plainDate = (value) => (value ? formatReportDate(value, "") : null);
 const badgeTone = (value) => {
     const normalized = String(value || "").toLowerCase();
@@ -334,7 +368,10 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                         {row.current_document.can_preview ? <Button type="button" size="compact" variant="cancel" onClick={() => onPreview?.(row)} className="shrink-0 rounded-lg px-3 py-2 text-xs">Preview</Button> : <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">Preview unavailable for this account</span>}
                     </div>
                 )}
-                {row.mov_processing?.applicable && <PambMovActions row={row} context={context} onSubmit={onSubmitMov} onReview={onReviewMov} hideReleaseAction showContextLabel />}
+                {row.mov_processing?.applicable && <>
+                    <PambMovActions row={row} context={context} onSubmit={onSubmitMov} onReview={onReviewMov} hideReleaseAction showContextLabel />
+                    <PambMovCorrectionNotice row={row} />
+                </>}
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-1">
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
@@ -463,6 +500,7 @@ export default function Index({
     );
     const [reviewHistoryRecord, setReviewHistoryRecord] = useState(null);
     const lastLinkedKey = useRef(submissionKey(trackingContext.selected_record));
+    const dispatchSubmitInFlight = useRef(false);
     const [showFullDetails, setShowFullDetails] = useState(false);
     const [expandFullTimeline, setExpandFullTimeline] = useState(false);
     useEffect(() => {
@@ -490,7 +528,7 @@ export default function Index({
         reason: "",
         password: "",
     });
-    const reviewForm = useForm({ decision: "", remarks: "" });
+    const reviewForm = useForm({ decision: "", remarks: "", attachment: null });
     const [correction, setCorrection] = useState(null);
     const [routingStage, setRoutingStage] = useState(null);
     const [previewRow, setPreviewRow] = useState(null);
@@ -505,7 +543,7 @@ export default function Index({
         {}, { preserveScroll: true, ...options },
     );
     const reviewMov = (row, decision) => {
-        reviewForm.setData({ decision, remarks: "" });
+        reviewForm.setData({ decision, remarks: "", attachment: null });
         reviewForm.clearErrors();
         setReviewing(row);
     };
@@ -643,6 +681,11 @@ export default function Index({
                         : "The existing archive checkpoint could not be verified. Ask an administrator to check its private provider logs and connectivity before retrying.",
           }
         : null;
+    const archiveCheckpointPending = archiveCheckpointPendingNotice(
+        form.processing,
+        selected?.source,
+        form.data.stage,
+    );
     const selectedActionLabel = standardActionLabel(
         genericAction?.action_label || form.data.stage || action[0],
     );
@@ -1082,16 +1125,25 @@ export default function Index({
     const closeInternalRouting = () => { internalForm.reset(); internalForm.clearErrors(); setRoutingStage(null); };
     const submit = (event) => {
         event.preventDefault();
+        const stage = form.data.stage;
+        if (!beginInitialPenroDispatch(dispatchSubmitInFlight, stage)) return;
         if (
             genericAction?.remarks_required &&
             !String(form.data.remarks || "").trim()
         ) {
+            finishInitialPenroDispatch(dispatchSubmitInFlight, stage);
             form.setError("remarks", "Correction remarks are required.");
             return;
         }
         const continuationTarget = selected
             ? { source: selected.source, source_id: selected.source_id }
             : null;
+        const tracesArchiveDispatch = selected?.source === "conservation"
+            && form.data.stage === "dispatch_penro_records_to_cds_focal";
+        const traceId = tracesArchiveDispatch ? createArchiveTraceId() : null;
+        const traceStartedAt = traceId ? performance.now() : null;
+        const localPerfOptIn = Boolean(traceId)
+            && new URLSearchParams(window.location.search).get("__cds_perf") === "1";
         form.transform((data) => {
             const next = { ...data };
             if (!(typeof File !== "undefined" && next.attachment instanceof File)) delete next.attachment;
@@ -1107,16 +1159,23 @@ export default function Index({
             {
                 preserveScroll: true,
                 forceFormData: true,
+                ...(traceId ? { headers: { "X-CDS-Trace-ID": traceId } } : {}),
+                onFinish: () => finishInitialPenroDispatch(dispatchSubmitInFlight, stage),
                 onSuccess: (page) => {
                     continueWithFreshIncomingRow(continuationTarget, page);
                     setSelected(null);
                     form.reset();
+                    if (localPerfOptIn) finishArchiveTrace(traceId, traceStartedAt);
+                },
+                onError: () => {
+                    if (localPerfOptIn) finishArchiveTrace(traceId, traceStartedAt);
                 },
             },
         );
     };
     const submitReview = (event) => {
         event.preventDefault();
+        reviewForm.transform(pambMovReviewPayload);
         reviewForm.post(
             route("submission-tracking.mov.review", [
                 reviewing.source,
@@ -1124,6 +1183,7 @@ export default function Index({
             ]),
             {
                 preserveScroll: true,
+                forceFormData: true,
                 onSuccess: () => {
                     setReviewing(null);
                     reviewForm.reset();
@@ -1680,7 +1740,7 @@ export default function Index({
                 onSubmit={submit}
                 processing={form.processing}
                 errors={Object.fromEntries(Object.entries(form.errors).filter(([key]) => key !== "archive"))}
-                systemNotice={archiveCheckpointNotice}
+                systemNotice={archiveCheckpointPending || archiveCheckpointNotice}
                 saveLabel={selectedActionLabel}
                 saveVariant={genericAction?.correction ? "warning" : "primary"}
                 maxWidth="max-w-xl"
@@ -1697,6 +1757,15 @@ export default function Index({
                         uploadProgress={form.progress}
                             officialDocumentMode={true}
                             canReplaceDocument={canReplaceSelectedDocument}
+                    />
+                    <CorrectionReferenceAttachment
+                        action={genericAction}
+                        file={form.data.attachment}
+                        onChange={(value) => form.setData("attachment", value instanceof File ? value : null)}
+                        error={form.errors.attachment}
+                        disabled={form.processing}
+                        processing={form.processing}
+                        uploadProgress={form.progress}
                     />
                 </CrudSection>
                 <CrudSection
@@ -1925,17 +1994,19 @@ export default function Index({
                 mode="edit"
                 title={
                     reviewForm.data.decision === "needs_correction"
-                        ? "Return MOV/report for Correction"
+                        ? "Return MOV to CENRO Focal for Correction"
                         : "Mark MOV/report Ready for Release"
                 }
-                subtitle="Record the Chief review decision. This is operational monitoring, not an electronic approval chain."
+                subtitle={reviewForm.data.decision === "needs_correction"
+                    ? "One submission records the Chief’s Needs Correction MOV verdict and the custody handoff to CENRO CDS Focal. The current official document stays unchanged."
+                    : "Record the Chief review decision. This is operational monitoring, not an electronic approval chain."}
                 onClose={() => !reviewForm.processing && setReviewing(null)}
                 onSubmit={submitReview}
                 processing={reviewForm.processing}
                 errors={reviewForm.errors}
                 saveLabel={
                     reviewForm.data.decision === "needs_correction"
-                        ? "Return for Correction"
+                        ? "Return MOV to CENRO Focal for Correction"
                         : "Ready for Release"
                 }
                 saveVariant={reviewForm.data.decision === "needs_correction" ? "warning" : "primary"}
@@ -1949,9 +2020,7 @@ export default function Index({
                                 ? "Correction remarks"
                                 : "Review remarks (optional)"
                         }
-                        required={
-                            reviewForm.data.decision === "needs_correction"
-                        }
+                        required={reviewForm.data.decision === "needs_correction"}
                         rows={4}
                         value={reviewForm.data.remarks}
                         onChange={(event) =>
@@ -1959,6 +2028,19 @@ export default function Index({
                         }
                         error={reviewForm.errors.remarks}
                     />
+                    {reviewForm.data.decision === "needs_correction" && <RoutingAttachmentField
+                        file={reviewForm.data.attachment}
+                        onChange={(value) => reviewForm.setData("attachment", value instanceof File ? value : null)}
+                        error={reviewForm.errors.attachment}
+                        disabled={reviewForm.processing}
+                        processing={reviewForm.processing}
+                        uploadProgress={reviewForm.progress}
+                        attachmentAllowed
+                        correctionAttachment
+                        hideCurrentDocument
+                        attachmentTitle="Correction Reference (Optional)"
+                        attachmentHelperText="Attach an optional marked-up or reference copy. This does not replace the current official document."
+                    />}
                 </CrudSection>
             </CrudFormModal>
             <CrudFormModal

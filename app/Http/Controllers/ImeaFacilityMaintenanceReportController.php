@@ -61,6 +61,9 @@ class ImeaFacilityMaintenanceReportController extends Controller
             'mov.required' => 'A report attachment / MOV is required.',
             'mov.max' => 'The MOV attachment must not exceed 20 MB.',
         ]);
+        $dates = app(\App\Services\ActualActivityDateGuard::class);
+        $dates->assertNotFuture($validated['date_conducted'] ?? null, 'date_conducted', 'Date Conducted', $report->date_conducted);
+        $dates->assertNotFuture($validated['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $report->date_accomplished);
         $this->organization->assertCanAccessProtectedArea($request->user(), $validated['protected_area_id']);
         if ($wasExisting && ! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($report, 'mov_file_path')) {
             throw \Illuminate\Validation\ValidationException::withMessages(['mov' => ComplianceMovService::MESSAGE]);

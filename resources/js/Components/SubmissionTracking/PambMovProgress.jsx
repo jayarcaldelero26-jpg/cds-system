@@ -1,5 +1,7 @@
 import { formatReportDate, formatReportDateTime } from '@/Utils/dateFormatters';
 import PambMovActions from '@/Components/SubmissionTracking/PambMovActions';
+import PambMovCorrectionNotice from '@/Components/SubmissionTracking/PambMovCorrectionNotice';
+import { movActionAvailability } from '@/Utils/submissionDetailContext';
 
 const FALLBACK = '\u2014';
 
@@ -25,6 +27,7 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
     const reviewable = status === 'submitted_for_review';
     const correction = status === 'needs_correction';
     const awaitingChiefReview = reviewable && !(row.pamb_action_flags?.can_review ?? context.can_review_mov);
+    const canEditCorrection = movActionAvailability(row, context).submit;
 
     return <section className="cds-card-surface space-y-3 rounded-xl border border-green-100 bg-green-50/60 p-3 dark:border-green-900/60 dark:bg-green-950/20" aria-label="MOV Review">
         <div className="flex flex-wrap items-end justify-between gap-2">
@@ -45,11 +48,12 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
         {correction && <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
             <p className="font-bold uppercase tracking-wide">Correction Required</p>
             <p className="mt-1 whitespace-pre-wrap">{progress.review_remarks || 'Please review the Chief remarks before resubmitting.'}</p>
-            <p className="mt-1 text-amber-800/80 dark:text-amber-200/80">Returned by: {progress.reviewed_by || 'CENRO CDS Chief'}{progress.reviewed_at ? ` · ${formatReportDateTime(progress.reviewed_at, FALLBACK)}` : ''}</p>
+            <p className="mt-1 text-amber-800/80 dark:text-amber-200/80">Review marked by: {progress.reviewed_by || 'CENRO CDS Chief'}{progress.reviewed_at ? ` · ${formatReportDateTime(progress.reviewed_at, FALLBACK)}` : ''}</p>
         </div>}
+        <PambMovCorrectionNotice row={row} />
         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-300"><span className="font-bold uppercase tracking-wide text-gray-500">Turnaround</span><span className="font-semibold text-gray-900 dark:text-white">{progress.turnaround?.label || FALLBACK}</span><span>Deadline: {formatReportDate(progress.turnaround?.deadline, FALLBACK)}</span></div>
         <div className="flex flex-wrap gap-2">
-            {correction && row.source_url && <a href={row.source_url} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction inline-flex rounded-lg px-2.5 py-1.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2">Edit / Correct Submission</a>}
+            {correction && canEditCorrection && row.source_url && <a href={row.source_url} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction inline-flex rounded-lg px-2.5 py-1.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2">Edit / Correct Submission</a>}
         </div>
         <PambMovActions row={row} context={context} onSubmit={onSubmit} onReview={onReview} onRelease={onRelease} hideReleaseAction={hideReleaseAction} />
         {progress.chief_verdict_label && <div className="border-t border-green-100 pt-2 text-[11px] text-gray-600 dark:border-green-900/60 dark:text-gray-300"><span className="font-bold uppercase tracking-wide text-gray-500">Final Chief Verdict:</span> {progress.chief_verdict_label}</div>}

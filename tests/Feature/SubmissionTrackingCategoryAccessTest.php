@@ -205,15 +205,15 @@ test('role-free CENRO Chief reviews CENRO-managed PAMB while PENRO Chief is deni
     ]);
     $review = route('submission-tracking.mov.review', ['conservation', $report->id]);
     $this->actingAs($penroChief)->post($review, ['decision' => 'ready_for_release'])->assertForbidden();
-    $this->actingAs($chief)->post($review, ['decision' => 'ready_for_release'])->assertRedirect()->assertSessionHasNoErrors();
-    expect($report->fresh()->mov_processing_status)->toBe('ready_for_release');
-
     $transition = fn (User $actor, string $action) => $this->actingAs($actor)->post(
         route('submission-tracking.transition', ['conservation', $report->id, $action]),
         ['stage' => $action],
     );
     $transition($focal, 'forward_to_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
     $transition($chief, 'receive_at_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($chief)->post($review, ['decision' => 'ready_for_release'])->assertRedirect()->assertSessionHasNoErrors();
+    expect($report->fresh()->mov_processing_status)->toBe('ready_for_release');
+
     $transition($chief, 'forward_to_cenro_records')->assertRedirect()->assertSessionHasNoErrors();
     $transition($cenroRecords, 'receive_at_cenro_records')->assertRedirect()->assertSessionHasNoErrors();
 

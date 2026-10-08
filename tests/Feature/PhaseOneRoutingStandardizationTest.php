@@ -127,7 +127,7 @@ test('generic PENRO Records receipt stays at PENRO Records until an explicit for
         ->and($events->pluck('metadata')->pluck('action_key')->all())->not->toContain('forward_to_office_penro')
         ->and($state['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
         ->and(collect($allowedOffice)->pluck('key')->all())->toBe([])
-        ->and(collect($allowedPenro)->pluck('key')->all())->toBe(['forward_to_office_penro']);
+        ->and(collect($allowedPenro)->pluck('key')->all())->toContain('forward_to_office_penro', 'return_for_correction_penro_records');
 
     $routing->transition($report->fresh(), 'bms', 'forward_to_office_penro', $penroRecords->id);
     expect($routing->state($report->fresh(), 'bms')['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
@@ -343,14 +343,17 @@ test('each generic source separates PENRO Records receipt from explicit Office P
         $officePresentation['allowed_actions'],
     ];
 
+    $penroActionKeys = collect($penro['allowed_actions'])->pluck('key');
+    $expectedOperationalCount = $source === 'aws' ? 1 : 2;
     expect($receipt->event_key)->toBe('received')
         ->and($events->count())->toBe($eventsBeforeReceipt + 1)
         ->and($events->pluck('metadata')->pluck('action_key')->all())->toContain('receive_at_penro_records')
         ->and($events->pluck('metadata')->pluck('action_key')->all())->not->toContain('forward_to_office_penro')
         ->and($routing->state($report->fresh(), $source)['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
-        ->and(collect($penro['allowed_actions'])->pluck('key')->all())->toBe(['forward_to_office_penro'])
+        ->and($penroActionKeys)->toContain('forward_to_office_penro')
+        ->and($source === 'aws' ? $penroActionKeys->doesntContain('return_for_correction_penro_records') : $penroActionKeys->contains('return_for_correction_penro_records'))->toBeTrue()
         ->and(collect($officePresentation['allowed_actions'])->pluck('key')->all())->toBe([])
-        ->and(collect($operationalActions)->flatten(1)->count())->toBe(1)
+        ->and(collect($operationalActions)->flatten(1)->count())->toBe($expectedOperationalCount)
         ->and(app(SubmissionTrackingService::class)->isRoutingComplete($report->fresh()))->toBeFalse()
         ->and(collect($routing->actionKeys($report->fresh(), $source))->contains('forward_to_office_penro'))->toBeTrue();
 

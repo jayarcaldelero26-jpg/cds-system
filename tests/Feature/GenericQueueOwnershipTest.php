@@ -121,6 +121,7 @@ test('correction receipt retains its dedicated success message', function (): vo
     $tracking->transition('conservation', $report->id, 'forward_to_cenro_records', null, $chief->id);
     $tracking->transition('conservation', $report->id, 'receive_at_cenro_records', null, $records->id);
     $tracking->transition('conservation', $report->id, 'forward_to_penro_records', null, $records->id);
+    $tracking->transition('conservation', $report->id, 'receive_at_penro_records', null, $penroRecords->id);
     $tracking->transition('conservation', $report->id, 'return_for_correction_penro_records', null, $penroRecords->id, null, 'missing_received_copy');
 
     $response = $this->actingAs($records)->post(route('submission-tracking.transition', [

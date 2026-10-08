@@ -56,7 +56,7 @@ final class AdminRoutingOverrideService
     {
         $presentation = $this->pamb->present($record); $current = collect($presentation['timeline'])->firstWhere('status', 'current'); $stage = (string) ($current['stage_key'] ?? $current['key'] ?? ''); $canonical = $this->pamb->canonicalStageKey($stage); $actions = [];
         if ($canonical === PambRoutingTimelineService::RECEIVED_BY_PENRO_FINAL) {
-            $actions[] = $this->action(PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION, 'Return for Correction', 'Return for Correction', true, OrganizationalAccessService::OFFICE_PENRO, 'Office of the PENRO');
+            $actions[] = $this->action(PambRoutingTimelineService::PENRO_FINAL_RETURNED_FOR_CORRECTION, 'Return Report to PENRO CDS Focal for Correction', 'Return Report to PENRO CDS Focal', true, OrganizationalAccessService::OFFICE_PENRO, 'Office of the PENRO');
             $actions[] = $this->action(PambRoutingTimelineService::PENRO_FINAL_APPROVED_FOR_REGIONAL, 'Approve for Regional Release', 'Approve for Regional Release', false, OrganizationalAccessService::OFFICE_PENRO, 'Office of the PENRO');
         } elseif (($current['can_record'] ?? false) && ($category = $this->pambCategory($canonical)) !== null) {
             $actions[] = $this->action($stage, $current['label'] ?? 'Record Routing Event', $current['action_label'] ?? 'Record Routing Event', false, $category, $this->pambOffice($record, $category));

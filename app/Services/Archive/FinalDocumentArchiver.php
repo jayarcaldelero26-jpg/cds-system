@@ -7,6 +7,7 @@ use App\Models\ModuleDefinition;
 use App\Models\ReportTrackingReference;
 use App\Services\Attachments\DocumentReferenceAdapter;
 use App\Services\Attachments\ScalarDocumentReferenceAdapter;
+use App\Support\ArchiveRequestTrace;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -93,11 +94,12 @@ final class FinalDocumentArchiver
                 ])->saveOrFail();
 
                 $this->logPhase('existing_archive_availability_check', $phaseStartedAt);
-                Log::debug('Existing archived checkpoint rechecked without path resolution or upload.', ['source_type' => $sourceType, 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
+                Log::debug('Existing archived checkpoint rechecked without path resolution or upload.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
                 return ['status' => 'archived', 'file_id' => $archive->google_drive_file_id, 'working_file_removed' => false];
             }
 
             $phaseStartedAt = hrtime(true);
+            $validationStartedAt = $phaseStartedAt;
             $reference = $adapter->read($record, $logicalSlot);
             $path = $reference['path'];
             $archive->forceFill(['archive_status' => 'PENDING', 'last_error' => null])->saveOrFail();
@@ -106,13 +108,21 @@ final class FinalDocumentArchiver
                 throw new \RuntimeException('The final working document is unavailable.');
             }
 
+            $this->logPhase('local_document_reference', $phaseStartedAt);
+            $phaseStartedAt = hrtime(true);
             $absolute = Storage::disk('local')->path($path);
             $size = Storage::disk('local')->size($path);
+            $this->logPhase('local_document_storage_stat', $phaseStartedAt);
+            $phaseStartedAt = hrtime(true);
             $sha256 = hash_file('sha256', $absolute);
-            if (! is_string($sha256) || $size < 1 || mime_content_type($absolute) !== 'application/pdf') {
+            $this->logPhase('local_document_hash', $phaseStartedAt);
+            $phaseStartedAt = hrtime(true);
+            $mime = mime_content_type($absolute);
+            $this->logPhase('local_document_mime_check', $phaseStartedAt);
+            if (! is_string($sha256) || $size < 1 || $mime !== 'application/pdf') {
                 throw new \RuntimeException('The final working document failed type or integrity validation.');
             }
-            $this->logPhase('local_document_validation', $phaseStartedAt);
+            $this->logPhase('local_document_validation', $validationStartedAt);
 
             $phaseStartedAt = hrtime(true);
             if (! $module || ! $archiveUnit || ! $archiveOffice) throw new \RuntimeException('The active submission module, unit, or CENRO office is unmapped for archive storage.');
@@ -180,7 +190,7 @@ final class FinalDocumentArchiver
             // The verified final document remains the authoritative private
             // working copy after archival. Drive is the archive/checkpoint
             // copy; it is not a replacement for operational storage.
-            Log::debug('Synchronous document archive completed.', ['source_type' => $sourceType, 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
+            Log::debug('Synchronous document archive completed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
             return ['status' => 'archived', 'file_id' => $remote['file_id'], 'working_file_removed' => false];
         } catch (Throwable $exception) {
             try {
@@ -189,10 +199,10 @@ final class FinalDocumentArchiver
                     $archive->forceFill(['archive_status' => 'FAILED', 'last_error' => 'Archive operation failed; working document retained.'])->save();
                 }
             } catch (Throwable $metadataException) {
-                Log::warning('Archive failure status could not be persisted; retry remains safe.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $historySlot, 'exception' => $metadataException::class]);
+                Log::warning('Archive failure status could not be persisted; retry remains safe.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_failure_status_persistence', 'exception' => $metadataException::class]);
             }
-            Log::error('Final document archive failed; private working file retained.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $historySlot, 'exception' => $exception::class]);
-            Log::debug('Synchronous document archive failed.', ['source_type' => $sourceType, 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
+            Log::error('Final document archive failed; private working file retained.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'exception' => $exception::class]);
+            Log::debug('Synchronous document archive failed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
             return ['status' => 'failed'];
         }
     }
@@ -268,6 +278,10 @@ final class FinalDocumentArchiver
 
     private function logPhase(string $phase, int $startedAt): void
     {
-        Log::debug('Synchronous document archive phase completed.', ['phase' => $phase, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
+        Log::debug('Synchronous document archive phase completed.', [
+            'request_id' => ArchiveRequestTrace::currentId(),
+            'phase' => $phase,
+            'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000,
+        ]);
     }
 }

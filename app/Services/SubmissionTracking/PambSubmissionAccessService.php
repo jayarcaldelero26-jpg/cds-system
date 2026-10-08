@@ -137,23 +137,27 @@ final class PambSubmissionAccessService
      * Authorizes a MOV decision or canonical milestone against the actual
      * protected-area routing context.
      */
-    public function canPerformForSubmission(User $user, string $action, ConservationReportSubmission $submission): bool
+    public function canPerformForSubmission(User $user, string $action, ConservationReportSubmission $submission, ?array $routingState = null): bool
     {
         if (! $this->canView($user, $submission)) return false;
 
         $category = $this->categoryFor($user);
+        $status = app(PambMovProcessingService::class)->status($submission);
 
         return match ($action) {
             'submit' => in_array($category, [self::CENRO_FOCAL, self::PAMO], true)
-                && in_array(app(PambMovProcessingService::class)->status($submission), [PambMovProcessingService::ACTIVITY_CONDUCTED, PambMovProcessingService::NEEDS_CORRECTION], true),
+                && ($status === PambMovProcessingService::ACTIVITY_CONDUCTED
+                    || ($status === PambMovProcessingService::NEEDS_CORRECTION && $this->hasReceivedCorrection($submission, $routingState))),
             // Direct-PENRO PAMB submissions enter the explicit PENRO Records
             // receipt queue before the shared PENRO internal chain.
             'review' => $this->routeProfile($submission) !== 'direct'
                 && $this->reviewCategoryFor($submission) === $category
-                && app(PambMovProcessingService::class)->status($submission) === PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+                && $status === PambMovProcessingService::SUBMITTED_FOR_REVIEW
+                && $this->hasReceivedByCenroChief($submission, $routingState),
             'release' => $category === self::CENRO_RECORDS
                 && $this->routeProfile($submission) !== 'direct'
-                && $this->isAwaitingCenroRelease($submission),
+                && $this->isAwaitingCenroRelease($submission)
+                && $this->hasReceivedByCenroRecords($submission, $routingState),
             'penro_receipt', 'penro_records_receive' => $category === self::PENRO_RECORDS
                 && $this->isAwaitingPenroReceipt($submission),
             'regional_endorsement', 'penro_records_release_regional' => $category === self::PENRO_RECORDS
@@ -212,6 +216,46 @@ final class PambSubmissionAccessService
     private function reviewCategoryFor(ConservationReportSubmission $submission): string
     {
         return self::CENRO_CHIEF;
+    }
+
+    /** A correction recipient must acknowledge custody before the focal person can resubmit. */
+    private function hasReceivedCorrection(ConservationReportSubmission $submission, ?array $routingState): bool
+    {
+        $state = $this->routingState($submission, $routingState);
+        $last = ($state['events'] ?? collect())->last();
+
+        return $last?->event_key === 'correction_received'
+            && data_get($last->metadata, 'action_key') === 'receive_correction';
+    }
+
+    /** MOV review is available only after the shared custody graph records the Chief's receipt. */
+    private function hasReceivedByCenroChief(ConservationReportSubmission $submission, ?array $routingState): bool
+    {
+        $state = $this->routingState($submission, $routingState);
+        $last = ($state['events'] ?? collect())->last();
+
+        return ($state['stage'] ?? null) === DocumentRoutingProfileRegistry::CENRO_CHIEF
+            && $last?->event_key === 'received'
+            && $last?->to_stage === DocumentRoutingProfileRegistry::CENRO_CHIEF
+            && data_get($last->metadata, 'action_key') === 'receive_at_cenro_chief';
+    }
+
+    /** The CENRO Records release control must not bypass its incoming receipt. */
+    private function hasReceivedByCenroRecords(ConservationReportSubmission $submission, ?array $routingState): bool
+    {
+        $state = $this->routingState($submission, $routingState);
+        $last = ($state['events'] ?? collect())->last();
+
+        return ($state['stage'] ?? null) === DocumentRoutingProfileRegistry::CENRO_RECORDS
+            && $last?->event_key === 'received'
+            && $last?->to_stage === DocumentRoutingProfileRegistry::CENRO_RECORDS
+            && data_get($last->metadata, 'action_key') === 'receive_at_cenro_records';
+    }
+
+    /** @return array<string,mixed> */
+    private function routingState(ConservationReportSubmission $submission, ?array $routingState): array
+    {
+        return $routingState ?? app(DocumentRoutingTransitionService::class)->state($submission, 'conservation');
     }
 
     private function isAwaitingCenroRelease(ConservationReportSubmission $submission): bool

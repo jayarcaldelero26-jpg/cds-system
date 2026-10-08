@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fitPageScale, nextPage, nextZoom, zoomedScrollOffset } from '../../resources/js/Utils/pdfViewerGeometry.mjs';
+import { fitPageScale, nearestPageToViewportCenter, nextPage, nextZoom, zoomedScrollOffset } from '../../resources/js/Utils/pdfViewerGeometry.mjs';
 
 test('Fit Page contains a portrait or landscape page without changing its aspect ratio', () => {
     for (const [width, height, containerWidth, containerHeight] of [[612, 792, 800, 500], [792, 612, 500, 800]]) {
@@ -20,6 +20,18 @@ test('multipage controls stay within document boundaries', () => {
     assert.equal(nextPage(1, 5, -1), 1);
     assert.equal(nextPage(4, 5, 1), 5);
     assert.equal(nextPage(5, 5, 1), 5);
+});
+
+test('continuous scrolling keeps the visible page indicator on the closest page', () => {
+    const pages = [
+        { number: 1, top: 0, bottom: 792 },
+        { number: 2, top: 812, bottom: 1604 },
+        { number: 3, top: 1624, bottom: 2416 },
+    ];
+    assert.equal(nearestPageToViewportCenter(pages, 0, 400), 1);
+    assert.equal(nearestPageToViewportCenter(pages, 900, 500), 2);
+    assert.equal(nearestPageToViewportCenter(pages, 1950, 400), 3);
+    assert.equal(nearestPageToViewportCenter([], 0, 400), null);
 });
 
 test('zoom controls grow and shrink from Fit Page with bounded scale', () => {

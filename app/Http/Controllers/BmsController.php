@@ -523,7 +523,7 @@ class BmsController extends Controller
 
     public function bulkUpdateHeader(Request $request)
     {
-        $request->validate([
+        $validated = $request->validate([
             'protected_area_id' => 'nullable|exists:protected_areas,id',
             'category' => 'nullable|string',
             'start_date' => 'nullable|date',
@@ -542,8 +542,21 @@ class BmsController extends Controller
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $request->input('protected_area_id'));
 
+        $identity = $request->only(['protected_area_id', 'category', 'start_date', 'end_date']);
+        $existingHeader = BmsAnnexHeader::query();
+        foreach ($identity as $key => $value) {
+            $value === null ? $existingHeader->whereNull($key) : $existingHeader->where($key, $value);
+        }
+        $existingDate = $existingHeader->value('date_conducted');
+        app(\App\Services\ActualActivityDateGuard::class)->assertNotFuture(
+            $validated['date_conducted'] ?? null,
+            'date_conducted',
+            'Date Conducted',
+            $existingDate,
+        );
+
         BmsAnnexHeader::updateOrCreate(
-            $request->only(['protected_area_id', 'category', 'start_date', 'end_date']),
+            $identity,
             $request->only(['location', 'date_conducted', 'start_end_time', 'start_gps', 'end_gps', 'length_of_transect', 'weather_condition', 'elevation', 'ecosystem_type', 'species_observed', 'observer'])
         );
 

@@ -33,6 +33,7 @@ class BmsReportSubmissionController extends Controller
             'mov.required' => 'A primary report attachment is required.',
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
+        $this->assertNoFutureActualDates($request, $validated);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges'));
         unset($validated['mov']);
@@ -61,6 +62,7 @@ class BmsReportSubmissionController extends Controller
         $validated = $request->validate($this->rules($bmsReportSubmission->document_type), [
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
+        $this->assertNoFutureActualDates($request, $validated, $bmsReportSubmission);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
         $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges'));
         if (! $request->hasFile('mov') && ! app(ComplianceMovService::class)->hasValidSingleFile($bmsReportSubmission, 'mov_file_path')) {
@@ -129,6 +131,14 @@ class BmsReportSubmissionController extends Controller
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];
+    }
+
+    /** @param array<string, mixed> $validated */
+    private function assertNoFutureActualDates(Request $request, array $validated, ?BmsReportSubmission $existing = null): void
+    {
+        $dates = app(\App\Services\ActualActivityDateGuard::class);
+        $dates->assertDateConductedRanges($request->input('date_conducted_ranges'), $existing?->date_conducted_ranges, $existing?->date_conducted);
+        $dates->assertNotFuture($validated['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $existing?->date_accomplished);
     }
 
 }

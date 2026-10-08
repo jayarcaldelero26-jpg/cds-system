@@ -13,12 +13,12 @@ function TitleButton({ children, onClick, label }) {
     return <button type="button" onClick={onClick} aria-label={label} className="rounded-lg px-2 py-1 text-sm font-extrabold text-gray-900 transition hover:bg-green-50 hover:text-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-white dark:hover:bg-green-950/40 dark:hover:text-green-300">{children}</button>;
 }
 
-export default function CalendarPanel({ month, onMonthChange, months = 1, selectedDate = '', rangeStart = '', rangeEnd = '', onSelectDate, minDate = '', maxDate = '' }) {
+export default function CalendarPanel({ month, onMonthChange, months = 1, selectedDate = '', rangeStart = '', rangeEnd = '', onSelectDate, minDate = '', maxDate = '', todayDateKey = '' }) {
     const firstMonth = monthStart(month);
     const [pickerView, setPickerView] = useState('day');
     const [pickerYear, setPickerYear] = useState(firstMonth.getFullYear());
     const [pickerMonth, setPickerMonth] = useState(firstMonth.getMonth());
-    const today = formatDateKey(todayDate());
+    const today = todayDateKey || formatDateKey(todayDate());
 
     const openMonthPicker = (value) => { const selectedMonth = monthStart(value); setPickerYear(selectedMonth.getFullYear()); setPickerMonth(selectedMonth.getMonth()); setPickerView('month'); };
     const chooseYear = (year) => { setPickerYear(year); setPickerView('month'); onMonthChange(createDateOnly(year, pickerMonth, 1)); };

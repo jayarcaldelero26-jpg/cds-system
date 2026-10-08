@@ -9,6 +9,22 @@ export function nextPage(current, total, direction) {
     return Math.min(total, Math.max(1, current + direction));
 }
 
+export function nearestPageToViewportCenter(pages, viewportTop, viewportHeight) {
+    if (!Array.isArray(pages) || !Number.isFinite(viewportTop) || !Number.isFinite(viewportHeight) || viewportHeight < 0) return null;
+    const center = viewportTop + viewportHeight / 2;
+    let nearest = null;
+    let distance = Number.POSITIVE_INFINITY;
+    for (const page of pages) {
+        if (!Number.isInteger(page?.number) || !Number.isFinite(page.top) || !Number.isFinite(page.bottom)) continue;
+        const candidate = Math.abs((page.top + page.bottom) / 2 - center);
+        if (candidate < distance) {
+            nearest = page.number;
+            distance = candidate;
+        }
+    }
+    return nearest;
+}
+
 export function nextZoom(current, direction) {
     const factor = direction > 0 ? 1.2 : 1 / 1.2;
     return Math.min(4, Math.max(0.25, current * factor));

@@ -31,6 +31,7 @@ function awsPeriodArea(User $user): ProtectedArea
 }
 
 test('AWS coverage ranges derive the year and preserve the selected quarter', function (): void {
+    \Carbon\CarbonImmutable::setTestNow(\Carbon\CarbonImmutable::parse('2029-01-01 12:00:00', 'Asia/Manila'));
     Storage::fake('local');
     $user = awsPeriodUser();
     $area = awsPeriodArea($user);

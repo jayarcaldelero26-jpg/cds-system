@@ -3,6 +3,7 @@
 use App\Models\BmsRecord;
 use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
+use App\Models\Aws;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\ProtectedArea;
@@ -164,7 +165,7 @@ test('protected attachments require source permission and serve only the resolve
         ->assertNotFound();
 });
 
-test('authorized source and record scope skips the redundant current-routing fallback', function (): void {
+test('official document access uses the shared routing authorization policy', function (): void {
     Storage::fake('local');
     $owner = User::factory()->create();
     $user = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
@@ -183,7 +184,7 @@ test('authorized source and record scope skips the redundant current-routing fal
         ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $record->id, 'attachment' => 'mov']).'?preview=1');
     $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
     expect(protectedAttachmentResponseBody($response))->toBe($bytes)
-        ->and($routingFallbackQueries)->toBe(0);
+        ->and($routingFallbackQueries)->toBe(1);
 });
 
 test('production security policy keeps same-origin protected document previews available', function () {
@@ -268,18 +269,27 @@ test('current routing holder can preview and download only the routed official d
         ->assertOk()
         ->assertHeader('Content-Disposition', 'attachment; filename="routed-current.pdf"');
 
+    $routing->transition($report->fresh(), 'bms', 'forward_to_office_penro', $penroRecords->id);
+    expect($routing->canAccessCurrentDocument($report->fresh(), 'bms', $penroRecords))->toBeTrue();
+    $this->actingAs($penroRecords)
+        ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']).'?preview=1')
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
+
     $formerCenroRecordsHolder = $actors['cenro_records'];
     expect($formerCenroRecordsHolder->can('bms.view'))->toBeFalse()
-        ->and($routing->canAccessCurrentDocument($report->fresh(), 'bms', $formerCenroRecordsHolder))->toBeFalse();
+        ->and($routing->canAccessCurrentDocument($report->fresh(), 'bms', $formerCenroRecordsHolder))->toBeTrue();
     $this->actingAs($formerCenroRecordsHolder)
         ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']).'?preview=1')
-        ->assertForbidden();
+        ->assertOk()
+        ->assertHeader('Content-Type', 'application/pdf');
     $this->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']).'?download=1')
-        ->assertForbidden();
+        ->assertOk()
+        ->assertHeader('Content-Disposition', 'attachment; filename="routed-current.pdf"');
     $this->get(route('submission-tracking.index', ['source' => 'bms', 'source_id' => $report->id]))
         ->assertOk()
         ->assertInertia(fn (\Inertia\Testing\AssertableInertia $page) => $page
-            ->where('trackingContext.selected_record.current_document.can_preview', false));
+            ->where('trackingContext.selected_record.current_document.can_preview', true));
 
     $nonHolder = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $nonHolder->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
@@ -338,6 +348,67 @@ test('Conservation PENRO Records holder can preview and download its current off
     $this->get(route('attachments.show', ['source' => 'conservation-report', 'record' => $report->id, 'attachment' => 'mov']).'?download=1')
         ->assertOk()
         ->assertHeader('Content-Disposition', 'attachment; filename="current-maintenance-report.pdf"');
+});
+
+test('CENRO Records retains scoped preview after returning a PAMB document for correction', function (): void {
+    Storage::fake('local');
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $path = 'conservation-report-movs/regular-pamb-prior-records.pdf';
+    $bytes = "%PDF-1.7\nsynthetic PAMB official document bytes";
+    $report = protectedPambPreviewReport($owner, 'regular_pamb', $path);
+    $report->update(['mov_processing_status' => \App\Services\SubmissionTracking\PambMovProcessingService::READY_FOR_RELEASE]);
+    Storage::disk('local')->put($path, $bytes);
+
+    $focal = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $chief = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga');
+    $records = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Baganga');
+    $sameOfficeOtherRecords = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Baganga');
+    $wrongOfficeRecords = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    foreach ([$focal, $chief, $records, $sameOfficeOtherRecords, $wrongOfficeRecords] as $actor) {
+        $actor->givePermissionTo(Permission::findOrCreate('reports.view', 'web'));
+    }
+
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    foreach ([
+        [$focal, 'forward_to_cenro_chief'],
+        [$chief, 'receive_at_cenro_chief'],
+        [$chief, 'forward_to_cenro_records'],
+        [$records, 'receive_at_cenro_records'],
+    ] as [$actor, $action]) {
+        $routing->transition($report->fresh(), 'conservation', $action, $actor->id);
+    }
+    $routing->transition($report->fresh(), 'conservation', 'return_for_correction_cenro_records', $records->id, 'Please correct the signature.', 'missing_signature');
+
+    expect($routing->canAccessCurrentDocument($report->fresh(), 'conservation', $records))->toBeTrue()
+        ->and($routing->canAccessCurrentDocument($report->fresh(), 'conservation', $sameOfficeOtherRecords))->toBeFalse()
+        ->and($routing->canAccessCurrentDocument($report->fresh(), 'conservation', $wrongOfficeRecords))->toBeFalse();
+
+    $previewUrl = route('attachments.show', ['source' => 'conservation-report', 'record' => $report->id, 'attachment' => 'mov']).'?preview=1';
+    $response = $this->actingAs($records)->get($previewUrl);
+    $response->assertOk()->assertHeader('Content-Type', 'application/pdf');
+    expect(protectedAttachmentResponseBody($response))->toBe($bytes);
+    $this->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $report->id]))
+        ->assertOk()
+        ->assertInertia(fn (\Inertia\Testing\AssertableInertia $page) => $page
+            ->where('trackingContext.selected_record.current_document.can_preview', true));
+
+    $this->actingAs($sameOfficeOtherRecords)->get($previewUrl)->assertForbidden();
+    $this->actingAs($wrongOfficeRecords)->get($previewUrl)->assertForbidden();
+
+    foreach ([
+        [$chief, 'receive_correction'],
+        [$chief, 'forward_to_cenro_records'],
+        [$records, 'receive_at_cenro_records'],
+        [$records, 'forward_to_penro_records'],
+    ] as [$actor, $action]) {
+        $routing->transition($report->fresh(), 'conservation', $action, $actor->id);
+    }
+
+    expect($routing->canAccessCurrentDocument($report->fresh(), 'conservation', $records))->toBeTrue();
+    $laterPreview = $this->actingAs($records)->get($previewUrl);
+    $laterPreview->assertOk()->assertHeader('Content-Type', 'application/pdf');
+    expect(protectedAttachmentResponseBody($laterPreview))->toBe($bytes);
 });
 
 test('shared upload dropzone uses an SVG icon and contains no mojibake glyphs', function (): void {
@@ -620,4 +691,143 @@ test('current preview returns not found rather than reading an archived copy whe
     $this->actingAs($actor)
         ->get(route('attachments.show', ['source' => 'bms-report', 'record' => $report->id, 'attachment' => 'mov']).'?preview=1')
         ->assertNotFound();
+});
+
+test('colliding conservation BMS and AWS IDs keep tracking documents and replacement bound to each source', function (): void {
+    Storage::fake('local');
+    Storage::fake('public');
+    $owner = User::factory()->create();
+    $area = ProtectedArea::create([
+        'name' => 'Source Collision Attachment PA', 'short_name' => 'SCAP',
+        'category' => 'Protected Landscape', 'municipality' => 'Baganga',
+        'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
+        'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('name', 'CENRO Baganga')->value('id'),
+        'assignment_type' => 'supervising',
+    ]);
+
+    $id = 73109;
+    $conservationBytes = "%PDF-1.7\nCONSERVATION-SOURCE-MARKER";
+    $bmsBytes = "%PDF-1.7\nBMS-SOURCE-MARKER";
+    $awsBytes = "%PDF-1.7\nAWS-SOURCE-MARKER";
+    $conservation = new ConservationReportSubmission([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Source collision test',
+        'document_type' => 'Minutes', 'reporting_period' => 'Quarter 3',
+        'date_conducted' => '2026-09-20', 'date_accomplished' => '2026-09-20',
+        'mov_file_name' => 'conservation-marker.pdf', 'mov_file_path' => 'conservation-report-movs/conservation-marker.pdf',
+        'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    $conservation->setAttribute('id', $id);
+    $conservation->save();
+
+    $bms = new BmsReportSubmission([
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Source collision test', 'document_type' => 'Final Report',
+        'semester' => '1st Semester', 'date_conducted' => '2026-09-20',
+        'date_conducted_ranges' => [['from' => '2026-09-20', 'to' => '2026-09-20']],
+        'date_accomplished' => '2026-09-20',
+        // This is a permissible user-supplied filename; its name does not change its source.
+        'mov_file_name' => 'aws-summary-2026-09.pdf', 'mov_file_path' => 'bms-report-movs/aws-summary-2026-09.pdf',
+        'created_by' => $owner->id, 'updated_by' => $owner->id,
+    ]);
+    $bms->setAttribute('id', $id);
+    $bms->save();
+
+    $aws = new Aws([
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
+        'station_name' => 'Source collision test station', 'location' => 'Baganga',
+        'activity_name' => 'Source collision test', 'document_type' => 'Report',
+        'date_conducted' => '2026-09-20', 'date_accomplished' => '2026-09-20',
+        'report_file_name' => 'aws-summary-2026-09.pdf', 'report_file_path' => 'aws_reports/aws-summary-2026-09.pdf',
+        'status' => 'Active',
+    ]);
+    $aws->setAttribute('id', $id);
+    $aws->save();
+
+    Storage::disk('local')->put($conservation->mov_file_path, $conservationBytes);
+    Storage::disk('local')->put($bms->mov_file_path, $bmsBytes);
+    Storage::disk('local')->put($aws->report_file_path, $awsBytes);
+
+    $actor = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    foreach ([
+        'submission-tracking.view', 'technical-reports.view', 'technical-reports.update',
+        'bms.view', 'bms.update', 'aws.view', 'aws.update',
+    ] as $ability) {
+        $actor->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+
+    $selected = [];
+    foreach ([
+        ['conservation', 'conservation-report', 'mov', $conservation, 'conservation-marker.pdf', $conservationBytes],
+        ['bms', 'bms-report', 'mov', $bms, 'aws-summary-2026-09.pdf', $bmsBytes],
+        ['aws', 'aws', 'report_file', $aws, 'aws-summary-2026-09.pdf', $awsBytes],
+    ] as [$source, $attachmentSource, $attachmentKey, $record, $expectedName, $expectedBytes]) {
+        $response = $this->actingAs($actor)->get(route('submission-tracking.index', [
+            'source' => $source, 'source_id' => $id, 'view' => 'incoming',
+        ]))->assertOk()->inertiaProps();
+        $row = data_get($response, 'trackingContext.selected_record');
+        $document = data_get($row, 'current_document');
+        expect(data_get($row, 'source'))->toBe($source)
+            ->and((int) data_get($row, 'source_id'))->toBe($id)
+            ->and(data_get($document, 'name'))->toBe($expectedName)
+            ->and(data_get($document, 'url'))->toContain('/attachments/'.$attachmentSource.'/'.$id.'/'.$attachmentKey)
+            ->and(data_get($document, 'preview_url'))->toEndWith('?preview=1')
+            ->and(data_get($document, 'download_url'))->toEndWith('?download=1');
+
+        $descriptor = app(ProtectedAttachmentService::class)->previewDescriptor($attachmentSource, $record, $attachmentKey);
+        expect($descriptor['name'])->toBe($expectedName)
+            ->and($descriptor['url'])->toBe(data_get($document, 'url'));
+
+        $preview = $this->actingAs($actor)->get(route('attachments.show', [
+            'source' => $attachmentSource, 'record' => $id, 'attachment' => $attachmentKey,
+        ]).'?preview=1')->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        expect(protectedAttachmentResponseBody($preview))->toBe($expectedBytes);
+
+        $download = $this->get(route('attachments.show', [
+            'source' => $attachmentSource, 'record' => $id, 'attachment' => $attachmentKey,
+        ]).'?download=1')->assertOk()->assertHeader('Content-Disposition', 'attachment; filename="'.$expectedName.'"');
+        expect(protectedAttachmentResponseBody($download))->toBe($expectedBytes);
+        $selected[$source] = $document;
+    }
+
+    expect($selected['bms']['url'])->not->toBe($selected['aws']['url'])
+        ->and($selected['bms']['name'])->toBe('aws-summary-2026-09.pdf')
+        ->and($selected['aws']['name'])->toBe('aws-summary-2026-09.pdf');
+
+    $replacementBytes = "%PDF-1.7\nBMS-REPLACEMENT-MARKER";
+    $this->actingAs($actor)->put(route('bms.report-submissions.update', $bms->id), [
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Source collision test',
+        'document_type' => 'Final Report',
+        'semester' => '1st Semester',
+        'date_conducted' => '2026-09-20',
+        'date_conducted_ranges' => [['from' => '2026-09-20', 'to' => '2026-09-20']],
+        'date_accomplished' => '2026-09-20',
+        'mov' => UploadedFile::fake()->createWithContent('bms-replacement.pdf', $replacementBytes),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $bmsAfter = $bms->fresh();
+    $replacementPath = $bmsAfter->mov_file_path;
+    expect($bmsAfter->mov_file_name)->toBe('bms-replacement.pdf')
+        ->and($replacementPath)->not->toBe('bms-report-movs/aws-summary-2026-09.pdf')
+        ->and(Storage::disk('local')->get($replacementPath))->toBe($replacementBytes)
+        ->and(Storage::disk('local')->get($conservation->fresh()->mov_file_path))->toBe($conservationBytes)
+        ->and(Storage::disk('local')->get($aws->fresh()->report_file_path))->toBe($awsBytes);
+
+    $selectedBmsAfter = $this->actingAs($actor)->get(route('submission-tracking.index', [
+        'source' => 'bms', 'source_id' => $id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps();
+    expect(data_get($selectedBmsAfter, 'trackingContext.selected_record.current_document.name'))->toBe('bms-replacement.pdf')
+        ->and(data_get($selectedBmsAfter, 'trackingContext.selected_record.current_document.url'))->toContain('/attachments/bms-report/'.$id.'/mov');
+
+    $wrongOffice = effectiveBmsAttachmentUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $wrongOffice->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
+    $this->actingAs($wrongOffice)->get(route('attachments.show', [
+        'source' => 'bms-report', 'record' => $id, 'attachment' => 'mov',
+    ]).'?preview=1')->assertForbidden();
 });

@@ -13,13 +13,20 @@ use App\Models\ImeaReportSubmission;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
+use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\SubmissionRoutingCorrection;
 use App\Models\User;
+use App\Notifications\EdatsInAppNotification;
+use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Notification;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -113,6 +120,142 @@ function correctionCoverageSnapshot(string $source, Model $record): array
             ->all(),
     ];
 }
+
+function correctionCoverageOperationalActor(string $category, string $office): User
+{
+    $actor = User::factory()->create([
+        'unit_assignment' => OrganizationalAccessService::CONSERVATION,
+        'section' => $category,
+        'office_designated' => $office,
+        'is_active' => true,
+        'is_approved' => true,
+    ]);
+
+    foreach ([
+        'reports.view', 'submission-tracking.view', 'technical-reports.update', 'bms.update',
+        'bams.update', 'imea.update', 'aws.update', 'management-plans.update',
+    ] as $ability) {
+        $actor->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+
+    return $actor;
+}
+
+test('HTTP custody correction and resubmission cycles remain source-scoped across all ten registered sources', function (): void {
+    $area = correctionCoverageArea($this->corrector);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+    ]);
+
+    $sourceDefinitions = correctionCoverageSources($this->corrector, $area);
+    $sources = [
+        'conservation' => $sourceDefinitions['conservation'],
+        'engp' => [EngpReportSubmission::class, [
+            'workflow_key' => 'ngp_produce', 'office' => 'CENRO Mati', 'section_name' => 'NGP',
+            'activity_name' => 'ENGP correction source contract', 'document_type' => 'Quarterly Report',
+            'reporting_year' => 2026, 'period_key' => 'q3', 'period_label' => 'Q3 2026',
+            'deadline_submission' => '2026-09-30', 'created_by' => $this->corrector->id,
+            'updated_by' => $this->corrector->id,
+        ], 'date_received_penro'],
+        ...array_diff_key($sourceDefinitions, ['conservation' => true]),
+    ];
+    expect(array_keys($sources))->toBe([
+        'conservation', 'engp', 'bms', 'bams', 'imea', 'imea-maintenance',
+        'aws', 'ipaf-management', 'revenue', 'management-plans',
+    ]);
+
+    $focal = correctionCoverageOperationalActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = correctionCoverageOperationalActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $wrongCategory = correctionCoverageOperationalActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $routing = app(DocumentRoutingTransitionService::class);
+    $postAction = function (User $actor, string $source, int $recordId, string $action, array $payload = []): \Illuminate\Testing\TestResponse {
+        return test()->actingAs($actor)->post(
+            route('submission-tracking.transition', ['source' => $source, 'record' => $recordId, 'stage' => $action]),
+            ['stage' => $action, ...$payload],
+        );
+    };
+
+    foreach ($sources as $source => [$modelClass, $attributes]) {
+        unset($attributes['date_report_released_cenro'], $attributes['date_received_penro'], $attributes['date_endorsed_regional']);
+        $table = (new $modelClass)->getTable();
+        if ($source !== 'engp' && Schema::hasColumn($table, 'protected_area_id')) $attributes['protected_area_id'] = $area->id;
+        if ($source !== 'engp' && Schema::hasColumn($table, 'target_office')) $attributes['target_office'] = 'CENRO Mati';
+        $attributes['created_by'] = $this->corrector->id;
+        $attributes['updated_by'] = $this->corrector->id;
+        /** @var Model $record */
+        $record = $modelClass::query()->create($attributes);
+        $recordId = (int) $record->getKey();
+
+        // Build the current CENRO Chief state through the designated predecessor handoffs.
+        $postAction($focal, $source, $recordId, 'forward_to_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+        $postAction($chief, $source, $recordId, 'receive_at_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+
+        $chiefReturn = collect($routing->presentation($record->fresh(), $source, null, $chief)['allowed_actions'])
+            ->firstWhere('key', 'return_to_cenro_focal');
+        expect($chiefReturn['action_label'])->toBe('Return Report to CENRO Focal');
+        $beforeReturn = DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->count();
+        $postAction($wrongCategory, $source, $recordId, 'return_to_cenro_focal', ['remarks' => 'Wrong category.'])->assertForbidden();
+        $postAction($chief, $source, $recordId, 'return_to_cenro_focal')->assertRedirect()->assertSessionHasErrors('remarks');
+        expect(DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->count())->toBe($beforeReturn);
+
+        foreach (['First correction: attach the signed record.', 'Second correction: clarify the report period.'] as $cycle => $remarks) {
+            $eventsBeforeThisReturn = DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->count();
+            $postAction($chief, $source, $recordId, 'return_to_cenro_focal', ['remarks' => $remarks])
+                ->assertRedirect()->assertSessionHasNoErrors();
+            $returned = DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->latest('id')->firstOrFail();
+            expect($returned->event_key)->toBe('returned_for_correction')
+                ->and($returned->from_stage)->toBe(DocumentRoutingProfileRegistry::CENRO_CHIEF)
+                ->and($returned->to_stage)->toBe(DocumentRoutingProfileRegistry::PREPARATION)
+                ->and($returned->to_office)->toBe('CENRO CDS Focal Person')
+                ->and($returned->remarks)->toBe($remarks)
+                ->and(data_get($returned->metadata, 'correction'))->toBeTrue()
+                ->and(DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->count())->toBe($eventsBeforeThisReturn + 1);
+
+            $selectedResponse = test()->actingAs($focal)->get(route('submission-tracking.index', [
+                'source' => $source, 'source_id' => $recordId, 'view' => 'incoming',
+            ]))->assertOk();
+            $selected = data_get($selectedResponse->inertiaProps(), 'trackingContext.selected_record');
+            $incoming = collect(data_get($selectedResponse->inertiaProps(), 'workspaceQueues.incoming', []));
+            expect(data_get($selected, 'source'))->toBe($source)
+                ->and((int) data_get($selected, 'source_id'))->toBe($recordId)
+                ->and(data_get($selected, 'routing.current_status'))->toBe('Needs Correction')
+                ->and(data_get($selected, 'routing.correction_reason'))->toBe($remarks)
+                ->and(collect(data_get($selected, 'routing.actions', []))->pluck('key')->all())->toBe(['receive_correction'])
+                ->and($incoming->contains(fn (array $row): bool => $row['source'] === $source
+                    && (int) $row['source_id'] === $recordId
+                    && $row['incoming_action_category'] === 'correction'))->toBeTrue();
+            Notification::assertSentTo($focal, EdatsInAppNotification::class, fn (EdatsInAppNotification $notification): bool => (int) data_get($notification->toArray($focal), 'source_id') === $recordId
+                && data_get($notification->toArray($focal), 'title') === 'Correction Required');
+
+            $oldActorResponse = test()->actingAs($chief)->get(route('submission-tracking.index', [
+                'source' => $source, 'source_id' => $recordId, 'view' => 'incoming',
+            ]))->assertOk();
+            expect(data_get($oldActorResponse->inertiaProps(), 'trackingContext.selected_record.routing.actions'))->toBeEmpty();
+
+            // Only the newest cycle's receive enables the recipient's resubmission path.
+            $postAction($chief, $source, $recordId, 'return_to_cenro_focal', ['remarks' => 'Stale duplicate.'])
+                ->assertRedirect()->assertSessionHasErrors('stage');
+            expect(DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->count())->toBe($eventsBeforeThisReturn + 1);
+            $postAction($focal, $source, $recordId, 'receive_correction')->assertRedirect()->assertSessionHasNoErrors();
+            $postAction($focal, $source, $recordId, 'forward_to_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+            $postAction($chief, $source, $recordId, 'receive_at_cenro_chief')->assertRedirect()->assertSessionHasNoErrors();
+        }
+
+        $state = $routing->state($record->fresh(), $source);
+        $events = DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $recordId)->orderBy('id')->get();
+        expect($state['stage'])->toBe(DocumentRoutingProfileRegistry::CENRO_CHIEF)
+            ->and($state['correction'])->toBeFalse()
+            ->and($events->pluck('event_key')->all())->toBe([
+                'forwarded', 'received', 'returned_for_correction', 'correction_received', 'forwarded', 'received',
+                'returned_for_correction', 'correction_received', 'forwarded', 'received',
+            ])
+            ->and($events->where('event_key', 'returned_for_correction')->pluck('remarks')->all())->toBe([
+                'First correction: attach the signed record.', 'Second correction: clarify the report period.',
+            ]);
+    }
+});
 
 test('completed correction endpoint writes each registered source through its actual date columns and rejects blank clears atomically', function (): void {
     $area = correctionCoverageArea($this->corrector);

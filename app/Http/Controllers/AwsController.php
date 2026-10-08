@@ -372,6 +372,7 @@ class AwsController extends Controller
         $validated = $request->validate($this->validationRules(fileRequired: true), [
             'report_file.required' => 'A report attachment / MOV is required.',
         ]);
+        $this->assertNoFutureActualDates($validated);
         $validated = $this->deriveCanonicalPeriod($validated);
         $this->validateMonitoringPeriod($validated);
         $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
@@ -404,6 +405,7 @@ class AwsController extends Controller
             $request->merge(['document_type' => $request->input('reporting_period')]);
         }
         $validated = $request->validate($this->validationRules(fileRequired: false, legacyDocumentType: $aws->document_type ?: $aws->report_period_type));
+        $this->assertNoFutureActualDates($validated, $aws);
         $validated = $this->deriveCanonicalPeriod($validated, $aws);
         $this->validateMonitoringPeriod($validated);
         $validated['target_office'] = $this->organization->normalizeOffice($validated['target_office']) ?: $validated['target_office'];
@@ -897,6 +899,16 @@ class AwsController extends Controller
             'recommendation_remarks' => ['nullable', 'string'],
             'report_file' => [$fileRequired ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx', 'max:10240'],
         ];
+    }
+
+    /** @param array<string, mixed> $validated */
+    private function assertNoFutureActualDates(array $validated, ?Aws $existing = null): void
+    {
+        $dates = app(\App\Services\ActualActivityDateGuard::class);
+        // AWS report rows use these as actual activity dates. Monitoring and
+        // reporting-period bounds are intentionally not activity completion dates.
+        $dates->assertNotFuture($validated['date_conducted'] ?? null, 'date_conducted', 'Date Conducted', $existing?->date_conducted);
+        $dates->assertNotFuture($validated['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $existing?->date_accomplished);
     }
 
     private function normalizeReportInput(Request $request): void

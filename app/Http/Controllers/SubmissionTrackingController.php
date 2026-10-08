@@ -157,7 +157,14 @@ class SubmissionTrackingController extends Controller
                 'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400'],
             ]);
             abort_unless($data['stage'] === $stage, 422);
-            $this->transitionWithAttachment($request, $source, $record, $stage, null, $data['remarks'] ?? null, $data['correction_reason_key'] ?? null, $data['correction_detail'] ?? null, 'correction_reference');
+            $remarks = $data['remarks'] ?? null;
+            if ($source === 'conservation' && $stage === 'return_to_cenro_focal' && blank($remarks)) {
+                $submission = \App\Models\ConservationReportSubmission::query()->findOrFail($record);
+                if ($this->pambMov->status($submission) === PambMovProcessingService::NEEDS_CORRECTION) {
+                    $remarks = $submission->mov_review_remarks;
+                }
+            }
+            $this->transitionWithAttachment($request, $source, $record, $stage, null, $remarks, $data['correction_reason_key'] ?? null, $data['correction_detail'] ?? null, 'correction_reference');
 
             return back()->with('success', 'Document returned for correction successfully.');
         }
@@ -317,17 +324,68 @@ class SubmissionTrackingController extends Controller
     public function reviewMov(Request $request, string $source, int $record): RedirectResponse
     {
         abort_unless($source === 'conservation', 404);
+        $attachmentRules = $request->input('decision') === PambMovProcessingService::NEEDS_CORRECTION
+            ? ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400']
+            : ['prohibited'];
         $data = $request->validate([
             'decision' => ['required', Rule::in([PambMovProcessingService::READY_FOR_RELEASE, PambMovProcessingService::NEEDS_CORRECTION])],
             'remarks' => ['nullable', 'string', 'max:2000'],
+            'attachment' => $attachmentRules,
         ]);
         if ($data['decision'] === PambMovProcessingService::NEEDS_CORRECTION) {
             validator($data, ['remarks' => ['required', 'string', 'min:5', 'max:2000']])->validate();
         }
         $submission = \App\Models\ConservationReportSubmission::query()->with('protectedArea')->findOrFail($record);
-        $this->pambMov->review($submission, $request->user(), $data['decision'], $data['remarks'] ?? null);
+        $actor = $request->user();
+        abort_unless($actor && $this->pambAccess->canPerformForSubmission($actor, 'review', $submission), 403);
+        $file = $request->file('attachment');
+        $path = $file ? $this->routingAttachments->store($file) : null;
+        $returnEvent = null;
+        try {
+            $returnEvent = $this->pambMov->review(
+                $submission,
+                $actor,
+                $data['decision'],
+                $data['remarks'] ?? null,
+                $data['decision'] === PambMovProcessingService::NEEDS_CORRECTION
+                    ? function (\App\Models\ConservationReportSubmission $locked, ?string $reason) use ($actor, $file, $path): \App\Models\DocumentRoutingEvent {
+                        $event = $this->documentRouting->transition(
+                            $locked,
+                            'conservation',
+                            'return_to_cenro_focal',
+                            (int) $actor->getKey(),
+                            $reason,
+                            deferNotificationUntilCommit: true,
+                        );
+                        if ($file && $path) {
+                            $this->routingAttachments->create(
+                                'conservation',
+                                (int) $locked->getKey(),
+                                $file,
+                                $path,
+                                $actor,
+                                'return_to_cenro_focal',
+                                'return_to_cenro_focal',
+                                $reason,
+                                $event,
+                                null,
+                                'correction_reference',
+                            );
+                        }
 
-        return back()->with('success', $data['decision'] === PambMovProcessingService::READY_FOR_RELEASE ? 'MOV/report marked Ready for Release.' : 'MOV/report returned for correction.');
+                        return $event;
+                    }
+                    : null,
+            );
+        } catch (\Throwable $exception) {
+            if ($path) $this->routingAttachments->discard($path);
+            throw $exception;
+        }
+        if ($returnEvent) $this->transitionLifecycle->afterTransition($returnEvent, $actor);
+
+        return back()->with('success', $data['decision'] === PambMovProcessingService::READY_FOR_RELEASE
+            ? 'MOV/report marked Ready for Release.'
+            : 'MOV returned to CENRO Focal for correction. The MOV verdict and custody return were recorded together.');
     }
 
     public function correctRouting(Request $request, string $source, int $record): RedirectResponse
@@ -374,11 +432,19 @@ class SubmissionTrackingController extends Controller
             $officialOperation = $this->officialDocumentOperation($source, $document, $stage);
             abort_unless($officialOperation, 422);
         }
-        $path = $file ? $this->routingAttachments->store($file) : null;
+        $dispatchGuard = app(\App\Services\SubmissionTracking\DispatchInProgressGuard::class);
+        $dispatchLock = null;
+        $path = null;
         $officialPath = null;
         $committed = false;
         $routingStartedAt = hrtime(true);
         try {
+            if ($dispatchGuard->protects($stage)) {
+                $document = $sourceConfig['model']::query()->findOrFail($record);
+                $this->documentRouting->assertCanAttemptCheckpoint($document, $source, $stage, $request->user());
+                $dispatchLock = $dispatchGuard->acquire($source, $record);
+            }
+            $path = $file ? $this->routingAttachments->store($file) : null;
             DB::transaction(function () use ($request, $source, $record, $stage, $date, $remarks, $file, $path, $officialFile, $officialOperation, &$officialPath, $correctionReasonKey, $correctionDetail, $attachmentPurpose): void {
                 $event = (in_array($stage, ['receive_correction', 'forward_to_penro_records'], true) || str_starts_with($stage, 'return_for_correction_')) && $source === 'conservation'
                     ? $this->documentRouting->transition(
@@ -410,6 +476,8 @@ class SubmissionTrackingController extends Controller
             if ($path && ! $committed) $this->routingAttachments->discard($path);
             if ($officialPath && ! $committed) \Illuminate\Support\Facades\Storage::disk(CurrentDocumentReplacementService::DISK)->delete($officialPath);
             throw $exception;
+        } finally {
+            $dispatchLock?->release();
         }
     }
 

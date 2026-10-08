@@ -416,8 +416,8 @@ final class PambRoutingTimelineService
                     ],
                     [
                         'key' => 'return_for_correction_penro_records',
-                        'label' => 'Return for Correction',
-                        'action_label' => 'Return for Correction',
+                        'label' => 'Return to Previous Sender for Correction',
+                        'action_label' => 'Return to Previous Sender',
                         'correction' => true,
                         'correction_reference_allowed' => true,
                         'receipt_correction_context' => 'penro_records',

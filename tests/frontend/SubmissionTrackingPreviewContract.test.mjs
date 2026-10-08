@@ -59,6 +59,7 @@ const CrudFormModal = await component('Crud/CrudFormModal');
 const UserManagement = await component('Pages/Admin/Users/Index');
 const appStyles = readFileSync(resolve('resources/css/app.css'), 'utf8');
 const previewDialogSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
+const pdfViewerSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/PdfDocumentViewer.jsx'), 'utf8');
 const submissionTrackingSource = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
 const render = row => renderToStaticMarkup(React.createElement(Preview, { open: true, row }));
 
@@ -121,20 +122,28 @@ test('supported protected previews wait for a validated response before embeddin
     assert.match(previewDialogSource, /<img src=\{current\.url\}/);
 });
 
-test('PDF viewer exposes Fit Page, zoom, and bounded page controls', () => {
+test('PDF viewer exposes Fit Page, bounded zoom, continuous scrolling, and accessible page navigation', () => {
     const markup = renderToStaticMarkup(React.createElement(PdfViewer, { blob: new Blob(), title: 'Portrait report' }));
     assert.match(markup, /aria-label="PDF controls"/);
     assert.match(markup, /aria-label="Zoom out"/);
     assert.match(markup, />Fit Page</);
     assert.match(markup, /aria-label="Zoom in"/);
     assert.match(markup, /aria-label="Zoom percentage"/);
-    assert.match(markup, /aria-label="Previous page" disabled/);
-    assert.match(markup, /aria-label="Next page" disabled/);
-    assert.match(markup, /class="[^"]*overflow-auto[^"]*" role="region" aria-label="PDF page"/);
-    assert.match(markup, /class="hidden" aria-label="Portrait report, page 1 of 0"/);
+    assert.match(markup, /aria-label="Go to page"/);
+    assert.match(markup, /class="[^"]*overflow-auto[^"]*" role="region" aria-label="PDF pages"/);
+    assert.doesNotMatch(markup, /aria-label="Previous page"|aria-label="Next page"/);
     assert.match(markup, /Preparing PDF preview/);
     assert.match(markup, /aria-label="Zoom percentage"[^>]*>—%/);
     assert.match(markup, /Page — of —/);
+    assert.match(pdfViewerSource, /Math\.abs\(number - pageNumber\) <= 1/);
+    assert.match(pdfViewerSource, /onWheel/);
+    assert.match(pdfViewerSource, /if \(!event\.ctrlKey/);
+    assert.match(pdfViewerSource, /onPointerDown/);
+    assert.match(pdfViewerSource, /onKeyDown=\{handleKeyDown\}/);
+    assert.match(pdfViewerSource, /PageDown/);
+    assert.match(pdfViewerSource, /setPageInput\(event\.target\.value\)/);
+    assert.match(pdfViewerSource, /onBlur=\{commitPageInput\}/);
+    assert.match(pdfViewerSource, /if \(active \|\| renderedKey === null\) return;/);
 });
 
 test('unsupported and unverified MIME never embed, even with a PDF filename', () => {
@@ -187,8 +196,57 @@ test('extracted MOV actions render for the current review owner', () => {
     }));
 
     assert.match(markup, /Ready for Release/);
-    assert.match(markup, /Needs Correction/);
+    assert.match(markup, /Return MOV to CENRO Focal for Correction/);
     assert.doesNotMatch(markup, /Submit for Review|>Release</);
+});
+
+test('correction receipt gates resubmission and editing controls in the shared MOV details', () => {
+    const row = received => ({
+        source_url: '/conservation-reports/regular_pamb/1/edit',
+        mov_url: '/protected/current-mov',
+        mov_processing: { applicable: true, status_key: 'needs_correction', review_remarks: 'Attach the signed page.' },
+        pamb_action_flags: { can_submit: received, can_review: false, can_release: false },
+    });
+    const waitingMarkup = renderToStaticMarkup(React.createElement(PambProgress, { row: row(false) }));
+    assert.doesNotMatch(waitingMarkup, /Edit \/ Correct Submission|Resubmit for Review/);
+
+    const receivedMarkup = renderToStaticMarkup(React.createElement(PambProgress, { row: row(true) }));
+    assert.match(receivedMarkup, /Edit \/ Correct Submission/);
+    assert.match(receivedMarkup, /Resubmit for Review/);
+});
+
+test('legacy verdict-only correction shows one missing return action on both details surfaces', () => {
+    const correctionAction = {
+        key: 'return_to_cenro_focal',
+        action_label: 'Return Report to CENRO Focal',
+        label: 'Return Report to CENRO Focal for Correction',
+        correction: true,
+    };
+    const row = {
+        source: 'conservation',
+        source_id: 12,
+        target_office: 'CENRO Mati',
+        canonical_custody_applicable: true,
+        pamb_routing_applicable: true,
+        can_transition: true,
+        mov_processing: { applicable: true, status_key: 'needs_correction', review_remarks: 'Existing verdict.' },
+        pamb_action_flags: { can_submit: false, can_review: false },
+        routing: {
+            current_stage: 'cenro_chief',
+            current_status: 'Needs Correction',
+            next_expected_action: 'Return Report to CENRO Focal',
+            actions: [correctionAction],
+            timeline: [],
+            routing_history: [],
+        },
+        routing_timeline: [],
+    };
+    const sidebar = renderToStaticMarkup(React.createElement(SidebarDetails, { row }));
+    const fullTimeline = renderToStaticMarkup(React.createElement(RoutingTimeline, { row }));
+    for (const markup of [sidebar, fullTimeline]) {
+        assert.match(markup, /Return Report to CENRO Focal/);
+        assert.doesNotMatch(markup, /Ready for Release|Return MOV to CENRO Focal for Correction|Submit for Review/);
+    }
 });
 
 test('Submission Review History renders MOV and routing event actor context in its details surface', () => {

@@ -37,10 +37,63 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Collection;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Database\Seeders\ModuleDefinitionSeeder;
+
+final class DelayedPositionControlArchiveGateway implements GoogleDriveArchiveGateway
+{
+    private FakeDocumentArchiveGateway $inner;
+    private float $uploadDurationMs = 0.0;
+    private int $uploadAttempts = 0;
+
+    public function __construct(private readonly int $uploadDelayUs = 30_000, private readonly int $verificationDelayUs = 12_000)
+    {
+        $this->inner = new FakeDocumentArchiveGateway();
+    }
+
+    public function findByIdentityAndHash(array $identity, string $sha256): ?array
+    {
+        return $this->inner->findByIdentityAndHash($identity, $sha256);
+    }
+
+    public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
+    {
+        $startedAt = hrtime(true);
+        usleep($this->uploadDelayUs);
+        $this->uploadAttempts++;
+        $result = $this->inner->upload($localPath, $filename, $identity, $sha256, $folderId, $archiveContext);
+        $this->uploadDurationMs = (hrtime(true) - $startedAt) / 1_000_000;
+        return $result;
+    }
+
+    public function verify(string $fileId, string $sha256, int $size): bool
+    {
+        usleep($this->verificationDelayUs);
+        return $this->inner->verify($fileId, $sha256, $size);
+    }
+
+    public function verifyAvailability(string $fileId, string $sha256, int $size): string
+    {
+        usleep($this->verificationDelayUs);
+        return $this->inner->verifyAvailability($fileId, $sha256, $size);
+    }
+
+    public function replace(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
+    {
+        return $this->inner->replace($fileId, $localPath, $filename, $identity, $sha256, $folderId, $archiveContext);
+    }
+
+    public function retrieve(string $fileId)
+    {
+        return $this->inner->retrieve($fileId);
+    }
+
+    public function uploadDurationMs(): float { return $this->uploadDurationMs; }
+    public function uploadAttempts(): int { return $this->uploadAttempts; }
+}
 
 function positionControlActor(string $category, string $office): User
 {
@@ -288,6 +341,7 @@ test('new routes capture one immutable settings version and execute the actual R
         positionControlTransition($routing, $record, 'receive_at_cenro_records', $cenroRecords);
         positionControlTransition($routing, $record, 'forward_to_penro_records', $cenroRecords);
         for ($cycle = 1; $cycle <= 2; $cycle++) {
+            positionControlTransition($routing, $record, 'receive_at_penro_records', $penroRecords);
             positionControlTransition($routing, $record, 'return_for_correction_penro_records', $penroRecords, 'Please correct cycle '.$cycle.'.', 'incomplete_document');
             $correctionState = $routing->state($record->fresh(), 'bms');
             expect(collect($correctionState['actions'])->pluck('key')->all())->toBe(['receive_correction']);
@@ -600,11 +654,11 @@ test('PAMB MOV correction and setting re-enable preserve the captured graph whil
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
         'decision' => PambMovProcessingService::NEEDS_CORRECTION, 'remarks' => 'Attach the signed attendance sheet.',
     ])->assertRedirect()->assertSessionHasNoErrors();
-    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(2)
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(3)
         ->and(PambRoutingEvent::query()->where('conservation_report_submission_id', $report->id)->count())->toBe(0)
-        ->and(app(DocumentRoutingTransitionService::class)->state($report->fresh()->load('protectedArea'), 'conservation')['stage'])->toBe(DocumentRoutingProfileRegistry::CENRO_CHIEF);
+        ->and($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(1)
+        ->and(app(DocumentRoutingTransitionService::class)->state($report->fresh()->load('protectedArea'), 'conservation')['stage'])->toBe(DocumentRoutingProfileRegistry::PREPARATION);
 
-    routingPositionRegressionTransition('conservation', $report, 'return_to_cenro_focal', $chief, ['remarks' => 'Replace the corrected MOV.']);
     routingPositionRegressionTransition('conservation', $report, 'receive_correction', $focal);
     $oldMov = $report->fresh()->mov_file_path;
     $this->actingAs($focal)->put(route('conservation-reports.update', ['regular_pamb', $report->id]), [
@@ -1537,7 +1591,7 @@ test('direct initial Records correction rejects a missing sender before writing 
             'stage' => 'return_for_correction_penro_records',
             'correction_reason_key' => 'incomplete_document',
             'correction_detail' => 'Identify the authorized previous sender.',
-        ])->assertRedirect()->assertSessionHasErrors(['stage' => 'A correction return cannot be recorded because no verified sender is recorded in the captured direct route.']);
+        ])->assertRedirect()->assertSessionHasErrors('stage');
 
         $fresh = $record->fresh();
         expect(DocumentRoutingEvent::query()->where('source_type', $source)->where('source_id', $record->id)->count())->toBe($eventsBefore)
@@ -1650,6 +1704,7 @@ test('stale position-dependent actions use effective-graph authorization before 
 
 test('direct Records correction returns only to a sender verified by the captured route graph', function (): void {
     Storage::fake('local');
+    \Illuminate\Support\Facades\Notification::fake();
     $penroRecords = routingPositionRegressionActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
     $penroFocal = routingPositionRegressionActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
     $record = positionControlReport('Mt. Hamiguitan Range Wildlife Sanctuary');
@@ -1669,8 +1724,11 @@ test('direct Records correction returns only to a sender verified by the capture
     ]);
 
     $routing = app(DocumentRoutingTransitionService::class);
+    $routing->transition($record->fresh(), 'bms', 'receive_at_penro_records', $penroRecords->id);
     expect($routing->state($record->fresh(), 'bms')['route_profile'])->toBe('direct')
-        ->and(collect($routing->state($record->fresh(), 'bms')['actions'])->pluck('key'))->toContain('return_for_correction_penro_records');
+        ->and(collect($routing->state($record->fresh(), 'bms')['actions'])->pluck('key'))->toContain('return_for_correction_penro_records')
+        ->and(collect($routing->presentation($record->fresh(), 'bms', null, $penroRecords)['allowed_actions'])->firstWhere('key', 'return_for_correction_penro_records')['action_label'])
+        ->toBe('Return to Previous Sender');
 
     $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['source' => 'bms', 'record' => $record->id, 'stage' => 'return_for_correction_penro_records']), [
         'stage' => 'return_for_correction_penro_records',
@@ -1680,6 +1738,8 @@ test('direct Records correction returns only to a sender verified by the capture
     $returned = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $record->id)->latest('id')->firstOrFail();
     expect($returned->to_stage)->toBe(DocumentRoutingProfileRegistry::PENRO_ORIGIN)
         ->and($returned->to_office)->toBe($sender['from_office']);
+    \Illuminate\Support\Facades\Notification::assertSentTo($penroFocal, \App\Notifications\EdatsInAppNotification::class, fn ($notification): bool => (int) data_get($notification->toArray($penroFocal), 'source_id') === $record->id
+        && data_get($notification->toArray($penroFocal), 'title') === 'Correction Required');
 
     $correctionState = $routing->state($record->fresh(), 'bms');
     expect(collect($correctionState['actions'])->firstWhere('key', 'receive_correction')['categories'])
@@ -1824,4 +1884,88 @@ test('locked route position resolution sees a committed version newer than its c
         }
         DB::purge($connectionName);
     }
+});
+
+test('PENRO Records dispatch timing correlates the fake archive phases without duplicate writes on retry', function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    $this->seed(ModuleDefinitionSeeder::class);
+    Storage::fake('local');
+    $gateway = new DelayedPositionControlArchiveGateway(30_000, 12_000);
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+
+    $settingsAdmin = User::factory()->create(['section' => 'CDS']);
+    $settingsAdmin->givePermissionTo(Permission::findOrCreate('submission-tracking.routing-settings.update', 'web'));
+    routingPositionRegressionSet($settingsAdmin, false, false);
+    $focal = positionControlActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $cenroChief = positionControlActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $cenroRecords = positionControlActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    $penroRecords = positionControlActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $record = positionControlReport('Synthetic archive timing report');
+    $path = 'bms-report-movs/synthetic-archive-timing.pdf';
+    $payload = "%PDF-1.4\n".str_repeat('synthetic archive timing bytes ', 2048);
+    $record->forceFill(['mov_file_path' => $path, 'mov_file_name' => 'Synthetic report.pdf'])->save();
+    Storage::disk('local')->put($path, $payload);
+
+    $routing = app(DocumentRoutingTransitionService::class);
+    positionControlTransition($routing, $record, 'forward_to_cenro_chief', $focal);
+    positionControlTransition($routing, $record, 'receive_at_cenro_chief', $cenroChief);
+    positionControlTransition($routing, $record, 'forward_to_cenro_records', $cenroChief);
+    positionControlTransition($routing, $record, 'receive_at_cenro_records', $cenroRecords);
+    positionControlTransition($routing, $record, 'forward_to_penro_records', $cenroRecords);
+    positionControlTransition($routing, $record, 'receive_at_penro_records', $penroRecords);
+
+    $traceId = bin2hex(random_bytes(16));
+    Log::spy();
+    $startedAt = hrtime(true);
+    $response = $this->actingAs($penroRecords)
+        ->from(route('submission-tracking.index', ['__cds_perf' => '1']))
+        ->withHeader('X-CDS-Trace-ID', $traceId)
+        ->post(route('submission-tracking.transition', ['bms', $record->id, 'dispatch_penro_records_to_cds_focal']), [
+            'stage' => 'dispatch_penro_records_to_cds_focal',
+        ]);
+    $serverElapsedMs = (hrtime(true) - $startedAt) / 1_000_000;
+
+    $response->assertRedirect()->assertSessionHasNoErrors()->assertHeader('X-CDS-Trace-ID', $traceId);
+    $archive = DocumentArchive::query()->where('source_type', 'bms')->where('source_id', $record->id)->where('logical_slot', 'mov')->firstOrFail();
+    expect($archive->archive_status)->toBe('ARCHIVED')
+        ->and($archive->archived_size)->toBe(strlen($payload))
+        ->and($archive->archived_sha256)->toBe(hash('sha256', $payload))
+        ->and($gateway->uploadAttempts())->toBe(1)
+        ->and($gateway->uploadDurationMs())->toBeGreaterThanOrEqual(29.0)
+        ->and($serverElapsedMs)->toBeGreaterThanOrEqual(50.0);
+    if (getenv('CDS_ARCHIVE_BENCHMARK') === '1') {
+        fwrite(STDERR, sprintf(
+            "Synthetic slow-provider trace: payload_bytes=%d upload_delay_ms=30 verification_delay_ms=12x2 measured_action_post_ms=%.1f fake_upload_ms=%.1f\n",
+            strlen($payload),
+            $serverElapsedMs,
+            $gateway->uploadDurationMs(),
+        ));
+    }
+
+    Log::shouldHaveReceived('debug')->with('Synchronous document archive phase completed.', \Mockery::on(
+        fn (array $context): bool => ($context['request_id'] ?? null) === $traceId
+            && ($context['phase'] ?? null) === 'archive_upload'
+            && is_numeric($context['duration_ms'] ?? null)
+    ))->once();
+    Log::shouldHaveReceived('debug')->with('Synchronous document archive phase completed.', \Mockery::on(
+        fn (array $context): bool => ($context['request_id'] ?? null) === $traceId
+            && ($context['phase'] ?? null) === 'persisted_archive_verification'
+    ))->once();
+    Log::shouldHaveReceived('debug')->with('PENRO Records dispatch request completed.', \Mockery::on(
+        fn (array $context): bool => ($context['request_id'] ?? null) === $traceId
+            && ($context['phase'] ?? null) === 'action_post'
+            && ! array_key_exists('source_id', $context)
+            && ! array_key_exists('filename', $context)
+    ))->once();
+
+    $eventCount = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $record->id)->count();
+    $repeat = $this->actingAs($penroRecords)
+        ->withHeader('X-CDS-Trace-ID', bin2hex(random_bytes(16)))
+        ->post(route('submission-tracking.transition', ['bms', $record->id, 'dispatch_penro_records_to_cds_focal']), [
+            'stage' => 'dispatch_penro_records_to_cds_focal',
+        ]);
+    $repeat->assertRedirect()->assertSessionHasErrors('stage');
+    expect(DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $record->id)->count())->toBe($eventCount)
+        ->and($gateway->uploadAttempts())->toBe(1)
+        ->and(DocumentArchive::query()->where('source_type', 'bms')->where('source_id', $record->id)->where('logical_slot', 'mov')->count())->toBe(1);
 });

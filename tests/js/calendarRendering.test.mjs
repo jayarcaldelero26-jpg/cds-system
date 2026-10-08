@@ -13,7 +13,7 @@ const load = async path => {
         configFile: false,
         plugins: [viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, hmr: false },
         appType: 'custom',
         logLevel: 'error',
     });
@@ -21,6 +21,121 @@ const load = async path => {
 };
 
 test.after(async () => { await server?.close(); });
+
+test('opening an empty DatePicker under a fixed clock does not select or change a date', async () => {
+    const { default: DatePicker } = await load('Components/DatePicker.jsx');
+    const receivedDates = [];
+    const props = { id: 'activity-date', value: '', onChange: value => receivedDates.push(value) };
+    const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+    const previousDispatcher = internals.H;
+    const previousDate = globalThis.Date;
+    const slots = [];
+    let cursor = 0;
+
+    class FixedDate extends previousDate {
+        constructor(...args) { super(...(args.length ? args : [2026, 9, 5, 12])); }
+        static now() { return new previousDate(2026, 9, 5, 12).getTime(); }
+    }
+
+    const render = () => {
+        cursor = 0;
+        internals.H = {
+            useRef(initialValue) {
+                const index = cursor++;
+                return slots[index] ??= { current: initialValue };
+            },
+            useState(initialValue) {
+                const index = cursor++;
+                if (!(index in slots)) slots[index] = typeof initialValue === 'function' ? initialValue() : initialValue;
+                return [slots[index], nextValue => {
+                    slots[index] = typeof nextValue === 'function' ? nextValue(slots[index]) : nextValue;
+                }];
+            },
+            useEffect() { cursor++; },
+        };
+        return DatePicker(props);
+    };
+
+    try {
+        globalThis.Date = FixedDate;
+        const closed = render();
+        const trigger = React.Children.toArray(closed.props.children).find(child => child.type === 'button');
+        trigger.props.onClick();
+        const opened = render();
+        const openedChildren = React.Children.toArray(opened.props.children);
+        const openTrigger = openedChildren.find(child => child.type === 'button');
+        const popover = openedChildren.find(child => child.props && 'anchorRef' in child.props);
+        const calendarPanel = React.Children.toArray(popover.props.children)
+            .find(child => child.props && 'selectedDate' in child.props);
+
+        assert.equal(openTrigger.props['aria-expanded'], true);
+        assert.equal(calendarPanel.props.month.getFullYear(), 2026);
+        assert.equal(calendarPanel.props.month.getMonth(), 9);
+        assert.equal(calendarPanel.props.selectedDate, '');
+        assert.equal(typeof calendarPanel.props.onSelectDate, 'function');
+        assert.deepEqual(receivedDates, []);
+    } finally {
+        internals.H = previousDispatcher;
+        globalThis.Date = previousDate;
+    }
+});
+
+test('actual activity date pickers render the Philippines today cap and helper text', async () => {
+    const { default: DatePicker } = await load('Components/DatePicker.jsx');
+    const { default: DateRangePicker } = await load('Components/DateRangePicker.jsx');
+    const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+    const previousDispatcher = internals.H;
+    const previousDate = globalThis.Date;
+    const instant = new previousDate('2026-10-08T16:30:00.000Z');
+    const slots = [];
+    let cursor = 0;
+
+    class FixedDate extends previousDate {
+        constructor(...args) { super(...(args.length ? args : [instant.getTime()])); }
+        static now() { return instant.getTime(); }
+    }
+
+    const renderComponent = Component => {
+        cursor = 0;
+        internals.H = {
+            useRef(initialValue) {
+                const index = cursor++;
+                return slots[index] ??= { current: initialValue };
+            },
+            useState(initialValue) {
+                const index = cursor++;
+                if (!(index in slots)) slots[index] = typeof initialValue === 'function' ? initialValue() : initialValue;
+                return [slots[index], nextValue => { slots[index] = typeof nextValue === 'function' ? nextValue(slots[index]) : nextValue; }];
+            },
+            useEffect() { cursor++; },
+        };
+        return Component({ id: 'actual-activity-date', value: '', actualDate: true });
+    };
+
+    try {
+        globalThis.Date = FixedDate;
+        const single = renderComponent(DatePicker);
+        const singleChildren = React.Children.toArray(single.props.children);
+        const singleMarkup = renderToStaticMarkup(singleChildren.find(child => child.type === 'p'));
+        const singlePopover = singleChildren.find(child => child.props && 'anchorRef' in child.props);
+        const singlePanel = React.Children.toArray(singlePopover.props.children).find(child => child.props && 'selectedDate' in child.props);
+        assert.equal(singlePanel.props.maxDate, '2026-10-09');
+        assert.equal(singlePanel.props.todayDateKey, '2026-10-09');
+        assert.match(singleMarkup, /Choose today or an earlier date \(Philippines time\)\./);
+
+        const range = renderComponent(DateRangePicker);
+        const rangeChildren = React.Children.toArray(range.props.children);
+        const rangeMarkup = renderToStaticMarkup(rangeChildren.find(child => child.type === 'p'));
+        const rangePopover = rangeChildren.find(child => child.props && 'anchorRef' in child.props);
+        const rangePanel = React.Children.toArray(rangePopover.props.children).find(child => child.props && 'rangeStart' in child.props);
+        assert.equal(rangePanel.props.maxDate, '2026-10-09');
+        assert.equal(rangePanel.props.todayDateKey, '2026-10-09');
+        assert.match(rangeMarkup, /Choose today or an earlier date \(Philippines time\)\./);
+    } finally {
+        internals.H = previousDispatcher;
+        globalThis.Date = previousDate;
+    }
+});
 
 test('Calendar renders both plus utility controls with labels, focus, hover, and their date callbacks', async () => {
     const { default: BusinessCalendarMonth, CalendarAddButton, FilterRail } = await load('Components/BusinessCalendarMonth.jsx');

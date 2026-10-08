@@ -1,6 +1,9 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\AuditLog;
+use App\Models\DocumentArchive;
+use App\Models\DocumentAttachmentHistory;
 use App\Models\DocumentRoutingEvent;
 use App\Models\PambRoutingEvent;
 use App\Models\SubmissionRoutingAttachment;
@@ -67,6 +70,13 @@ function pambReport(User $user, array $overrides = []): ConservationReportSubmis
         'created_by' => $user->id,
         'updated_by' => $user->id,
     ], ...$overrides]);
+}
+
+function pambReceiveAtCenroChief(ConservationReportSubmission $report, User $focal, User $chief): void
+{
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_cenro_chief', $focal->id);
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
 }
 
 test('a conducted record without an MOV starts at zero percent and an uploaded MOV is thirty-five percent', function (): void {
@@ -208,7 +218,7 @@ test('PENRO Records receipt has no upload and exposes a separate Office forwardi
     $this->actingAs($records);
     $before = $tracking->records()->firstWhere('source_id', $report->id);
     expect(collect($before['routing']['actions'])->pluck('action_label')->all())
-        ->toBe(['Receive', 'Return for Correction'])
+        ->toBe(['Receive'])
         ->and(collect($before['routing']['actions'])->firstWhere('key', 'receive_at_penro_records')['can_replace_document'])->toBeFalse()
         ->and(collect($before['routing']['actions'])->pluck('key')->all())->not->toContain('release_to_regional');
 
@@ -398,6 +408,7 @@ test('Chief review supports ready and correction decisions without changing comp
     $timeliness = $report->timeliness;
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    pambReceiveAtCenroChief($report, $focal, $chief);
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::NEEDS_CORRECTION, 'remarks' => 'Please attach the signed attendance sheet.'])->assertSessionHasNoErrors();
 
     $corrected = $report->fresh();
@@ -407,11 +418,86 @@ test('Chief review supports ready and correction decisions without changing comp
         ->and($corrected->timeliness)->toBe($timeliness)
         ->and($corrected->movReviewEvents()->count())->toBe(2);
 
+    app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->transition($report->fresh(), 'conservation', 'receive_correction', $focal->id);
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
     expect($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::SUBMITTED_FOR_REVIEW)->count())->toBe(1)
         ->and($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::RESUBMITTED_FOR_REVIEW)->count())->toBe(1);
+    pambReceiveAtCenroChief($report, $focal, $chief);
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::READY_FOR_RELEASE])->assertSessionHasNoErrors();
     expect(app(PambMovProcessingService::class)->present($report->fresh())['percent'])->toBe(70);
+});
+
+test('no-file Ready for Release accepts Inertia empty-file serialization and keeps custody Forward separate', function (): void {
+    Storage::fake('local');
+    \Illuminate\Support\Facades\Notification::fake();
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
+    $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/no-file-review.pdf']);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    pambReceiveAtCenroChief($report, $focal, $chief);
+
+    $reviewEvents = $report->fresh()->movReviewEvents()->count();
+    $routingEvents = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count();
+    $verdictAudits = \App\Models\AuditLog::query()->where('action', 'PAMB MOV Marked Ready for Release')->count();
+    $archiveRows = \App\Models\DocumentArchive::query()->count();
+    $notifications = count(\Illuminate\Support\Facades\Notification::sentNotifications());
+    $files = Storage::disk('local')->allFiles();
+
+    // Inertia forceFormData serializes attachment: null as attachment="".
+    // This protects the controller path even if an older client submits that empty field.
+    $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+        'remarks' => '',
+        'attachment' => '',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $reviewed = $report->fresh();
+    $row = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    expect($reviewed->movReviewEvents()->count())->toBe($reviewEvents + 1)
+        ->and($reviewed->movReviewEvents()->where('event_key', PambMovProcessingService::READY_FOR_RELEASE)->count())->toBe(1)
+        ->and($reviewed->mov_processing_status)->toBe(PambMovProcessingService::READY_FOR_RELEASE)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe($routingEvents)
+        ->and(\App\Models\AuditLog::query()->where('action', 'PAMB MOV Marked Ready for Release')->count())->toBe($verdictAudits + 1)
+        ->and(\App\Models\DocumentArchive::query()->count())->toBe($archiveRows)
+        ->and(count(\Illuminate\Support\Facades\Notification::sentNotifications()))->toBe($notifications)
+        ->and(Storage::disk('local')->allFiles())->toBe($files)
+        ->and(SubmissionRoutingAttachment::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(0)
+        ->and(collect($row['routing']['actions'])->pluck('key')->all())->toBe(['forward_to_cenro_records']);
+});
+
+test('an invalid optional correction reference is rejected without recording review or custody writes', function (): void {
+    Storage::fake('local');
+    \Illuminate\Support\Facades\Notification::fake();
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
+    $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/invalid-reference-review.pdf']);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    pambReceiveAtCenroChief($report, $focal, $chief);
+
+    $reviewEvents = $report->fresh()->movReviewEvents()->count();
+    $routingEvents = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count();
+    $auditRows = \App\Models\AuditLog::query()->count();
+    $archiveRows = \App\Models\DocumentArchive::query()->count();
+    $notifications = count(\Illuminate\Support\Facades\Notification::sentNotifications());
+    $files = Storage::disk('local')->allFiles();
+
+    $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => 'Please check the signed page.',
+        'attachment' => UploadedFile::fake()->create('correction-reference.txt', 10, 'text/plain'),
+    ])->assertSessionHasErrors('attachment');
+
+    expect($report->fresh()->movReviewEvents()->count())->toBe($reviewEvents)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe($routingEvents)
+        ->and(\App\Models\AuditLog::query()->count())->toBe($auditRows)
+        ->and(\App\Models\DocumentArchive::query()->count())->toBe($archiveRows)
+        ->and(count(\Illuminate\Support\Facades\Notification::sentNotifications()))->toBe($notifications)
+        ->and(Storage::disk('local')->allFiles())->toBe($files)
+        ->and(SubmissionRoutingAttachment::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(0)
+        ->and($report->fresh()->mov_processing_status)->toBe(PambMovProcessingService::SUBMITTED_FOR_REVIEW);
 });
 
 test('Chief review decisions are idempotent within the current review state', function (): void {
@@ -420,6 +506,7 @@ test('Chief review decisions are idempotent within the current review state', fu
     $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/idempotent-review.pdf']);
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]));
+    pambReceiveAtCenroChief($report, $focal, $chief);
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::READY_FOR_RELEASE])->assertSessionHasNoErrors();
     $reviewedAt = $report->fresh()->mov_reviewed_at;
 
@@ -439,6 +526,7 @@ test('CENRO review summary exposes the current verdict and preserves prior corre
     $service->recordUpload($report, $focal);
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]));
+    pambReceiveAtCenroChief($report, $focal, $chief);
     expect($service->present($report->fresh())['cenro_review']['verdict'])->toBe('Awaiting CENRO CDS Chief Review');
 
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::NEEDS_CORRECTION, 'remarks' => 'Attach the signed resolution.']);
@@ -449,11 +537,14 @@ test('CENRO review summary exposes the current verdict and preserves prior corre
         ->and($needsCorrection['correction_reason'])->toBe('Attach the signed resolution.')
         ->and($needsCorrection['previous_correction_cycles'])->toBe(1);
 
+    app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->transition($report->fresh(), 'conservation', 'receive_correction', $focal->id);
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]));
     $awaitingSecondReview = $service->present($report->fresh())['cenro_review'];
     expect($awaitingSecondReview['verdict'])->toBe('Awaiting CENRO CDS Chief Review')
         ->and($awaitingSecondReview['previous_correction']['reason'])->toBe('Attach the signed resolution.');
 
+    pambReceiveAtCenroChief($report, $focal, $chief);
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::READY_FOR_RELEASE]);
     $final = $service->present($report->fresh())['cenro_review'];
     expect($final['verdict'])->toBe('Ready for Release')
@@ -476,13 +567,22 @@ test('For Review MOV status keeps canonical custody ownership with the focal', f
     $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/owner-review.pdf']);
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])->assertSessionHasNoErrors();
     $tracking = app(SubmissionTrackingService::class);
     $row = $tracking->records()->firstWhere('source_id', $report->id);
     expect($row['mov_processing']['workflow_status'])->toBe('Awaiting Review by CENRO CDS Chief')
-        ->and($row['routing']['responsible_user_category'])->toBe('CENRO CDS Focal Person')
+        ->and($row['routing']['responsible_user_category'])->toBe('CENRO CDS Chief')
+        ->and($row['routing']['next_expected_action'])->toBe('Receive')
         ->and($row['pamb_action_flags']['can_review'])->toBeFalse();
 
     $this->actingAs($chief);
+    $transitRow = $tracking->records()->firstWhere('source_id', $report->id);
+    expect($transitRow['pamb_action_flags']['can_review'])->toBeFalse()
+        ->and(collect($transitRow['routing']['actions'])->pluck('key')->all())->toBe(['receive_at_cenro_chief']);
+    $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertForbidden();
+    $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_chief']), ['stage' => 'receive_at_cenro_chief'])->assertSessionHasNoErrors();
     $chiefRow = $tracking->records()->firstWhere('source_id', $report->id);
     expect($chiefRow['pamb_action_flags']['can_review'])->toBeTrue();
 });
@@ -492,6 +592,7 @@ test('needs correction requires remarks and returns the record to the focal queu
     $report = pambReport($focal, ['mov_file_path' => 'conservation-report-movs/correction.pdf']);
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]));
+    pambReceiveAtCenroChief($report, $focal, $chief);
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::NEEDS_CORRECTION])->assertSessionHasErrors('remarks');
     $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), ['decision' => PambMovProcessingService::NEEDS_CORRECTION, 'remarks' => 'Please correct the signature page.'])->assertSessionHasNoErrors();
     $response = $this->actingAs($focal)->get(route('submission-tracking.index'))->assertOk();
@@ -501,6 +602,392 @@ test('needs correction requires remarks and returns the record to the focal queu
         ->and($incoming->pluck('source_id'))->toContain($report->id)
         ->and($incoming->firstWhere('source_id', $report->id)['mov_processing']['queue'])->toBe('needs_correction')
         ->and($incoming->firstWhere('source_id', $report->id)['mov_processing']['review_remarks'])->toBe('Please correct the signature page.');
+});
+
+test('Needs Correction records its MOV verdict and custody return atomically', function (): void {
+    Storage::fake('local');
+    \Illuminate\Support\Facades\Notification::fake();
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+    $path = 'conservation-report-movs/mov-review-custody-separation.pdf';
+    Storage::disk('local')->put($path, "%PDF-1.4\nSynthetic MOV");
+    $report = pambReport($focal, ['mov_file_path' => $path, 'mov_file_name' => basename($path)]);
+    app(PambMovProcessingService::class)->recordUpload($report, $focal);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))
+        ->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), [
+        'stage' => 'forward_to_cenro_chief',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_at_cenro_chief']), [
+        'stage' => 'receive_at_cenro_chief',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $reviewResponse = $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => 'Please correct the signature page.',
+        'attachment' => UploadedFile::fake()->createWithContent('correction-reference.pdf', "%PDF-1.4\nSynthetic correction reference"),
+    ]);
+    $reviewResponse->assertRedirect()->assertSessionHasNoErrors()->assertSessionHas('success',
+        'MOV returned to CENRO Focal for correction. The MOV verdict and custody return were recorded together.');
+
+    $routingEvents = DocumentRoutingEvent::query()
+        ->where('source_type', 'conservation')
+        ->where('source_id', $report->id)
+        ->orderBy('id')
+        ->get();
+    $correctedProjection = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    expect($routingEvents->pluck('event_key')->all())->toBe(['forwarded', 'received', 'returned_for_correction'])
+        ->and(app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'conservation')['stage'])
+        ->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PREPARATION)
+        ->and(data_get($correctedProjection, 'mov_processing.cenro_review.custody_return_recorded'))->toBeTrue()
+        ->and($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(1)
+        ->and($report->fresh()->mov_file_path)->toBe($path);
+    $returned = $routingEvents->last();
+    $reference = SubmissionRoutingAttachment::query()->where('document_routing_event_id', $returned->id)->firstOrFail();
+    expect($reference->purpose)->toBe('correction_reference')
+        ->and($reference->stage_key)->toBe('return_to_cenro_focal')
+        ->and($reference->uploaded_by)->toBe($chief->id);
+
+    $chiefDetails = $this->actingAs($chief)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps();
+    $chiefRow = data_get($chiefDetails, 'trackingContext.selected_record');
+    $chiefIncoming = collect(data_get($chiefDetails, 'workspaceQueues.incoming', []));
+    expect(data_get($chiefRow, 'routing.current_stage'))->toBe('cenro_preparation')
+        ->and(data_get($chiefRow, 'routing.actions'))->toBeEmpty()
+        ->and($chiefIncoming->contains(fn (array $row): bool => ($row['source'] ?? null) === 'conservation' && (int) ($row['source_id'] ?? 0) === $report->id))->toBeFalse();
+
+    $focalIncoming = collect($this->actingAs($focal)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps()['workspaceQueues']['incoming']);
+    $focalRow = $focalIncoming->first(fn (array $row): bool => ($row['source'] ?? null) === 'conservation' && (int) ($row['source_id'] ?? 0) === $report->id);
+    expect($focalRow)->not->toBeNull()
+        ->and(collect($focalRow['routing']['actions'])->pluck('key')->all())->toBe(['receive_correction'])
+        ->and($focalRow['pamb_action_flags']['can_submit'])->toBeFalse();
+
+    $this->actingAs($penroRecords)->post(route('submission-tracking.transition', ['conservation', $report->id, 'return_to_cenro_focal']), [
+        'stage' => 'return_to_cenro_focal', 'remarks' => 'Wrong category.',
+    ])->assertSessionHasErrors('stage');
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(3)
+        ->and($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(1);
+
+    $focalDetails = $this->actingAs($focal)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps();
+    $focalRow = data_get($focalDetails, 'trackingContext.selected_record');
+    $focalIncoming = collect(data_get($focalDetails, 'workspaceQueues.incoming', []));
+    expect(collect(data_get($focalRow, 'routing.actions', []))->pluck('key')->all())->toBe(['receive_correction'])
+        ->and(data_get($focalRow, 'routing.actions.0.action_label'))->toBe('Receive Correction')
+        ->and($focalIncoming->contains(fn (array $row): bool => ($row['source'] ?? null) === 'conservation'
+            && (int) ($row['source_id'] ?? 0) === $report->id
+            && ($row['incoming_action_category'] ?? null) === 'correction'))->toBeTrue();
+
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_correction']), [
+        'stage' => 'receive_correction',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $receivedFocalRow = collect($this->actingAs($focal)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps()['workspaceQueues']['incoming'])
+        ->first(fn (array $row): bool => ($row['source'] ?? null) === 'conservation' && (int) ($row['source_id'] ?? 0) === $report->id);
+    expect($receivedFocalRow['pamb_action_flags']['can_submit'])->toBeTrue()
+        ->and(collect($receivedFocalRow['routing']['actions'])->pluck('key')->all())->toBe([]);
+
+    $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'return_to_cenro_focal']), [
+        'stage' => 'return_to_cenro_focal', 'remarks' => 'Stale duplicate.',
+    ])->assertRedirect()->assertSessionHasErrors('stage');
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(4)
+        ->and($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(1);
+    \Illuminate\Support\Facades\Notification::assertSentTo($focal, \App\Notifications\EdatsInAppNotification::class, fn ($notification): bool => data_get($notification->toArray($focal), 'source_id') === $report->id
+        && data_get($notification->toArray($focal), 'title') === 'Correction Required');
+});
+
+test('legacy Needs Correction without a return exposes one custody action and adds no second MOV verdict', function (): void {
+    \Illuminate\Support\Facades\Notification::fake();
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $report = pambReport($focal, [
+        'mov_file_path' => 'conservation-report-movs/legacy-needs-correction.pdf',
+        'mov_processing_status' => PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+    ]);
+    pambReceiveAtCenroChief($report, $focal, $chief);
+    $report->update([
+        'mov_processing_status' => PambMovProcessingService::NEEDS_CORRECTION,
+        'mov_review_remarks' => 'Legacy correction remarks remain the recorded reason.',
+        'mov_reviewed_at' => now(),
+        'mov_reviewed_by' => $chief->id,
+    ]);
+    $report->movReviewEvents()->create([
+        'event_key' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => 'Legacy correction remarks remain the recorded reason.',
+        'recorded_by' => $chief->id,
+    ]);
+
+    $details = $this->actingAs($chief)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id,
+    ]))->assertOk()->inertiaProps();
+    $chiefRow = data_get($details, 'trackingContext.selected_record');
+    expect(collect(data_get($chiefRow, 'routing.actions', []))->pluck('key')->all())->toBe(['return_to_cenro_focal'])
+        ->and(data_get($chiefRow, 'pamb_action_flags.can_review'))->toBeFalse()
+        ->and(data_get($chiefRow, 'pamb_action_flags.can_submit'))->toBeFalse()
+        ->and(data_get($chiefRow, 'mov_processing.cenro_review.custody_return_recorded'))->toBeFalse();
+
+    $this->actingAs($chief)->post(route('submission-tracking.transition', [
+        'conservation', $report->id, 'return_to_cenro_focal',
+    ]), ['stage' => 'return_to_cenro_focal'])->assertRedirect()->assertSessionHasNoErrors();
+    expect($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(1)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
+            ->where('event_key', 'returned_for_correction')->count())->toBe(1);
+
+    $focalDetails = $this->actingAs($focal)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps();
+    $focalRow = collect(data_get($focalDetails, 'workspaceQueues.incoming', []))
+        ->first(fn (array $row): bool => ($row['source'] ?? null) === 'conservation' && (int) ($row['source_id'] ?? 0) === $report->id);
+    expect(collect($focalRow['routing']['actions'])->pluck('key')->all())->toBe(['receive_correction'])
+        ->and(data_get($focalRow, 'mov_processing.cenro_review.custody_return_recorded'))->toBeTrue()
+        ->and($focalRow['pamb_action_flags']['can_submit'])->toBeFalse();
+
+});
+
+test('a prior-cycle custody return does not satisfy a newer legacy correction verdict', function (): void {
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $earlier = CarbonImmutable::parse('2026-10-07 10:00:00', 'Asia/Manila');
+    $current = CarbonImmutable::parse('2026-10-08 10:00:00', 'Asia/Manila');
+    $this->travelTo($earlier);
+    $report = pambReport($focal, [
+        'mov_file_path' => 'conservation-report-movs/prior-cycle-return.pdf',
+        'mov_processing_status' => PambMovProcessingService::NEEDS_CORRECTION,
+        'mov_reviewed_at' => $earlier,
+        'mov_reviewed_by' => $chief->id,
+        'mov_review_remarks' => 'Earlier correction verdict.',
+    ]);
+    $report->movReviewEvents()->create([
+        'event_key' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => 'Earlier correction verdict.',
+        'recorded_by' => $chief->id,
+    ]);
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'conservation', 'source_id' => $report->id, 'workflow_key' => 'regular_pamb',
+        'event_key' => 'returned_for_correction', 'from_stage' => 'cenro_chief', 'to_stage' => 'cenro_preparation',
+        'from_office' => 'CENRO Mati', 'to_office' => 'CENRO Mati', 'occurred_at' => $earlier,
+        'recorded_by' => $chief->id, 'remarks' => 'Earlier cycle returned.',
+        'metadata' => ['state_source' => 'routing_events', 'action_key' => 'return_to_cenro_focal', 'correction' => true, 'correction_cycle' => true, 'pamb_cycle' => 1],
+    ]);
+
+    $this->travelTo($current);
+    $report->movReviewEvents()->create([
+        'event_key' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => 'Current legacy verdict still needs a return.',
+        'recorded_by' => $chief->id,
+    ]);
+    $report->update([
+        'mov_processing_status' => PambMovProcessingService::NEEDS_CORRECTION,
+        'mov_reviewed_at' => $current,
+        'mov_reviewed_by' => $chief->id,
+        'mov_review_remarks' => 'Current legacy verdict still needs a return.',
+    ]);
+
+    $this->actingAs($focal);
+    $row = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    expect($row['mov_processing']['status_key'])->toBe(PambMovProcessingService::NEEDS_CORRECTION)
+        ->and($row['mov_processing']['cenro_review']['custody_return_recorded'])->toBeFalse();
+});
+
+test('Needs Correction rolls back its verdict when the custody return fails', function (): void {
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Mati');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF', 'CENRO Mati');
+    $report = pambReport($focal, [
+        'mov_file_path' => 'conservation-report-movs/failed-atomic-return.pdf',
+        'mov_processing_status' => PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+    ]);
+    pambReceiveAtCenroChief($report, $focal, $chief);
+
+    expect(fn () => app(PambMovProcessingService::class)->review(
+        $report->fresh(),
+        $chief,
+        PambMovProcessingService::NEEDS_CORRECTION,
+        'Please attach the signed page.',
+        fn () => throw new \RuntimeException('Synthetic return failure'),
+    ))->toThrow(\RuntimeException::class, 'Synthetic return failure');
+
+    expect($report->fresh()->mov_processing_status)->toBe(PambMovProcessingService::SUBMITTED_FOR_REVIEW)
+        ->and($report->fresh()->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(0)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(2);
+});
+
+test('MOV correction replacement and resubmission return each PAMB meeting to its authorized Chief reviewer', function (string $workflow): void {
+    Storage::fake('local');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
+    $activity = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->find($workflow)['default_activity'];
+    $area = ProtectedArea::create([
+        'name' => "{$workflow} MOV correction area", 'short_name' => strtoupper(substr($workflow, 0, 4)),
+        'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental',
+        'region' => 'XI', 'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising', 'assigned_by' => $focal->id,
+    ]);
+    $originalPath = "conservation-report-movs/{$workflow}-original.pdf";
+    Storage::disk('local')->put($originalPath, "%PDF-1.4\nOriginal {$workflow} MOV");
+    $report = pambReport($focal, [
+        'workflow_key' => $workflow,
+        'protected_area_id' => $area->id,
+        'activity_name' => $activity,
+        'mov_file_name' => basename($originalPath),
+        'mov_file_path' => $originalPath,
+    ]);
+    app(PambMovProcessingService::class)->recordUpload($report, $focal);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))
+        ->assertRedirect()->assertSessionHasNoErrors();
+    pambReceiveAtCenroChief($report, $focal, $chief);
+    $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => "{$workflow}: attach the signed meeting record.",
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $needsCorrection = $this->actingAs($focal)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps();
+    $focalRow = collect($needsCorrection['workspaceQueues']['incoming'])->firstWhere('source_id', $report->id);
+    expect($focalRow['mov_processing']['queue'])->toBe('needs_correction')
+        ->and($focalRow['mov_processing']['review_remarks'])->toBe("{$workflow}: attach the signed meeting record.")
+        ->and($focalRow['mov_processing']['cenro_review']['reviewed_user_category'])->toBe('CENRO CDS Chief')
+        ->and($focalRow['routing']['responsible_user_category'])->toBe('CENRO CDS Focal Person')
+        ->and(collect($focalRow['routing']['actions'])->pluck('key')->all())->toBe(['receive_correction'])
+        ->and($focalRow['pamb_action_flags']['can_submit'])->toBeFalse()
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(3)
+        ->and(PambRoutingEvent::query()->where('conservation_report_submission_id', $report->id)->count())->toBe(0);
+
+    $this->actingAs($focal)->put(route('conservation-reports.update', [$workflow, $report->id]), [
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Mati',
+        'activity_name' => $activity,
+        'document_type' => 'Minutes',
+        'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-03',
+        'date_accomplished' => '2026-08-03',
+        'mov' => UploadedFile::fake()->createWithContent("{$workflow}-premature.pdf", "%PDF-1.4\nPremature {$workflow} MOV"),
+    ])->assertForbidden();
+    expect($report->fresh()->mov_file_path)->toBe($originalPath);
+
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'receive_correction']), [
+        'stage' => 'receive_correction',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $this->actingAs($focal)->put(route('conservation-reports.update', [$workflow, $report->id]), [
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Mati',
+        'activity_name' => $activity,
+        'document_type' => 'Minutes',
+        'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-08-03',
+        'date_accomplished' => '2026-08-03',
+        'mov' => UploadedFile::fake()->createWithContent("{$workflow}-corrected.pdf", "%PDF-1.4\nCorrected {$workflow} MOV"),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $corrected = $report->fresh();
+    expect($corrected->mov_file_path)->not->toBe($originalPath)
+        ->and($corrected->mov_file_name)->toBe("{$workflow}-corrected.pdf")
+        ->and($corrected->mov_processing_status)->toBeNull()
+        ->and($corrected->movReviewEvents()->where('event_key', PambMovProcessingService::NEEDS_CORRECTION)->count())->toBe(1)
+        ->and($corrected->movReviewEvents()->where('event_key', PambMovProcessingService::MOV_UPLOADED)->count())->toBe(2);
+    Storage::disk('local')->assertExists($corrected->mov_file_path);
+    Storage::disk('local')->assertMissing($originalPath);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))
+        ->assertRedirect()->assertSessionHasNoErrors();
+    pambReceiveAtCenroChief($report, $focal, $chief);
+    expect($report->fresh()->movReviewEvents()->reorder('id', 'asc')->pluck('event_key')->all())->toBe([
+        PambMovProcessingService::MOV_UPLOADED,
+        PambMovProcessingService::SUBMITTED_FOR_REVIEW,
+        PambMovProcessingService::NEEDS_CORRECTION,
+        PambMovProcessingService::MOV_UPLOADED,
+        PambMovProcessingService::RESUBMITTED_FOR_REVIEW,
+    ]);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::READY_FOR_RELEASE,
+    ])->assertForbidden();
+    $reviewQueue = $this->actingAs($chief)->get(route('submission-tracking.index', [
+        'source' => 'conservation', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk()->inertiaProps();
+    $chiefRow = data_get($reviewQueue, 'trackingContext.selected_record');
+    expect(data_get($chiefRow, 'mov_processing.workflow_status'))->toBe('Awaiting Review by CENRO CDS Chief')
+        ->and(data_get($chiefRow, 'pamb_action_flags.can_review'))->toBeTrue()
+        ->and($report->fresh()->date_report_released_cenro)->toBeNull()
+        ->and($report->fresh()->date_received_penro)->toBeNull()
+        ->and($report->fresh()->date_endorsed_regional)->toBeNull()
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(6)
+        ->and(PambRoutingEvent::query()->where('conservation_report_submission_id', $report->id)->count())->toBe(0);
+})->with(['regular_pamb', 'special_pamb', 'twc_meetings']);
+
+test('a future activity date cannot be saved after a PAMB correction is received', function (): void {
+    Storage::fake('local');
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-08 12:00:00', 'Asia/Manila'));
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
+    $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
+    $area = ProtectedArea::create([
+        'name' => 'Future date guard PAMB area', 'short_name' => 'FDG',
+        'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental',
+        'region' => 'XI', 'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising', 'assigned_by' => $focal->id,
+    ]);
+    $path = 'conservation-report-movs/future-date-correction.pdf';
+    Storage::disk('local')->put($path, "%PDF-1.4\nSynthetic correction-cycle MOV");
+    $report = pambReport($focal, [
+        'protected_area_id' => $area->id,
+        'mov_file_path' => $path,
+        'mov_file_name' => basename($path),
+    ]);
+    app(PambMovProcessingService::class)->recordUpload($report, $focal);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    pambReceiveAtCenroChief($report, $focal, $chief);
+    $this->actingAs($chief)->post(route('submission-tracking.mov.review', ['conservation', $report->id]), [
+        'decision' => PambMovProcessingService::NEEDS_CORRECTION,
+        'remarks' => 'Correct the activity dates.',
+    ])->assertSessionHasNoErrors();
+    app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->transition($report->fresh(), 'conservation', 'receive_correction', $focal->id);
+
+    $before = [
+        'report' => $report->fresh()->getAttributes(),
+        'routing_events' => DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->get()->toArray(),
+        'mov_events' => $report->fresh()->movReviewEvents()->get()->toArray(),
+        'audit_count' => AuditLog::query()->count(),
+        'attachment_history' => DocumentAttachmentHistory::query()->count(),
+        'archive_count' => DocumentArchive::query()->count(),
+        'files' => Storage::disk('local')->allFiles(),
+    ];
+
+    $this->actingAs($focal)->put(route('conservation-reports.update', ['regular_pamb', $report->id]), [
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Mati',
+        'activity_name' => 'Regular PAMB',
+        'document_type' => 'Minutes',
+        'reporting_period' => 'Quarter 1',
+        'date_conducted' => '2026-10-09',
+        'date_accomplished' => '2026-10-09',
+    ])->assertSessionHasErrors('date_conducted');
+
+    expect($report->fresh()->getAttributes())->toBe($before['report'])
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->get()->toArray())->toBe($before['routing_events'])
+        ->and($report->fresh()->movReviewEvents()->get()->toArray())->toBe($before['mov_events'])
+        ->and(AuditLog::query()->count())->toBe($before['audit_count'])
+        ->and(DocumentAttachmentHistory::query()->count())->toBe($before['attachment_history'])
+        ->and(DocumentArchive::query()->count())->toBe($before['archive_count'])
+        ->and(Storage::disk('local')->allFiles())->toBe($before['files']);
 });
 
 test('records release uses the canonical CENRO release date and reaches one hundred percent', function (): void {
@@ -527,6 +1014,52 @@ test('records release uses the canonical CENRO release date and reaches one hund
     expect($released->date_report_released_cenro->toDateString())->toBe(CarbonImmutable::now('Asia/Manila')->toDateString())
         ->and(app(PambMovProcessingService::class)->present($released)['percent'])->toBe(100)
         ->and(app(PambMovProcessingService::class)->present($released)['status_label'])->toBe('Released by CENRO to PENRO');
+});
+
+test('fixed-clock PAMB custody release and receipt preserve activity dates and action timestamps', function (): void {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-10-05 09:15:00', 'Asia/Manila'));
+
+    try {
+        $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL');
+        $chief = pambRoleUser('CENRO CDS Chief', 'CENRO_CDS_CHIEF');
+        $records = pambRoleUser('CENRO Records Unit', 'CENRO_RECORDS');
+        $penroRecords = pambRoleUser('PENRO Records Unit', 'PENRO_RECORDS', 'PENRO Davao Oriental');
+        $report = pambReport($focal, [
+            'date_conducted' => '2026-10-07',
+            'date_accomplished' => '2026-10-07',
+            'mov_file_name' => 'fixed-clock-pamb.pdf',
+            'mov_file_path' => 'conservation-report-movs/fixed-clock-pamb.pdf',
+            'mov_processing_status' => PambMovProcessingService::READY_FOR_RELEASE,
+        ]);
+        $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+
+        foreach ([
+            [$focal, 'forward_to_cenro_chief'],
+            [$chief, 'receive_at_cenro_chief'],
+            [$chief, 'forward_to_cenro_records'],
+            [$records, 'receive_at_cenro_records'],
+            [$records, 'forward_to_penro_records'],
+        ] as [$actor, $action]) {
+            $routing->transition($report->fresh(), 'conservation', $action, $actor->id);
+        }
+        $events = fn () => DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->get();
+        $releaseEvent = $events()->first(fn ($event) => data_get($event->metadata, 'action_key') === 'forward_to_penro_records');
+
+        $routing->transition($report->fresh(), 'conservation', 'receive_at_penro_records', $penroRecords->id);
+        $received = $report->fresh();
+        $receiptEvent = $events()->first(fn ($event) => data_get($event->metadata, 'action_key') === 'receive_at_penro_records');
+
+        expect($releaseEvent)->not->toBeNull()
+            ->and($receiptEvent)->not->toBeNull()
+            ->and($received->date_conducted)->toBe('2026-10-07')
+            ->and($received->date_accomplished->toDateString())->toBe('2026-10-07')
+            ->and($received->date_report_released_cenro->toDateString())->toBe('2026-10-05')
+            ->and($received->date_received_penro->toDateString())->toBe('2026-10-05')
+            ->and($releaseEvent->occurred_at->toDateTimeString())->toBe('2026-10-05 09:15:00')
+            ->and($receiptEvent->occurred_at->toDateTimeString())->toBe('2026-10-05 09:15:00');
+    } finally {
+        CarbonImmutable::setTestNow();
+    }
 });
 
 test('CENRO Records PAMB routing stays at 35 percent across authorized viewer contexts while MOV remains complete', function (): void {
@@ -785,12 +1318,19 @@ test('direct-to-PENRO Regular, Special, and TWC profiles omit CENRO release and 
             'mov_file_path' => "conservation-report-movs/{$workflow}-direct.pdf",
         ]);
         Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\n{$workflow} direct route fixture");
+        $this->actingAs($penroRecords);
 
         $before = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
             ->presentation($report->fresh()->load('protectedArea'), 'conservation', null, $penroRecords);
+        $detailRow = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
         expect($before['profile']['key'])->toBe('canonical_direct_penro')
             ->and($before['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
-            ->and(collect($before['allowed_actions'])->pluck('key'))->not->toContain('forward_to_cenro_chief');
+            ->and(collect($before['allowed_actions'])->pluck('key'))->not->toContain('forward_to_cenro_chief')
+            ->and($detailRow['submission_status'])->toBe('Pending Receipt by PENRO')
+            ->and($detailRow['cenro_release_applicable'])->toBeFalse()
+            ->and($detailRow['date_report_released_cenro'])->toBeNull()
+            ->and($detailRow['date_received_penro'])->toBeNull()
+            ->and($detailRow['date_endorsed_regional'])->toBeNull();
 
         $this->actingAs($penroRecords)->post(route('submission-tracking.transition', [
             'conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT,
@@ -798,12 +1338,18 @@ test('direct-to-PENRO Regular, Special, and TWC profiles omit CENRO release and 
 
         $afterReceipt = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
             ->presentation($report->fresh()->load('protectedArea'), 'conservation', null, $penroRecords);
+        $receiptRow = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+        $storedReceiptDate = $report->fresh()->getRawOriginal('date_received_penro');
         expect($report->fresh()->date_report_released_cenro)->toBeNull()
             ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)
                 ->get()->map(fn (DocumentRoutingEvent $event) => data_get($event->metadata, 'action_key'))->all())->toBe(['receive_at_penro_records'])
             ->and($report->fresh()->routingEvents()->exists())->toBeFalse()
             ->and($afterReceipt['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
-            ->and(collect($afterReceipt['allowed_actions'])->pluck('key'))->toContain('forward_to_office_penro');
+            ->and(collect($afterReceipt['allowed_actions'])->pluck('key'))->toContain('forward_to_office_penro')
+            ->and($receiptRow['submission_status'])->toBe('Pending Regional Endorsement')
+            ->and($receiptRow['cenro_release_applicable'])->toBeFalse()
+            ->and($receiptRow['date_report_released_cenro'])->toBeNull()
+            ->and($receiptRow['date_received_penro'])->toBe($storedReceiptDate);
 
         $this->actingAs($penroRecords)->post(route('submission-tracking.internal-routing', [
             'conservation', $report->id, PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
@@ -1114,6 +1660,7 @@ test('PAMB review uses the correct Chief for the routing context', function (): 
         'mov_file_path' => 'conservation-report-movs/cenro-review.pdf',
         'mov_processing_status' => PambMovProcessingService::SUBMITTED_FOR_REVIEW,
     ]);
+    pambReceiveAtCenroChief($cenroReport, $focal, $cenroChief);
     $directArea = ProtectedArea::create([
         'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary',
         'short_name' => 'MHRWS',
@@ -1302,6 +1849,11 @@ test('PAMB negative authority matrix denies cross-category operations', function
         'date_received_penro' => '2026-08-11',
     ]);
     $pamoReport = pambReport($pamo, ['protected_area_id' => $area->id]);
+    pambReceiveAtCenroChief($reviewReport, $cenroFocal, $cenroChief);
+    pambReceiveAtCenroChief($readyReport, $cenroFocal, $cenroChief);
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    $routing->transition($readyReport->fresh(), 'conservation', 'forward_to_cenro_records', $cenroChief->id);
+    $routing->transition($readyReport->fresh(), 'conservation', 'receive_at_cenro_records', $cenroRecords->id);
     $access = app(\App\Services\SubmissionTracking\PambSubmissionAccessService::class);
 
     expect($access->canPerformForSubmission($cenroChief, 'review', $reviewReport))->toBeTrue()

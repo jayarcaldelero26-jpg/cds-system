@@ -10,6 +10,7 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\DocumentRoutingPresenter;
 use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
+use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -48,6 +49,38 @@ function detailsProjectionReport(string $workflow, User $owner): ConservationRep
         'created_by' => $owner->id, 'updated_by' => $owner->id,
     ]);
 }
+
+test('PAMB Full Details receive business dates only after their routing milestones', function (string $workflow): void {
+    $focal = detailsProjectionActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = detailsProjectionReport($workflow, $focal);
+    $report->update([
+        'date_report_released_cenro' => null,
+        'date_received_penro' => null,
+        'date_endorsed_regional' => null,
+    ]);
+
+    $this->actingAs($focal);
+    $pending = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    expect($pending['submission_status'])->toBe('Pending Submission by CENRO')
+        ->and($pending['date_report_released_cenro'])->toBeNull()
+        ->and($pending['date_received_penro'])->toBeNull()
+        ->and($pending['date_endorsed_regional'])->toBeNull()
+        ->and($pending['cenro_release_applicable'])->toBeTrue()
+        ->and($report->fresh()->getRawOriginal('date_report_released_cenro'))->toBeNull()
+        ->and($report->fresh()->getRawOriginal('date_received_penro'))->toBeNull()
+        ->and($report->fresh()->getRawOriginal('date_endorsed_regional'))->toBeNull();
+
+    $report->update([
+        'date_report_released_cenro' => '2026-09-01',
+        'date_received_penro' => '2026-09-02',
+        'date_endorsed_regional' => '2026-09-05',
+    ]);
+    $completed = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    expect($completed['submission_status'])->toBe('Completed')
+        ->and($completed['date_report_released_cenro'])->toBe('2026-09-01')
+        ->and($completed['date_received_penro'])->toBe('2026-09-02')
+        ->and($completed['date_endorsed_regional'])->toBe('2026-09-05');
+})->with(['regular_pamb', 'special_pamb', 'twc_meetings']);
 
 test('a PENRO correction keeps its real current step and cannot reuse later checkpoints from the preceding cycle', function (string $workflow): void {
     $focal = detailsProjectionActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
@@ -157,8 +190,7 @@ test('approved legacy MOV release ownership does not replace canonical focal cus
         ->has('workspaceQueues.incoming', fn (Assert $rows) => $rows->where('0.source', 'conservation')->where('0.source_id', $report->id))
         ->where('trackingContext.selected_record.pamb_action_flags.can_release', false));
     $this->actingAs($records)->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $report->id]))->assertOk()->assertInertia(fn (Assert $page) => $page
-        ->where('trackingContext.selected_record.pamb_action_flags.can_release', true)
-        ->where('trackingContext.selected_record.can_transition', true));
+        ->where('trackingContext.selected_record.pamb_action_flags.can_release', false));
 
     $eventCount = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count();
     $this->actingAs($chief)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])->assertForbidden();
@@ -181,6 +213,18 @@ test('approved legacy MOV release ownership does not replace canonical focal cus
 
     $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $report->id, 'forward_to_cenro_chief']), ['stage' => 'forward_to_cenro_chief'])
         ->assertRedirect()->assertSessionHasErrors('stage');
-    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(1)
-        ->and($pambAccess->canPerformForSubmission($records, 'release', $report->fresh()))->toBeTrue();
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(1);
+
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
+    $routing->transition($report->fresh(), 'conservation', 'forward_to_cenro_records', $chief->id);
+    $this->actingAs($records)->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $report->id]))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('trackingContext.selected_record.pamb_action_flags.can_release', false)
+        ->where('trackingContext.selected_record.routing.actions.0.key', 'receive_at_cenro_records'));
+    expect($pambAccess->canPerformForSubmission($records, 'release', $report->fresh()))->toBeFalse();
+
+    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_records', $records->id);
+    $this->actingAs($records)->get(route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $report->id]))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('trackingContext.selected_record.pamb_action_flags.can_release', true)
+        ->where('trackingContext.selected_record.can_transition', true));
+    expect($pambAccess->canPerformForSubmission($records, 'release', $report->fresh()))->toBeTrue();
 })->with(['regular_pamb', 'special_pamb', 'twc_meetings']);

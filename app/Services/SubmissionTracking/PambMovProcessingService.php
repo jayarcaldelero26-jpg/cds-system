@@ -3,6 +3,7 @@
 namespace App\Services\SubmissionTracking;
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\PambMovReviewEvent;
 use App\Models\User;
 use App\Services\BusinessCalendarService;
@@ -236,14 +237,18 @@ final class PambMovProcessingService
         });
     }
 
-    public function review(ConservationReportSubmission $submission, User $actor, string $decision, ?string $remarks = null): void
+    public function review(ConservationReportSubmission $submission, User $actor, string $decision, ?string $remarks = null, ?callable $createCorrectionReturn = null): ?DocumentRoutingEvent
     {
         $this->assertScoped($submission, $actor);
         abort_unless($this->access->canPerformForSubmission($actor, 'review', $submission), 403);
         if (! in_array($decision, [self::READY_FOR_RELEASE, self::NEEDS_CORRECTION], true)) throw ValidationException::withMessages(['decision' => 'Choose Ready for Release or Needs Correction.']);
         if ($decision === self::NEEDS_CORRECTION && blank(trim((string) $remarks))) throw ValidationException::withMessages(['remarks' => 'Remarks are required when correction is needed.']);
+        if ($decision === self::NEEDS_CORRECTION && $createCorrectionReturn === null) {
+            throw ValidationException::withMessages(['decision' => 'A Needs Correction verdict and its custody return must be submitted together.']);
+        }
 
-        DB::transaction(function () use ($submission, $actor, $decision, $remarks): void {
+        $returnEvent = null;
+        DB::transaction(function () use ($submission, $actor, $decision, $remarks, $createCorrectionReturn, &$returnEvent): void {
             $locked = ConservationReportSubmission::query()->with('protectedArea')->lockForUpdate()->findOrFail($submission->id);
             $this->assertScoped($locked, $actor);
             abort_unless($this->access->canPerformForSubmission($actor, 'review', $locked), 403);
@@ -254,8 +259,28 @@ final class PambMovProcessingService
             $cleanRemarks = $remarks ? trim($remarks) : null;
             $locked->update(['mov_processing_status' => $decision, 'mov_reviewed_at' => now(), 'mov_reviewed_by' => $actor->id, 'mov_review_remarks' => $cleanRemarks, 'updated_by' => $actor->id]);
             $locked->movReviewEvents()->create(['event_key' => $decision, 'remarks' => $cleanRemarks, 'recorded_by' => $actor->id]);
-            $this->auditLogs->record('submission_tracking', $decision === self::READY_FOR_RELEASE ? 'PAMB MOV Marked Ready for Release' : 'PAMB MOV Returned for Correction', ConservationReportSubmission::class, $locked->id, 'PAMB', 'CENRO CDS Chief recorded a MOV/report review decision.', ['event_key' => $decision, 'remarks' => $cleanRemarks], $actor->id);
+            $this->auditLogs->record(
+                'submission_tracking',
+                $decision === self::READY_FOR_RELEASE ? 'PAMB MOV Marked Ready for Release' : 'PAMB MOV Returned for Correction',
+                ConservationReportSubmission::class,
+                $locked->id,
+                'PAMB',
+                $decision === self::READY_FOR_RELEASE
+                    ? 'CENRO CDS Chief recorded the MOV/report review decision.'
+                    : 'CENRO CDS Chief recorded the MOV correction verdict and custody return.',
+                ['event_key' => $decision, 'remarks' => $cleanRemarks],
+                $actor->id,
+            );
+
+            if ($decision === self::NEEDS_CORRECTION) {
+                $returnEvent = $createCorrectionReturn($locked, $cleanRemarks);
+                if (! $returnEvent instanceof DocumentRoutingEvent) {
+                    throw new \LogicException('The MOV correction return did not produce a custody event.');
+                }
+            }
         });
+
+        return $returnEvent;
     }
 
     /** @return array<string, mixed> */

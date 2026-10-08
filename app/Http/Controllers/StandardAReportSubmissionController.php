@@ -112,7 +112,7 @@ abstract class StandardAReportSubmissionController extends Controller
             'mov.max' => 'The report attachment must not exceed 100 MB.',
         ]);
         $this->organization->assertCanUseOptionalProtectedArea($request->user(), $validated['protected_area_id'] ?? null);
-        $validated = $this->prepareDateConductedPayload($request, $validated);
+        $validated = $this->prepareDateConductedPayload($request, $validated, $submission);
         unset($validated['mov']);
         $validated['updated_by'] = $request->user()?->id;
         if ($request->hasFile('mov')) {
@@ -192,8 +192,16 @@ abstract class StandardAReportSubmissionController extends Controller
         return $data;
     }
 
-    private function prepareDateConductedPayload(Request $request, array $validated): array
+    private function prepareDateConductedPayload(Request $request, array $validated, ?Model $existing = null): array
     {
+        $dates = app(\App\Services\ActualActivityDateGuard::class);
+        if ($this->dateConductedRangesEnabled) {
+            $dates->assertDateConductedRanges($request->input('date_conducted_ranges'), $existing?->getAttribute('date_conducted_ranges'), $existing?->getAttribute('date_conducted'));
+        } else {
+            $dates->assertNotFuture($validated['date_conducted'] ?? null, 'date_conducted', 'Date Conducted', $existing?->getAttribute('date_conducted'));
+        }
+        $dates->assertNotFuture($validated['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $existing?->getAttribute('date_accomplished'));
+
         return $this->dateConductedRangesEnabled ? $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')) : $validated;
     }
 
