@@ -263,6 +263,37 @@ final class OrganizationalAccessService
         $officeCode = $this->officeCode($user->office_designated);
         if ($officeCode === null) return $query->whereRaw('1 = 0');
         $table = $query->getModel()->getTable();
+        $scope = $this->submissionTrackingProtectedAreaScope($user, $officeCode);
+        $assignedProtectedAreaIds = $scope['assigned'];
+        $fallbackProtectedAreaIds = $scope['fallback'];
+        return $query->where(function ($scoped) use ($table, $column, $assignedProtectedAreaIds, $fallbackProtectedAreaIds): void {
+            if ($assignedProtectedAreaIds !== []) $scoped->whereIn($table.'.'.$column, $assignedProtectedAreaIds);
+            if ($fallbackProtectedAreaIds !== []) {
+                $method = $assignedProtectedAreaIds === [] ? 'whereIn' : 'orWhereIn';
+                $scoped->{$method}($table.'.'.$column, $fallbackProtectedAreaIds);
+            }
+            if ($assignedProtectedAreaIds === [] && $fallbackProtectedAreaIds === []) $scoped->whereRaw('1 = 0');
+        });
+    }
+
+    /**
+     * Reuse identical live PA assignment lookups only within one read-only
+     * Submission Tracking index request. Other routes and requests always
+     * resolve their current scope independently.
+     *
+     * @return array{assigned:list<int>, fallback:list<int>}
+     */
+    private function submissionTrackingProtectedAreaScope(User $user, string $officeCode): array
+    {
+        $request = app('request');
+        $cacheable = $request->isMethod('GET')
+            && $request->route()?->getName() === 'submission-tracking.index';
+        $cacheKey = 'cds.submission_tracking_pa_scope.'.hash('sha256', (string) $user->getAuthIdentifier().'|'.$officeCode);
+
+        if ($cacheable && is_array($cached = $request->attributes->get($cacheKey))) {
+            return $cached;
+        }
+
         $assignedProtectedAreaIds = ProtectedAreaOfficeAssignment::query()
             ->join('organizational_offices as oo', 'oo.id', '=', 'protected_area_office_assignments.organizational_office_id')
             ->where('protected_area_office_assignments.assignment_type', 'supervising')
@@ -278,15 +309,16 @@ final class OrganizationalAccessService
             ->map(fn (mixed $id): int => (int) $id)
             ->all();
         $fallbackProtectedAreaIds = array_values(array_diff($this->fallbackProtectedAreaIdsForOffice($user->office_designated), $assignedAnywhereIds));
-        return $query->where(function ($scoped) use ($table, $column, $assignedProtectedAreaIds, $fallbackProtectedAreaIds): void {
-            if ($assignedProtectedAreaIds !== []) $scoped->whereIn($table.'.'.$column, $assignedProtectedAreaIds);
-            if ($fallbackProtectedAreaIds !== []) {
-                $method = $assignedProtectedAreaIds === [] ? 'whereIn' : 'orWhereIn';
-                $scoped->{$method}($table.'.'.$column, $fallbackProtectedAreaIds);
-            }
-            if ($assignedProtectedAreaIds === [] && $fallbackProtectedAreaIds === []) $scoped->whereRaw('1 = 0');
-        });
+
+        $scope = [
+            'assigned' => $assignedProtectedAreaIds,
+            'fallback' => $fallbackProtectedAreaIds,
+        ];
+        if ($cacheable) $request->attributes->set($cacheKey, $scope);
+
+        return $scope;
     }
+
     public function canAccessProtectedAreaRecord(?User $user, Model $record): bool
     {
         if ($record instanceof ProtectedArea) return $this->canAccessProtectedArea($user, $record->getKey());

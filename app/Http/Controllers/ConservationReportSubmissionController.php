@@ -54,7 +54,7 @@ class ConservationReportSubmissionController extends Controller
 
         $formScope = app(SubmissionFormScopeService::class)->options($request->user());
 
-        return Inertia::render('ConservationReports/Index', [
+        $response = Inertia::render('ConservationReports/Index', [
             'workflow' => $config,
             'submissions' => $submissions,
             'protectedAreas' => $this->pambAccess->isPamo($request->user())
@@ -63,6 +63,8 @@ class ConservationReportSubmissionController extends Controller
             ...$formScope,
             'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type']),
         ]);
+
+        return $response;
     }
 
     public function store(Request $request, string $workflow): RedirectResponse

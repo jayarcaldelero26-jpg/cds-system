@@ -10,10 +10,21 @@ import { viteReactInterop } from './helpers/viteReactInterop.mjs';
 import { timelinePresentation } from '../../resources/js/Utils/submissionTrackingPresentation.js';
 
 let server;
+const inertiaRouterBridgeId = '\0test-inertia-router';
+const inertiaRouterBridge = {
+    name: 'test-inertia-router-bridge',
+    resolveId(source) {
+        return source === 'virtual:test-inertia-router' ? inertiaRouterBridgeId : null;
+    },
+    load(id) {
+        return id === inertiaRouterBridgeId ? 'export { router } from "@inertiajs/react";' : null;
+    },
+};
+
 const load = async (path) => {
     server ??= await createServer({
         configFile: false,
-        plugins: [viteReactInterop(), react()],
+        plugins: [inertiaRouterBridge, viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
         server: { middlewareMode: true },
         appType: 'custom',
@@ -81,8 +92,11 @@ test('disabled and submitting settings controls render disabled, while view-only
 
 test('RoutingWorkflow page keeps the acknowledged version across consecutive successful saves and preserves edits on validation errors', async () => {
     const { default: RoutingWorkflow } = await load('Pages/Admin/Settings/RoutingWorkflow.jsx');
-    const inertia = await import('@inertiajs/react');
-    const originalPut = inertia.router.put;
+    // Read the router through the same Vite SSR graph as the page; a Node-side
+    // import creates a separate Inertia singleton and cannot intercept useForm.
+    const { router } = await server.ssrLoadModule('virtual:test-inertia-router');
+    const originalPut = router.put;
+    const originalVisit = router.visit;
     const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
     const originalDispatcher = internals.H;
     const originalWindow = globalThis.window;
@@ -132,6 +146,8 @@ test('RoutingWorkflow page keeps the acknowledged version across consecutive suc
     const submit = async (panel, response) => {
         panel.props.onSave();
         const visit = visits.at(-1);
+        assert.ok(visit, 'the PUT must be captured by the test router');
+        assert.equal(visit.method, 'put');
         assert.equal(visit.url, '/settings/routing-workflow');
         visit.options.onBefore?.({});
         visit.options.onStart?.({});
@@ -141,10 +157,15 @@ test('RoutingWorkflow page keeps the acknowledged version across consecutive suc
         return visit;
     };
 
-    inertia.router.put = (url, data, options) => {
-        visits.push({ url, data: structuredClone(data), options });
+    router.put = (url, data, options) => {
+        visits.push({ method: 'put', url, data: structuredClone(data), options });
     };
-    globalThis.window = { setTimeout: () => 1, clearTimeout() {} };
+    router.visit = () => { throw new Error('Unexpected Inertia visit escaped the PUT test spy.'); };
+    globalThis.window = {
+        location: new URL('http://cds-system.test/settings/routing-workflow'),
+        setTimeout: () => 1,
+        clearTimeout() {},
+    };
 
     try {
         let panel = render({ available: true, version: 1, office_penro_enabled: true, penro_tsd_chief_enabled: true });
@@ -164,7 +185,16 @@ test('RoutingWorkflow page keeps the acknowledged version across consecutive suc
         await submit(panel, null);
         panel = render({ available: true, version: 3, office_penro_enabled: true, penro_tsd_chief_enabled: true });
 
-        assert.deepEqual(visits.map(visit => visit.data.expected_version), [1, 2, 3]);
+        assert.deepEqual(visits.map(({ method, url }) => ({ method, url })), [
+            { method: 'put', url: '/settings/routing-workflow' },
+            { method: 'put', url: '/settings/routing-workflow' },
+            { method: 'put', url: '/settings/routing-workflow' },
+        ]);
+        assert.deepEqual(visits.map(visit => visit.data), [
+            { expected_version: 1, office_penro_enabled: false, penro_tsd_chief_enabled: true, reason: '' },
+            { expected_version: 2, office_penro_enabled: true, penro_tsd_chief_enabled: true, reason: '' },
+            { expected_version: 3, office_penro_enabled: true, penro_tsd_chief_enabled: false, reason: 'Validation recovery remains available' },
+        ]);
         assert.deepEqual(panel.props.data, {
             expected_version: 3,
             office_penro_enabled: true,
@@ -173,7 +203,8 @@ test('RoutingWorkflow page keeps the acknowledged version across consecutive suc
         });
     } finally {
         internals.H = originalDispatcher;
-        inertia.router.put = originalPut;
+        router.put = originalPut;
+        router.visit = originalVisit;
         if (originalWindow === undefined) delete globalThis.window;
         else globalThis.window = originalWindow;
     }
