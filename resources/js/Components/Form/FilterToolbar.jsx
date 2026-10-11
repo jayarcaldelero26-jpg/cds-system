@@ -21,9 +21,8 @@ export default function FilterToolbar({ label = 'Filters', chips = [], onClear, 
             setStyle({ position: 'fixed', left, top, width, maxHeight: `min(80vh, ${window.innerHeight - top - margin}px)` });
         };
         const keydown = event => {
-            if (event.key === 'Escape') {
-                event.preventDefault(); setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus());
-            }
+            if (event.key !== 'Escape' || event.defaultPrevented) return;
+            event.preventDefault(); setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus());
         };
         const pointerdown = event => {
             const target = event.target;

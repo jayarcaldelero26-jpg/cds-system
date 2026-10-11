@@ -123,13 +123,13 @@ class ComplianceAlertDeliveryService
     /** @param Collection<int, OverdueReport> $reports @return array{deliveries: Collection<int, array<string,mixed>>, unmapped: Collection<int, OverdueReport>} */
     public function deliveryPlan(Collection $reports, ?string $alertType = null): array
     {
-        return $this->recipients->plans($reports, $alertType);
+        return $this->recipients->plans($this->reports->withoutHistoricalOrigins($reports), $alertType);
     }
 
     /** @param Collection<int, OverdueReport> $reports @return Collection<int, array<string,mixed>> */
     public function recipientReadiness(Collection $reports, ?string $alertType = null): Collection
     {
-        return $this->recipients->readiness($reports, $alertType);
+        return $this->recipients->readiness($this->reports->withoutHistoricalOrigins($reports), $alertType);
     }
 
     /**
@@ -236,7 +236,10 @@ class ComplianceAlertDeliveryService
     {
         return $deliveries->map(function (array $delivery) use ($type, $user, $alertType): ?ComplianceNotificationRun {
             $recipient = $delivery['recipient'];
-            $reports = $delivery['reports'];
+            // Origins can be written after a candidate was read and planned.
+            // Recheck immediately before creating the memorandum/run or calling
+            // the mail transport so stale candidates cannot be dispatched.
+            $reports = $this->reports->withoutHistoricalOrigins($delivery['reports']);
             if ($reports->isEmpty()) {
                 return null;
             }

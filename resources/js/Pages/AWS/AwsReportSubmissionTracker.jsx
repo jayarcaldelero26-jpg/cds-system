@@ -11,6 +11,7 @@ export default function AwsReportSubmissionTracker({ records = [], pagination, p
         protectedAreasByOffice={protectedAreasByOffice}
         filters={filters}
         moduleLabel="Automated Weather Station"
+        historicalSource="aws"
         submissionRoutes={{
             index: route('aws.index'),
             store: route('aws.store'),

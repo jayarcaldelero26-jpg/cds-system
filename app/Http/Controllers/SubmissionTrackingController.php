@@ -106,6 +106,7 @@ class SubmissionTrackingController extends Controller
 
     public function transition(Request $request, string $source, int $record, string $stage): RedirectResponse
     {
+        $this->tracking->assertNotHistoricalSourceRecord($source, $record);
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         abort_unless(app(OrganizationalAccessService::class)->canUseSubmissionTrackingSource($request->user(), $source, $sourceConfig['ability']), 403);
@@ -215,6 +216,7 @@ class SubmissionTrackingController extends Controller
 
     public function internalRouting(Request $request, string $source, int $record, string $stage): RedirectResponse
     {
+        $this->tracking->assertNotHistoricalSourceRecord($source, $record);
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         abort_unless(app(OrganizationalAccessService::class)->canUseSubmissionTrackingSource($request->user(), $source, $sourceConfig['ability']), 403);
@@ -314,6 +316,7 @@ class SubmissionTrackingController extends Controller
 
     public function submitMovForReview(Request $request, string $source, int $record): RedirectResponse
     {
+        $this->tracking->assertNotHistoricalSourceRecord($source, $record);
         abort_unless($source === 'conservation', 404);
         $submission = \App\Models\ConservationReportSubmission::query()->with('protectedArea')->findOrFail($record);
         $this->pambMov->submit($submission, $request->user());
@@ -323,6 +326,7 @@ class SubmissionTrackingController extends Controller
 
     public function reviewMov(Request $request, string $source, int $record): RedirectResponse
     {
+        $this->tracking->assertNotHistoricalSourceRecord($source, $record);
         abort_unless($source === 'conservation', 404);
         $attachmentRules = $request->input('decision') === PambMovProcessingService::NEEDS_CORRECTION
             ? ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:102400']
@@ -390,6 +394,7 @@ class SubmissionTrackingController extends Controller
 
     public function correctRouting(Request $request, string $source, int $record): RedirectResponse
     {
+        $this->tracking->assertNotHistoricalSourceRecord($source, $record);
         $sourceConfig = $this->tracking->source($source);
         abort_unless($sourceConfig, 404);
         $data = $request->validate([

@@ -479,7 +479,7 @@ final class SubmissionTrackingService
     private function genericQueue(Collection $records, string $queue): Collection
     {
         $keys = match ($queue) {
-            'pamo_origin' => ['forward_from_pamo'],
+            'pamo_origin' => ['forward_from_pamo', 'forward_from_pamo_to_cenro_focal'],
             'cenro_focal' => ['forward_to_cenro_chief'],
             'cenro_correction' => ['receive_correction', 'forward_to_cenro_chief'],
             'cenro_chief' => ['receive_at_cenro_chief', 'forward_to_cenro_records'],
@@ -741,6 +741,7 @@ final class SubmissionTrackingService
         $source = $this->source($sourceKey);
         if (! $source) return false;
         $record = $source['model']::query()->findOrFail($id);
+        $this->assertNotHistorical($record);
         $this->genericRouting->assertCanView($record, $sourceKey, auth()->user());
         return $this->usesGenericRecord($sourceKey, $record);
     }
@@ -751,6 +752,7 @@ final class SubmissionTrackingService
         $source = $this->source($sourceKey);
         abort_unless($source, 404);
         $record = $source['model']::query()->findOrFail($id);
+        $this->assertNotHistorical($record);
         $this->genericRouting->assertCanView($record, $sourceKey, auth()->user());
         abort_unless($this->usesGenericRecord($sourceKey, $record), 422);
         return $this->genericRouting->actionKeys($record, $sourceKey, auth()->user());
@@ -763,6 +765,7 @@ final class SubmissionTrackingService
         $recordQuery = $source['model']::query();
         if ($sourceKey === 'conservation') $recordQuery->with('protectedArea');
         $record = $recordQuery->findOrFail($id);
+        $this->assertNotHistorical($record);
         if ($sourceKey === 'engp' && $user = auth()->user()) {
             abort_unless($this->organization->canViewDevelopmentRecord($user, $record), 403);
         }
@@ -823,6 +826,7 @@ final class SubmissionTrackingService
 
         DB::transaction(function () use ($record, $stage, $userId): void {
             $locked = ConservationReportSubmission::query()->lockForUpdate()->findOrFail($record->getKey());
+            $this->assertNotHistorical($locked);
             if ($this->stage($locked) !== $stage) {
                 throw ValidationException::withMessages(['stage' => 'This PAMB record is no longer awaiting that action.']);
             }
@@ -849,6 +853,7 @@ final class SubmissionTrackingService
         }
 
         $record = ConservationReportSubmission::query()->with('protectedArea')->findOrFail($id);
+        $this->assertNotHistorical($record);
         $compatibility = app(ConservationMeetingRoutingCompatibilityAdapter::class);
         if ($compatibility->applies($record)) {
             $action = $compatibility->actionForLegacyStage($record, $stageKey);
@@ -871,6 +876,15 @@ final class SubmissionTrackingService
         $model = $query->getModel();
         $schema = Schema::connection($model->getConnectionName());
         $table = $model->getTable();
+
+        // Historical encodings are source-module records, not submissions.
+        // This predicate is shared by tracking lists, queue snapshots, filter
+        // options, aggregate counts, and receipt-date consumers.
+        if ($this->columnExists($schema, $table, 'is_historical')) {
+            $query->where(function ($historical) use ($table): void {
+                $historical->whereNull($table.'.is_historical')->orWhere($table.'.is_historical', false);
+            });
+        }
 
         if ($withRelations) {
             if ($key !== 'engp') $query->with('protectedArea:id,name,short_name');
@@ -1470,8 +1484,27 @@ final class SubmissionTrackingService
      */
     public function assertMutable(Model $record): void
     {
+        $this->assertNotHistorical($record);
         if ($this->isRoutingComplete($record)) {
             throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
+        }
+    }
+
+    /** Reject direct IDs and action URLs for records created through historical encoding. */
+    public function assertNotHistoricalSourceRecord(string $sourceKey, int $id): void
+    {
+        $source = $this->source($sourceKey);
+        abort_unless($source, 404);
+        $record = $source['model']::query()->findOrFail($id);
+        $this->assertNotHistorical($record);
+    }
+
+    private function assertNotHistorical(Model $record): void
+    {
+        if ((bool) $record->getAttribute('is_historical')) {
+            throw ValidationException::withMessages([
+                'submission' => 'Historically encoded records do not use live submission tracking or routing actions.',
+            ]);
         }
     }
 

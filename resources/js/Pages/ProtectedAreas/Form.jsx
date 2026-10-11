@@ -9,11 +9,12 @@ import PageHeader from '../../Components/PageHeader';
 import PrimaryButton from '../../Components/PrimaryButton';
 import Button from '../../Components/Button';
 import ConfirmDialog from '../../Components/ConfirmDialog';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 export const protectedAreaCreateCardSurface = isEdit => !isEdit;
 
 
-export default function Form({ title, protectedArea, officeOptions = [], modal = false, onClose }) {
+export default function Form({ title, protectedArea, officeOptions = [], pamoOfficeOptions = [], modal = false, open = true, onClose, onExited }) {
   const isEdit = Boolean(protectedArea);
   const { auth } = usePage().props;
 
@@ -41,6 +42,7 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
     core_zone_hectares: protectedArea?.core_zone_hectares || '',
     buffer_zone_hectares: protectedArea?.buffer_zone_hectares || '',
     pamo: protectedArea?.pamo || '',
+    pamo_office_id: protectedArea?.pamo_office_id || '',
     pasu: protectedArea?.pasu || '',
     supervising_office_id: protectedArea?.supervising_office_id || '',
     year_established: protectedArea?.year_established || '',
@@ -54,6 +56,16 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deletingRecord, setDeletingRecord] = useState(false);
   const deleteRequestInFlight = useRef(false);
+  const overlayRef = useRef(null);
+  const modalPanelRef = useRef(null);
+  const submittingRef = useRef(submitting);
+  submittingRef.current = submitting;
+  const { present: modalPresent, phase: modalPhase, onTransitionEnd: modalTransitionEnd } = useModalMotion(Boolean(modal && open && !isEdit), {
+    onClose: () => { if (!submittingRef.current) onClose?.(); },
+    onExited,
+    panelRef: modalPanelRef,
+    layerRef: overlayRef,
+  });
 
   const PSGC_REGION_NAME = 'Region XI (Davao Region)';
   const PSGC_BASE_URL = 'https://psgc.cloud/api/v2';
@@ -494,7 +506,19 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
                                     </div>
                                 </div>
                             </div>
-                            <FormField size="sm" id="pamo" label="PAMO" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} />
+                            <div className="sm:col-span-2">
+                                <FloatingSelect size="sm" label="Mapped PAMO office" id="pamo_office_id" value={form.data.pamo_office_id} onChange={(event) => {
+                                    const office = pamoOfficeOptions.find((item) => String(item.id) === event.target.value);
+                                    form.setData((current) => ({ ...current, pamo_office_id: event.target.value, pamo: office?.name || '' }));
+                                }}>
+                                    <option value="">Create a PAMO office identity</option>
+                                    {pamoOfficeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
+                                </FloatingSelect>
+                                {form.data.pamo_office_id
+                                    ? <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">This Protected Area shares the stable office identity with other mapped PAs.</p>
+                                    : <FormField size="sm" id="pamo" label="New PAMO office name" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} className="mt-2" />}
+                                {form.errors.pamo_office_id && <p className="mt-1.5 text-sm text-red-700 dark:text-red-300">{form.errors.pamo_office_id}</p>}
+                            </div>
                             <FormField size="sm" id="pasu" label="PASu" value={form.data.pasu} onChange={(event) => form.setData('pasu', event.target.value)} error={form.errors.pasu} />
                             {select('supervising_office_id', 'Supervising Office',
                                 <><option value="">Select the authoritative office</option>{officeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}{office.office_type === 'penro' ? ' (PENRO-managed)' : ''}</option>)}</>
@@ -562,9 +586,10 @@ export default function Form({ title, protectedArea, officeOptions = [], modal =
 
 
   if (modal && !isEdit) {
+    if (!modalPresent) return null;
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-3 backdrop-blur-sm sm:p-4" role="presentation">
-        <div className="protected-area-modal relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="dialog" aria-modal="true" aria-labelledby="create-protected-area-title">
+      <div ref={overlayRef} data-cds-modal-layer data-motion-state={modalPhase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-3 backdrop-blur-sm sm:p-4" role="presentation">
+        <div ref={modalPanelRef} onTransitionEnd={modalTransitionEnd} data-motion-state={modalPhase} tabIndex={-1} className="cds-modal-motion-panel relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="dialog" aria-modal="true" aria-labelledby="create-protected-area-title">
           <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-6">
             <div>
               <h1 id="create-protected-area-title" className="text-base font-bold text-gray-900 dark:text-white sm:text-lg">Add Protected Area</h1>

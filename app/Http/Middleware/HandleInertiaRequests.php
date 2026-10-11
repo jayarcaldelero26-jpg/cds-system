@@ -20,7 +20,8 @@ class HandleInertiaRequests extends Middleware
 
     public function handle(Request $request, Closure $next)
     {
-        $user = Auth::user();
+        LocalNavigationTrace::markInertiaEntry($request);
+        $user = LocalNavigationTrace::measure($request, 'auth_user_resolution', static fn () => Auth::user());
 
         if ($user && ! $user->is_approved) {
             Auth::guard('web')->logout();
@@ -38,7 +39,10 @@ class HandleInertiaRequests extends Middleware
             return redirect()->route('login')->with('account_inactive', true);
         }
 
-        return LocalNavigationTrace::measure($request, 'inertia_route_pipeline', fn () => parent::handle($request, $next));
+        $response = LocalNavigationTrace::measure($request, 'inertia_route_pipeline', fn () => parent::handle($request, $next));
+        LocalNavigationTrace::markInertiaExit($request);
+
+        return $response;
     }
 
     public function share(Request $request): array
@@ -57,10 +61,8 @@ class HandleInertiaRequests extends Middleware
         $canBrowseConservation = $organization->canViewConservationModules($user);
         $canBrowseDevelopment = $organization->canViewDevelopmentModules($user);
         $can = static fn (?string $ability): bool => $isAdmin || ($user?->can($ability) ?? false);
-        $canViewPambWorkflow = ($canBrowseConservation && $can('technical-reports.view')) || ($user
-            && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
-            && $user->can('technical-reports.view')
-            && $organization->canAccessProtectedArea($user, $user->protected_area_id));
+        $canViewPambWorkflow = ($canBrowseConservation && $can('technical-reports.view'))
+            || $organization->canViewPamoPilotWorkflow($user);
 
         // Susiha ang section sa user ('CDS' o 'MES')
         $userSection = $user?->section ?? '';
@@ -78,6 +80,10 @@ class HandleInertiaRequests extends Middleware
 
         $sharedProps = [
             ...parent::share($request),
+            'demoDataNotice' => (bool) config('app.demo_data_notice') ? [
+                'label' => 'DEMO DATA',
+                'message' => 'Synthetic Office TAT records in an isolated preview database.',
+            ] : null,
             'auth' => [
                 'user' => $user ? [
                     'id' => $user->id,
@@ -110,6 +116,11 @@ class HandleInertiaRequests extends Middleware
                 ],
                 'canViewPambWorkflow' => (bool) $canViewPambWorkflow,
                 'canManageAdministration' => $isAdmin || (!$isMes && $can('compliance-alerts.manage')),
+                'canViewOfficeTat' => $user?->can('office-tat.view') ?? false,
+                'canConfigureOfficeTat' => $user?->can('office-tat.configure') ?? false,
+                'canViewHistoricalReports' => $user?->can('historical-reports.view') ?? false,
+                'canEncodeHistoricalReports' => $user?->can('historical-reports.encode') ?? false,
+                'canAccessAdministrationSection' => $isAdmin || ($user?->can('office-tat.view') ?? false) || (!$isMes && $can('compliance-alerts.manage')),
                 'canCorrectSubmissionRouting' => $isAdmin && ($user?->can('submission-tracking.correct-routing') ?? false),
                 'canAdminRoutingOverride' => $isAdmin && ($user?->can('submission-tracking.admin-override') ?? false),
                 'pambScope' => $user ? [
@@ -194,7 +205,7 @@ class HandleInertiaRequests extends Middleware
                 // Reports (CDS ra)
                 'canViewReports' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('reports.view'),
                 'canViewSubmissionTracking' => $organization->canViewSubmissionTracking($user),
-                'canBrowseConservationModules' => $canBrowseConservation || $canViewPambWorkflow,
+                'canBrowseConservationModules' => $canBrowseConservation,
                 'canBrowseDevelopmentModules' => $canBrowseDevelopment,
                 'canViewComplianceAlerts' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('compliance-alerts.manage'),
                 'canManageComplianceAlerts' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('compliance-alerts.manage'),

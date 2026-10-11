@@ -83,9 +83,43 @@
    its current position a visible, gentle ring pulse. */
 .motion-safe\:animate-pulse { animation: edats-current-stage-pulse 2s ease-in-out infinite; }
 
+.record-type-badge__live-indicator {
+    position: relative;
+    display: inline-flex;
+    width: 12px;
+    height: 12px;
+    flex: 0 0 12px;
+    align-items: center;
+    justify-content: center;
+    color: rgb(22 163 74 / 0.55);
+}
+.record-type-badge__live-indicator::before {
+    position: relative;
+    z-index: 1;
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    background: #16a34a;
+    content: "";
+}
+.record-type-badge__live-indicator::after {
+    position: absolute;
+    inset: 1px;
+    border: 1px solid currentColor;
+    border-radius: 9999px;
+    animation: record-type-live-pulse 1.8s ease-out infinite;
+    content: "";
+}
+
+@keyframes record-type-live-pulse {
+    0% { opacity: 0.62; transform: scale(0.65); }
+    75%, 100% { opacity: 0; transform: scale(1.28); }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .edats-current-stage-pulse { animation: none; }
     .edats-current-stage-marker__ripple { animation: none; opacity: 0.16; transform: translate(-50%, -50%) scale(1); }
+    .record-type-badge__live-indicator::after { animation: none; opacity: 0.22; transform: scale(1); }
 }
 
 @keyframes edats-tracking-status-pulse {
@@ -642,9 +676,32 @@ select:not([multiple]):disabled {
     to { opacity: 0; transform: translateY(5px); }
 }
 .cds-filter-panel-exit { animation: cds-filter-panel-out 240ms ease-in both; pointer-events: none; }
+:root {
+    --cds-modal-motion-duration: 240ms;
+    --cds-modal-motion-enter-easing: ease-out;
+    --cds-modal-motion-exit-easing: ease-in;
+    --cds-modal-motion-offset: 5px;
+    --cds-modal-motion-scale: 0.99;
+}
+.cds-modal-motion-backdrop { transition: opacity var(--cds-modal-motion-duration) var(--cds-modal-motion-enter-easing); }
+.cds-modal-motion-panel { transition: opacity var(--cds-modal-motion-duration) var(--cds-modal-motion-enter-easing), transform var(--cds-modal-motion-duration) var(--cds-modal-motion-enter-easing); }
+.cds-modal-motion-backdrop[data-motion-state="entering"],
+.cds-modal-motion-backdrop[data-motion-state="closing"] { opacity: 0; }
+.cds-modal-motion-panel[data-motion-state="entering"],
+.cds-modal-motion-panel[data-motion-state="closing"] { opacity: 0; transform: translateY(var(--cds-modal-motion-offset)) scale(var(--cds-modal-motion-scale)); }
+.cds-modal-motion-panel[data-motion-state="closing"] { pointer-events: none; transition-timing-function: var(--cds-modal-motion-exit-easing); }
+@keyframes cds-modal-motion-enter {
+    from { opacity: 0; transform: translateY(var(--cds-modal-motion-offset)) scale(var(--cds-modal-motion-scale)); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes cds-modal-backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
+.cds-modal-motion-panel:not([data-motion-state]) { animation: cds-modal-motion-enter var(--cds-modal-motion-duration) var(--cds-modal-motion-enter-easing) both; }
+.cds-modal-motion-backdrop:not([data-motion-state]) { animation: cds-modal-backdrop-enter var(--cds-modal-motion-duration) var(--cds-modal-motion-enter-easing) both; }
 @media (prefers-reduced-motion: reduce) {
     .cds-filter-panel-enter,
     .cds-filter-panel-exit { animation: none; }
+    .cds-modal-motion-backdrop,
+    .cds-modal-motion-panel { transition: none; animation: none !important; }
 }
 
 .dark .cds-filter-option { color: #e5e7eb; }

@@ -1,11 +1,15 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { inlinePreviewType, startProtectedPreview } from '@/Utils/protectedDocumentPreview.mjs';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 const PdfDocumentViewer = lazy(() => import('@/Components/SubmissionTracking/PdfDocumentViewer'));
 
 export default function DocumentPreviewDialog({ open, row, accountKey = null, onClose }) {
     const [preview, setPreview] = useState(null);
     const [retry, setRetry] = useState(0);
+    const panelRef = useRef(null);
+    const overlayRef = useRef(null);
     const attachment = row?.current_document;
     const canPreview = attachment?.can_preview === true;
     const url = attachment?.preview_url || attachment?.url;
@@ -25,21 +29,21 @@ export default function DocumentPreviewDialog({ open, row, accountKey = null, on
         return task.dispose;
     }, [open, url, inline, requestKey, canPreview]);
 
-    useEffect(() => {
-        if (!open) return undefined;
-        const closeOnEscape = event => event.key === 'Escape' && onClose?.();
-        document.addEventListener('keydown', closeOnEscape);
-        return () => document.removeEventListener('keydown', closeOnEscape);
-    }, [open, onClose]);
+    const { present, phase, onTransitionEnd } = useModalMotion(open, {
+        onClose,
+        panelRef,
+        layerRef: overlayRef,
+        initialFocusSelector: '[data-preview-close]',
+    });
 
-    if (!open) return null;
+    if (!present) return null;
 
     const current = preview?.requestKey === requestKey ? preview : null;
     const previewReady = current?.status === 'ready';
     const previewError = current?.status === 'error';
 
-    return <div className="fixed inset-0 z-[70] flex items-center justify-center bg-gray-950/70 p-4 backdrop-blur-xs" role="presentation">
-        <div role="dialog" aria-modal="true" aria-label="Document Preview" className="flex h-[92vh] max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+    return typeof document !== 'undefined' ? createPortal(<div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-gray-950/70 p-4 backdrop-blur-xs" role="presentation">
+        <div ref={panelRef} onTransitionEnd={onTransitionEnd} role="dialog" aria-modal="true" aria-label="Document Preview" tabIndex={-1} data-motion-state={phase} className="cds-modal-motion-panel flex h-[92vh] max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <div className="flex items-start justify-between gap-4 border-b border-gray-200 px-4 py-3 dark:border-gray-700">
                 <div className="min-w-0"><h2 className="text-base font-bold text-gray-900 dark:text-white">Document Preview</h2><p className="mt-1 truncate text-xs text-gray-500 dark:text-gray-400">{attachment?.name || 'MOV / report attachment'}</p></div>
             </div>
@@ -54,7 +58,7 @@ export default function DocumentPreviewDialog({ open, row, accountKey = null, on
                         : <p role="status" className="rounded-xl border border-gray-200 px-4 py-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">Loading document preview…</p>
                     : <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-8 text-center text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><p>{mimeType ? "This document type cannot be previewed in the browser." : "Preview is unavailable because the file type could not be verified."}</p><p className="mt-1 font-semibold">Open or download the file to inspect it.</p></div>}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700"><button type="button" onClick={onClose} className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800" data-cds-action="true" data-cds-action-variant="primary">Close Preview</button>{canPreview && downloadUrl && (!inline || previewReady) && <a href={downloadUrl} download={attachment?.name || undefined} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction rounded-xl px-4 py-2.5 text-xs font-bold">Download Current Copy</a>}</div>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-t border-gray-200 px-4 py-3 dark:border-gray-700"><button type="button" onClick={onClose} data-preview-close className="rounded-xl border border-gray-300 px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800" data-cds-action="true" data-cds-action-variant="primary">Close Preview</button>{canPreview && downloadUrl && (!inline || previewReady) && <a href={downloadUrl} download={attachment?.name || undefined} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction rounded-xl px-4 py-2.5 text-xs font-bold">Download Current Copy</a>}</div>
         </div>
-    </div>;
+    </div>, document.body) : null;
 }

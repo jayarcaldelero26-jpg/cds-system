@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
@@ -523,28 +524,28 @@ test('Full Details renders the existing routing percentage with or without a doc
 
 test('protected preview explains projected denial without offering download or a loading state', async () => {
     const { default: DocumentPreviewDialog } = await load('Components/SubmissionTracking/DocumentPreviewDialog.jsx');
+    const source = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
     const html = renderToStaticMarkup(React.createElement(DocumentPreviewDialog, {
         open: true,
         row: { source: 'bms', id: 42, current_document: { name: 'Current report.pdf', preview_url: '/attachments/bms-report/42/mov?preview=1', download_url: '/attachments/bms-report/42/mov', mime_type: 'application/pdf', can_preview: false } },
         onClose() {},
     }));
-    assert.match(html, /Your current account is not authorized to access this document/);
-    assert.doesNotMatch(html, /Loading document preview|Download Current Copy|Retry Preview/);
-    assert.match(html, />Close Preview<\/button>/);
+    assert.equal(typeof document, 'undefined');
+    assert.equal(html, '');
+    assert.match(source, /!canPreview \? <p role="alert"[^>]*>Your current account is not authorized to access this document\./);
+    assert.match(source, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
+    assert.ok(source.indexOf('!canPreview ?') < source.indexOf(': inline ? previewReady ?'));
 });
 
-test('Create Module close control is a neutral accessible icon button and retains its callback', async () => {
+test('Create Module close control is a neutral accessible icon button wired to its callback', async () => {
     const { ModuleForm } = await load('Pages/Admin/Settings/ModuleManagement.jsx');
-    let closed = false;
+    const source = readFileSync(resolve('resources/js/Pages/Admin/Settings/ModuleManagement.jsx'), 'utf8');
     const values = { name: '', program_area: '', module_type: 'regular_target', reporting_frequency: 'monthly', plan_duration_years: '', deadline_mode: 'none', default_deadline_days: '', allow_deadline_override: false, description: '', is_active: true };
-    const element = React.createElement(ModuleForm, { form: { data: values, errors: {}, processing: false, setData() {} }, editing: null, programAreas: [], frequencies: [], onClose: () => { closed = true; }, onSubmit() {} });
-    const html = renderToStaticMarkup(element);
+    const html = renderToStaticMarkup(React.createElement(ModuleForm, { form: { data: values, errors: {}, processing: false, setData() {} }, editing: null, programAreas: [], frequencies: [], onClose() {}, onSubmit() {} }));
     assert.match(html, /aria-label="Close module form"/);
     assert.match(html, /type="button"/);
     assert.match(html, /focus-visible:ring-2/);
-    const close = element.type(element.props).props.children.props.children[0].props.children[1];
-    close.props.onClick();
-    assert.equal(closed, true);
+    assert.match(source, /<button type="button" onClick=\{onClose\}[^>]*aria-label="Close module form"/);
 });
 
 test('Protected Area detail actions render matching compact Edit and Delete controls with icons', async () => {

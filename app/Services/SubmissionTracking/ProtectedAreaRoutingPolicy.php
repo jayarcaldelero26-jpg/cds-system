@@ -38,16 +38,24 @@ final class ProtectedAreaRoutingPolicy
             return false;
         }
 
+        $area = $record->relationLoaded('protectedArea') ? $record->getRelation('protectedArea') : null;
+        if ($area instanceof ProtectedArea) return $this->isDirectProtectedArea($area);
+
         $this->resolveCanonicalId();
 
         if ($this->directPenroProtectedAreaId !== null && (int) $protectedAreaId === $this->directPenroProtectedAreaId) {
             return true;
         }
 
-        $area = $record->relationLoaded('protectedArea') ? $record->getRelation('protectedArea') : null;
-        $normalizedName = preg_replace('/[^a-z0-9]+/', ' ', strtolower(trim((string) $area?->name)));
-        $normalizedShortName = preg_replace('/[^a-z0-9]+/', ' ', strtolower(trim((string) $area?->short_name)));
+        return false;
+    }
 
+    public function isDirectProtectedArea(ProtectedArea $area): bool
+    {
+        $this->resolveCanonicalId();
+        if ($this->directPenroProtectedAreaId !== null && (int) $area->getKey() === $this->directPenroProtectedAreaId) return true;
+        $normalizedName = preg_replace('/[^a-z0-9]+/', ' ', strtolower(trim((string) $area->name)));
+        $normalizedShortName = preg_replace('/[^a-z0-9]+/', ' ', strtolower(trim((string) $area->short_name)));
         return ($normalizedName !== '' && in_array($normalizedName, self::DIRECT_PENRO_ALIASES, true))
             || ($normalizedShortName !== '' && in_array($normalizedShortName, self::DIRECT_PENRO_ALIASES, true));
     }

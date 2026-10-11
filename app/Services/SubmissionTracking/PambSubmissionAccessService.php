@@ -59,8 +59,7 @@ final class PambSubmissionAccessService
             return false;
         }
         if ($this->isPamo($user)) {
-            return $user->protected_area_id !== null
-                && (int) $user->protected_area_id === (int) $submission->protected_area_id;
+            return $organization->canViewSubmission($user, $submission);
         }
         if ($submission->protected_area_id !== null) {
             $area = $submission->relationLoaded('protectedArea') ? $submission->getRelation('protectedArea') : null;
@@ -114,7 +113,8 @@ final class PambSubmissionAccessService
         if ($this->isPamo($user)) {
             return $user->protected_area_id === null
                 ? $query->whereRaw('1 = 0')
-                : $query->where($query->getModel()->getTable().'.protected_area_id', (int) $user->protected_area_id);
+                : $query->where($query->getModel()->getTable().'.protected_area_id', (int) $user->protected_area_id)
+                    ->whereIn($query->getModel()->getTable().'.workflow_key', \App\Services\Conservation\PambComplianceCalculator::MEETING_WORKFLOWS);
         }
         return $query;
     }

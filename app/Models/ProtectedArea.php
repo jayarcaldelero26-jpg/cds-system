@@ -60,6 +60,11 @@ class ProtectedArea extends Model
         return $this->hasOne(ProtectedAreaOfficeAssignment::class)->where('assignment_type', 'supervising');
     }
 
+    public function pamoOfficeAssignment(): HasOne
+    {
+        return $this->hasOne(ProtectedAreaOfficeAssignment::class)->where('assignment_type', 'pamo');
+    }
+
     public function supervisingOffice(): HasOneThrough
     {
         return $this->hasOneThrough(

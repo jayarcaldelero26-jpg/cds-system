@@ -5,6 +5,7 @@ import MapView from './Components/MapView';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import { normalizeSpatialFile } from '@/Utils/spatialUpload';
 import DatePicker from '@/Components/DatePicker';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 
 export default function BamsIndex({
   auth,
@@ -114,81 +115,9 @@ export default function BamsIndex({
             <div className="py-6 px-4 sm:px-6 lg:px-8 bg-gray-50 dark:bg-gray-900 min-h-screen">
                 <div className="max-w-7xl mx-auto space-y-6">
 
-                    {/* CUSTOM BULK DELETE CONFIRMATION MODAL */}
-                    {canDelete && showBulkDeleteConfirm &&
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
+                    <ConfirmDialog open={canDelete && showBulkDeleteConfirm} variant="danger" title="Delete Selected Records?" message={`Are you sure you want to delete ${selectedIds.length} selected record(s)? This cannot be undone.`} confirmLabel="Yes, Delete All" onConfirm={confirmBulkDelete} onCancel={() => setShowBulkDeleteConfirm(false)} />
 
-                                <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">
-                                    âš ï¸
-                                </div>
-
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-                                    Delete Selected Records?
-                                </h3>
-
-                                <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-                                    Are you sure you want to delete {selectedIds.length} selected record(s)? This cannot be undone.
-                                </p>
-
-                                <div className="flex gap-3">
-                                    <button
-                  type="button"
-                  onClick={() => setShowBulkDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="danger">
-
-                                        Cancel
-                                    </button>
-
-                                    <button
-                  type="button"
-                  onClick={confirmBulkDelete}
-                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">
-
-                                        Yes, Delete All
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-          }
-
-                    {/* CUSTOM SINGLE DELETE CONFIRMATION MODAL */}
-                    {canDelete && showDeleteConfirm &&
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                            <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-
-                                <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl">
-                                    âš ï¸
-                                </div>
-
-                                <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">
-                                    Are you sure?
-                                </h3>
-
-                                <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">
-                                    Do you really want to delete this record? This process cannot be undone.
-                                </p>
-
-                                <div className="flex gap-3">
-                                    <button
-                  type="button"
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="danger">
-
-                                        Cancel
-                                    </button>
-
-                                    <button
-                  type="button"
-                  onClick={confirmDelete}
-                  className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">
-
-                                        Yes, Delete
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-          }
+                    <ConfirmDialog open={canDelete && showDeleteConfirm} variant="danger" title="Are you sure?" message="Do you really want to delete this record? This process cannot be undone." confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />
 
                     {/* SHARED PAGE HEADER */}
                     <PageHeader

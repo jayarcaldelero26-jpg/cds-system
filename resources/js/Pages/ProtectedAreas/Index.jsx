@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import ConfirmDialog from '../../Components/ConfirmDialog';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 import DataTable from '../../Components/DataTable';
 import PageHeader from '../../Components/PageHeader';
 import StatusBadge from '../../Components/StatusBadge';
@@ -44,7 +45,7 @@ export function ProtectedAreaDetailActions({ areaId, canEdit, canDelete, onDelet
   </div>;
 }
 
-export default function Index({ protectedAreas, filters, officeOptions = [] }) {
+export default function Index({ protectedAreas, filters, officeOptions = [], pamoOfficeOptions = [] }) {
   const { auth } = usePage().props;
 
   const [search, setSearch] = useState(filters.search || '');
@@ -53,7 +54,9 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   const [protectedAreaToDelete, setProtectedAreaToDelete] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createPresent, setCreatePresent] = useState(false);
   const detailsDialogRef = useRef(null);
+  const detailsOverlayRef = useRef(null);
   const detailsOpenerRef = useRef(null);
 
   useEffect(() => setSearch(filters.search || ''), [filters.search]);
@@ -115,20 +118,15 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
 
   const closeDetails = () => {
     setDetailsOpen(false);
-    setSelectedArea(null);
   };
-
-  useEffect(() => {
-    if (!detailsOpen) return undefined;
-    const onKeyDown = event => { if (event.key === 'Escape') { event.preventDefault(); closeDetails(); } };
-    document.addEventListener('keydown', onKeyDown);
-    detailsDialogRef.current?.focus();
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-      detailsOpenerRef.current?.focus?.();
-      detailsOpenerRef.current = null;
-    };
-  }, [detailsOpen]);
+  const { present: detailsPresent, phase: detailsPhase, onTransitionEnd: detailsTransitionEnd } = useModalMotion(detailsOpen, {
+    onClose: closeDetails,
+    onExited: () => { setSelectedArea(null); detailsOpenerRef.current = null; },
+    panelRef: detailsDialogRef,
+    layerRef: detailsOverlayRef,
+    initialFocusSelector: ':scope',
+    returnFocusTarget: detailsOpenerRef.current,
+  });
 
   const deleteProtectedArea = () => {
     if (!protectedAreaToDelete) return;
@@ -139,7 +137,6 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
       onSuccess: () => {
         setProtectedAreaToDelete(null);
         setDetailsOpen(false);
-        setSelectedArea(null);
       },
       onFinish: () => setDeleting(false)
     });
@@ -292,21 +289,6 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
   return (
     <AuthenticatedLayout title="Protected Area Management">
             <style>{`
-                @keyframes popIn {
-                    0% {
-                        transform: scale(0.96) translateY(6px);
-                        opacity: 0;
-                    }
-                    100% {
-                        transform: scale(1) translateY(0);
-                        opacity: 1;
-                    }
-                }
-
-                .protected-area-modal {
-                    animation: popIn 0.2s ease-out forwards;
-                }
-
                 .protected-area-scrollbar::-webkit-scrollbar {
                     width: 7px;
                     height: 7px;
@@ -329,7 +311,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
         />
 
             {auth.canCreateProtectedAreas && <div className="cds-action-row">
-                <button type="button" onClick={() => setCreateOpen(true)} className="cds-page-action inline-flex items-center justify-center text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">Add protected area</button>
+                <button type="button" onClick={() => { setCreatePresent(true); setCreateOpen(true); }} className="cds-page-action inline-flex items-center justify-center text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">Add protected area</button>
             </div>}
 
 
@@ -409,14 +391,14 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
             </div>
 
             {/* FULL DETAILS MODAL */}
-            {detailsOpen && selectedArea &&
-      <div
-        className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-[2px]"
+            {detailsPresent && selectedArea &&
+      <div ref={detailsOverlayRef} data-cds-modal-layer data-motion-state={detailsPhase}
+        className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-[2px]"
         onMouseDown={(event) => {
-          if (event.target === event.currentTarget) closeDetails();
+          if (detailsOpen && event.target === event.currentTarget) closeDetails();
         }}>
 
-                    <div ref={detailsDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="protected-area-details-title" className="protected-area-modal relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl focus:outline-none dark:border-gray-800 dark:bg-gray-900">
+                    <div ref={detailsDialogRef} onTransitionEnd={detailsTransitionEnd} data-motion-state={detailsPhase} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="protected-area-details-title" className="cds-modal-motion-panel relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl focus:outline-none dark:border-gray-800 dark:bg-gray-900">
                         {/* Modal Header */}
                         <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50/80 px-6 py-4 dark:border-gray-800 dark:bg-gray-800/40">
                             <div className="flex min-w-0 items-center gap-3">
@@ -647,7 +629,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [] }) {
         onConfirm={deleteProtectedArea}
         processing={deleting} />
 
-            {createOpen && <ProtectedAreaForm modal onClose={() => setCreateOpen(false)} title="Add Protected Area" officeOptions={officeOptions} />}
+            {createPresent && <ProtectedAreaForm modal open={createOpen} onClose={() => setCreateOpen(false)} onExited={() => setCreatePresent(false)} title="Add Protected Area" officeOptions={officeOptions} pamoOfficeOptions={pamoOfficeOptions} />}
 
         </AuthenticatedLayout>);
 

@@ -12,6 +12,7 @@ use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
 use App\Models\ManagementPlan;
+use App\Models\HistoricalReportOrigin;
 use App\Models\ReportComplianceConfirmation;
 use Carbon\CarbonImmutable;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
@@ -243,6 +244,12 @@ class OverdueReportService
     public function findSource(string $sourceType, int $sourceId): ?Model
     {
         if (! array_key_exists($sourceType, $this->sourceDefinitions())) {
+            return null;
+        }
+
+        $originSource = $this->historicalOriginSource($sourceType);
+        if ($originSource !== null && Schema::hasTable((new HistoricalReportOrigin)->getTable())
+            && HistoricalReportOrigin::query()->where('source', $originSource)->where('source_record_id', $sourceId)->exists()) {
             return null;
         }
 
@@ -668,6 +675,7 @@ class OverdueReportService
                 }
             }
             $configure($query, $definition, $modelClass);
+            $this->excludeHistoricalOriginRows($query, $modelClass);
 
             foreach ($query->get() as $model) {
                 $sources->push(['model' => $model, 'definition' => $definition]);
@@ -677,6 +685,82 @@ class OverdueReportService
         $this->moduleResolver->prime($sources->pluck('model'));
 
         return $sources;
+    }
+
+    /**
+     * Historical eligibility is owned by the source+record origin, not by a
+     * blank custody date or the source row's display flag.
+     */
+    private function excludeHistoricalOriginRows($query, string $modelClass): void
+    {
+        if (! Schema::hasTable((new HistoricalReportOrigin)->getTable())) {
+            return;
+        }
+
+        $source = $this->historicalOriginSource($modelClass);
+        if ($source === null) {
+            return;
+        }
+
+        $table = (new $modelClass)->getTable();
+        $query->whereNotExists(function ($origins) use ($source, $table): void {
+            $origins->selectRaw('1')
+                ->from((new HistoricalReportOrigin)->getTable())
+                ->where('source', $source)
+                ->whereColumn((new HistoricalReportOrigin)->getTable().'.source_record_id', $table.'.id');
+        });
+    }
+
+    /**
+     * Recheck candidates received from caches or built before an origin row
+     * was created. Synthetic ENGP schedule projections have negative IDs and
+     * are deliberately left eligible.
+     *
+     * @param Collection<int,OverdueReport> $reports
+     * @return Collection<int,OverdueReport>
+     */
+    public function withoutHistoricalOrigins(Collection $reports): Collection
+    {
+        if ($reports->isEmpty() || ! Schema::hasTable((new HistoricalReportOrigin)->getTable())) {
+            return $reports->values();
+        }
+
+        $excluded = [];
+        foreach ($reports->filter(fn (mixed $report): bool => $report instanceof OverdueReport && $report->sourceId > 0)
+            ->groupBy(fn (OverdueReport $report): string => $report->sourceType) as $modelClass => $candidates) {
+            $source = $this->historicalOriginSource((string) $modelClass);
+            if ($source === null) {
+                continue;
+            }
+
+            $ids = $candidates->pluck('sourceId')->map(fn (int $id): string => (string) $id)->all();
+            foreach (HistoricalReportOrigin::query()
+                ->where('source', $source)
+                ->whereIn('source_record_id', $ids)
+                ->pluck('source_record_id') as $id) {
+                $excluded[$modelClass.':'.$id] = true;
+            }
+        }
+
+        return $reports->reject(fn (mixed $report): bool => $report instanceof OverdueReport
+            && isset($excluded[$report->sourceType.':'.$report->sourceId]))->values();
+    }
+
+    private function historicalOriginSource(string $modelClass): ?string
+    {
+        return match ($modelClass) {
+            ConservationReportSubmission::class => 'conservation',
+            EngpReportSubmission::class => 'engp',
+            BmsReportSubmission::class => 'bms',
+            BamsReportSubmission::class => 'bams',
+            ImeaReportSubmission::class => 'imea',
+            ImeaFacilityMaintenanceReport::class => 'imea-maintenance',
+            Aws::class => 'aws',
+            ManagementPlan::class => 'management-plans',
+            IpafManagementReport::class => 'ipaf-management',
+            IpafRevenueCollection::class => 'revenue',
+            default => null,
+        };
     }
 
     private function hasProtectedAreaColumn(string $modelClass): bool

@@ -8,6 +8,7 @@ use App\Models\ProtectedArea;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\DateConductedRangeService;
 use App\Services\Conservation\PambComplianceCalculator;
+use App\Services\HistoricalReports\ConservationHistoricalEvidenceProjection;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Attachments\CurrentDocumentReplacementService;
 use App\Services\Attachments\ReportDocumentAdapterResolver;
@@ -30,7 +31,7 @@ class ConservationReportSubmissionController extends Controller
 {
     private const PRIMARY_ATTACHMENT_MAX_KB = 102400;
 
-    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments, private readonly DateConductedRangeService $dateConductedRanges, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
+    public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly PambComplianceCalculator $pambCompliance, private readonly PambSubmissionAccessService $pambAccess, private readonly OrganizationalAccessService $organization, private readonly PambMovProcessingService $pambMov, private readonly RoutingAttachmentService $routingAttachments, private readonly DateConductedRangeService $dateConductedRanges, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
 
     public function index(Request $request, string $workflow): Response
     {
@@ -50,9 +51,12 @@ class ConservationReportSubmissionController extends Controller
                     ->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%")));
             })
             ->latest('id')->paginate(10)->withQueryString()
-            ->through(fn (ConservationReportSubmission $submission) => $this->submissionData($submission));
+            ->through(fn (ConservationReportSubmission $submission) => $this->submissionData($submission, $request->user()));
 
         $formScope = app(SubmissionFormScopeService::class)->options($request->user());
+        $pamoDraftProps = $this->pambAccess->isPamo($request->user())
+            ? app(PamoPambDraftController::class)->index($request, $workflow)
+            : [];
 
         $response = Inertia::render('ConservationReports/Index', [
             'workflow' => $config,
@@ -62,6 +66,7 @@ class ConservationReportSubmissionController extends Controller
                 : app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name', 'short_name']),
             ...$formScope,
             'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type']),
+            ...$pamoDraftProps,
         ]);
 
         return $response;
@@ -69,6 +74,7 @@ class ConservationReportSubmissionController extends Controller
 
     public function store(Request $request, string $workflow): RedirectResponse
     {
+        abort_unless(! $this->pambAccess->isPamo($request->user()), 403, 'PAMO reports must be created from a saved draft.');
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
@@ -98,10 +104,21 @@ class ConservationReportSubmissionController extends Controller
 
     public function update(Request $request, string $workflow, ConservationReportSubmission $submission): RedirectResponse
     {
+        app(SubmissionTrackingService::class)->assertMutable($submission);
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $this->ensureWorkflow($workflow, $submission);
-        if ($this->pambCompliance->isMeeting($submission->workflow_key)
+        $isPamoCorrection = $this->pambAccess->isPamo($request->user());
+        if ($isPamoCorrection) {
+            $this->assertPamoCorrectionEdit($request->user(), $workflow, $submission);
+            if ($request->filled('protected_area_id') && (int) $request->input('protected_area_id') !== (int) $submission->protected_area_id) {
+                abort(403, 'PAMO corrections cannot change the report origin Protected Area.');
+            }
+            $request->merge([
+                'protected_area_id' => $submission->protected_area_id,
+                'target_office' => $submission->target_office,
+            ]);
+        } elseif ($this->pambCompliance->isMeeting($submission->workflow_key)
             && $this->pambMov->status($submission) === PambMovProcessingService::NEEDS_CORRECTION) {
             abort_unless($this->pambAccess->canPerformForSubmission($request->user(), 'submit', $submission), 403);
         }
@@ -110,7 +127,9 @@ class ConservationReportSubmissionController extends Controller
         }
         $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
         $this->assertNoFutureActualDates($validated, $request, $workflow, $submission);
-        $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? $submission->target_office);
+        $validated['target_office'] = $this->pambAccess->isPamo($request->user())
+            ? $submission->target_office
+            : $this->resolvedTargetOffice($request, $validated['target_office'] ?? $submission->target_office);
         if ($this->dateConductedRanges->supportsWorkflow($workflow)) { $validated = $this->dateConductedRanges->applyToPayload($validated, $request->input('date_conducted_ranges')); }
         $this->assertScopedWorkflow($request, $workflow, $validated['target_office'], $validated['protected_area_id'] ?? $submission->protected_area_id);
         $hasReplacement = $request->hasFile('mov');
@@ -130,6 +149,8 @@ class ConservationReportSubmissionController extends Controller
 
     public function destroy(string $workflow, ConservationReportSubmission $submission): RedirectResponse
     {
+        abort_unless(! $this->pambAccess->isPamo(request()->user()), 403);
+        app(SubmissionTrackingService::class)->assertMutable($submission);
         $this->ensureWorkflow($workflow, $submission);
         if (app(SubmissionTrackingService::class)->isRoutingComplete($submission)) {
             throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
@@ -176,6 +197,22 @@ class ConservationReportSubmissionController extends Controller
             'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::PRIMARY_ATTACHMENT_MAX_KB],
             'remarks' => ['nullable', 'string'],
         ];
+    }
+
+    /** Existing full source contract exposed only to the scoped PAMO PAMB promotion endpoint. */
+    public function pamoPilotReportRules(string $workflow, ?string $activityName, bool $requireMov): array
+    {
+        abort_unless(in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 404);
+        $config = $this->workflow($workflow);
+        $rules = $this->reportRules($config, null, $requireMov, $activityName);
+        $rules['activity_name'][] = Rule::in($config['activities'] ?? []);
+        return $rules;
+    }
+
+    public function assertPamoPilotActualDates(array $validated, Request $request, string $workflow): void
+    {
+        abort_unless(in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 404);
+        $this->assertNoFutureActualDates($validated, $request, $workflow);
     }
 
     /** @param array<string, mixed> $validated */
@@ -286,8 +323,24 @@ class ConservationReportSubmissionController extends Controller
             }
         }
         if ($this->pambAccess->isPamo($user)) {
-            abort_unless($user->protected_area_id !== null && (int) $user->protected_area_id === (int) $protectedAreaId, 403);
+            abort_unless($this->organization->canViewPamoPilotWorkflow($user)
+                && in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true)
+                && $user->protected_area_id !== null
+                && (int) $user->protected_area_id === (int) $protectedAreaId, 403);
         }
+    }
+
+    private function assertPamoCorrectionEdit(?\App\Models\User $user, string $workflow, ConservationReportSubmission $submission): void
+    {
+        abort_unless($user && in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 403);
+        $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($submission, 'conservation');
+        $position = $state['route_position'] ?? [];
+        $last = $state['events']->last();
+        abort_unless(($position['origin_kind'] ?? null) === 'pamo_pamb'
+            && ($position['protected_area_id'] ?? null) === (int) $user->protected_area_id
+            && ($state['stage'] ?? null) === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PAMO_ORIGIN
+            && $last?->event_key === 'correction_received'
+            && data_get($last->metadata, 'action_key') === 'receive_correction', 403);
     }
 
     private function resolvedTargetOffice(Request $request, ?string $submittedTargetOffice): ?string
@@ -304,14 +357,26 @@ class ConservationReportSubmissionController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function submissionData(ConservationReportSubmission $submission): array
+    private function submissionData(ConservationReportSubmission $submission, ?\App\Models\User $viewer = null): array
     {
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
+        $historical = (bool) $submission->getAttribute('is_historical')
+            ? app(ConservationHistoricalEvidenceProjection::class)->forRecord($submission)
+            : null;
+        $presentation = $historical['record'] ?? $submission;
 
         $original = $this->attachments->descriptor('conservation-report', $submission, 'mov');
 
         return [
-            ...collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all(),
+            ...collect($presentation->toArray())->except(['mov_file_path', 'mov_file_name'])->all(),
+            ...($historical ? [
+                'deadline_submission' => $historical['deadline_submission'],
+                'days_complied' => $historical['days_complied'],
+                'timeliness' => $historical['timeliness'],
+                'submission_status' => $historical['submission_status'],
+                'penro_delay' => $historical['penro_delay'],
+                'historical_evidence' => $historical['historical_evidence'],
+            ] : []),
             'mov' => $original,
             'mov_url' => $submission->mov_file_path ? $this->attachments->url('conservation-report', $submission, 'mov') : null,
             'current_document' => $this->routingAttachments->currentDescriptor('conservation', (int) $submission->getKey(), $original),
@@ -322,6 +387,29 @@ class ConservationReportSubmissionController extends Controller
                 'date_conducted_ranges' => $submission->date_conducted_ranges,
             ] : []),
             'mov_processing' => $this->pambMov->present($submission),
+            ...($viewer && $this->pambAccess->isPamo($viewer)
+                ? ['pamo_correction_ready' => $this->canPamoCorrect($viewer, $submission)]
+                : []),
         ];
+    }
+
+    private function canPamoCorrect(\App\Models\User $user, ConservationReportSubmission $submission): bool
+    {
+        if (! in_array($submission->workflow_key, PambComplianceCalculator::MEETING_WORKFLOWS, true)
+            || ! app(OrganizationalAccessService::class)->canViewPamoPilotWorkflow($user)
+            || (int) $user->protected_area_id !== (int) $submission->protected_area_id) return false;
+
+        try {
+            $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($submission, 'conservation');
+            $last = $state['events']->last();
+            return ($state['route_position']['origin_kind'] ?? null) === 'pamo_pamb'
+                && (int) ($state['route_position']['protected_area_id'] ?? 0) === (int) $user->protected_area_id
+                && (int) ($state['route_position']['pamo_office_id'] ?? 0) === (int) (app(OrganizationalAccessService::class)->pamoAssignmentForProtectedArea((int) $user->protected_area_id)['pamo_office_id'] ?? 0)
+                && ($state['stage'] ?? null) === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PAMO_ORIGIN
+                && $last?->event_key === 'correction_received'
+                && data_get($last->metadata, 'action_key') === 'receive_correction';
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }

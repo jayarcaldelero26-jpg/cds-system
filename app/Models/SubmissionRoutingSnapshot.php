@@ -7,7 +7,11 @@ use LogicException;
 
 final class SubmissionRoutingSnapshot extends Model
 {
-    protected $fillable = ['source_key', 'source_id', 'setting_version_id', 'profile', 'graph_version', 'captured_by', 'captured_at'];
+    protected $fillable = [
+        'source_key', 'source_id', 'setting_version_id', 'profile', 'graph_version', 'captured_by', 'captured_at',
+        'origin_kind', 'protected_area_id', 'pamo_office_id', 'pamo_office_name',
+        'responsible_cenro_office_id', 'responsible_cenro_name', 'originator_user_id', 'origin_started_at',
+    ];
 
     protected static function booted(): void
     {
@@ -17,6 +21,6 @@ final class SubmissionRoutingSnapshot extends Model
 
     protected function casts(): array
     {
-        return ['source_id' => 'integer', 'captured_at' => 'immutable_datetime'];
+        return ['source_id' => 'integer', 'protected_area_id' => 'integer', 'pamo_office_id' => 'integer', 'responsible_cenro_office_id' => 'integer', 'originator_user_id' => 'integer', 'captured_at' => 'immutable_datetime', 'origin_started_at' => 'immutable_datetime'];
     }
 }

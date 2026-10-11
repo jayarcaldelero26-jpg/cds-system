@@ -9,6 +9,7 @@ use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Engp\EngpMonitoringStatusResolver;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\HistoricalReports\EngpHistoricalEvidenceProjection;
 use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
@@ -25,7 +26,7 @@ use Throwable;
 
 class EngpReportController extends Controller
 {
-    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses, private readonly SubmissionTrackingService $tracking, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
+    public function __construct(private readonly EngpReportWorkflowRegistry $workflows, private readonly ProtectedAttachmentService $attachments, private readonly OrganizationalAccessService $organization, private readonly EngpMonitoringStatusResolver $monitoringStatuses, private readonly EngpHistoricalEvidenceProjection $historicalEvidence, private readonly SubmissionTrackingService $tracking, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters) {}
 
     public function index(Request $request, ?string $workflow = null): Response
     {
@@ -228,23 +229,37 @@ class EngpReportController extends Controller
 
     private function data(EngpReportSubmission $record): array
     {
-        $data = collect($record->toArray())->except(['mov_file_path'])->all();
+        $historical = $this->historicalEvidence->forRecord($record);
+        $displayRecord = $historical['record'] ?? $record;
+        if ($historical) $displayRecord->setAppends([]);
+        $data = collect($displayRecord->toArray())->except(['mov_file_path'])->all();
         $externalUrl = $this->safeExternalUrl($record->mov_external_url);
-        $monitoringStatus = $this->monitoringStatuses->resolve($record->deadline_submission?->toDateString(), $record->date_received_penro?->toDateString());
+        $monitoringStatus = $historical
+            ? null
+            : $this->monitoringStatuses->resolve($record->deadline_submission?->toDateString(), $record->date_received_penro?->toDateString());
         $releaseEvents = $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values();
         $mov = $record->mov_file_path
             ? $this->attachments->descriptor('engp-report', $record, 'mov')
             : ($externalUrl ? ['name' => 'External MOV reference', 'mime_type' => null, 'type' => null, 'size' => null, 'url' => $externalUrl, 'external' => true] : null);
         return [...$data,
             'workflow_label' => $record->workflow()['label'] ?? 'ENGP Report',
-            'monitoring_status_key' => $monitoringStatus['key'],
-            'monitoring_status' => $monitoringStatus['label'],
+            'monitoring_status_key' => $historical['monitoring_status_key'] ?? $monitoringStatus['key'],
+            'monitoring_status' => $historical['monitoring_status'] ?? $monitoringStatus['label'],
             'record_source' => 'Actual encoded submission',
             'submission_matched' => true,
-            'date_released_cenro' => $releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last(),
+            'date_released_cenro' => $historical
+                ? ($historical['milestones']['date_report_released_cenro'] ?? null)
+                : $releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last(),
+            'date_received_penro' => $historical
+                ? ($historical['milestones']['date_received_penro'] ?? null)
+                : $record->date_received_penro?->toDateString(),
+            'days_complied' => $historical['days_complied'] ?? $record->days_complied,
+            'timeliness_rating' => $historical['timeliness'] ?? $record->timeliness_rating,
+            'submission_status' => $historical['submission_status'] ?? $record->submission_status,
             'release_events' => $releaseEvents,
             'mov_status' => $mov ? 'Recorded' : 'Not yet recorded',
             'mov' => $mov,
+            ...($historical ? ['historical_evidence' => $historical['historical_evidence']] : []),
         ];
     }
 

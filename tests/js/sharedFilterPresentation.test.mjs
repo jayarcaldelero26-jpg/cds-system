@@ -38,3 +38,8 @@ test('shared filter dropdowns and content cards use the system surfaces', async 
     assert.match(table, /cds-card-surface/);
     assert.match(styles, /\.cds-card-surface\s*\{\s*box-shadow:/);
 });
+
+test('filter toolbar yields Escape to an open child selector before closing', async () => {
+    const toolbar = await readFile(new URL('../../resources/js/Components/Form/FilterToolbar.jsx', import.meta.url), 'utf8');
+    assert.match(toolbar, /if \(event\.key !== 'Escape' \|\| event\.defaultPrevented\) return;/);
+});

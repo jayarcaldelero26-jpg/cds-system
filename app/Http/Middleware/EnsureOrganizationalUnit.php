@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\Conservation\PambComplianceCalculator;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -22,14 +23,17 @@ final class EnsureOrganizationalUnit
         if (! $unit || ! $request->user()) return $next($request);
         $organization = app(OrganizationalAccessService::class);
         $user = $request->user();
-        $pamoPambRead = $unit === OrganizationalAccessService::CONSERVATION
-            && $request->isMethod('GET')
-            && in_array($request->route('workflow'), ['regular_pamb', 'special_pamb'], true)
+        $pamoPilotRequest = $unit === OrganizationalAccessService::CONSERVATION
+            && $request->routeIs(
+                'conservation-reports.index',
+                'conservation-reports.pamo-drafts.*',
+                'conservation-reports.update',
+            )
+            && in_array($request->route('workflow'), PambComplianceCalculator::MEETING_WORKFLOWS, true)
             && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
-            && $user->can('technical-reports.view')
-            && $organization->canAccessProtectedArea($user, $user->protected_area_id);
+            && $organization->canViewPamoPilotWorkflow($user);
 
-        abort_unless($pamoPambRead || $organization->canBrowseModuleUnit($user, $unit), 403);
+        abort_unless($pamoPilotRequest || $organization->canBrowseModuleUnit($user, $unit), 403);
         return $next($request);
     }
 }

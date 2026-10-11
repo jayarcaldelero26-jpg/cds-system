@@ -40,9 +40,11 @@ final class DocumentRoutingTransitionService
             $record->load('protectedArea');
         }
         $position = $resolvedPosition ?? $this->positionSnapshots->resolve($record, $sourceKey, $hasHistory);
-        $direct = in_array($position['profile'] ?? null, ['regular', 'direct'], true)
-            ? $position['profile'] === 'direct'
-            : ($sourceKey !== 'engp' && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record));
+        $direct = match ($position['profile'] ?? null) {
+            'direct', 'pamo_direct' => true,
+            'regular', 'pamo_regular' => false,
+            default => $sourceKey !== 'engp' && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record),
+        };
         $graph = $this->graphResolver->resolve($sourceKey, $direct, $position);
         $profile = ['profile' => $graph['profile'], 'actions' => $graph['actions']];
             // Compatibility events already carry deterministic source-local order.
@@ -56,7 +58,12 @@ final class DocumentRoutingTransitionService
         $stage = $last?->to_stage;
 
         if (! $stage) {
-            [$stage, $bootstrapped] = $this->legacyStage($record, $direct, $actor, $sourceKey);
+            if (in_array($position['profile'] ?? null, ['pamo_regular', 'pamo_direct'], true)
+                && ($position['origin_kind'] ?? null) === 'pamo_pamb') {
+                $stage = DocumentRoutingProfileRegistry::PAMO_ORIGIN;
+            } else {
+                [$stage, $bootstrapped] = $this->legacyStage($record, $direct, $actor, $sourceKey);
+            }
         }
 
         $lastCorrection = $last?->event_key === 'returned_for_correction';
@@ -86,7 +93,15 @@ final class DocumentRoutingTransitionService
                 'correction_reference_allowed' => false,
             ]];
         } elseif ($correctionReceived) {
-            $actions = array_map(function (array $action): array {
+            $actions = array_map(function (array $action) use ($last): array {
+                if ($action['key'] === 'forward_from_pamo'
+                    && $last?->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
+                    return [...$action, 'action_label' => 'Resubmit Corrected Copy', 'label' => 'Corrected copy resubmitted to PENRO Records Unit', 'correction_cycle' => true, 'document_operation' => 'correction_resubmission'];
+                }
+                if ($action['key'] === 'forward_from_pamo_to_cenro_focal'
+                    && $last?->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
+                    return [...$action, 'action_label' => 'Resubmit Corrected Copy', 'label' => 'Corrected copy resubmitted to CENRO CDS Focal Person', 'correction_cycle' => true, 'document_operation' => 'correction_resubmission'];
+                }
                 if ($action['key'] === 'forward_to_penro_records') {
                     return [...$action, 'action_label' => 'Resubmit Corrected Copy', 'label' => 'Corrected copy resubmitted to PENRO Records', 'correction_cycle' => true, 'document_operation' => 'correction_resubmission'];
                 }

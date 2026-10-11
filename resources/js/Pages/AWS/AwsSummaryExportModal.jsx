@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import CrudModalFooter from '@/Components/Crud/CrudModalFooter';
 import Button from '@/Components/Button';
 import CrudModalHeader from '@/Components/Crud/CrudModalHeader';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 const formats = [
     {
@@ -32,6 +33,7 @@ const formatNames = { pdf: 'PDF', xlsx: 'Excel', docx: 'Word' };
 
 export default function AwsSummaryExportModal({ open, onClose, onExport, returnFocusRef, summaryType, reportingPeriod, protectedArea }) {
     const dialogRef = useRef(null);
+    const overlayRef = useRef(null);
     const firstCardRef = useRef(null);
     const generatingRef = useRef('');
     const [selectedFormat, setSelectedFormat] = useState('');
@@ -44,44 +46,20 @@ export default function AwsSummaryExportModal({ open, onClose, onExport, returnF
         setSelectedFormat('');
         setGenerating('');
         setError('');
-        const previousFocus = document.activeElement;
-
-        const focusFirstCard = () => firstCardRef.current?.focus();
-        const handleKeyDown = (event) => {
-            if (event.key === 'Escape') {
-                event.preventDefault();
-                if (!generatingRef.current) { onClose?.(); window.requestAnimationFrame(() => returnFocusRef?.current?.focus()); }
-                return;
-            }
-            if (event.key !== 'Tab' || !dialogRef.current) return;
-            const focusable = [...dialogRef.current.querySelectorAll('button:not([disabled])')];
-            if (!focusable.length) return;
-            const first = focusable[0];
-            const last = focusable[focusable.length - 1];
-            if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-            } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-            }
-        };
-
-        document.addEventListener('keydown', handleKeyDown, true);
-        const focusTimer = window.requestAnimationFrame(focusFirstCard);
-        return () => {
-            window.cancelAnimationFrame(focusTimer);
-            document.removeEventListener('keydown', handleKeyDown, true);
-            if (previousFocus && typeof previousFocus.focus === 'function') previousFocus.focus();
-        };
     }, [open]);
 
-    if (!open) return null;
+    const { present, phase, onTransitionEnd } = useModalMotion(open, {
+        onClose: () => { if (!generatingRef.current) onClose?.(); },
+        panelRef: dialogRef,
+        layerRef: overlayRef,
+        initialFocusSelector: '[role="radio"]',
+        returnFocusTarget: returnFocusRef?.current,
+    });
+    if (!present) return null;
 
     const close = (force = false) => {
         if (generating && !force) return;
         onClose?.();
-        window.requestAnimationFrame(() => returnFocusRef?.current?.focus());
     };
 
     const chooseFormat = (format) => {
@@ -106,8 +84,8 @@ export default function AwsSummaryExportModal({ open, onClose, onExport, returnF
 
     const generatingLabel = generating ? `Generating ${formatNames[generating]}...` : '';
 
-    return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
-        <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="aws-export-title" aria-describedby="aws-export-subtitle" className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
+    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation" onMouseDown={(event) => { if (open && event.target === event.currentTarget) close(); }}>
+        <div ref={dialogRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="aws-export-title" aria-describedby="aws-export-subtitle" data-motion-state={phase} className="cds-modal-motion-panel flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
             <CrudModalHeader title="Export AWS Monitoring Summary" subtitle="Choose the file format for the current monitoring report." onClose={generating ? undefined : close} />
             <div className="custom-table-scrollbar min-h-0 overflow-y-auto p-5 sm:p-6">
                 <div id="aws-export-title" className="sr-only">Export AWS Monitoring Summary</div>

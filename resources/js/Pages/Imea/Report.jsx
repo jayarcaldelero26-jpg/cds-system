@@ -1,5 +1,6 @@
 import { FloatingSelect } from "@/Components/Form";import { Link, router } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import PageHeader from '@/Components/PageHeader';
@@ -30,6 +31,9 @@ export default function ImeaReport({
 
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const detailLayerRef = useRef(null);
+  const detailPanelRef = useRef(null);
+  const detailMotion = useModalMotion(isDetailModalOpen, { panelRef: detailPanelRef, layerRef: detailLayerRef, onExited: () => setSelectedRecord(null) });
 
   const handleFilterChange = (type, value) => {
     const queryParams = {
@@ -63,7 +67,6 @@ export default function ImeaReport({
 
   const closeModal = () => {
     setIsDetailModalOpen(false);
-    setSelectedRecord(null);
   };
 
   const handlePrint = () => {
@@ -82,7 +85,6 @@ export default function ImeaReport({
     <AuthenticatedLayout title="IMEA Summary Report">
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-                .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
                 .custom-table-scrollbar {
                     scrollbar-width: thin;
                     scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
@@ -432,9 +434,9 @@ export default function ImeaReport({
             </div>
 
             {/* FULL DETAILS MODAL */}
-            {isDetailModalOpen && selectedRecord &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print">
-                    <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto animate-pop-in custom-table-scrollbar border border-gray-200 dark:border-gray-800">
+            {detailMotion.present && selectedRecord &&
+      <div ref={detailLayerRef} data-cds-modal-layer data-motion-state={detailMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print" role="presentation">
+                    <div ref={detailPanelRef} onTransitionEnd={detailMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Assessment Full Details" data-motion-state={detailMotion.phase} className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto cds-modal-motion-panel custom-table-scrollbar border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-4 dark:border-gray-800">
                             <div className="flex items-center gap-2">
                                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">📋</span>

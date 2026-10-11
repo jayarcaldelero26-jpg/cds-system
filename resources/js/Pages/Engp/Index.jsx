@@ -16,11 +16,14 @@ import TimelinessBadge, { isTimelinessValue } from '@/Components/TimelinessBadge
 import StatusBadge from '@/Components/StatusBadge';
 import TargetOfficeSelect from '@/Components/Form/TargetOfficeSelect';
 import { formatReportDate } from '@/Utils/dateFormatters';
+import HistoricalRecordBadge from '@/Components/HistoricalRecordBadge';
+import RecordTypeBadge from '@/Components/RecordTypeBadge';
+import OperationalStatus from '@/Components/OperationalStatus';
 
 const label = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
 const show = value => value === null || value === undefined || value === '' ? '\u2014' : value;
 const date = value => formatReportDate(value);
-const badge = value => isTimelinessValue(value) ? <TimelinessBadge value={value} /> : <span className="inline-flex rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-800 dark:bg-green-950/60 dark:text-green-200">{show(value)}</span>;
+const badge = value => <OperationalStatus value={value} renderStatus={status => isTimelinessValue(status) ? <TimelinessBadge value={status} /> : <span className="inline-flex rounded-full bg-green-100 px-2.5 py-1 text-xs font-bold text-green-800 dark:bg-green-950/60 dark:text-green-200">{show(status)}</span>} />;
 const monitoringBadge = value => { const normalized = String(value || '').toLowerCase(); const variant = normalized.includes('submitted') ? 'active' : normalized.includes('not yet') ? 'inactive' : normalized.includes('ongoing') ? 'pending' : 'info'; return <StatusBadge variant={variant}>{show(value)}</StatusBadge>; };
 
 export default function Index({ workflow, workflowConfig, workflows = [], submissions = {}, periods = [], periodsByYear = {}, offices = [], targetOffices = [], years = [], filters = {}, year, summary = null, summaryRows = [] }) {
@@ -59,7 +62,7 @@ function Tracker({ workflow, config, rows = {}, periods, periodsByYear, offices,
         ...(filters.office ? [{ key: 'office', label: 'Office', value: filters.office, onRemove: () => apply({ office: undefined }) }] : []),
         ...(filters.period_key ? [{ key: 'period_key', label: 'Reporting Period', value: periods.find(item => item.key === filters.period_key)?.label || filters.period_key, onRemove: () => apply({ period_key: undefined }) }] : []),
     ];
-    const columns = [{ key: 'office', label: 'Office', render: row => <span className="font-bold dark:text-white">{row.office}</span> }, { key: 'period_label', label: 'Reporting Period', render: row => row.period_label }, { key: 'activity_name', label: 'Activity', render: row => row.activity_name }, { key: 'document_type', label: 'Document', render: row => row.document_type }, { key: 'deadline_submission', label: 'Deadline', render: row => date(row.deadline_submission) }, { key: 'date_released_cenro', label: 'Released by CENRO', render: row => date(row.date_released_cenro) }, { key: 'date_received_penro', label: 'Received by PENRO', render: row => date(row.date_received_penro) }, { key: 'days_complied', label: 'Days Complied', render: row => show(row.days_complied) }, { key: 'timeliness_rating', label: 'Timeliness', render: row => badge(row.timeliness_rating) }, { key: 'monitoring_status', label: 'Monitoring Status', render: row => monitoringBadge(row.monitoring_status) }, { key: 'submission_status', label: 'Routing Status', render: row => badge(row.submission_status) }];
+    const columns = [{ key: 'record_origin', label: 'Record Type', render: row => <RecordTypeBadge source="engp" id={row.id} isHistorical={Boolean(row.is_historical)} /> }, { key: 'office', label: 'Office', render: row => <span className="font-bold dark:text-white">{row.office}</span> }, { key: 'period_label', label: 'Reporting Period', render: row => row.period_label }, { key: 'activity_name', label: 'Activity', render: row => row.activity_name }, { key: 'document_type', label: 'Document', render: row => row.document_type }, { key: 'deadline_submission', label: 'Deadline', render: row => date(row.deadline_submission) }, { key: 'date_released_cenro', label: 'Released by CENRO', render: row => date(row.date_released_cenro) }, { key: 'date_received_penro', label: 'Received by PENRO', render: row => date(row.date_received_penro) }, { key: 'days_complied', label: 'Days Complied', render: row => show(row.days_complied) }, { key: 'timeliness_rating', label: 'Timeliness', render: row => badge(row.timeliness_rating) }, { key: 'monitoring_status', label: 'Monitoring Status', render: row => monitoringBadge(row.monitoring_status) }, { key: 'submission_status', label: 'Routing Status', render: row => badge(row.submission_status) }];
     const pagination = rows.links?.length > 3 ? <div className="flex flex-wrap gap-1">{rows.links.map((link, index) => <button key={index} type="button" disabled={!link.url} onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })} className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${link.active ? 'bg-green-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-green-50 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600'} disabled:cursor-not-allowed disabled:opacity-40`} dangerouslySetInnerHTML={{ __html: link.label }} data-cds-action="true" data-cds-action-variant="primary" />)}</div> : null;
 
     return <AuthenticatedLayout title={config.label}>
@@ -103,7 +106,20 @@ function FormFields({ form, config, periods, periodsByYear, offices, selected, c
 
 function Details({ record }) {
     if (!record) return null;
-    return <div className="space-y-5"><CrudSection title="Report Information"><div className="grid gap-4 sm:grid-cols-2"><Detail label="Office">{show(record.office)}</Detail><Detail label="Name of Section">{show(record.section_name)}</Detail><Detail label="Name of Activity">{show(record.activity_name)}</Detail><Detail label="Document Type">{show(record.document_type)}</Detail></div></CrudSection><CrudSection title="CENRO Release Events"><div className="grid gap-4 sm:grid-cols-2">{(record.release_events || []).map(event => <Detail key={event.period_component} label={event.component_label}>{date(event.date_report_released_cenro)}</Detail>)}</div></CrudSection><CrudSection title="PENRO Submission"><div className="grid gap-4 sm:grid-cols-2"><Detail label="Date Received by PENRO">{date(record.date_received_penro)}</Detail><Detail label="Days Complied">{show(record.days_complied)}</Detail></div></CrudSection><CrudSection title="Remarks"><p>{record.remarks || 'None.'}</p></CrudSection></div>;
+    const historical = Boolean(record.is_historical);
+    const milestones = record.historical_evidence?.milestones || {};
+    const originalDate = value => value ? date(value) : 'Missing historical evidence';
+
+    return <div className="space-y-5">
+        <CrudSection title="Report Information"><div className="grid gap-4 sm:grid-cols-2"><Detail label="Office">{show(record.office)}</Detail><Detail label="Name of Section">{show(record.section_name)}</Detail><Detail label="Name of Activity">{show(record.activity_name)}</Detail><Detail label="Document Type">{show(record.document_type)}</Detail></div></CrudSection>
+        <CrudSection title={historical ? 'Original Routing Evidence' : 'CENRO Release Events'}>
+            <div className="grid gap-4 sm:grid-cols-2">{historical
+                ? <><Detail label="Original CENRO Release Date">{originalDate(milestones.date_report_released_cenro)}</Detail><Detail label="Original PENRO Receipt Date">{originalDate(milestones.date_received_penro)}</Detail><Detail label="Original Regional Endorsement Date">{originalDate(milestones.date_endorsed_regional)}</Detail></>
+                : (record.release_events || []).map(event => <Detail key={event.period_component} label={event.component_label}>{date(event.date_report_released_cenro)}</Detail>)}</div>
+        </CrudSection>
+        <CrudSection title="PENRO Submission"><div className="grid gap-4 sm:grid-cols-2"><Detail label={historical ? 'Original Date Received by PENRO' : 'Date Received by PENRO'}>{historical ? originalDate(milestones.date_received_penro) : date(record.date_received_penro)}</Detail><Detail label="Days Complied">{show(record.days_complied)}</Detail></div></CrudSection>
+        <CrudSection title="Remarks"><p>{record.remarks || 'None.'}</p></CrudSection>
+    </div>;
 }
 
 function Detail({ label: heading, children }) {

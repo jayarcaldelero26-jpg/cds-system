@@ -60,13 +60,14 @@ class StoreProtectedAreaRequest extends FormRequest
             ],
 
             'pamo' => ['nullable', 'string', 'max:255'],
+            'pamo_office_id' => ['nullable', 'integer', Rule::exists('organizational_offices', 'id')->where(fn ($query) => $query->where('office_type', 'pamo')->where('is_active', true))],
             'pasu' => ['nullable', 'string', 'max:255'],
             'year_established' => ['nullable', 'integer', 'min:1800', 'max:' . (now()->year + 10)],
             'legal_basis' => ['nullable', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'status' => ['required', Rule::in(['Active', 'Inactive', 'Proposed'])],
             'remarks' => ['nullable', 'string'],
-            'supervising_office_id' => ['required', 'integer', 'exists:organizational_offices,id'],
+            'supervising_office_id' => ['required', 'integer', Rule::exists('organizational_offices', 'id')->where(fn ($query) => $query->whereIn('office_type', ['cenro', 'penro'])->where('is_active', true))],
         ];
     }
 }

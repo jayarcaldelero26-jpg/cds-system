@@ -13,7 +13,11 @@ class UpdateUserRequest extends FormRequest
 {
     protected function prepareForValidation(): void
     {
-        $this->merge(app(OrganizationalAccessService::class)->normalizeAssignment($this->all()));
+        $organization = app(OrganizationalAccessService::class);
+        if ($organization->normalizeCategory($this->input('section')) === OrganizationalAccessService::PAMO || $this->input('operational_group') === OrganizationalAccessService::OPERATIONAL_GROUP_PAMO) {
+            $organization->assertSubmittedPamoOfficeMatches($this->input('office_designated'), $this->input('protected_area_id'));
+        }
+        $this->merge($organization->normalizeAssignment($this->all()));
     }
 
     public function authorize(): bool
@@ -25,8 +29,6 @@ class UpdateUserRequest extends FormRequest
     {
         /** @var User $user */
         $user = $this->route('user');
-        $legacyPamo = $user instanceof User && $user->section === OrganizationalAccessService::PAMO;
-
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => [
@@ -39,11 +41,11 @@ class UpdateUserRequest extends FormRequest
             ],
             'account_role' => ['sometimes', 'required', 'string', Rule::in([OrganizationalAccessService::ACCOUNT_ROLE_USER, OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN])],
             'role' => ['sometimes', 'nullable', 'string', Rule::in(['no_role'])],
-            'operational_group' => [Rule::requiredIf(! $legacyPamo), 'nullable', 'string', Rule::in(['cenro', 'penro', ...($legacyPamo ? [OrganizationalAccessService::OPERATIONAL_GROUP_PAMO] : [])])],
+            'operational_group' => ['required', 'string', Rule::in(['cenro', 'penro', OrganizationalAccessService::OPERATIONAL_GROUP_PAMO])],
             'office_designated' => ['nullable', 'string', 'max:255'],
-            'section' => ['required', 'string', Rule::in(['CENRO_RECORDS', 'PENRO_RECORDS', 'OFFICE_OF_THE_PENRO', 'PENRO_TSD_CHIEF', 'CENRO_CDS_CHIEF', 'CENRO_CDS_FOCAL', 'PENRO_CDS_CHIEF', 'PENRO_CDS_FOCAL', ...($legacyPamo ? [OrganizationalAccessService::PAMO] : [])])],
+            'section' => ['required', 'string', Rule::in(['CENRO_RECORDS', 'PENRO_RECORDS', 'OFFICE_OF_THE_PENRO', 'PENRO_TSD_CHIEF', 'CENRO_CDS_CHIEF', 'CENRO_CDS_FOCAL', 'PENRO_CDS_CHIEF', 'PENRO_CDS_FOCAL', OrganizationalAccessService::PAMO])],
             'unit_assignment' => ['nullable', 'string', 'in:conservation,development'],
-            'protected_area_id' => ['nullable', 'integer', 'exists:protected_areas,id'],
+            'protected_area_id' => [Rule::requiredIf($this->input('section') === OrganizationalAccessService::PAMO), 'nullable', 'integer', 'exists:protected_areas,id'],
             'password' => ['nullable', 'string', 'confirmed', Password::defaults()],
             'is_active' => ['sometimes', 'boolean'],
         ];
@@ -52,7 +54,6 @@ class UpdateUserRequest extends FormRequest
     public function withValidator($validator): void
     {
         $validator->after(function ($validator): void {
-            if ($this->route('user')?->section === OrganizationalAccessService::PAMO && $this->input('section') === OrganizationalAccessService::PAMO) return;
             try {
                 $data = app(OrganizationalAccessService::class)->normalizeAssignment($this->all());
                 app(OrganizationalAccessService::class)->validateAssignment(
@@ -61,6 +62,7 @@ class UpdateUserRequest extends FormRequest
                     $data['office_designated'] ?? null,
                     $data['protected_area_id'] ?? null,
                     null,
+                    $data['operational_group'] ?? null,
                 );
                 $existingCategory = app(OrganizationalAccessService::class)->normalizeCategory($this->route('user')?->section);
                 if (! app(RoutingPositionSettingsService::class)->categoryAvailableForAccount($data['section'] ?? null, $existingCategory)) {

@@ -37,7 +37,14 @@ export default function ScopedOptionSelect({ id, label, value = '', options = []
     }, [open]);
     const keyDown = event => {
         if (disabled || readOnly) return;
-        if (event.key === 'Escape') { setOpen(false); setQuery(''); return; }
+        if (event.key === 'Escape') {
+            if (!open) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+            setQuery('');
+            return;
+        }
         if (event.key === 'ArrowDown') { event.preventDefault(); if (!open) setOpen(true); else setActive(index => Math.min(index + 1, filtered.length - 1)); return; }
         if (event.key === 'ArrowUp') { event.preventDefault(); setActive(index => Math.max(index - 1, 0)); return; }
         if (event.key === 'Enter' && open && filtered[active]) { event.preventDefault(); choose(filtered[active]); }

@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { rolldown } from 'rolldown';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { inlinePreviewType } from '../../resources/js/Utils/protectedDocumentPreview.mjs';
 
 // Compile the real components in memory. No browser, network, or output files.
 async function component(name) {
@@ -111,15 +112,24 @@ function capturedRouteRow(officeEnabled, tsdEnabled, version = 4) {
 }
 
 test('supported protected previews wait for a validated response before embedding a blob URL', () => {
+    // This SSR fixture has no DOM. The dialog intentionally renders through a portal,
+    // so verify its source contract here and its response handling in the unit suite.
+    assert.equal(typeof document, 'undefined');
     for (const mime_type of ['application/pdf', 'image/jpeg', 'image/png']) {
         const markup = render({ current_document: { name: 'synthetic', mime_type, can_preview: true, preview_url: '/attachments/aws-report/1/report?preview=1' }, mov_url: '/overview' });
-        assert.match(markup, /Loading document preview/);
-        assert.doesNotMatch(markup, /<iframe|<img|\/attachments\/aws-report\/1\/report/);
-        assert.doesNotMatch(markup, /\/overview/);
+        assert.equal(markup, '');
+        assert.equal(inlinePreviewType(mime_type), mime_type);
     }
+    assert.match(previewDialogSource, /return typeof document !== 'undefined' \? createPortal/);
+    assert.match(previewDialogSource, /if \(!open \|\| !url \|\| !inline \|\| !canPreview\)/);
     assert.match(previewDialogSource, /startProtectedPreview\(url,/);
+    assert.match(previewDialogSource, /preview\?\.requestKey === requestKey \? preview : null/);
+    assert.match(previewDialogSource, /current\?\.status === 'ready'/);
+    assert.match(previewDialogSource, /Loading document preview/);
     assert.match(previewDialogSource, /<PdfDocumentViewer blob=\{current\.blob\}/);
     assert.match(previewDialogSource, /<img src=\{current\.url\}/);
+    assert.match(previewDialogSource, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
+    assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
 
 test('PDF viewer exposes Fit Page, bounded zoom, continuous scrolling, and accessible page navigation', () => {
@@ -146,19 +156,29 @@ test('PDF viewer exposes Fit Page, bounded zoom, continuous scrolling, and acces
     assert.match(pdfViewerSource, /if \(active \|\| renderedKey === null\) return;/);
 });
 
-test('unsupported and unverified MIME never embed, even with a PDF filename', () => {
+test('unsupported and unverified MIME stay download-only, even with a PDF filename', () => {
+    assert.equal(typeof document, 'undefined');
     for (const mime_type of [null, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']) {
         const markup = render({ current_document: { name: 'looks-like.pdf', mime_type, can_preview: true, preview_url: '/attachments/source/1/mov?preview=1', download_url: '/attachments/source/1/mov?download=1' } });
-        assert.doesNotMatch(markup, /<iframe|<img/);
-        assert.match(markup, /Download Current Copy/);
-        assert.match(markup, mime_type ? /cannot be previewed/ : /could not be verified/);
+        assert.equal(markup, '');
+        assert.equal(inlinePreviewType(mime_type), null);
     }
+    assert.match(previewDialogSource, /\{mimeType \? "This document type cannot be previewed in the browser\." : "Preview is unavailable because the file type could not be verified\."\}/);
+    assert.match(previewDialogSource, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
+    assert.match(previewDialogSource, /<PdfDocumentViewer blob=\{current\.blob\}/);
+    assert.match(previewDialogSource, /<img src=\{current\.url\}/);
+    assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
 
 test('missing current descriptor cannot revive other document URLs', () => {
+    assert.equal(typeof document, 'undefined');
     const markup = render({ current_document: { can_preview: true }, mov_url: '/overview', effective_document: { url: '/archive' }, mov_attachment: { url: '/history', mime_type: 'application/pdf' } });
-    assert.doesNotMatch(markup, /<iframe|<img|\/overview|\/archive|\/history|Download Current Copy/);
-    assert.match(markup, /No MOV\/report attachment is available/);
+    assert.equal(markup, '');
+    assert.match(previewDialogSource, /const attachment = row\?\.current_document;/);
+    assert.match(previewDialogSource, /: !url \? <p[^>]*>No MOV\/report attachment is available for this submission\./);
+    assert.match(previewDialogSource, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
+    assert.doesNotMatch(previewDialogSource, /row\?\.(?:mov_url|effective_document|mov_attachment)/);
+    assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
 
 test('PAMB MOV Review retains milestones and actions without a second overall percentage or bar', () => {

@@ -3,7 +3,7 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "build": "node scripts/clean-vite-hot.js && vite build && node scripts/clean-vite-hot.js",
+        "build": "node scripts/build-vite-guarded.mjs",
         "dev": "vite"
     },
     "devDependencies": {

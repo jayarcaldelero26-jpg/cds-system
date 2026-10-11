@@ -264,7 +264,11 @@ test('the effective graph preserves the all-enabled contract and resolves all fo
         'penro_tsd_chief_enabled' => $tsd,
         'profile' => 'preview',
     ];
-    $base = $profiles->actionProfile('bms')['actions'];
+    $v1Only = ['forward_from_pamo_to_cenro_focal', 'receive_at_cenro_focal', 'return_to_pamo_for_correction'];
+    $base = array_values(array_filter(
+        $profiles->actionProfile('bms')['actions'],
+        static fn (array $action): bool => ! in_array($action['key'], $v1Only, true),
+    ));
     $both = $resolver->resolve('bms', false, $position(true, true));
     expect($both['actions'])->toBe($base)
         ->and(array_column($both['actions'], 'key'))->toBe(array_column($base, 'key'));

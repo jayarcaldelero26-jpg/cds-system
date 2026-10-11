@@ -1,11 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 export default function Modal({ open, onClose, title, children, footer, size = 'md' }) {
     const panelRef = useRef(null);
+    const overlayRef = useRef(null);
     const dropMessage = useModalFileDrop(panelRef, open);
-    useEffect(() => { const closeOnEscape = (event) => { if (event.key === 'Escape') onClose?.(); }; if (open) document.addEventListener('keydown', closeOnEscape); return () => document.removeEventListener('keydown', closeOnEscape); }, [open, onClose]);
-    if (!open) return null;
+    const { present, phase, onTransitionEnd } = useModalMotion(open, { onClose, panelRef, layerRef: overlayRef });
+    if (!present) return null;
     const widths = { sm: 'max-w-md', md: 'max-w-lg', lg: 'max-w-2xl' };
-    return <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button type="button" className="absolute inset-0 cursor-default bg-gray-950/50" onClick={onClose} aria-label="Close dialog" /><section ref={panelRef} data-cds-modal-drop-panel className={`relative w-full ${widths[size] || widths.md} rounded-xl bg-white shadow-xl dark:bg-gray-900`}>{dropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{dropMessage}</div>}<header className="flex items-start justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700"><h2 id="modal-title" className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2><button type="button" onClick={onClose} className="-mr-1 rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close dialog" data-cds-action="true" data-cds-action-variant="primary">×</button></header><div className="px-6 py-5">{children}</div>{footer && <footer className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4 dark:border-gray-700">{footer}</footer>}</section></div>;
+    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation"><button type="button" data-motion-state={phase} className="cds-modal-motion-backdrop absolute inset-0 cursor-default bg-gray-950/50" onClick={() => open && onClose?.()} aria-label="Close dialog" /><section ref={panelRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="modal-title" data-motion-state={phase} data-cds-modal-drop-panel className={`cds-modal-motion-panel relative w-full ${widths[size] || widths.md} rounded-xl bg-white shadow-xl dark:bg-gray-900`}>{dropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{dropMessage}</div>}<header className="flex items-start justify-between border-b border-gray-200 px-6 py-4 dark:border-gray-700"><h2 id="modal-title" className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h2><button type="button" onClick={onClose} className="-mr-1 rounded p-1 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close dialog" data-cds-action="true" data-cds-action-variant="primary">×</button></header><div className="px-6 py-5">{children}</div>{footer && <footer className="flex justify-end gap-3 border-t border-gray-200 px-6 py-4 dark:border-gray-700">{footer}</footer>}</section></div>;
 }

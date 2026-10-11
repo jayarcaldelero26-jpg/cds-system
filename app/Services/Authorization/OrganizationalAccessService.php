@@ -6,6 +6,7 @@ use App\Models\ProtectedArea;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\EngpReportSubmission;
+use App\Models\ConservationReportSubmission;
 use App\Models\User;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use Illuminate\Database\Eloquent\Builder;
@@ -34,7 +35,7 @@ final class OrganizationalAccessService
     public const OPERATIONAL_GROUP_PENRO = 'penro';
     public const OPERATIONAL_GROUP_PAMO = 'pamo';
 
-    private const OPERATIONAL_CATEGORIES = [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF, self::PENRO_CHIEF, self::PENRO_FOCAL];
+    private const OPERATIONAL_CATEGORIES = [self::CENRO_RECORDS, self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF, self::PENRO_CHIEF, self::PENRO_FOCAL, self::PAMO];
 
     /** @var list<string> */
     private const CENRO_FOCAL_PREPARATION_SOURCES = [
@@ -106,8 +107,7 @@ final class OrganizationalAccessService
     {
         if (! $user || ! $user->is_active) return false;
         if ($this->effectiveCategory($user) === self::PAMO) {
-            return $user->protected_area_id !== null
-                && $user->getAllPermissions()->contains('name', 'submission-tracking.view');
+            return $this->canViewPamoPilotWorkflow($user);
         }
         if ($this->isGlobal($user) || $this->hasSubmissionTrackingScope($user)) return true;
         $legacy = in_array($user->section, ['CDS', 'ENGP'], true) || (blank($user->unit_assignment) && in_array($user->section, self::OPERATIONAL_CATEGORIES, true));
@@ -117,6 +117,14 @@ final class OrganizationalAccessService
     public function canViewConservationModules(?User $user): bool
     {
         return $this->canBrowseModuleUnit($user, self::CONSERVATION);
+    }
+
+    public function canViewPamoPilotWorkflow(?User $user): bool
+    {
+        if (! $user || ! $user->is_active || ! $user->is_approved
+            || $this->effectiveCategory($user) !== self::PAMO || $user->protected_area_id === null) return false;
+        $facts = $this->pamoAssignmentForProtectedArea((int) $user->protected_area_id);
+        return $facts !== null && $this->same($this->normalizeOffice($user->office_designated), $facts['pamo_office_name']);
     }
 
     public function canViewDevelopmentModules(?User $user): bool
@@ -132,6 +140,7 @@ final class OrganizationalAccessService
         $category = $this->effectiveCategory($user);
         if (in_array($category, [self::CENRO_CHIEF, self::CENRO_RECORDS, self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF, self::PENRO_CHIEF, self::PENRO_FOCAL], true)) return [self::CONSERVATION, self::DEVELOPMENT];
         if ($category === self::CENRO_FOCAL) return [self::CONSERVATION, self::DEVELOPMENT];
+        if ($category === self::PAMO) return $this->canViewPamoPilotWorkflow($user) ? [self::CONSERVATION] : [];
         if (in_array($user->unit_assignment, [self::CONSERVATION, self::DEVELOPMENT], true)) return [$user->unit_assignment];
         return $user->section === 'ENGP' ? [self::DEVELOPMENT] : ($user->section === 'CDS' ? [self::CONSERVATION] : []);
     }
@@ -143,7 +152,7 @@ final class OrganizationalAccessService
         if (! $this->hasSubmissionTrackingScope($user)) return false;
         $category = $this->effectiveCategory($user);
         if (in_array($category, [self::CENRO_RECORDS, self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF], true)) return false;
-        return in_array($unit, $this->effectiveUnits($user), true) && in_array($category, [self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_CHIEF, self::PENRO_FOCAL, self::PAMO], true);
+        return in_array($unit, $this->effectiveUnits($user), true) && in_array($category, [self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_CHIEF, self::PENRO_FOCAL], true);
     }
 
     public function canBrowseModule(?User $user, string $source, string $unit): bool
@@ -156,6 +165,11 @@ final class OrganizationalAccessService
         if (! $user || ! $user->is_active) return false;
         if ($this->isGlobal($user)) return true;
         if ($record instanceof EngpReportSubmission) return $this->canViewDevelopmentRecord($user, $record);
+        if ($this->effectiveCategory($user) === self::PAMO) {
+            return $record instanceof ConservationReportSubmission
+                && in_array($record->workflow_key, \App\Services\Conservation\PambComplianceCalculator::MEETING_WORKFLOWS, true)
+                && $this->canAccessProtectedArea($user, $record->protected_area_id);
+        }
         if ($record->getAttribute('protected_area_id') !== null) return $this->canAccessProtectedArea($user, $record->getAttribute('protected_area_id'));
         if ($this->isCenroCategory($this->effectiveCategory($user))) return $this->same($user->office_designated, $record->getAttribute('target_office') ?: $record->getAttribute('office')) || (blank($record->getAttribute('target_office')) && (int) $record->getAttribute('created_by') === (int) $user->getKey());
         return in_array($this->effectiveCategory($user), self::OPERATIONAL_CATEGORIES, true);
@@ -175,6 +189,7 @@ final class OrganizationalAccessService
     {
         if (! $this->canViewSubmissionTracking($user)) return false;
         if ($this->isGlobal($user)) return true;
+        if ($this->effectiveCategory($user) === self::PAMO) return $source === 'conservation';
         if ($source === 'engp') return in_array(self::DEVELOPMENT, $this->effectiveUnits($user), true);
         return in_array(self::CONSERVATION, $this->effectiveUnits($user), true);
     }
@@ -236,7 +251,9 @@ final class OrganizationalAccessService
             return $this->same($this->supervisingOfficeNameForProtectedArea((int) $protectedAreaId), $user->office_designated);
         }
         if ($this->effectiveCategory($user) === self::PAMO) {
-            return $user->protected_area_id !== null && (int) $user->protected_area_id === (int) $protectedAreaId;
+            return (bool) $user->is_approved && $user->protected_area_id !== null
+                && (int) $user->protected_area_id === (int) $protectedAreaId
+                && $this->canViewPamoPilotWorkflow($user);
         }
         return $this->isPenroCategory($this->effectiveCategory($user));
     }
@@ -362,7 +379,9 @@ final class OrganizationalAccessService
             return $this->same($supervisingOffice, $user->office_designated);
         }
         if ($category === self::PAMO) {
-            return $user->protected_area_id !== null && (int) $user->protected_area_id === (int) $area->getKey();
+            return (bool) $user->is_approved && $user->protected_area_id !== null
+                && (int) $user->protected_area_id === (int) $area->getKey()
+                && $this->canViewPamoPilotWorkflow($user);
         }
         return $this->isPenroCategory($category);
     }
@@ -379,14 +398,111 @@ final class OrganizationalAccessService
 
     public function officeOptions(): array
     {
-        return OrganizationalOffice::query()->where('is_active', true)->whereIn('name', [...$this->cenroOffices(), ...$this->penroOffices()])->orderByRaw("CASE office_type WHEN 'cenro' THEN 1 ELSE 2 END")->orderBy('name')->get(['id', 'code', 'name', 'office_type'])->map(fn (OrganizationalOffice $office): array => ['id' => $office->id, 'code' => $office->code, 'name' => $office->name, 'label' => $office->office_type === 'penro' ? 'PENRO Davao Oriental' : $office->name, 'office_type' => $office->office_type, 'is_active' => true])->all();
+        return OrganizationalOffice::query()->where('is_active', true)->where(function ($query): void {
+            $query->whereIn('name', [...$this->cenroOffices(), ...$this->penroOffices()])->orWhere('office_type', 'pamo');
+        })->orderByRaw("CASE office_type WHEN 'cenro' THEN 1 WHEN 'penro' THEN 2 ELSE 3 END")->orderBy('name')->get(['id', 'code', 'name', 'office_type'])->map(fn (OrganizationalOffice $office): array => ['id' => $office->id, 'code' => $office->code, 'name' => $office->name, 'label' => $office->office_type === 'penro' ? 'PENRO Davao Oriental' : $office->name, 'office_type' => $office->office_type, 'is_active' => true])->all();
+    }
+
+    public function supervisingOfficeOptions(): array
+    {
+        return array_values(array_filter($this->officeOptions(), fn (array $office): bool => in_array($office['office_type'] ?? null, ['cenro', 'penro'], true)));
     }
 
     public function assignSupervisingOffice(ProtectedArea $protectedArea, int $officeId, User $actor): void
     {
         abort_unless($this->isGlobal($actor) || $actor->can('protected-areas.create') || $actor->can('protected-areas.update'), 403);
-        $office = OrganizationalOffice::query()->where('is_active', true)->findOrFail($officeId);
+        $office = OrganizationalOffice::query()->where('is_active', true)->whereIn('office_type', ['cenro', 'penro'])->findOrFail($officeId);
         ProtectedAreaOfficeAssignment::updateOrCreate(['protected_area_id' => $protectedArea->getKey(), 'assignment_type' => 'supervising'], ['organizational_office_id' => $office->getKey(), 'assigned_by' => $actor->getKey()]);
+    }
+
+    /** Create or retain the administrator-approved PAMO office identity and PA mapping. */
+    public function assignPamoOfficeByName(ProtectedArea $protectedArea, ?string $name, User $actor, ?int $officeId = null): ?OrganizationalOffice
+    {
+        abort_unless($this->isGlobal($actor) || $actor->can('protected-areas.create') || $actor->can('protected-areas.update'), 403);
+        $name = trim((string) $name);
+        if (($officeId ?? 0) > 0) {
+            $office = OrganizationalOffice::query()->where('office_type', 'pamo')->where('is_active', true)->findOrFail($officeId);
+            $name = (string) $office->name;
+        } elseif ($name === '') {
+            ProtectedAreaOfficeAssignment::query()->where('protected_area_id', $protectedArea->getKey())->where('assignment_type', 'pamo')->delete();
+            $protectedArea->update(['pamo' => null]);
+            return null;
+        } else {
+            if (mb_strlen($name) > 150) throw ValidationException::withMessages(['pamo' => 'Use a PAMO office name of 150 characters or fewer, or select an existing office identity.']);
+            $identity = $this->normalizePamoOfficeName($name);
+            $nameMatches = OrganizationalOffice::query()->get(['id', 'name', 'office_type', 'is_active'])
+                ->filter(fn (OrganizationalOffice $candidate): bool => $this->normalizePamoOfficeName((string) $candidate->name) === $identity)
+                ->values();
+            if ($nameMatches->count() > 1) throw ValidationException::withMessages(['pamo' => 'This PAMO office name matches multiple office identities. Select the intended existing office.']);
+            if ($nameMatches->count() === 1) {
+                $office = OrganizationalOffice::query()->findOrFail($nameMatches->first()->id);
+                if ($office->office_type !== 'pamo' || ! $office->is_active) throw ValidationException::withMessages(['pamo' => 'This PAMO office name conflicts with an inactive or different-type office.']);
+            } else {
+                $slug = \Illuminate\Support\Str::slug($identity) ?: 'office';
+                $code = 'pamo_'.substr($slug, 0, 40).'_'.substr(hash('sha256', $identity), 0, 32);
+                $office = OrganizationalOffice::query()->where('code', $code)->first();
+                if ($office && ($office->office_type !== 'pamo' || ! $office->is_active || $this->normalizePamoOfficeName((string) $office->name) !== $identity)) {
+                    throw ValidationException::withMessages(['pamo' => 'The PAMO office identity conflicts with an existing organizational office.']);
+                }
+                if (! $office) {
+                    $office = OrganizationalOffice::query()->create([
+                        'code' => $code, 'name' => $name, 'office_type' => 'pamo', 'is_active' => true,
+                    ]);
+                }
+            }
+        }
+
+        ProtectedAreaOfficeAssignment::query()->updateOrCreate(
+            ['protected_area_id' => $protectedArea->getKey(), 'assignment_type' => 'pamo'],
+            ['organizational_office_id' => $office->getKey(), 'assigned_by' => $actor->getKey()],
+        );
+        $protectedArea->update(['pamo' => $office->name]);
+
+        return $office;
+    }
+
+    public function pamoOfficeOptions(): array
+    {
+        return OrganizationalOffice::query()->where('office_type', 'pamo')->where('is_active', true)->orderBy('name')->get(['id', 'name'])->map(fn (OrganizationalOffice $office): array => ['id' => (int) $office->id, 'name' => (string) $office->name])->all();
+    }
+
+    /** Active, explicitly mapped pilot origin facts; never use the legacy pamo string as access evidence. */
+    public function pamoAssignmentForProtectedArea(int $protectedAreaId): ?array
+    {
+        $area = ProtectedArea::query()->whereKey($protectedAreaId)->where('status', 'Active')->first();
+        if (! $area) return null;
+        $assignment = ProtectedAreaOfficeAssignment::query()->where('protected_area_id', $protectedAreaId)
+            ->where('assignment_type', 'pamo')->with('office')->first();
+        $pamoOffice = $assignment?->office;
+        if (! $pamoOffice || $pamoOffice->office_type !== 'pamo' || ! $pamoOffice->is_active) return null;
+
+        $direct = app(\App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy::class)->isDirectProtectedArea($area);
+        $supervising = $area->supervisingOfficeAssignment()->with('office')->first();
+        $responsible = $supervising?->office;
+        if (! $direct && (! $responsible || $responsible->office_type !== 'cenro' || ! $responsible->is_active)) return null;
+        if ($direct && (! $responsible || $responsible->office_type !== 'penro' || ! $responsible->is_active)) return null;
+
+        return [
+            'protected_area' => $area,
+            'protected_area_id' => (int) $area->getKey(),
+            'pamo_office_id' => (int) $pamoOffice->getKey(),
+            'pamo_office_name' => (string) $pamoOffice->name,
+            'responsible_cenro_office_id' => $responsible && $responsible->office_type === 'cenro' ? (int) $responsible->getKey() : null,
+            'responsible_cenro_name' => $responsible && $responsible->office_type === 'cenro' ? (string) $responsible->name : null,
+            'target_office' => (string) $responsible->name,
+            'profile' => $direct ? 'pamo_direct' : 'pamo_regular',
+        ];
+    }
+
+    /** @return list<array{id:int,name:string,short_name:?string,pamo_office_id:int}> */
+    public function pamoRegistrationProtectedAreas(): array
+    {
+        return ProtectedArea::query()->where('status', 'Active')
+            ->whereHas('pamoOfficeAssignment.office', fn ($query) => $query->where('office_type', 'pamo')->where('is_active', true))
+            ->orderBy('name')->get(['id', 'name', 'short_name'])->map(function (ProtectedArea $area): array {
+                $facts = $this->pamoAssignmentForProtectedArea((int) $area->getKey());
+                return ['id' => (int) $area->getKey(), 'name' => (string) $area->name, 'short_name' => $area->short_name, 'pamo_office_id' => (int) ($facts['pamo_office_id'] ?? 0)];
+            })->filter(fn (array $row): bool => $row['pamo_office_id'] > 0)->values()->all();
     }
 
     public function supervisingOfficeId(ProtectedArea $protectedArea): ?int { return $protectedArea->supervisingOfficeAssignment?->organizational_office_id; }
@@ -417,6 +533,7 @@ final class OrganizationalAccessService
                 $disabledPositionCategories,
                 $preservedCategory,
             ), 'unit_assignment' => null],
+            ['value' => self::OPERATIONAL_GROUP_PAMO, 'label' => 'Protected Area / PAMO', 'categories' => $this->optionsFor([self::PAMO]), 'unit_assignment' => null],
         ];
     }
 
@@ -469,6 +586,7 @@ final class OrganizationalAccessService
         return match ($category) {
             self::CENRO_FOCAL, self::CENRO_CHIEF, self::CENRO_RECORDS => self::OPERATIONAL_GROUP_CENRO,
             self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF, self::PENRO_FOCAL, self::PENRO_CHIEF => self::OPERATIONAL_GROUP_PENRO,
+            self::PAMO => self::OPERATIONAL_GROUP_PAMO,
             default => null,
         };
     }
@@ -492,6 +610,7 @@ final class OrganizationalAccessService
         return match ($category) {
             self::CENRO_CHIEF, self::CENRO_FOCAL, self::PENRO_CHIEF, self::PENRO_FOCAL => ['reports.view', 'technical-reports.view', 'technical-reports.create', 'technical-reports.update'],
             self::CENRO_RECORDS, self::PENRO_RECORDS, self::OFFICE_PENRO, self::PENRO_TSD_CHIEF => ['reports.view'],
+            self::PAMO => ['technical-reports.view'],
             default => [],
         };
     }
@@ -532,11 +651,25 @@ final class OrganizationalAccessService
         }
         if ($category === self::PAMO) {
             $data['unit_assignment'] = null;
-            if (blank($data['office_designated'] ?? null) && filled($data['protected_area_id'] ?? null)) $data['office_designated'] = $this->supervisingOfficeNameForProtectedArea((int) $data['protected_area_id']);
+            if (filled($data['protected_area_id'] ?? null)) {
+                $facts = $this->pamoAssignmentForProtectedArea((int) $data['protected_area_id']);
+                if ($facts) $data['office_designated'] = $facts['pamo_office_name'];
+            }
             return $data;
         }
         if (($data['unit_assignment'] ?? null) === self::DEVELOPMENT) $data['protected_area_id'] = null;
         return $data;
+    }
+
+    public function assertSubmittedPamoOfficeMatches(mixed $submittedOffice, mixed $protectedAreaId): void
+    {
+        if (blank($submittedOffice)) return;
+        $facts = is_numeric($protectedAreaId)
+            ? $this->pamoAssignmentForProtectedArea((int) $protectedAreaId)
+            : null;
+        if (! $facts || ! $this->same($this->normalizeOffice((string) $submittedOffice), $facts['pamo_office_name'])) {
+            throw ValidationException::withMessages(['office_designated' => 'PAMO office identity must match the selected Protected Area mapping.']);
+        }
     }
 
     public function supervisingOfficeNameForProtectedArea(?int $protectedAreaId): ?string
@@ -654,6 +787,9 @@ final class OrganizationalAccessService
         } elseif ($category === self::PAMO) {
             if (filled($unit) && $unit !== self::CONSERVATION) throw ValidationException::withMessages(['unit_assignment' => 'PAMO is a Conservation assignment.']);
             if (blank($protectedAreaId)) throw ValidationException::withMessages(['protected_area_id' => 'A protected-area assignment is required for PAMO users.']);
+            $facts = $this->pamoAssignmentForProtectedArea((int) $protectedAreaId);
+            if (! $facts) throw ValidationException::withMessages(['protected_area_id' => 'Select an active Protected Area with an approved PAMO office mapping and valid routing responsibility.']);
+            if (filled($office) && ! $this->same($this->normalizeOffice($office), $facts['pamo_office_name'])) throw ValidationException::withMessages(['office_designated' => 'PAMO office identity is derived from the selected Protected Area mapping.']);
         } elseif (filled($unit) && ! in_array($unit, [self::CONSERVATION, self::DEVELOPMENT], true)) {
             throw ValidationException::withMessages(['unit_assignment' => 'Select a valid operational unit.']);
         }
@@ -692,6 +828,11 @@ final class OrganizationalAccessService
     }
 
     private function same(?string $left, ?string $right): bool { return trim((string) $left) !== '' && mb_strtolower(trim((string) $left)) === mb_strtolower(trim((string) $right)); }
+
+    private function normalizePamoOfficeName(string $name): string
+    {
+        return mb_strtolower((string) preg_replace('/\s+/u', ' ', trim($name)));
+    }
 
     private function isPenroCategory(?string $category): bool
     {

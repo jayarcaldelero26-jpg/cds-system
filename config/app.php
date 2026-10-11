@@ -15,6 +15,8 @@ return [
 
     'name' => env('APP_NAME', 'CDS-SMART'),
 
+    'demo_data_notice' => env('APP_DEMO_DATA_NOTICE', false),
+
     /*
     |--------------------------------------------------------------------------
     | Application Environment

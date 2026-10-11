@@ -163,7 +163,9 @@ final class DocumentRoutingPresenter
         $profile = $state['profile'];
         $actions = collect($state['actions']);
         $currentStage = (string) $state['stage'];
-        $start = $state['stage'] === DocumentRoutingProfileRegistry::PAMO_ORIGIN
+        $pamoOrigin = in_array(data_get($state, 'route_position.profile'), ['pamo_regular', 'pamo_direct'], true)
+            && data_get($state, 'route_position.origin_kind') === 'pamo_pamb';
+        $start = $pamoOrigin || $state['stage'] === DocumentRoutingProfileRegistry::PAMO_ORIGIN
             ? DocumentRoutingProfileRegistry::PAMO_ORIGIN
             : ($profile['key'] === 'canonical_direct_penro' ? DocumentRoutingProfileRegistry::PENRO_ORIGIN : DocumentRoutingProfileRegistry::PREPARATION);
         $pathStart = $state['bootstrapped'] ? $currentStage : $start;
@@ -385,6 +387,7 @@ final class DocumentRoutingPresenter
             DocumentRoutingProfileRegistry::PREPARATION => 0,
             DocumentRoutingProfileRegistry::PENRO_ORIGIN => 0,
             DocumentRoutingProfileRegistry::PAMO_ORIGIN => 0,
+            DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL => 10,
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF => 20,
             DocumentRoutingProfileRegistry::CENRO_CHIEF => 20,
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_RECORDS => 50,
@@ -616,7 +619,8 @@ final class DocumentRoutingPresenter
         }
         if ($stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL) return 'Regional Office';
         if ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
-            return $this->supervisingOffice((int) $record->getAttribute('protected_area_id')) ?: $fallback;
+            $snapshot = \App\Models\SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')->where('source_id', $record->getKey())->first();
+            return $snapshot?->pamo_office_name ?: $fallback;
         }
         if ($stage !== null) {
             $targetOffice = (string) $this->originOffice($record);

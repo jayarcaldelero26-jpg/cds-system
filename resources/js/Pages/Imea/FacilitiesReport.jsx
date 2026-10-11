@@ -1,5 +1,6 @@
 import { FloatingSelect } from "@/Components/Form";import { Link, router, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import Tooltip from '@/Components/Tooltip';
@@ -29,6 +30,9 @@ export default function FacilitiesReport({
   // Facility Detail Modal State
   const [selectedFacility, setSelectedFacility] = useState(null);
   const [isFacilityModalOpen, setIsFacilityModalOpen] = useState(false);
+  const facilityLayerRef = useRef(null);
+  const facilityPanelRef = useRef(null);
+  const facilityMotion = useModalMotion(isFacilityModalOpen, { panelRef: facilityPanelRef, layerRef: facilityLayerRef, onExited: () => setSelectedFacility(null) });
 
   // Dynamic As-Of Date para sa header ug print view
   const currentInventoryDateDisplay = selectedInventoryDate ?
@@ -78,14 +82,12 @@ export default function FacilitiesReport({
 
   const closeFacilityModal = () => {
     setIsFacilityModalOpen(false);
-    setSelectedFacility(null);
   };
 
   return (
     <AuthenticatedLayout title="Facilities Summary Report">
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-                .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
                 .custom-table-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
                 .custom-table-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 9999px; }
 
@@ -281,9 +283,9 @@ export default function FacilitiesReport({
             </div>
 
             {/* FACILITY FULL DETAILS MODAL */}
-            {isFacilityModalOpen && selectedFacility &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print">
-                    <div className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto animate-pop-in custom-table-scrollbar border border-gray-200 dark:border-gray-800">
+            {facilityMotion.present && selectedFacility &&
+      <div ref={facilityLayerRef} data-cds-modal-layer data-motion-state={facilityMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print" role="presentation">
+                    <div ref={facilityPanelRef} onTransitionEnd={facilityMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Facility Full Details" data-motion-state={facilityMotion.phase} className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto cds-modal-motion-panel custom-table-scrollbar border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-4 dark:border-gray-800">
                             <div className="flex items-center gap-2">
                                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">ðŸ—ï¸</span>

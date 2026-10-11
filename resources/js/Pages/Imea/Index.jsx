@@ -1,6 +1,7 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { Link, useForm, usePage, router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
 import StatusBadge from '@/Components/StatusBadge';
@@ -8,11 +9,20 @@ import PageHeader from '@/Components/PageHeader';
 import Tooltip from '@/Components/Tooltip';
 import WorkflowTabs from './WorkflowTabs';
 import Button from '@/Components/Button';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 export default function ImeaIndex({ assessments, facilities = { data: [] }, protectedAreas, filters = {} }) {
   const importDropRef = useRef(null);
   const assessmentDropRef = useRef(null);
+  const assessmentLayerRef = useRef(null);
+  const assessmentViewLayerRef = useRef(null);
+  const assessmentViewPanelRef = useRef(null);
+  const facilityLayerRef = useRef(null);
+  const facilityPanelRef = useRef(null);
+  const facilityViewLayerRef = useRef(null);
+  const facilityViewPanelRef = useRef(null);
+  const importLayerRef = useRef(null);
   const { props } = usePage();
   const canCreate = Boolean(props.auth?.canCreateImea);
   const canUpdate = Boolean(props.auth?.canUpdateImea);
@@ -93,6 +103,12 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
     protected_area_id: '',
     file: null
   });
+
+  const assessmentViewMotion = useModalMotion(isViewAssessmentModalOpen, { panelRef: assessmentViewPanelRef, layerRef: assessmentViewLayerRef });
+  const assessmentMotion = useModalMotion(isAssessmentModalOpen, { panelRef: assessmentDropRef, layerRef: assessmentLayerRef });
+  const facilityViewMotion = useModalMotion(isViewFacilityModalOpen, { panelRef: facilityViewPanelRef, layerRef: facilityViewLayerRef });
+  const facilityMotion = useModalMotion(isFacilityModalOpen, { panelRef: facilityPanelRef, layerRef: facilityLayerRef });
+  const importMotion = useModalMotion(isImportModalOpen, { panelRef: importDropRef, layerRef: importLayerRef });
 
   const openViewAssessmentModal = (row) => {
     setSelectedAssessment(row);
@@ -184,18 +200,10 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
   const closeAssessmentModal = () => {
     setIsAssessmentModalOpen(false);
-    setSelectedAssessment(null);
-    setAttachedFiles([]);
-    setExistingFiles([]);
-    setActivePreview(null);
-    reset();
   };
 
   const closeFacilityModal = () => {
     setIsFacilityModalOpen(false);
-    setSelectedFacility(null);
-    facilityForm.reset();
-    facilityForm.clearErrors();
   };
 
   const handleUpdate = (e) => {
@@ -288,7 +296,6 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
     <AuthenticatedLayout title="IMEA Monitoring">
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-                .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
                 .custom-table-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
                 .custom-table-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 9999px; }
             `}</style>
@@ -433,9 +440,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* VIEW ASSESSMENT FULL DETAILS MODAL */}
-            {isViewAssessmentModalOpen && selectedAssessment &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
-                    <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {assessmentViewMotion.present && selectedAssessment &&
+      <div ref={assessmentViewLayerRef} data-cds-modal-layer data-motion-state={assessmentViewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+                    <div ref={assessmentViewPanelRef} onTransitionEnd={assessmentViewMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="IMEA Assessment Full Details" data-motion-state={assessmentViewMotion.phase} className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">IMEA Assessment Full Details</h3>
@@ -499,9 +506,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* EDIT MODAL FOR IMEA ASSESSMENTS */}
-            {isAssessmentModalOpen &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs">
-                    <div ref={assessmentDropRef} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {assessmentMotion.present &&
+      <div ref={assessmentLayerRef} data-cds-modal-layer data-motion-state={assessmentMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
+                    <div ref={assessmentDropRef} onTransitionEnd={assessmentMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit IMEA Assessment" data-motion-state={assessmentMotion.phase} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         {assessmentDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{assessmentDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div className="flex items-center gap-2">
@@ -716,9 +723,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* MODAL FOR ADDING/EDITING FACILITIES */}
-            {isFacilityModalOpen &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
-                    <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {facilityMotion.present &&
+      <div ref={facilityLayerRef} data-cds-modal-layer data-motion-state={facilityMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+                    <div ref={facilityPanelRef} onTransitionEnd={facilityMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Facility / Infrastructure Form" data-motion-state={facilityMotion.phase} className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">
                                 {selectedFacility ? 'Edit Facility / Infrastructure Record' : 'Add Facility / Infrastructure Record'}
@@ -839,9 +846,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* VIEW FACILITY DETAILS MODAL */}
-            {isViewFacilityModalOpen && selectedFacility &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
-                    <div className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {facilityViewMotion.present && selectedFacility &&
+      <div ref={facilityViewLayerRef} data-cds-modal-layer data-motion-state={facilityViewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+                    <div ref={facilityViewPanelRef} onTransitionEnd={facilityViewMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Facility Full Details" data-motion-state={facilityViewMotion.phase} className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">Facility Full Details</h3>
@@ -907,9 +914,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* IMPORT EXCEL/CSV MODAL */}
-            {canImport && isImportModalOpen &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div ref={importDropRef} data-cds-modal-drop-panel className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {canImport && importMotion.present &&
+      <div ref={importLayerRef} data-cds-modal-layer data-motion-state={importMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" role="presentation">
+                    <div ref={importDropRef} onTransitionEnd={importMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Import Facilities" data-motion-state={importMotion.phase} data-cds-modal-drop-panel className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         {importDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{importDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">ðŸ“¥ Import Facilities via CSV/Excel</h3>
@@ -938,9 +945,9 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       }
 
             {/* DELETE ALERTS */}
-            {canDelete && showDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">âš ï¸</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
-            {canDelete && showFacilityDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">âš ï¸</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Facility?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this facility record?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowFacilityDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmFacilityDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
-            {canDelete && showBulkDeleteConfirm && <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"><div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 text-center animate-pop-in"><div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 mb-4 text-red-600 text-2xl">âš ï¸</div><h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected?</h3><p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete {selectedFacilityIds.length} selected facilities?</p><div className="flex gap-3"><Button type="button" size="compact" variant="cancel" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 rounded-xl px-4 py-2 text-sm">Cancel</Button><Button type="button" size="compact" variant="danger" onClick={confirmBulkDelete} className="flex-1 rounded-xl px-4 py-2 text-sm">Yes, Delete</Button></div></div></div>}
+            <ConfirmDialog open={canDelete && showDeleteConfirm} variant="danger" title="Are you sure?" message="Do you really want to delete this record?" confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />
+            <ConfirmDialog open={canDelete && showFacilityDeleteConfirm} variant="danger" title="Delete Facility?" message="Do you really want to delete this facility record?" confirmLabel="Yes, Delete" onConfirm={confirmFacilityDelete} onCancel={() => setShowFacilityDeleteConfirm(false)} />
+            <ConfirmDialog open={canDelete && showBulkDeleteConfirm} variant="danger" title="Delete Selected?" message={`Do you really want to delete ${selectedFacilityIds.length} selected facilities?`} confirmLabel="Yes, Delete" onConfirm={confirmBulkDelete} onCancel={() => setShowBulkDeleteConfirm(false)} />
 
         </AuthenticatedLayout>);
 

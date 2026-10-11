@@ -17,6 +17,7 @@ use RuntimeException;
 final class RoutingPositionSnapshotService
 {
     public const GRAPH_VERSION = 'position-graph-v1';
+    public const PAMO_GRAPH_VERSION = 'pamo-origin-v2';
     private const SOURCES = [
         'conservation', 'engp', 'bms', 'bams', 'imea', 'imea-maintenance', 'aws',
         'ipaf-management', 'revenue', 'management-plans',
@@ -86,10 +87,10 @@ final class RoutingPositionSnapshotService
                 $snapshot = $snapshotByKey->get($key);
                 if ($snapshot) {
                     $version = $versions->get((int) $snapshot->setting_version_id);
-                    if (! $version || $snapshot->graph_version !== self::GRAPH_VERSION || ! in_array($snapshot->profile, ['regular', 'direct'], true)) {
+                    if (! $version || ! $this->validSnapshot($snapshot)) {
                         throw new RuntimeException('The captured route snapshot is invalid; routing writes are disabled.');
                     }
-                    $this->primedPositions[$key] = $this->fromVersion($version, $snapshot->profile, false, false, $snapshot);
+                    $this->primedPositions[$key] = $this->fromVersion($version, $snapshot->profile, false, false, $snapshot, $snapshot->graph_version);
                     continue;
                 }
 
@@ -138,10 +139,10 @@ final class RoutingPositionSnapshotService
         $snapshot = $snapshotQuery->first();
         if ($snapshot) {
             $version = RoutingPositionSettingVersion::query()->find($snapshot->setting_version_id);
-            if (! $version || $snapshot->graph_version !== self::GRAPH_VERSION || ! in_array($snapshot->profile, ['regular', 'direct'], true)) {
+            if (! $version || ! $this->validSnapshot($snapshot)) {
                 throw new RuntimeException('The captured route snapshot is invalid; routing writes are disabled.');
             }
-            return $this->fromVersion($version, $snapshot->profile, false, false, $snapshot);
+            return $this->fromVersion($version, $snapshot->profile, false, false, $snapshot, $snapshot->graph_version);
         }
 
         $versionOne = RoutingPositionSettingVersion::query()->where('version', 1)->first();
@@ -182,6 +183,8 @@ final class RoutingPositionSnapshotService
         $position = $resolvedPosition ?? $this->resolve($record, $source, $hasHistory);
         $profile = $position['profile'] ?? null;
         if (in_array($profile, ['regular', 'direct'], true)) return $profile;
+        if ($profile === 'pamo_direct') return 'direct';
+        if ($profile === 'pamo_regular') return 'regular';
 
         return $source !== 'engp' && app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record)
             ? 'direct'
@@ -227,18 +230,30 @@ final class RoutingPositionSnapshotService
     }
 
     /** Persist the resolved preview alongside the first accepted event. Caller holds the source row and settings-head locks. */
-    public function capture(Model $record, string $source, array $resolved, string $profile, User $actor): ?SubmissionRoutingSnapshot
+    public function capture(Model $record, string $source, array $resolved, string $profile, User $actor, ?array $originContext = null): ?SubmissionRoutingSnapshot
     {
         if (! ($resolved['needs_capture'] ?? false)) return null;
-        if (! in_array($profile, ['regular', 'direct'], true) || ! ($resolved['setting_version_id'] ?? null)) {
+        $isPamoOrigin = in_array($profile, ['pamo_regular', 'pamo_direct'], true);
+        if ((! in_array($profile, ['regular', 'direct'], true) && ! $isPamoOrigin) || ! ($resolved['setting_version_id'] ?? null)) {
             throw new RuntimeException('The new route cannot be captured from an invalid preview.');
+        }
+        if ($isPamoOrigin && (! is_array($originContext) || empty($originContext['protected_area_id']) || empty($originContext['pamo_office_id']) || empty($originContext['origin_started_at']))) {
+            throw new RuntimeException('The PAMO origin context is incomplete; route capture is disabled.');
         }
         return SubmissionRoutingSnapshot::query()->create([
             'source_key' => $source,
             'source_id' => $record->getKey(),
             'setting_version_id' => $resolved['setting_version_id'],
             'profile' => $profile,
-            'graph_version' => self::GRAPH_VERSION,
+            'graph_version' => $isPamoOrigin ? self::PAMO_GRAPH_VERSION : self::GRAPH_VERSION,
+            'origin_kind' => $isPamoOrigin ? 'pamo_pamb' : null,
+            'protected_area_id' => $originContext['protected_area_id'] ?? null,
+            'pamo_office_id' => $originContext['pamo_office_id'] ?? null,
+            'pamo_office_name' => $originContext['pamo_office_name'] ?? null,
+            'responsible_cenro_office_id' => $originContext['responsible_cenro_office_id'] ?? null,
+            'responsible_cenro_name' => $originContext['responsible_cenro_name'] ?? null,
+            'originator_user_id' => $originContext['originator_user_id'] ?? null,
+            'origin_started_at' => $originContext['origin_started_at'] ?? null,
             'captured_by' => $actor->getKey(),
             'captured_at' => CarbonImmutable::now(),
         ]);
@@ -251,7 +266,7 @@ final class RoutingPositionSnapshotService
     }
 
     /** @return array<string,mixed> */
-    private function fromVersion(RoutingPositionSettingVersion $version, string $profile, bool $preview, bool $needsCapture, ?SubmissionRoutingSnapshot $snapshot): array
+    private function fromVersion(RoutingPositionSettingVersion $version, string $profile, bool $preview, bool $needsCapture, ?SubmissionRoutingSnapshot $snapshot, string $graphVersion = self::GRAPH_VERSION): array
     {
         $this->assertVersionIntegrity($version);
         return [
@@ -259,14 +274,36 @@ final class RoutingPositionSnapshotService
             'version' => (int) $version->version,
             'office_penro_enabled' => (bool) $version->office_penro_enabled,
             'penro_tsd_chief_enabled' => (bool) $version->penro_tsd_chief_enabled,
-            'graph_version' => self::GRAPH_VERSION,
+            'graph_version' => $graphVersion,
             'preview' => $preview,
             'needs_capture' => $needsCapture,
             'origin' => $snapshot ? 'snapshot' : ($preview ? 'current_preview' : 'all_enabled_baseline'),
             'profile' => $profile,
             'snapshot_id' => $snapshot?->getKey(),
             'captured_at' => $snapshot?->captured_at?->toIso8601String(),
+            'origin_kind' => $snapshot?->origin_kind,
+            'protected_area_id' => $snapshot?->protected_area_id,
+            'pamo_office_id' => $snapshot?->pamo_office_id,
+            'pamo_office_name' => $snapshot?->pamo_office_name,
+            'responsible_cenro_office_id' => $snapshot?->responsible_cenro_office_id,
+            'responsible_cenro_name' => $snapshot?->responsible_cenro_name,
+            'originator_user_id' => $snapshot?->originator_user_id,
+            'origin_started_at' => $snapshot?->origin_started_at?->toIso8601String(),
         ];
+    }
+
+    private function validSnapshot(SubmissionRoutingSnapshot $snapshot): bool
+    {
+        if ($snapshot->graph_version === self::GRAPH_VERSION) return in_array($snapshot->profile, ['regular', 'direct'], true);
+        if ($snapshot->graph_version !== self::PAMO_GRAPH_VERSION) return false;
+        return in_array($snapshot->profile, ['pamo_regular', 'pamo_direct'], true)
+            && $snapshot->origin_kind === 'pamo_pamb'
+            && (int) $snapshot->protected_area_id > 0
+            && (int) $snapshot->pamo_office_id > 0
+            && $snapshot->originator_user_id !== null
+            && $snapshot->origin_started_at !== null
+            && ($snapshot->profile !== 'pamo_regular' || ((int) $snapshot->responsible_cenro_office_id > 0 && filled($snapshot->responsible_cenro_name)))
+            && ($snapshot->profile !== 'pamo_direct' || $snapshot->responsible_cenro_office_id === null);
     }
 
     private function assertVersionIntegrity(RoutingPositionSettingVersion $version): void

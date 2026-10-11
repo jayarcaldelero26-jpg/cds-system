@@ -1,6 +1,7 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";
 import DatePicker from "@/Components/DatePicker";import { useState, useEffect, useRef } from 'react';
 import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 import { useForm, router, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
@@ -38,8 +39,15 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
   const [isViewModalOpen, setIsViewModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const importLayerRef = useRef(null);
   const importDropRef = useRef(null);
+  const viewLayerRef = useRef(null);
+  const viewPanelRef = useRef(null);
+  const editLayerRef = useRef(null);
   const editDropRef = useRef(null);
+  const importMotion = useModalMotion(isImportModalOpen, { panelRef: importDropRef, layerRef: importLayerRef });
+  const viewMotion = useModalMotion(isViewModalOpen, { panelRef: viewPanelRef, layerRef: viewLayerRef });
+  const editMotion = useModalMotion(isEditModalOpen, { panelRef: editDropRef, layerRef: editLayerRef });
   const importDropMessage = useModalFileDrop(importDropRef, isImportModalOpen);
   const editDropMessage = useModalFileDrop(editDropRef, isEditModalOpen);
 
@@ -161,7 +169,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
           reset();
           setPreviewUrl(null);
           setExistingFile(null);
-          setSelectedRecord(null);
           setIsEditModalOpen(false);
         }
       });
@@ -202,7 +209,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
         setIsEditModalOpen(false);
         setIsViewModalOpen(false);
         setDeletingId(null);
-        setSelectedRecord(null);
       }
     });
   };
@@ -223,7 +229,6 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
     <AuthenticatedLayout title={dataOnly ? 'AWS Data' : 'Automated Weather Station'}>
             <style>{`
                 @keyframes popIn { 0% { transform: scale(0.9); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-                .animate-pop-in { animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards; }
                 .custom-table-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
                 .custom-table-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.5); border-radius: 9999px; }
             `}</style>
@@ -593,9 +598,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
         }
             </div>
 
-            {isImportModalOpen &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div ref={importDropRef} data-cds-modal-drop-panel className="relative bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 animate-pop-in space-y-6">
+            {importMotion.present &&
+      <div ref={importLayerRef} data-cds-modal-layer data-motion-state={importMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" role="presentation">
+                    <div ref={importDropRef} onTransitionEnd={importMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Import AWS Data" data-motion-state={importMotion.phase} data-cds-modal-drop-panel className="relative bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 cds-modal-motion-panel space-y-6">
                         {importDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{importDropMessage}</div>}
                         <div className="flex items-center justify-between border-b pb-4 dark:border-gray-800">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base flex items-center gap-2">
@@ -662,9 +667,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       }
 
             {/* VIEW MODAL */}
-            {isViewModalOpen && selectedRecord &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto">
-                    <div className="relative w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {viewMotion.present && selectedRecord &&
+      <div ref={viewLayerRef} data-cds-modal-layer data-motion-state={viewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+                    <div ref={viewPanelRef} onTransitionEnd={viewMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="AWS Monitoring Full Details" data-motion-state={viewMotion.phase} className="relative w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">AWS Monitoring Full Details</h3>
@@ -729,9 +734,9 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       }
 
             {/* EDIT MODAL */}
-            {isEditModalOpen && selectedRecord &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs">
-                    <div ref={editDropRef} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden animate-pop-in border border-gray-200 dark:border-gray-800">
+            {editMotion.present && selectedRecord &&
+      <div ref={editLayerRef} data-cds-modal-layer data-motion-state={editMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
+                    <div ref={editDropRef} onTransitionEnd={editMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit AWS Report" data-motion-state={editMotion.phase} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         {editDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{editDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div className="flex items-center gap-2">
@@ -852,47 +857,12 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
       }
 
             {/* BULK DELETE CONFIRMATION */}
-            {showBulkDeleteConfirm && !isReportContext &&
-      <ConfirmDialog
-        open
-        title="Delete Selected Raw Data?"
-        message={`Are you sure you want to Delete this report? This cannot be undone.`}
-        confirmLabel="Delete Selected"
-        onConfirm={confirmBulkDelete}
-        onCancel={() => setShowBulkDeleteConfirm(false)}
-        processing={bulkDeleteProcessing}
-        variant="danger" />
+            <ConfirmDialog open={showBulkDeleteConfirm && !isReportContext} title="Delete Selected Raw Data?" message="Are you sure you want to delete the selected raw data? This cannot be undone." confirmLabel="Delete Selected" onConfirm={confirmBulkDelete} onCancel={() => setShowBulkDeleteConfirm(false)} processing={bulkDeleteProcessing} variant="danger" />
 
-      }
-
-            {showBulkDeleteConfirm && isReportContext &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl"></div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Delete Selected Records?</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Are you sure you want to Delete this report? This cannot be undone.</p>
-                        <div className="flex gap-3">
-                            <button type="button" onClick={() => setShowBulkDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
-                            <button type="button" onClick={confirmBulkDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">Yes, Delete All</button>
-                        </div>
-                    </div>
-                </div>
-      }
+            <ConfirmDialog open={showBulkDeleteConfirm && isReportContext} variant="danger" title="Delete Selected Records?" message="Are you sure you want to delete the selected reports? This cannot be undone." confirmLabel="Yes, Delete All" onConfirm={confirmBulkDelete} onCancel={() => setShowBulkDeleteConfirm(false)} processing={bulkDeleteProcessing} />
 
             {/* DELETE CONFIRMATION */}
-            {showDeleteConfirm &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-sm w-full shadow-2xl border border-red-100 dark:border-red-950 text-center animate-pop-in">
-                        <div className="mx-auto flex items-center justify-center h-14 w-14 rounded-full bg-red-100 dark:bg-red-950 mb-4 shadow-sm text-red-600 dark:text-red-400 text-2xl"></div>
-                        <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-2">Are you sure?</h3>
-                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-6">Do you really want to delete this record? This process cannot be undone.</p>
-                        <div className="flex gap-3">
-                            <button type="button" onClick={() => setShowDeleteConfirm(false)} className="flex-1 px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-sm font-semibold hover:bg-gray-200 transition" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
-                            <button type="button" onClick={confirmDelete} className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-semibold shadow-sm transition" data-cds-action="true" data-cds-action-variant="danger">Yes, Delete</button>
-                        </div>
-                    </div>
-                </div>
-      }
+            <ConfirmDialog open={showDeleteConfirm} variant="danger" title="Are you sure?" message="Do you really want to delete this record? This process cannot be undone." confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />
 
         </AuthenticatedLayout>);
 

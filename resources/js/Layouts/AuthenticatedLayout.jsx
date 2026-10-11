@@ -9,6 +9,7 @@ import NotificationBell from '../Components/Notifications/NotificationBell';
 import Button from '../Components/Button';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
 import { withGenericModuleNavigation } from './navigation.mjs';
+import { settingsNavigationItem } from './settingsNavigation.mjs';
 
 const allNavigation = [
     { label: 'Dashboard', href: '/dashboard', icon: 'dashboard', section: 'BOTH' },
@@ -34,7 +35,7 @@ const allNavigation = [
             { label: 'Special PAMB Meetings', href: '/conservation-reports/special_pamb', permission: 'canViewPambWorkflow' },
             { label: 'Maintenance of Monuments', href: '/conservation-reports/maintenance_monuments', permission: 'canViewTechnicalReports' },
             { label: 'Maintenance of Buoy', href: '/conservation-reports/maintenance_buoy', permission: 'canViewTechnicalReports' },
-            { label: 'TWC Meetings', href: '/conservation-reports/twc_meetings', permission: 'canViewTechnicalReports' },
+            { label: 'TWC Meetings', href: '/conservation-reports/twc_meetings', permission: 'canViewPambWorkflow' },
             { label: 'Updating of PAMP', href: '/conservation-reports/updating_pamp', permission: 'canViewTechnicalReports' },
             { label: 'BMS', href: '/bms?tracker=1', permission: 'canViewBms', activeQuery: { tracker: '1' } },
             { label: 'BAMS', href: '/bams/report-submissions', permission: 'canViewBams' },
@@ -136,11 +137,12 @@ const allNavigation = [
     { label: 'Alerts', href: '/compliance-alerts', icon: 'alerts', permission: 'canViewComplianceAlerts', section: 'CDS' },
     { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewReports', section: 'BOTH' },
 
-    { label: 'Administration', heading: true, permission: 'canManageAdministration', section: 'BOTH' },
+    { label: 'Administration', heading: true, permission: 'canAccessAdministrationSection', section: 'BOTH' },
+    { label: 'Office TAT', href: '/admin/office-tat', icon: 'chart', permission: 'canViewOfficeTat', section: 'BOTH' },
     { label: 'User Management', href: '/admin/users', icon: 'users', permission: 'canManageUsers', section: 'BOTH' },
     { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'audit', permission: 'canManageUsers', section: 'BOTH' },
     { label: 'Recipient Mapping', href: '/admin/recipient-mapping', icon: 'recipient-map', permission: 'canManageComplianceAlerts', section: 'BOTH' },
-    { label: 'Settings', href: '/settings', icon: 'settings', permission: 'canManageUsers', section: 'BOTH' },
+    settingsNavigationItem,
 ];
 
 const lucideSidebarIcons = {
@@ -164,6 +166,7 @@ const lucideSidebarIcons = {
     activities: 'lucide:clipboard-list',
     photos: 'lucide:image',
     reports: 'lucide:file-text',
+    chart: 'lucide:chart-no-axes-column-increasing',
 };
 
 function Icon({ name, className = 'h-6 w-6 shrink-0' }) {
@@ -181,9 +184,10 @@ function MenuIcon({ name, active = false, muted = false }) {
 
 function matchesNavigationItem(item, url) {
     if (item.children?.length) return item.children.some((child) => matchesNavigationItem(child, url));
+    const currentPath = url.split('?')[0];
+    if (item.activePrefix && (currentPath === item.activePrefix || currentPath.startsWith(`${item.activePrefix}/`))) return true;
     if (!item.href || item.href === '#') return false;
     const [targetPath, targetQuery = ''] = item.href.split('?');
-    const currentPath = url.split('?')[0];
     if (!(item.exact ? currentPath === targetPath : (currentPath === targetPath || currentPath.startsWith(targetPath + '/')))) return false;
     const currentParams = new URLSearchParams(url.split('?')[1] || '');
     const targetParams = new URLSearchParams(targetQuery);
@@ -197,9 +201,12 @@ function matchesNavigationItem(item, url) {
 function filterNavigationByUnit(items, unit, inheritedUnit = null, auth = {}) {
     return items.map((item) => {
         if (item.permission && !auth[item.permission]) return null;
+        if (item.permissionAny?.length && !item.permissionAny.some(permission => auth[permission])) return null;
 
         const itemUnit = item.unit || inheritedUnit;
-        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false) return null;
+        const containsPilotPambLink = item.children?.some(child => child.permission === 'canViewPambWorkflow') && auth.canViewPambWorkflow;
+        const isPilotPambLink = item.permission === 'canViewPambWorkflow' && auth.canViewPambWorkflow;
+        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false && !containsPilotPambLink && !isPilotPambLink) return null;
         if (itemUnit === 'development' && auth.canBrowseDevelopmentModules === false) return null;
         if (unit && itemUnit && itemUnit !== unit) return null;
         const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit, auth) : null;
@@ -290,6 +297,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
     const renderChildren = (children, depth = 0, engpContext = false) => children.map((child) => {
         if (child.permission && !safeAuth[child.permission]) return null;
+        if (child.permissionAny?.length && !child.permissionAny.some(permission => safeAuth[permission])) return null;
 
         const isChildActive = matchesNavigationItem(child, url);
         const isOpen = openDropdowns[child.label];
@@ -430,7 +438,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                             </div></Tooltip>
                         );
                         return (
-                            <Link key={item.label} href={item.href} onClick={onClose} className={common} aria-current={active ? 'page' : undefined}>
+                            <Link key={item.label} href={typeof item.hrefResolver === 'function' ? item.hrefResolver(safeAuth) : item.href} onClick={onClose} className={common} aria-current={active ? 'page' : undefined}>
                                 <MenuIcon name={item.icon} active={active} />
                                 <span>{item.label}</span>
                             </Link>
@@ -450,7 +458,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 }
 
 export function AuthenticatedShell({ children }) {
-    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation } = usePage().props;
+    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, demoDataNotice } = usePage().props;
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [darkMode, setDarkMode] = useState(() => {
@@ -525,6 +533,7 @@ export function AuthenticatedShell({ children }) {
                         </div>
                     </header>
                     {mobileSearchOpen && <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900 md:hidden"><GlobalSearch onNavigate={() => setMobileSearchOpen(false)} /></div>}
+                    {demoDataNotice?.label && <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-950 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100 sm:mx-6 lg:mx-8" role="status" aria-label="Demo data notice"><span className="rounded-full bg-amber-200 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-950 dark:bg-amber-900 dark:text-amber-100">{demoDataNotice.label}</span><span>{demoDataNotice.message}</span></div>}
                     <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
                 </div>
             </div>

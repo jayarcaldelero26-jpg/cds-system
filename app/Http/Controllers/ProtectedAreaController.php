@@ -8,6 +8,7 @@ use App\Models\ProtectedArea;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -39,7 +40,8 @@ class ProtectedAreaController extends Controller
                 ->paginate(15)
                 ->withQueryString()
                 ->through(fn (ProtectedArea $protectedArea): array => $this->protectedAreaData($protectedArea)),
-            'officeOptions' => $this->organization->officeOptions(),
+            'officeOptions' => $this->organization->supervisingOfficeOptions(),
+            'pamoOfficeOptions' => $this->organization->pamoOfficeOptions(),
             'filters' => [
                 'search' => $search,
                 'sort' => $sort,
@@ -50,16 +52,21 @@ class ProtectedAreaController extends Controller
 
     public function create(): Response
     {
-        return Inertia::render('ProtectedAreas/Create', ['officeOptions' => $this->organization->officeOptions()]);
+        return Inertia::render('ProtectedAreas/Create', ['officeOptions' => $this->organization->supervisingOfficeOptions(), 'pamoOfficeOptions' => $this->organization->pamoOfficeOptions()]);
     }
 
     public function store(StoreProtectedAreaRequest $request): RedirectResponse
     {
         $data = $request->validated();
         $officeId = (int) $data['supervising_office_id'];
+        $pamoOfficeId = filled($data['pamo_office_id'] ?? null) ? (int) $data['pamo_office_id'] : null;
         unset($data['supervising_office_id']);
-        $area = ProtectedArea::create([...$data, 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
-        $this->organization->assignSupervisingOffice($area, $officeId, $request->user());
+        unset($data['pamo_office_id']);
+        DB::transaction(function () use ($data, $officeId, $pamoOfficeId, $request): void {
+            $area = ProtectedArea::create([...$data, 'created_by' => $request->user()->id, 'updated_by' => $request->user()->id]);
+            $this->organization->assignSupervisingOffice($area, $officeId, $request->user());
+            $this->organization->assignPamoOfficeByName($area, $data['pamo'] ?? null, $request->user(), $pamoOfficeId);
+        });
 
         return to_route('protected-areas.index')->with('success', 'Protected area created successfully.');
     }
@@ -67,7 +74,7 @@ class ProtectedAreaController extends Controller
     public function edit(Request $request, ProtectedArea $protectedArea): Response
     {
         $this->organization->assertCanAccessProtectedArea($request->user(), $protectedArea->id);
-        return Inertia::render('ProtectedAreas/Edit', ['protectedArea' => $this->protectedAreaData($protectedArea), 'officeOptions' => $this->organization->officeOptions()]);
+        return Inertia::render('ProtectedAreas/Edit', ['protectedArea' => $this->protectedAreaData($protectedArea), 'officeOptions' => $this->organization->supervisingOfficeOptions(), 'pamoOfficeOptions' => $this->organization->pamoOfficeOptions()]);
     }
 
     public function update(UpdateProtectedAreaRequest $request, ProtectedArea $protectedArea): RedirectResponse
@@ -75,9 +82,14 @@ class ProtectedAreaController extends Controller
         $this->organization->assertCanAccessProtectedArea($request->user(), $protectedArea->id);
         $data = $request->validated();
         $officeId = (int) $data['supervising_office_id'];
+        $pamoOfficeId = filled($data['pamo_office_id'] ?? null) ? (int) $data['pamo_office_id'] : null;
         unset($data['supervising_office_id']);
-        $protectedArea->update([...$data, 'updated_by' => $request->user()->id]);
-        $this->organization->assignSupervisingOffice($protectedArea, $officeId, $request->user());
+        unset($data['pamo_office_id']);
+        DB::transaction(function () use ($protectedArea, $data, $officeId, $pamoOfficeId, $request): void {
+            $protectedArea->update([...$data, 'updated_by' => $request->user()->id]);
+            $this->organization->assignSupervisingOffice($protectedArea, $officeId, $request->user());
+            $this->organization->assignPamoOfficeByName($protectedArea, $data['pamo'] ?? null, $request->user(), $pamoOfficeId);
+        });
 
         return to_route('protected-areas.index')->with('success', 'Protected area updated successfully.');
     }
@@ -94,7 +106,7 @@ class ProtectedAreaController extends Controller
     /** @return array<string, mixed> */
     private function protectedAreaData(ProtectedArea $protectedArea): array
     {
-        $protectedArea->loadMissing('supervisingOffice');
+        $protectedArea->loadMissing(['supervisingOffice', 'pamoOfficeAssignment.office']);
         return [
             'id' => $protectedArea->id,
             'name' => $protectedArea->name,
@@ -114,6 +126,7 @@ class ProtectedAreaController extends Controller
             'status' => $protectedArea->status,
             'remarks' => $protectedArea->remarks,
             'supervising_office_id' => $protectedArea->supervisingOffice?->id,
+            'pamo_office_id' => $protectedArea->pamoOfficeAssignment?->organizational_office_id,
             'supervising_office_name' => $protectedArea->supervisingOffice?->name,
         ];
     }

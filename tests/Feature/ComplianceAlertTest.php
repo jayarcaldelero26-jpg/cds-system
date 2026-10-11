@@ -8,6 +8,7 @@ use App\Models\ComplianceAlertSetting;
 use App\Models\ComplianceDeliveryClaim;
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
+use App\Models\HistoricalReportOrigin;
 use App\Models\ComplianceNotificationRun;
 use App\Models\DocumentRoutingEvent;
 use App\Models\ProtectedArea;
@@ -1975,6 +1976,100 @@ test('submitted MOV not yet submitted is pending before deadline, overdue after 
     expect($service->overdueReports())->toHaveCount(1)
         ->and($service->overdueReports()->first()->complianceIssue)->toBe('MOV Not Yet Submitted')
         ->and($service->confirmationHistory()->first()['source_id'])->toBe($report->id);
+});
+
+test('source plus record historical origins are excluded from alert aggregates and stale fake delivery plans', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    $user = complianceUser();
+    $manager = complianceManager($user);
+    $area = complianceArea($manager);
+    $historical = bmsForDeadline($area, $manager, '2026-08-24');
+    $historical->forceFill(['is_historical' => true, 'date_received_penro' => null])->save();
+    $live = bmsForDeadline($area, $manager, '2026-08-24');
+    $service = app(OverdueReportService::class);
+    $staleCandidate = $service->overdueReports(CarbonImmutable::parse('2026-08-25', 'Asia/Manila'))
+        ->firstWhere('sourceId', $historical->id);
+
+    expect($staleCandidate)->toBeInstanceOf(OverdueReport::class);
+
+    HistoricalReportOrigin::query()->create([
+        'source' => 'bms',
+        'source_record_id' => $historical->id,
+        'workflow_key' => 'bms',
+        'encoded_by' => $manager->id,
+        'idempotency_key' => 'alert-origin-'.$historical->id,
+        'original_milestones' => ['provenance' => 'manually_recorded_original_dates', 'milestones' => ['date_received_penro' => '2025-01-22']],
+        'encoded_at' => CarbonImmutable::parse('2026-08-25', 'Asia/Manila'),
+    ]);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'isolated-test@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
+
+    $active = $service->overdueReports(CarbonImmutable::parse('2026-08-25', 'Asia/Manila'));
+    $references = $service->destinationReferences();
+    $delivery = app(ComplianceAlertDeliveryService::class);
+    $plan = $delivery->deliveryPlan(collect([$staleCandidate]), ComplianceNotificationRun::ALERT_OVERDUE);
+
+    expect($active->pluck('sourceId')->all())->toContain($live->id)->not->toContain($historical->id)
+        ->and($references->pluck('source_id')->all())->toContain($live->id)->not->toContain($historical->id)
+        ->and($plan['deliveries'])->toBeEmpty()
+        ->and($plan['unmapped'])->toBeEmpty()
+        ->and($delivery->sendManual(collect([$staleCandidate]), $manager))->toBeEmpty();
+
+    $this->actingAs($manager)->post(route('compliance-alerts.confirm'), [
+        'source_type' => BmsReportSubmission::class,
+        'source_id' => $historical->id,
+        'remarks' => 'Historical evidence does not enter operational confirmation.',
+    ])->assertNotFound();
+    $this->assertDatabaseMissing('report_compliance_confirmations', [
+        'source_type' => BmsReportSubmission::class,
+        'source_id' => $historical->id,
+    ]);
+
+    Mail::assertNothingSent();
+
+    $this->actingAs($manager)->get(route('compliance-alerts.index'))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('summary.overdue_reports', 1)
+            ->where('activeOverdueSources.0.overdue_count', 1)
+            ->where('pendingMovReports', fn ($rows): bool => collect($rows)->doesntContain(fn ($row): bool => (int) ($row['source_id'] ?? 0) === $historical->id))
+            ->where('deliveryPlan.unmapped', fn ($groups): bool => collect($groups)->doesntContain(fn ($group): bool => collect(data_get($group, 'reports', []))->contains(fn ($row): bool => (int) ($row['source_id'] ?? 0) === $historical->id))));
+});
+
+test('historical ENGP period identity prevents a duplicate synthesized missing obligation', function () {
+    config()->set('compliance_alerts.scheduled_engp_obligations', true);
+    $manager = complianceManager(complianceUser());
+    $historical = engpForDeadline($manager, '2026-08-20', [
+        'workflow_key' => 'cbep',
+        'reporting_year' => 2026,
+        'period_key' => '2026-08',
+        'period_label' => 'August 2026',
+        'is_historical' => true,
+    ]);
+    HistoricalReportOrigin::query()->create([
+        'source' => 'engp',
+        'source_record_id' => $historical->id,
+        'workflow_key' => 'cbep',
+        'encoded_by' => $manager->id,
+        'idempotency_key' => 'engp-alert-origin-'.$historical->id,
+        'original_milestones' => ['milestones' => ['date_received_penro' => '2026-08-18']],
+        'encoded_at' => CarbonImmutable::parse('2026-08-25', 'Asia/Manila'),
+    ]);
+    $liveOtherPeriod = engpForDeadline($manager, '2026-07-20', [
+        'workflow_key' => 'cbep',
+        'reporting_year' => 2026,
+        'period_key' => '2026-07',
+        'period_label' => 'July 2026',
+    ]);
+
+    $reports = app(OverdueReportService::class)->overdueReports(CarbonImmutable::parse('2026-08-25', 'Asia/Manila'));
+    $logicalIdentity = 'engp|cbep|cenro baganga|2026|2026-08';
+
+    expect($reports->contains(fn (OverdueReport $report): bool => $report->sourceId === $historical->id))->toBeFalse()
+        ->and($reports->contains(fn (OverdueReport $report): bool => $report->logicalIdentity === $logicalIdentity))->toBeFalse()
+        ->and($reports->contains(fn (OverdueReport $report): bool => $report->sourceId === $liveOtherPeriod->id))->toBeTrue()
+        ->and($reports->contains(fn (OverdueReport $report): bool => $report->logicalIdentity === 'engp|cbep|cenro baganga|2026|2026-07'))->toBeTrue();
 });
 
 test('generic Conservation alerts stop at PENRO receipt while pending submissions retain deadline alerts', function () {

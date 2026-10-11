@@ -22,6 +22,8 @@ use App\Http\Controllers\SpatialLayerController;
 use App\Http\Controllers\ComplianceAlertController;
 use App\Http\Controllers\ConservationReportSubmissionController;
 use App\Http\Controllers\SubmissionTrackingController;
+use App\Http\Controllers\HistoricalReportController;
+use App\Http\Controllers\OfficeTatController;
 use App\Http\Controllers\AdminRoutingOverrideController;
 use App\Http\Controllers\EngpReportController;
 use App\Http\Controllers\NotificationController;
@@ -93,6 +95,23 @@ Route::middleware('auth')->group(function () {
     Route::patch('submission-tracking/{source}/{record}/correction', [SubmissionTrackingController::class, 'correctRouting'])->middleware(['admin', 'can:submission-tracking.correct-routing'])->name('submission-tracking.correct-routing');
     Route::get('compliance-alerts', [ComplianceAlertController::class, 'index'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.index');
     Route::get('settings', fn () => Inertia::render('Admin/Settings/Index'))->middleware('admin')->name('settings.index');
+    Route::get('settings/historical-reports', [HistoricalReportController::class, 'index'])->middleware('can:historical-reports.view')->name('settings.historical-reports.index');
+    Route::post('settings/historical-reports/preview', [HistoricalReportController::class, 'preview'])->middleware('can:historical-reports.view')->name('settings.historical-reports.preview');
+    Route::post('settings/historical-reports/periods', [HistoricalReportController::class, 'periods'])->middleware('can:historical-reports.view')->name('settings.historical-reports.periods');
+    Route::post('settings/historical-reports', [HistoricalReportController::class, 'store'])->middleware('can:historical-reports.encode')->name('settings.historical-reports.store');
+    Route::get('settings/historical-reports/{source}/{record}', [HistoricalReportController::class, 'show'])
+        ->where('source', '[a-z0-9-]+')->whereNumber('record')
+        ->middleware('can:historical-reports.view')->name('settings.historical-reports.show');
+    Route::get('admin/office-tat', [OfficeTatController::class, 'index'])->middleware('can:office-tat.view')->name('office-tat.index');
+    Route::post('admin/office-tat/configuration', [OfficeTatController::class, 'storeConfiguration'])->middleware('can:office-tat.configure')->name('office-tat.configuration.store');
+    Route::post('admin/office-tat/assessment-scope', [OfficeTatController::class, 'storeAssessmentScope'])->middleware('can:office-tat.configure')->name('office-tat.assessment-scope.store');
+    Route::post('admin/office-tat/approval-evidence', [OfficeTatController::class, 'storeApprovalEvidence'])->middleware('can:office-tat.configure')->name('office-tat.approval-evidence.store');
+    Route::get('admin/office-tat/approval-evidence/{reference}', [OfficeTatController::class, 'downloadApprovalEvidence'])->middleware('can:office-tat.view')->whereUuid('reference')->name('office-tat.approval-evidence.show');
+    Route::post('admin/office-tat/applicability', [OfficeTatController::class, 'storeApplicability'])->middleware('can:office-tat.configure')->name('office-tat.applicability.store');
+    Route::post('admin/office-tat/obligation-schedule', [OfficeTatController::class, 'storeObligationSchedule'])->middleware('can:office-tat.configure')->name('office-tat.obligation-schedule.store');
+    Route::post('admin/office-tat/non-receipt-register', [OfficeTatController::class, 'storeNonReceiptRegister'])->middleware('can:office-tat.configure')->name('office-tat.non-receipt-register.store');
+    Route::post('admin/office-tat/technical-classification', [OfficeTatController::class, 'storeTechnicalClassification'])->middleware('can:office-tat.configure')->name('office-tat.technical-classification.store');
+    Route::post('admin/office-tat/tie-decision', [OfficeTatController::class, 'storeTieDecision'])->middleware('can:office-tat.configure')->name('office-tat.tie-decision.store');
     Route::get('settings/routing-workflow', [RoutingWorkflowSettingsController::class, 'index'])->middleware('can:submission-tracking.routing-settings.view')->name('settings.routing-workflow');
     Route::put('settings/routing-workflow', [RoutingWorkflowSettingsController::class, 'update'])->middleware('can:submission-tracking.routing-settings.update')->name('settings.routing-workflow.update');
     Route::get('admin/audit-logs', [AuditLogController::class, 'index'])->middleware('can:audit-logs.view')->name('audit-logs.index');
@@ -214,6 +233,10 @@ Route::middleware('auth')->group(function () {
 
     // CONSERVATION UNIT REPORT WORKFLOWS
     Route::get('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'index'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.index');
+    Route::post('conservation-reports/{workflow}/pamo-drafts', [\App\Http\Controllers\PamoPambDraftController::class, 'store'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.store');
+    Route::put('conservation-reports/{workflow}/pamo-drafts/{draft}', [\App\Http\Controllers\PamoPambDraftController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.update');
+    Route::post('conservation-reports/{workflow}/pamo-drafts/{draft}/forward', [\App\Http\Controllers\PamoPambDraftController::class, 'forward'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.forward');
+    Route::get('conservation-reports/{workflow}/pamo-drafts/{draft}/mov', [\App\Http\Controllers\PamoPambDraftController::class, 'showMov'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.mov');
     Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware(['unit:conservation', 'can:technical-reports.create', 'pa-preparation:technical-reports'])->name('conservation-reports.store');
     Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.update', 'pa-preparation:technical-reports'])->name('conservation-reports.update');
     Route::delete('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'destroy'])->middleware(['unit:conservation', 'can:technical-reports.delete'])->name('conservation-reports.destroy');

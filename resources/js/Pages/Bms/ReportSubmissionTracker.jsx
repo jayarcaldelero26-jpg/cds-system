@@ -19,9 +19,11 @@ import { canonicalDateConductedValue, compactDateConductedRanges, dateConductedR
 import TargetOfficeSelect from '@/Components/Form/TargetOfficeSelect';
 import ProtectedAreaSelect from '@/Components/Form/ProtectedAreaSelect';
 import Button from '@/Components/Button';
-
+import HistoricalRecordBadge from '@/Components/HistoricalRecordBadge';
+import RecordTypeBadge from '@/Components/RecordTypeBadge';
+import OperationalStatus from '@/Components/OperationalStatus';
 const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', quarter: '', monitoring_period_start: '', monitoring_period_end: '', date_conducted: '', date_conducted_ranges: [], date_accomplished: '', mov: null, remarks: '' };
-const badgeClass = (value) => ({ 'Pending': 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
+const badgeClass = (value) => ({ 'Pending': 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Historical evidence incomplete': 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200', 'Missing historical evidence': 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
 const dateValue = (value) => value ? String(value).slice(0, 10) : '';
 const display = (value) => formatReportValue(value);
 const documentLabel = (value) => value === 'Reso' ? 'Resolution' : value || 'Document';
@@ -35,7 +37,7 @@ const protectedAreaTableLabel = (protectedArea) => {
   const parentheticalAcronym = fullName.match(/\(([^()]+)\)\s*$/)?.[1]?.trim();
   return { label: parentheticalAcronym || fullName || '-', fullName: fullName || '-' };
 };
-const Badge = ({ value }) => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(value)}`}>{display(value)}</span>;
+const Badge = ({ value }) => <OperationalStatus value={value} renderStatus={status => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(status)}`}>{display(status)}</span>} />;
 const Detail = ({ label, children }) => {
   const reportDetails = useReportDetails();
   const inSummary = /^(reporting period|semester|quarter|deadline|deadline for submission to penro|timeliness(?: rating)?|submission status|status of submission|report status)$/i.test(label);
@@ -48,38 +50,54 @@ const Detail = ({ label, children }) => {
 
 const pendingRouteStatuses = new Set(['Pending Submission by CENRO', 'Pending Receipt by PENRO', 'Pending Regional Endorsement']);
 
-export function SubmissionTimelineDetails({ report, isMeetingPamb = false, cenroReleaseApplicable = report?.cenro_release_applicable !== false, penroDelayField = 'total_days_delayed_penro' }) {
+export function SubmissionTimelineDetails({ report, isMeetingPamb = false, isHistorical = Boolean(report?.is_historical), cenroReleaseApplicable = report?.cenro_release_applicable !== false, penroDelayField = 'total_days_delayed_penro' }) {
   if (!report) return null;
 
-  const routePending = isMeetingPamb && pendingRouteStatuses.has(report.submission_status);
+  const routePending = !isHistorical && isMeetingPamb && pendingRouteStatuses.has(report.submission_status);
   const releaseDate = dateValue(report.date_report_released_cenro);
   const receiptDate = dateValue(report.date_received_penro);
   const endorsementDate = dateValue(report.date_endorsed_regional);
   const delay = report[penroDelayField];
   const delayPending = routePending && delay === 'Please Update Date Endorsed to Regional Office';
+  const missingHistoricalEvidence = <Badge value="Missing historical evidence" />;
   const notApplicableRelease = !cenroReleaseApplicable
     ? <Badge value="Not Applicable — PENRO-managed Protected Area" />
     : releaseDate
       ? display(releaseDate)
-      : routePending ? <Badge value="Pending" /> : display(releaseDate);
-  const receipt = receiptDate ? display(receiptDate) : routePending ? <Badge value="Pending" /> : display(receiptDate);
+      : isHistorical ? missingHistoricalEvidence : routePending ? <Badge value="Pending" /> : display(releaseDate);
+  const receipt = receiptDate ? display(receiptDate) : isHistorical ? missingHistoricalEvidence : routePending ? <Badge value="Pending" /> : display(receiptDate);
   const regional = endorsementDate
     ? display(endorsementDate)
+    : isHistorical
+      ? missingHistoricalEvidence
     : isMeetingPamb
       ? routePending ? <Badge value="Pending" /> : display(endorsementDate)
       : (!cenroReleaseApplicable
         ? (!receiptDate ? <Badge value="Not Yet Available" /> : <Badge value="For Endorsement" />)
         : (!releaseDate ? <Badge value="Not Yet Available" /> : receiptDate ? <Badge value="For Endorsement" /> : display(endorsementDate)));
 
-  return <CrudSection title="Submission Timeline"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2">
-    <Detail label="Date Report Released by CENRO Records">{notApplicableRelease}</Detail>
-    <Detail label="Date Received by PENRO Records">{receipt}</Detail>
-    <Detail label="Regional Endorsement">{regional}</Detail>
-    <Detail label="Total Number of Days Delayed at PENRO">{delayPending ? <Badge value="Pending" /> : display(delay)}</Detail>
+  return <CrudSection title={isHistorical ? 'Original Routing Dates — Manual Historical Evidence' : 'Submission Timeline'}><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2">
+    <Detail label={isHistorical ? 'Original CENRO Release Date' : 'Date Report Released by CENRO Records'}>{notApplicableRelease}</Detail>
+    <Detail label={isHistorical ? 'Original PENRO Receipt Date' : 'Date Received by PENRO Records'}>{receipt}</Detail>
+    <Detail label={isHistorical ? 'Original Regional Endorsement Date' : 'Regional Endorsement'}>{regional}</Detail>
+    <Detail label={isHistorical ? 'Original PENRO Delay (days)' : 'Total Number of Days Delayed at PENRO'}>{delay === 'Missing historical evidence' ? missingHistoricalEvidence : delayPending ? <Badge value="Pending" /> : display(delay)}</Detail>
   </div></CrudSection>;
 }
 
-export default function ReportSubmissionTracker({ submissions, protectedAreas, protectedAreasByOffice = {}, filters, moduleLabel = 'BMS', submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov', dateConductedRangesEnabled = false }) {
+function HistoricalOriginalDates({ report }) {
+  const milestones = [
+    ['CENRO release', report.date_report_released_cenro],
+    ['PENRO receipt', report.date_received_penro],
+    ['Regional endorsement', report.date_endorsed_regional],
+  ];
+
+  return <div className="mt-1.5 max-w-64 text-[10px] leading-4 text-amber-900 dark:text-amber-200">
+    <div className="font-bold">Manual historical evidence · original office dates</div>
+    {milestones.map(([label, value]) => <div key={label}>{label}: {value ? formatReportDate(value) : 'Missing historical evidence'}</div>)}
+  </div>;
+}
+
+export default function ReportSubmissionTracker({ submissions, protectedAreas, protectedAreasByOffice = {}, filters, moduleLabel = 'BMS', historicalSource = null, submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov', dateConductedRangesEnabled = false }) {
   if (!submissionRoutes || typeof submissionRoutes.store !== 'string' || typeof submissionRoutes.index !== 'string' || typeof submissionRoutes.update !== 'function' || typeof submissionRoutes.destroy !== 'function' || typeof submissionRoutes.mov !== 'function') {
     throw new Error(`${moduleLabel} ReportSubmissionTracker requires store, index, update, destroy, and MOV routes.`);
   }
@@ -88,6 +106,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
   const canCreate = permissions?.create ?? Boolean(auth.canCreateBms);
   const canUpdate = permissions?.update ?? Boolean(auth.canUpdateBms);
   const canDelete = permissions?.delete ?? Boolean(auth.canDeleteBms);
+  const pamoPilotMode = workflowConfig?.key && ['regular_pamb', 'special_pamb', 'twc_meetings'].includes(workflowConfig.key) && permissions?.pamoCorrectionOnly === true;
   const periodField = workflowConfig?.period_field || 'semester';
   const periodLabel = workflowConfig?.period_label || 'Semester';
   const periods = workflowConfig?.periods || ['1st Semester', '2nd Semester'];
@@ -220,7 +239,9 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
     : display(row.period_label);
   const updateDateConductedRange = (index, value) => form.setData('date_conducted_ranges', (form.data.date_conducted_ranges || []).map((range, rangeIndex) => rangeIndex === index ? { ...range, from: value?.from || '', to: value?.to || '' } : range));
   const removeDateConductedRange = (index) => { const next = (form.data.date_conducted_ranges || []).filter((_, rangeIndex) => rangeIndex !== index); form.setData('date_conducted_ranges', next.length > 0 ? next : [emptyDateConductedRange()]); };
+  const historicalKind = historicalSource || (moduleLabel === 'BAMS' ? 'bams' : moduleLabel === 'IMEA' ? 'imea' : moduleLabel === 'Automated Weather Station' ? 'aws' : 'bms');
   const columns = [
+  { key: 'record_origin', label: 'Record Type', render: (row) => <RecordTypeBadge source={historicalKind} id={row.id} isHistorical={Boolean(row.is_historical)} /> },
   {
     key: 'protected_area',
     label: 'Name of PA',
@@ -235,14 +256,16 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
   { key: periodField, label: periodLabel, render: periodDisplay },
   ...(hasCoveragePeriod ? [{ key: 'coverage_period', label: 'Coverage Period', render: coverageDisplay }] : []),
   { key: 'date_accomplished', label: 'Date Accomplished', render: (row) => display(dateValue(row.date_accomplished)) },
-  { key: 'timeliness', label: 'Timeliness', render: (row) => <TimelinessBadge value={row.timeliness} /> },
-  { key: 'submission_status', label: 'Status of Submission', render: (row) => <span className="block max-w-52 whitespace-normal leading-5"><Badge value={row.submission_status} /></span> }];
+  { key: 'timeliness', label: 'Timeliness', render: (row) => <div><TimelinessBadge value={row.timeliness} pendingAsUnrated={!Boolean(row.is_historical) && historicalKind === 'conservation'} />{Boolean(row.is_historical) && historicalKind !== 'conservation' && <HistoricalOriginalDates report={row} />}</div> },
+  { key: 'submission_status', label: 'Status of Submission', render: (row) => <div className="max-w-52 whitespace-normal leading-5"><Badge value={row.submission_status} />{Boolean(row.is_historical) && historicalKind !== 'conservation' && <span className="mt-1 block text-[10px] leading-4 text-amber-900 dark:text-amber-200">Historical/manual evidence; this does not represent live routing completion.</span>}</div> }];
 
 
   const pagination = submissions?.links?.length > 3 ? <div className="cds-pagination flex flex-wrap gap-1">{submissions.links.map((link, index) => <button key={index} type="button" disabled={!link.url} onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })} className={`cds-pagination-control rounded-lg px-3 py-1.5 text-xs font-bold transition ${link.active ? 'cds-pagination-current' : ''}`} dangerouslySetInnerHTML={{ __html: link.label }} />)}</div> : null;
   const detailsMov = currentMov(selectedReport);
   const originalMov = sourceMov(selectedReport);
   const completedSubmission = selectedReport?.submission_status === 'Completed';
+  const isHistorical = Boolean(selectedReport?.is_historical);
+  const canEditSelected = canUpdate && !completedSubmission && !isHistorical && (!pamoPilotMode || selectedReport?.pamo_correction_ready === true);
   const reportAttachmentLabel = `Report Attachment / ${documentLabel(form.data.document_type || selectedReport?.document_type)}`;
   const cenroReleaseApplicable = selectedReport?.cenro_release_applicable !== false;
   const appliedFilterChips = [
@@ -259,15 +282,16 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
         <CrudTable compactEmpty={true} title={rows.length > 0 ? `${moduleLabel} Report` : undefined} subtitle={rows.length > 0 ? `${submissions?.total ?? rows.length} report submission${(submissions?.total ?? rows.length) === 1 ? '' : 's'}` : undefined} helperText={rows.length > 0 ? 'Click any row to view full details' : undefined} caption={`${moduleLabel} report submission tracker`} columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} emptyTitle="No report submissions found" emptyDescription={`No ${moduleLabel} report submissions match the selected filters.`} pagination={rows.length > 0 ? pagination : null} />
         {isMeetingPamb && <p className="mt-3 text-xs italic text-gray-600 dark:text-gray-400"><span className="text-red-600 dark:text-red-400">Note:</span> The term "report" in the Column "Status of Submission" is used as a general term to refer to the required means of verification (MOVs) submitted after the conduct of an activity. These may include, but are not limited to, accomplishment reports, minutes of meetings, and resolutions. Remarks such as "Report Submitted" or "Report Not Yet Submitted" reflect the status of submission of these required documents.</p>}
 
-        <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canUpdate && !completedSubmission} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
+        <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canEditSelected} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[
     { label: 'Reporting Period', value: periodDisplay(selectedReport) },
     { label: 'Report Status', render: () => <Badge value={selectedReport.submission_status} /> },
     { label: 'Deadline', value: display(selectedReport.deadline_submission) },
-    { label: 'Timeliness Rating', render: () => <TimelinessBadge value={selectedReport.timeliness} /> }]
-    } />} attachments={selectedReport && (detailsMov ? <CrudSection title={reportAttachmentLabel}><div className="space-y-3"><div className="flex flex-wrap justify-end gap-2">{completedSubmission && (detailsMov.download_url || detailsMov.url) && <a href={detailsMov.download_url || detailsMov.url} download={detailsMov.name || undefined} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction rounded-xl px-3 py-2 text-xs font-bold">Download Current Copy</a>}{canUpdate && !completedSubmission && <button type="button" onClick={() => openMov(selectedReport)} className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100" data-cds-action="true" data-cds-action-variant="primary">Replace Attachment</button>}</div><FilePreviewPanel file={detailsMov} title={reportAttachmentLabel} heightClass="h-[480px]" /></div></CrudSection> : <CrudSection title={reportAttachmentLabel}><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canUpdate && !completedSubmission && <button type="button" onClick={() => openMov(selectedReport)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">Attach Report</button>}</CrudSection>)}>
+    { label: 'Timeliness Rating', render: () => <TimelinessBadge value={selectedReport.timeliness} pendingAsUnrated={!isHistorical && historicalKind === 'conservation'} /> }]
+    } />} attachments={selectedReport && (detailsMov ? <CrudSection title={reportAttachmentLabel}><div className="space-y-3"><div className="flex flex-wrap justify-end gap-2">{completedSubmission && (detailsMov.download_url || detailsMov.url) && <a href={detailsMov.download_url || detailsMov.url} download={detailsMov.name || undefined} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction rounded-xl px-3 py-2 text-xs font-bold">Download Current Copy</a>}{canEditSelected && <button type="button" onClick={() => openMov(selectedReport)} className="rounded-xl border border-green-200 bg-green-50 px-3 py-2 text-xs font-bold text-green-700 hover:bg-green-100" data-cds-action="true" data-cds-action-variant="primary">Replace Attachment</button>}</div><FilePreviewPanel file={detailsMov} title={reportAttachmentLabel} heightClass="h-[480px]" /></div></CrudSection> : <CrudSection title={reportAttachmentLabel}><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canEditSelected && <button type="button" onClick={() => openMov(selectedReport)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">Attach Report</button>}</CrudSection>)}>
             {selectedReport && <div className="space-y-6">
+                {isHistorical && <CrudSection title="Historical record"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30"><p className="text-xs leading-5 text-amber-900 dark:text-amber-200">Original dates shown below come from immutable manual evidence. They describe the recorded historical workflow, not current custody or live routing; editing and routing are disabled.</p><HistoricalRecordBadge source={historicalKind} id={selectedReport.id} /></div></CrudSection>}
                 <CrudSection title="Report Information"><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2"><Detail label="Target Office">{display(selectedReport.target_office)}</Detail><Detail label="Protected Area">{display(selectedReport.protected_area?.name)}</Detail><Detail label="Name of Activity">{display(selectedReport.activity_name)}</Detail>{!periodRepresentsDocument && <Detail label="Type of Document">{display(selectedReport.document_type)}</Detail>}{!periodRepresentsDocument && <Detail label={periodLabel}>{periodDisplay(selectedReport)}</Detail>}{hasCoveragePeriod && <Detail label="Coverage Period">{coverageDisplay(selectedReport)}</Detail>}<Detail label="Date Conducted">{display(selectedReport.date_conducted_display || selectedReport.date_conducted)}</Detail><Detail label="Date Accomplished">{display(dateValue(selectedReport.date_accomplished))}</Detail><Detail label="Days Complied">{display(selectedReport[daysCompliedField])}</Detail></div></CrudSection>
-                <SubmissionTimelineDetails report={selectedReport} isMeetingPamb={isMeetingPamb} cenroReleaseApplicable={cenroReleaseApplicable} penroDelayField={penroDelayField} />
+                <SubmissionTimelineDetails report={selectedReport} isMeetingPamb={isMeetingPamb} isHistorical={isHistorical} cenroReleaseApplicable={cenroReleaseApplicable} penroDelayField={penroDelayField} />
                 <CrudSection title="Remarks"><p className="whitespace-pre-wrap text-xs text-gray-800 dark:text-gray-200">{selectedReport.remarks || 'None.'}</p></CrudSection>
             </div>}
         </CrudDetailsModal>

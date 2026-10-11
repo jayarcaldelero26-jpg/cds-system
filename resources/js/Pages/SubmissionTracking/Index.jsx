@@ -35,6 +35,7 @@ import { startAuthentication } from "@simplewebauthn/browser";
 import TimelinessBadge, {
     isTimelinessValue,
 } from "@/Components/TimelinessBadge";
+import OperationalStatus from "@/Components/OperationalStatus";
 import { localDateInputValue } from "@/Utils/dateInput";
 import DatePicker from "@/Components/DatePicker";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
@@ -155,19 +156,15 @@ const badgeTone = (value) => {
         return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900";
     return "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700";
 };
-const Badge = ({ value }) =>
-    isTimelinessValue(value) ? (
-        <TimelinessBadge value={value} />
+const Badge = ({ value }) => <OperationalStatus value={value} renderStatus={(status) =>
+    isTimelinessValue(status) ? (
+        <TimelinessBadge value={status} />
     ) : (
-        <span
-            className={
-                "inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset " +
-                badgeTone(value)
-            }
-        >
-            {value}
+        <span className={"inline-flex rounded-full px-2.5 py-1 text-xs font-bold ring-1 ring-inset " + badgeTone(status)}>
+            {status}
         </span>
-    );
+    )
+} />;
 const historyWidths = {
     100: "w-[100px] min-w-[100px]",
     120: "w-[120px] min-w-[120px]",

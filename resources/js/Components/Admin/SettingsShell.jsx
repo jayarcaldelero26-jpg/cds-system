@@ -8,6 +8,7 @@ const items = [
     { title: 'Report Routing', subtitle: 'Position controls', href: '/settings/routing-workflow', icon: 'lucide:route', capability: 'canViewRoutingWorkflow' },
     { title: 'Storage', subtitle: 'Capacity and availability', href: '/settings/storage', icon: 'lucide:hard-drive', capability: 'canViewStorage' },
     { title: 'System Diagnostics', subtitle: 'Runtime health checks', href: '/settings/system-diagnostics', icon: 'lucide:activity', capability: 'canViewSystemDiagnostics' },
+    { title: 'Historical Reports', subtitle: 'Manual legacy record entry', href: '/settings/historical-reports', icon: 'lucide:archive', capability: 'canViewHistoricalReports' },
 ];
 
 export default function SettingsShell({ children, active }) {

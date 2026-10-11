@@ -72,7 +72,7 @@ class UserController extends Controller
 
         return Inertia::render('Admin/Users/Create', [
             'operationalGroups' => $organization->operationalGroups($routingSettings->disabledAccountCategories()),
-            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name']),
+            'protectedAreas' => $organization->pamoRegistrationProtectedAreas(),
             'offices' => app(OrganizationalAccessService::class)->officeOptions(),
             'accountRoles' => $organization->accountRoleOptions(),
         ]);
@@ -132,7 +132,7 @@ class UserController extends Controller
                 $routingSettings->disabledAccountCategories(),
                 $organization->normalizeCategory($user->section),
             ),
-            'protectedAreas' => ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name']),
+            'protectedAreas' => $organization->pamoRegistrationProtectedAreas(),
             'offices' => app(OrganizationalAccessService::class)->officeOptions(),
             'accountRoles' => $organization->accountRoleOptions(),
         ]);
@@ -308,7 +308,11 @@ class UserController extends Controller
         $before = $user->only(['is_approved', 'is_active']);
 
         DB::transaction(function () use ($user): void {
-            $user->update([
+            $locked = User::query()->lockForUpdate()->findOrFail($user->getKey());
+            if (($error = $this->activationError($locked)) !== null) {
+                throw ValidationException::withMessages(['assignment' => $error]);
+            }
+            $locked->update([
                 'is_approved' => true,
                 'is_active' => true,
             ]);

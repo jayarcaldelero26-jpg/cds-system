@@ -29,6 +29,7 @@ export default function Register({ registrationOptions = {} }) {
     const isCenroGroup = data.operational_group === 'cenro';
     const isPenroGroup = data.operational_group === 'penro';
     const isPamo = data.operational_group === 'pamo';
+    const hasPamoAssignments = protectedAreas.length > 0;
     const cenroOffices = offices.filter((office) => office?.office_type === 'cenro');
 
     const changeGroup = (event) => {
@@ -89,10 +90,15 @@ export default function Register({ registrationOptions = {} }) {
                         {selectedCategory.label} covers both Conservation and Development within the selected CENRO office.
                     </p>}
 
-                    {isPamo && <AuthSelect id="protected-area-id" label="Protected Area / PAMO assignment" name="protected_area_id" icon="map" value={data.protected_area_id} onChange={(event) => setData('protected_area_id', event.target.value)} required error={errors.protected_area_id} hint="A Protected Area is required for PAMO accounts.">
-                        <option value="">Select protected area</option>
+                    {isPamo && <>
+                        <AuthSelect id="protected-area-id" label="Protected Area / PAMO assignment" name="protected_area_id" icon="map" value={data.protected_area_id} onChange={(event) => setData('protected_area_id', event.target.value)} required disabled={!hasPamoAssignments} error={errors.protected_area_id} hint={hasPamoAssignments ? 'Choose an eligible Protected Area for the requested PAMO account.' : 'No eligible Protected Area / PAMO assignment is currently available.'}>
+                            <option value="">{hasPamoAssignments ? 'Select protected area' : 'No eligible protected area available'}</option>
                         {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                    </AuthSelect>}
+                        </AuthSelect>
+                        {!hasPamoAssignments && <p role="status" aria-live="polite" className="-mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950 dark:border-amber-100/20 dark:bg-amber-950/30 dark:text-amber-100">
+                            PAMO registration is unavailable until an active Protected Area has an active PAMO office assignment and an active supervising CENRO or PENRO assignment. Contact a CDS administrator to review the mappings.
+                        </p>}
+                    </>}
 
                     <AuthField id="name" name="name" label="Full name" icon="user-round" value={data.name} onChange={(event) => setData('name', event.target.value)} error={errors.name} autoComplete="name" autoFocus required />
                     <AuthField id="email" name="email" label="Email address" icon="mail" type="email" value={data.email} onChange={(event) => setData('email', event.target.value)} error={errors.email} autoComplete="username" required />
@@ -109,7 +115,7 @@ export default function Register({ registrationOptions = {} }) {
                         </button>
                     </AuthField>
 
-                    <PrimaryButton className="h-11 w-full justify-center gap-2" type="submit" disabled={processing}>
+                    <PrimaryButton className="h-11 w-full justify-center gap-2" type="submit" disabled={processing || (isPamo && !hasPamoAssignments)}>
                         <span>{processing ? 'Creating account...' : 'Create account'}</span>
                         {!processing && <Icon icon="lucide:user-plus" width="17" height="17" aria-hidden="true" />}
                     </PrimaryButton>

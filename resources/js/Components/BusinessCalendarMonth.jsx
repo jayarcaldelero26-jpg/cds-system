@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
 import { formatReportDate } from '@/Utils/dateFormatters';
 import FloatingSelect from '@/Components/Form/FloatingSelect';
 import UtilityIconButton from '@/Components/UtilityIconButton';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
@@ -11,6 +12,7 @@ const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 const CALENDAR_GROUPS = {
     national_holiday: { label: 'National holiday', chip: 'from-rose-500 to-red-700' },
     local_holiday: { label: 'Other non-working day', description: 'Local holidays, special non-working days, office-declared non-working days, and other configured non-working days use this color.', chip: 'from-amber-400 to-orange-600' },
+    historical_report: { label: 'Historical report', description: 'Read-only report evidence dated by recorded activity dates or original milestones.', chip: 'from-amber-500 to-orange-700' },
     engp_report: { label: 'ENGP report', chip: 'from-emerald-500 to-green-700' },
     protected_area_management: { label: 'Protected area management', chip: 'from-teal-500 to-emerald-700' },
     wildlife_conservation: { label: 'Wildlife conservation', chip: 'from-blue-500 to-blue-700' },
@@ -19,7 +21,7 @@ const CALENDAR_GROUPS = {
     conservation_report: { label: 'Conservation report', chip: 'from-violet-500 to-purple-700' },
     development_report: { label: 'Development report', chip: 'from-indigo-500 to-indigo-700' },
 };
-const LEGEND_GROUPS = ['national_holiday', 'local_holiday', 'engp_report', 'protected_area_management', 'wildlife_conservation', 'cbfm', 'integrated_watershed', 'conservation_report', 'development_report'];
+const LEGEND_GROUPS = ['national_holiday', 'local_holiday', 'historical_report', 'engp_report', 'protected_area_management', 'wildlife_conservation', 'cbfm', 'integrated_watershed', 'conservation_report', 'development_report'];
 const PAMD_SOURCES = new Set(['bms', 'bams', 'imea', 'imea-maintenance', 'conservation-reports', 'ipaf', 'revenue']);
 const PROGRAM_AREA_GROUPS = {
     protected_area_management_and_development: 'protected_area_management',
@@ -36,12 +38,13 @@ export default function BusinessCalendarMonth({
     yearSummary = null, nonWorkingDays = [], onSelectMov, onSelectHoliday, onAdd, canManage = false,
 }) {
     const [showMovs, setShowMovs] = useState(true);
+    const [showHistorical, setShowHistorical] = useState(true);
     const [moreDate, setMoreDate] = useState(null);
     const parsedMonth = parseMonth(month);
     const selectedYear = Number(year || parsedMonth.year);
     const selectedMonth = parsedMonth.year === selectedYear ? parsedMonth.index + 1 : null;
     const days = useMemo(() => monthDays(parsedMonth.year, parsedMonth.index), [parsedMonth.year, parsedMonth.index]);
-    const movByDate = useMemo(() => groupBy(movEvents, 'submission_date'), [movEvents]);
+    const movByDate = useMemo(() => groupBy(movEvents, 'event_date'), [movEvents]);
     const holidaysByDate = useMemo(() => groupBy(nonWorkingDays, 'date'), [nonWorkingDays]);
     const today = dateKey(new Date());
 
@@ -74,6 +77,8 @@ export default function BusinessCalendarMonth({
                     protectedAreas={protectedAreas}
                     showMovs={showMovs}
                     setShowMovs={setShowMovs}
+                    showHistorical={showHistorical}
+                    setShowHistorical={setShowHistorical}
                     chooseModule={module => navigate({ module })}
                     chooseProtectedArea={protected_area_id => navigate({ protected_area_id })}
                     clearFilters={() => navigate({ module: '', protected_area_id: '' })}
@@ -93,22 +98,26 @@ export default function BusinessCalendarMonth({
                         setView={targetView => navigate(targetView === 'year' ? { view: 'year', year: selectedYear } : { view: 'month', month })}
                     />
                     {view === 'year'
-                        ? <YearView year={selectedYear} selectedMonth={selectedMonth} summary={yearSummary} nonWorkingDays={nonWorkingDays} showMovs={showMovs} onOpenMonth={openMonth} />
-                        : <MonthView days={days} today={today} movByDate={movByDate} holidaysByDate={holidaysByDate} showMovs={showMovs} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={setMoreDate} />}
+                        ? <YearView year={selectedYear} selectedMonth={selectedMonth} summary={yearSummary} nonWorkingDays={nonWorkingDays} showMovs={showMovs} showHistorical={showHistorical} onOpenMonth={openMonth} />
+                        : <MonthView days={days} today={today} movByDate={movByDate} holidaysByDate={holidaysByDate} showMovs={showMovs} showHistorical={showHistorical} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={setMoreDate} />}
                 </div>
             </div>
         </div>
-        <DateEventsModal date={moreDate} events={moreDate ? movByDate[moreDate] || [] : []} onClose={() => setMoreDate(null)} onSelect={event => { setMoreDate(null); onSelectMov(event); }} />
+        <DateEventsModal date={moreDate} events={moreDate ? (movByDate[moreDate] || []).filter(event => event.is_historical ? showHistorical : showMovs) : []} onClose={() => setMoreDate(null)} onSelect={event => { setMoreDate(null); onSelectMov(event); }} />
     </section>;
 }
 
-export function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd }) {
+export function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, showHistorical, setShowHistorical, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd }) {
     return <div className="flex w-full flex-col sm:grid sm:grid-cols-2 sm:gap-5 xl:min-h-[520px] xl:flex-1 xl:flex xl:flex-col xl:gap-0">
         <div className="xl:mb-6">
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/65 dark:text-emerald-300/70">Show on calendar</p>
             <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-slate-700 dark:text-gray-200">
                 <input type="checkbox" checked={showMovs} onChange={event => setShowMovs(event.target.checked)} className="h-3.5 w-3.5 rounded border-slate-300 text-green-700 focus:ring-green-600 dark:border-gray-600 dark:bg-gray-800" />
                 Submitted MOVs
+            </label>
+            <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-slate-700 dark:text-gray-200">
+                <input type="checkbox" checked={showHistorical} onChange={event => setShowHistorical(event.target.checked)} className="h-3.5 w-3.5 rounded border-amber-400 text-amber-700 focus:ring-amber-600 dark:border-amber-700 dark:bg-gray-800" />
+                Historical reports
             </label>
         </div>
         <div className="mt-5 sm:col-span-2 xl:mb-6 xl:mt-0">
@@ -156,7 +165,7 @@ function CalendarToolbar({ view, month, year, shiftMonth, shiftYear, goToday, se
     </header>;
 }
 
-function MonthView({ days, today, movByDate, holidaysByDate, showMovs, canManage, onAdd, onSelectMov, onSelectHoliday, onMore }) {
+function MonthView({ days, today, movByDate, holidaysByDate, showMovs, showHistorical, canManage, onAdd, onSelectMov, onSelectHoliday, onMore }) {
     return <>
         <div className="overflow-x-auto px-2 pb-2 custom-table-scrollbar sm:px-3 sm:pb-3">
             <div className="min-w-[840px]">
@@ -164,7 +173,7 @@ function MonthView({ days, today, movByDate, holidaysByDate, showMovs, canManage
                     {WEEKDAYS.map(day => <div key={day} className="px-2 py-1.5 text-center text-[10px] font-semibold tracking-[0.12em] text-slate-700 dark:text-gray-300">{day}</div>)}
                 </div>
                 <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-                    {days.map(day => <CalendarDay key={day.key} day={day} today={today === day.key} movEvents={showMovs ? (movByDate[day.key] || []) : []} holidays={holidaysByDate[day.key] || []} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={() => onMore(day.key)} />)}
+                    {days.map(day => <CalendarDay key={day.key} day={day} today={today === day.key} movEvents={(movByDate[day.key] || []).filter(event => event.is_historical ? showHistorical : showMovs)} holidays={holidaysByDate[day.key] || []} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={() => onMore(day.key)} />)}
                 </div>
             </div>
         </div>
@@ -198,11 +207,11 @@ function HolidayChip({ holiday, onSelect }) {
 
 function MovChip({ event, onSelect }) {
     const style = getCalendarGroupStyle(getCalendarEventGroup(event));
-    const label = `${event.module} • ${event.source_name || event.office || 'Office'}`;
-    return <button type="button" onClick={() => onSelect(event)} title={`${label} — ${event.title}`} className={`block h-[22px] w-full truncate rounded-md bg-gradient-to-r px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${style.chip}`}>{label}</button>;
+    const label = `${event.is_historical ? 'Historical · ' : ''}${event.module} · ${event.source_name || event.office || 'Office'}`;
+    return <button type="button" onClick={() => onSelect(event)} title={`${label} — ${event.title}${event.calendar_basis ? ` · ${event.calendar_basis}` : ''}`} aria-label={`${event.is_historical ? 'Historical report' : 'Submitted MOV'}: ${event.title}; ${event.calendar_basis || 'PENRO receipt date'} ${formatReportDate(event.event_date)}`} className={`block h-[22px] w-full truncate rounded-md bg-gradient-to-r px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${style.chip}`}>{label}</button>;
 }
 
-function YearView({ year, selectedMonth, summary, nonWorkingDays, showMovs, onOpenMonth }) {
+function YearView({ year, selectedMonth, summary, nonWorkingDays, showMovs, showHistorical, onOpenMonth }) {
     const months = summary?.months || {};
     const overview = summary?.overview || {};
     const holidaysByMonth = groupHolidaysByMonth(nonWorkingDays);
@@ -212,17 +221,18 @@ function YearView({ year, selectedMonth, summary, nonWorkingDays, showMovs, onOp
             <p className="text-xs font-bold text-slate-800 dark:text-white">{year} Overview</p>
             <div className="mt-1.5 flex flex-wrap gap-x-5 gap-y-1 text-[11px] text-slate-600 dark:text-gray-300">
                 <span><b className="text-slate-800 dark:text-white">{showMovs ? overview.submitted_movs || 0 : 0}</b> Submitted MOVs</span>
+                <span><b className="text-slate-800 dark:text-white">{showHistorical ? overview.historical_reports || 0 : 0}</b> Historical reports</span>
                 <span><b className="text-slate-800 dark:text-white">{showMovs ? overview.months_with_submissions || 0 : 0}</b> Months with Activity</span>
                 <span><b className="text-slate-800 dark:text-white">{overview.non_working_days || 0}</b> Non-Working Days</span>
             </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 12 }, (_, index) => <YearMiniCalendar key={index} year={year} month={index + 1} selected={selectedMonth === index + 1} eventDays={months[String(index + 1).padStart(2, '0')]?.days || {}} holidayDays={holidaysByMonth[index + 1] || {}} showMovs={showMovs} onOpenMonth={onOpenMonth} />)}
+            {Array.from({ length: 12 }, (_, index) => <YearMiniCalendar key={index} year={year} month={index + 1} selected={selectedMonth === index + 1} eventDays={months[String(index + 1).padStart(2, '0')]?.days || {}} holidayDays={holidaysByMonth[index + 1] || {}} showMovs={showMovs} showHistorical={showHistorical} onOpenMonth={onOpenMonth} />)}
         </div>
     </div>;
 }
 
-export function YearMiniCalendar({ year, month, selected = false, eventDays, holidayDays, showMovs, onOpenMonth }) {
+export function YearMiniCalendar({ year, month, selected = false, eventDays, holidayDays, showMovs, showHistorical = false, onOpenMonth }) {
     const calendarDays = miniMonthDays(year, month - 1);
     const title = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date(year, month - 1, 1)).toUpperCase();
     const readableTitle = `${title[0]}${title.slice(1).toLowerCase()}`;
@@ -240,7 +250,7 @@ export function YearMiniCalendar({ year, month, selected = false, eventDays, hol
                 if (!day) return <span key={`blank-${index}`} className="min-h-[28px]" aria-hidden="true" />;
                 const key = String(day).padStart(2, '0');
                 const markers = [
-                    ...(showMovs ? (eventDays[key] || []).map(getCalendarEventGroup) : []),
+                    ...(eventDays[key] || []).filter(event => event.is_historical ? showHistorical : showMovs).map(getCalendarEventGroup),
                     ...(holidayDays[key] || []).map(getCalendarEventGroup),
                 ];
                 const visible = markers.slice(0, 3);
@@ -268,6 +278,7 @@ export function CalendarLegend() {
                 return <li key={group} aria-label={style.description ? `Non-working-day group: ${style.description}` : style.label} title={style.description || style.label} className="inline-flex min-w-0 items-center gap-1.5"><span className={`h-2.5 w-2.5 shrink-0 rounded-full bg-gradient-to-br ${style.chip}`} aria-hidden="true" /><span>{style.label}</span></li>;
             })}
         </ul>
+        <p className="basis-full text-[10px] text-slate-500 dark:text-gray-400">Historical reports use a recorded activity date or original milestone. Records without a supported date are not placed on the calendar.</p>
     </div>;
 }
 
@@ -275,12 +286,19 @@ export function CalendarAddButton({ onAdd, date = '', label, compact = false, cl
     return <UtilityIconButton type="button" compact={compact} onClick={() => onAdd(date)} disabled={disabled} aria-label={label} title={label} className={className}>{children}</UtilityIconButton>;
 }
 
-function DateEventsModal({ date, events, onClose, onSelect }) {
-    if (!date) return null;
-    return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
-        <section role="dialog" aria-modal="true" aria-label={`Submitted reports for ${formatReportDate(date)}`} className="max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+function DateEventsModal({ date: dateProp, events: eventsProp, onClose, onSelect }) {
+    const lastSnapshotRef = useRef(null);
+    const overlayRef = useRef(null);
+    const panelRef = useRef(null);
+    if (dateProp) lastSnapshotRef.current = { date: dateProp, events: eventsProp };
+    const date = dateProp || lastSnapshotRef.current?.date;
+    const events = dateProp ? eventsProp : (lastSnapshotRef.current?.events || []);
+    const { present, phase, onTransitionEnd } = useModalMotion(Boolean(dateProp), { onClose, panelRef, layerRef: overlayRef });
+    if (!present || !date) return null;
+    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
+        <section ref={panelRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} data-motion-state={phase} role="dialog" aria-modal="true" aria-label={`Report evidence for ${formatReportDate(date)}`} className="cds-modal-motion-panel max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <header className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
-                <div><h3 className="text-sm font-bold text-gray-900 dark:text-white">Submitted reports</h3><p className="mt-0.5 text-xs text-gray-500">{formatReportDate(date)} · {events.length} events</p></div>
+                <div><h3 className="text-sm font-bold text-gray-900 dark:text-white">Report evidence</h3><p className="mt-0.5 text-xs text-gray-500">{formatReportDate(date)} · {events.length} events</p></div>
                 <button type="button" onClick={onClose} className="rounded-lg px-2 py-1 text-xl text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800" aria-label="Close">&times;</button>
             </header>
             <div className="max-h-[60vh] space-y-2 overflow-y-auto p-4">
@@ -292,6 +310,7 @@ function DateEventsModal({ date, events, onClose, onSelect }) {
 
 function getCalendarEventGroup(event) {
     if (event?.type) return event.type === 'NATIONAL_HOLIDAY' ? 'national_holiday' : 'local_holiday';
+    if (event?.is_historical) return 'historical_report';
     if (event?.program_area && PROGRAM_AREA_GROUPS[event.program_area]) return PROGRAM_AREA_GROUPS[event.program_area];
     if (event?.source_type === 'engp') return 'engp_report';
     if (PAMD_SOURCES.has(event?.source_type)) return 'protected_area_management';

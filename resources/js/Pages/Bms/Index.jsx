@@ -1,7 +1,7 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
 import { Head, router, useForm } from '@inertiajs/react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { parseDateOnly } from '@/Utils/dateFormatters';
 import DatePicker from '@/Components/DatePicker';
 import DateRangePicker from '@/Components/DateRangePicker';
@@ -25,6 +25,7 @@ import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudSection from '@/Components/Crud/CrudSection';
 import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import SharedTooltip from '@/Components/Tooltip';
+import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 const floraIcon = L.divIcon({
   className: 'custom-marker',
@@ -183,6 +184,13 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
   const [deleteProcessing, setDeleteProcessing] = useState(false);
   const [bulkDeleteProcessing, setBulkDeleteProcessing] = useState(false);
   const [showEditHeaderModal, setShowEditHeaderModal] = useState(false);
+  const headerModalOverlayRef = useRef(null);
+  const headerModalPanelRef = useRef(null);
+  const { present: headerModalPresent, phase: headerModalPhase, onTransitionEnd: headerModalTransitionEnd } = useModalMotion(showEditHeaderModal, {
+    onClose: () => setShowEditHeaderModal(false),
+    panelRef: headerModalPanelRef,
+    layerRef: headerModalOverlayRef,
+  });
 
   const [latDeg, setLatDeg] = useState('');
   const [latMin, setLatMin] = useState('');
@@ -1305,9 +1313,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
             </div>
 
             {/* EDIT ANNEX HEADER MODAL */}
-            {showEditHeaderModal &&
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs">
-                    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 animate-pop-in max-h-[90vh] overflow-y-auto">
+            {headerModalPresent &&
+      <div ref={headerModalOverlayRef} data-cds-modal-layer data-motion-state={headerModalPhase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs" role="presentation">
+                    <div ref={headerModalPanelRef} onTransitionEnd={headerModalTransitionEnd} data-motion-state={headerModalPhase} role="dialog" aria-modal="true" aria-label="Edit Annex Header Details" tabIndex={-1} className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 cds-modal-motion-panel max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
                             <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">âœï¸ Edit Annex Header Details</h3><p className="text-xs text-gray-500">Update the summary metadata at the top of the Annex report.</p></div>
                             <button onClick={() => setShowEditHeaderModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">âœ•</button>

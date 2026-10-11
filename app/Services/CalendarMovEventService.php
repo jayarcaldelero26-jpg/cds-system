@@ -11,6 +11,7 @@ use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ImeaReportSubmission;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
+use App\Models\HistoricalReportOrigin;
 use App\Models\ManagementPlan;
 use App\Models\ModuleDefinition;
 use App\Models\User;
@@ -55,7 +56,7 @@ final class CalendarMovEventService
     /** @return array{months:array<string,array{submitted_movs:int,modules:list<array{key:string,label:string,count:int}>,days:array<string,list<array{source_type:string}>>}>,overview:array{submitted_movs:int,active_modules:int,months_with_submissions:int}} */
     public function yearSummary(User $user, CarbonImmutable $year, ?string $module = null, ?int $protectedAreaId = null): array
     {
-        $months = collect(range(1, 12))->mapWithKeys(fn (int $month): array => [str_pad((string) $month, 2, '0', STR_PAD_LEFT) => ['submitted_movs' => 0, 'modules' => [], 'days' => []]])->all();
+        $months = collect(range(1, 12))->mapWithKeys(fn (int $month): array => [str_pad((string) $month, 2, '0', STR_PAD_LEFT) => ['submitted_movs' => 0, 'historical_reports' => 0, 'modules' => [], 'days' => []]])->all();
         $activeModules = [];
 
         collect($this->sources())
@@ -72,6 +73,7 @@ final class CalendarMovEventService
                     $key,
                     $user,
                 );
+                $this->excludeOriginRows($query, $source);
                 if ($source['protected_area'] !== null && $protectedAreaId !== null) {
                     $query->where($source['protected_area'], $protectedAreaId);
                 }
@@ -95,6 +97,20 @@ final class CalendarMovEventService
                 });
             });
 
+        $this->historicalEventsBetween($user, $year->startOfYear(), $year->endOfYear(), $module, $protectedAreaId)
+            ->each(function (array $event) use (&$months, &$activeModules): void {
+                $date = $event['event_date'];
+                $month = substr($date, 5, 2);
+                $day = substr($date, 8, 2);
+                $key = $event['source_type'];
+                $months[$month]['historical_reports']++;
+                $months[$month]['days'][$day][] = [
+                    'source_type' => $key,
+                    'program_area' => $event['program_area'],
+                    'is_historical' => true,
+                ];
+            });
+
         foreach ($months as &$summary) {
             $summary['modules'] = collect($summary['modules'])
                 ->map(fn (int $count, string $key): array => ['key' => $key, 'label' => $this->sources()[$key]['label'], 'count' => $count])
@@ -106,6 +122,7 @@ final class CalendarMovEventService
             'months' => $months,
             'overview' => [
                 'submitted_movs' => array_sum(array_column($months, 'submitted_movs')),
+                'historical_reports' => array_sum(array_column($months, 'historical_reports')),
                 'active_modules' => count($activeModules),
                 'months_with_submissions' => count(array_filter($months, fn (array $summary): bool => $summary['submitted_movs'] > 0)),
             ],
@@ -131,6 +148,7 @@ final class CalendarMovEventService
                     $key,
                     $user,
                 );
+                $this->excludeOriginRows($query, $source);
 
                 if ($source['protected_area'] !== null) {
                     $query->when($protectedAreaId !== null, fn ($query) => $query->where($source['protected_area'], $protectedAreaId))
@@ -143,8 +161,68 @@ final class CalendarMovEventService
                 return $query->orderBy($source['date'])->orderBy('id')->get()
                     ->map(fn (Model $record): array => $this->normalize($key, $source, $record));
             })
-            ->sortBy([['submission_date', 'asc'], ['module', 'asc'], ['title', 'asc']])
+            ->merge($this->historicalEventsBetween($user, $startDate, $endDate, $module, $protectedAreaId))
+            ->sortBy([['event_date', 'asc'], ['module', 'asc'], ['title', 'asc']])
             ->values();
+    }
+
+    /** @return Collection<int,array<string,mixed>> */
+    private function historicalEventsBetween(User $user, CarbonImmutable $startDate, CarbonImmutable $endDate, ?string $module = null, ?int $protectedAreaId = null): Collection
+    {
+        return collect($this->sources())
+            ->filter(fn (array $source, string $key): bool => ($module === null || $module === $key) && $user->can($source['ability']))
+            ->flatMap(function (array $source, string $key) use ($user, $startDate, $endDate, $protectedAreaId): Collection {
+                if ($protectedAreaId !== null && $source['protected_area'] === null) {
+                    return collect();
+                }
+
+                $events = collect();
+                HistoricalReportOrigin::query()
+                    ->where('source', $source['historical_source'])
+                    ->orderBy('id')
+                    ->chunkById(300, function (Collection $origins) use ($source, $key, $user, $protectedAreaId, $startDate, $endDate, $events): void {
+                        $query = $source['model']::query()
+                            ->whereIn('id', $origins->pluck('source_record_id')->all())
+                            ->where('is_historical', true);
+                        $query = $this->scopeSourceQuery($query, $source, $key, $user);
+                        if ($source['protected_area'] !== null) {
+                            $query->with('protectedArea:id,name')
+                                ->when($protectedAreaId !== null, fn ($query) => $query->where($source['protected_area'], $protectedAreaId));
+                        }
+                        if ($key === 'management-plans') {
+                            $query->with('managementPlanType:id,name,slug');
+                        }
+                        $records = $query->get()->keyBy(fn (Model $record): string => (string) $record->getKey());
+
+                        foreach ($origins as $origin) {
+                            $record = $records->get((string) $origin->source_record_id);
+                            if (! $record) {
+                                continue;
+                            }
+
+                            $event = $this->normalizeHistorical($key, $source, $record, $origin);
+                            if ($event['event_date'] !== null
+                                && $event['event_date'] >= $startDate->toDateString()
+                                && $event['event_date'] <= $endDate->toDateString()) {
+                                $events->push($event);
+                            }
+                        }
+                    });
+
+                return $events;
+            })
+            ->values();
+    }
+
+    private function excludeOriginRows(Builder $query, array $source): void
+    {
+        $originTable = (new HistoricalReportOrigin)->getTable();
+        $modelTable = (new $source['model'])->getTable();
+        $query->whereNotExists(fn ($origins) => $origins
+            ->selectRaw('1')
+            ->from($originTable)
+            ->where('source', $source['historical_source'])
+            ->whereColumn($originTable.'.source_record_id', $modelTable.'.id'));
     }
 
     /**
@@ -206,6 +284,19 @@ final class CalendarMovEventService
             'period' => $period,
             'detail' => $detail,
             'protected_area' => $protectedArea,
+            'historical_source' => match ($model) {
+                ConservationReportSubmission::class => 'conservation',
+                EngpReportSubmission::class => 'engp',
+                BmsReportSubmission::class => 'bms',
+                BamsReportSubmission::class => 'bams',
+                ImeaReportSubmission::class => 'imea',
+                ImeaFacilityMaintenanceReport::class => 'imea-maintenance',
+                Aws::class => 'aws',
+                ManagementPlan::class => 'management-plans',
+                IpafManagementReport::class => 'ipaf-management',
+                IpafRevenueCollection::class => 'revenue',
+                default => throw new \LogicException('Calendar source has no historical origin mapping.'),
+            },
         ];
     }
 
@@ -246,6 +337,10 @@ final class CalendarMovEventService
             'id' => $record->getKey(),
             'source_type' => $key,
             'source_key' => $key.':'.$record->getKey(),
+            'is_historical' => false,
+            'event_kind' => 'Submitted MOV',
+            'event_date' => $this->dateString($submissionDate),
+            'calendar_basis' => 'PENRO receipt date',
             'module' => $module,
             'program_area' => $definition?->program_area?->value,
             'title' => $title,
@@ -262,6 +357,82 @@ final class CalendarMovEventService
             'attachment' => $attachment,
             'detail_url' => $detailUrl,
         ];
+    }
+
+    /** @return array<string,mixed> */
+    private function normalizeHistorical(string $key, array $source, Model $record, HistoricalReportOrigin $origin): array
+    {
+        $event = $this->normalize($key, $source, $record);
+        $ranges = $this->historicalActivityRanges($record);
+        $eventDate = null;
+        $basis = null;
+
+        if ($ranges !== []) {
+            $starts = collect($ranges)->pluck('from')->filter()->sort()->values();
+            $eventDate = $starts->first();
+            $basis = $eventDate !== null ? 'Date Conducted (earliest recorded range start)' : null;
+        }
+        if ($eventDate === null) {
+            $eventDate = $this->dateString($record->getAttribute('date_conducted'));
+            $basis = $eventDate !== null ? 'Date Conducted' : null;
+        }
+        if ($eventDate === null) {
+            $eventDate = $this->dateString($record->getAttribute('date_accomplished'));
+            $basis = $eventDate !== null ? 'Date Accomplished' : null;
+        }
+
+        $milestones = data_get($origin->original_milestones, 'milestones', []);
+        foreach ([
+            'date_received_penro' => 'Original PENRO receipt',
+            'date_report_released_cenro' => 'Original CENRO release',
+            'date_endorsed_regional' => 'Original regional endorsement',
+        ] as $field => $label) {
+            if ($eventDate !== null) break;
+            $eventDate = $this->dateString($milestones[$field] ?? null);
+            if ($eventDate !== null) $basis = $label;
+        }
+
+        if ($eventDate === null && $key === 'engp') {
+            $eventDate = $this->dateString($record->getAttribute('deadline_submission'));
+            if ($eventDate !== null) $basis = 'Original ENGP report deadline';
+        }
+
+        $event['source_key'] = 'historical:'.$origin->source.':'.$origin->source_record_id;
+        $event['is_historical'] = true;
+        $event['event_kind'] = 'Historical report evidence';
+        $event['event_date'] = $eventDate;
+        $event['calendar_basis'] = $basis;
+        $event['activity_ranges'] = $ranges;
+        $event['original_milestones'] = $milestones;
+        $event['original_source'] = (string) $origin->source;
+        $event['source_record_id'] = (int) $record->getKey();
+        $event['submission_date'] = $this->dateString($record->getAttribute($source['date']));
+        $event['detail_url'] = route('settings.historical-reports.show', [
+            'source' => $origin->source,
+            'record' => $record->getKey(),
+        ]);
+        // Historical evidence attachments are opened from the protected
+        // detail controller after it rechecks the viewer's source access.
+        $event['attachment']['url'] = null;
+
+        return $event;
+    }
+
+    /** @return list<array{from:string,to:?string}> */
+    private function historicalActivityRanges(Model $record): array
+    {
+        $ranges = $record->getAttribute('date_conducted_ranges');
+        if (! is_array($ranges)) {
+            return [];
+        }
+
+        return collect($ranges)->filter(fn (mixed $range): bool => is_array($range))
+            ->map(function (array $range): ?array {
+                $from = $this->dateString($range['from'] ?? null);
+                $to = $this->dateString($range['to'] ?? null);
+                return $from !== null ? ['from' => $from, 'to' => $to] : null;
+            })
+            ->filter()->sortBy('from')->values()->all();
     }
 
     /** @return array{exists:bool,name:?string,url:?string} */

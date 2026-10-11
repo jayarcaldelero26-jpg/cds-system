@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Per-request, local-only timing for authorized Inertia page GETs.
+ * Per-request, local-only timing for authorized page and detail GETs.
  * No query text, bindings, response data, or user identity is retained.
  */
 final class LocalNavigationTrace
@@ -31,6 +31,7 @@ final class LocalNavigationTrace
         'admin.users.index',
         'audit-logs.index',
         'settings.index',
+        'settings.historical-reports.show',
         'settings.system-diagnostics.index',
         'settings.storage.index',
         'settings.compliance-alerts',
@@ -87,6 +88,8 @@ final class LocalNavigationTrace
             'counters' => [],
             'context' => [],
             'phases' => self::bootstrapPhases($started),
+            'inertia_entry' => null,
+            'inertia_exit' => null,
             'original_events' => null,
             'activated' => false,
         ];
@@ -102,6 +105,7 @@ final class LocalNavigationTrace
             return;
         }
 
+        $setupStarted = hrtime(true);
         $state->original_events = app('events');
         $traceEvents = clone $state->original_events;
         $traceEvents->listen(QueryExecuted::class, static function (QueryExecuted $query) use ($state): void {
@@ -116,6 +120,7 @@ final class LocalNavigationTrace
             $connection->setEventDispatcher($traceEvents);
         }
         $state->activated = true;
+        self::addPhase($state, 'trace_event_hook_setup', (hrtime(true) - $setupStarted) / 1_000_000);
     }
 
     public static function measure(Request $request, string $name, Closure $callback): mixed
@@ -132,6 +137,27 @@ final class LocalNavigationTrace
         } finally {
             array_pop($state->phase_stack);
             self::addPhase($state, $name, (hrtime(true) - $started) / 1_000_000);
+        }
+    }
+
+    /** Mark the boundary after earlier web middleware and before Inertia middleware work. */
+    public static function markInertiaEntry(Request $request): void
+    {
+        $state = self::state($request);
+        if (! $state || $state->inertia_entry !== null) {
+            return;
+        }
+
+        $state->inertia_entry = hrtime(true);
+        self::addPhase($state, 'web_before_inertia', ($state->inertia_entry - $state->started) / 1_000_000);
+    }
+
+    /** Mark completion of the Inertia middleware before outer web middleware unwinds. */
+    public static function markInertiaExit(Request $request): void
+    {
+        $state = self::state($request);
+        if ($state && $state->inertia_entry !== null && $state->inertia_exit === null) {
+            $state->inertia_exit = hrtime(true);
         }
     }
 
@@ -232,6 +258,11 @@ final class LocalNavigationTrace
             return;
         }
 
+        $finishedAt = hrtime(true);
+        if (is_int($state->inertia_exit)) {
+            self::addPhase($state, 'web_after_inertia', ($finishedAt - $state->inertia_exit) / 1_000_000);
+        }
+
         $category = app(\App\Services\Authorization\OrganizationalAccessService::class)->effectiveCategory($user);
         $category = in_array($category, [
             \App\Services\Authorization\OrganizationalAccessService::CENRO_RECORDS,
@@ -246,7 +277,7 @@ final class LocalNavigationTrace
         ], true) ? $category : 'GLOBAL_OR_OTHER';
 
         $route = (string) $request->route()?->getName();
-        $pipelineMs = (hrtime(true) - $state->started) / 1_000_000;
+        $pipelineMs = ($finishedAt - $state->started) / 1_000_000;
         $serverTiming = [
             'app_pipeline;dur='.self::duration($pipelineMs),
             'sql;dur='.self::duration($state->sql_ms).';desc="queries '.$state->queries.'"',

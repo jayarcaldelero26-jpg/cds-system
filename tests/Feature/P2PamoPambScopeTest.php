@@ -16,10 +16,14 @@ uses(RefreshDatabase::class);
 
 function p2PamoScopeUser(?int $protectedAreaId = null): User
 {
+    $pamoOffice = OrganizationalOffice::query()->firstOrCreate(
+        ['code' => 'p2_pamo_scope_office'],
+        ['name' => 'P2 Test PAMO Office', 'office_type' => 'pamo', 'is_active' => true],
+    );
     $user = User::factory()->create([
         'section' => 'PAMO',
-        'unit_assignment' => 'conservation',
-        'office_designated' => 'CENRO Baganga',
+        'unit_assignment' => null,
+        'office_designated' => $pamoOffice->name,
         'protected_area_id' => $protectedAreaId,
     ]);
     $role = Role::findOrCreate('PAMO', 'web');
@@ -48,10 +52,25 @@ function p2PambScopeReport(User $creator, ProtectedArea $area, string $workflow)
     ]);
 }
 
+function p2MapPamoArea(ProtectedArea $area, User $actor): void
+{
+    $pamoOffice = OrganizationalOffice::query()->where('code', 'p2_pamo_scope_office')->firstOrFail();
+    ProtectedAreaOfficeAssignment::query()->updateOrCreate(
+        ['protected_area_id' => $area->id, 'assignment_type' => 'pamo'],
+        ['organizational_office_id' => $pamoOffice->id, 'assigned_by' => $actor->id],
+    );
+    $cenro = OrganizationalOffice::query()->where('code', 'cenro_baganga')->firstOrFail();
+    ProtectedAreaOfficeAssignment::query()->updateOrCreate(
+        ['protected_area_id' => $area->id, 'assignment_type' => 'supervising'],
+        ['organizational_office_id' => $cenro->id, 'assigned_by' => $actor->id],
+    );
+}
+
 test('assigned PAMO sees only Regular and Special PAMB submissions for its assigned PA', function (): void {
     $pamo = p2PamoScopeUser();
     $areaA = ProtectedArea::create(['name' => 'P2 PAMO Area A', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $pamo->id, 'updated_by' => $pamo->id]);
     $areaB = ProtectedArea::create(['name' => 'P2 PAMO Area B', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $pamo->id, 'updated_by' => $pamo->id]);
+    p2MapPamoArea($areaA, $pamo);
     $pamo->update(['protected_area_id' => $areaA->id]);
     $pamo->refresh();
     $regular = p2PambScopeReport($pamo, $areaA, 'regular_pamb');
@@ -80,7 +99,7 @@ test('assigned PAMO sees only Regular and Special PAMB submissions for its assig
             ->has('protectedAreas', 1)
             ->where('protectedAreas.0.id', $areaA->id)
             ->where('auth.canViewPambWorkflow', true)
-            ->where('auth.canBrowseConservationModules', true)
+            ->where('auth.canBrowseConservationModules', false)
             ->where('auth.canViewTechnicalReports', false)
             ->where('auth.canViewBms', false));
 

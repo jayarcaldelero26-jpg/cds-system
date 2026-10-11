@@ -198,6 +198,33 @@ final class ReportRequirementRegistry
         return $metadata['deadline_policy']['fixed_date'] ?? null;
     }
 
+    /** Return the catalogued beginning of a source period, in Asia/Manila date semantics. */
+    public function periodStartDate(string $domain, string $key, int $year, string $periodKey): ?string
+    {
+        $definition = $this->find($domain, $key);
+        if (! $definition || ! $this->period($domain, $key, $year, $periodKey)) return null;
+
+        $frequency = strtolower((string) ($definition['reporting_frequency'] ?? $definition['period'] ?? 'custom'));
+        $range = $this->periodRange($year, $periodKey, $frequency);
+        if ($range) return $range[0]->toDateString();
+
+        if ($frequency === 'weekly' && preg_match('/^W(\d{2})$/', $periodKey, $match)) {
+            $start = CarbonImmutable::create($year, 1, 1, 0, 0, 0, BusinessCalendarService::TIMEZONE);
+            while ($start->dayOfWeekIso !== 1) $start = $start->addDay();
+            $excluded = $definition['requirement_metadata']['weekly']['excluded_start_dates'] ?? [];
+            $number = 0;
+            while ($start->year === $year) {
+                if (! in_array($start->toDateString(), $excluded, true)) {
+                    $number++;
+                    if ($number === (int) $match[1]) return $start->toDateString();
+                }
+                $start = $start->addWeek();
+            }
+        }
+
+        return null;
+    }
+
     /** @return list<array{key:string,label:string}> */
     public function releaseComponents(string $domain, string $key, int $year, string $periodKey): array
     {

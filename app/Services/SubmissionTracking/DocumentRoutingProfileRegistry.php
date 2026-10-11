@@ -9,6 +9,7 @@ final class DocumentRoutingProfileRegistry
     public const PREPARATION = 'cenro_preparation';
     public const PENRO_ORIGIN = 'penro_origin';
     public const PAMO_ORIGIN = 'pamo_origin';
+    public const TRANSIT_PAMO_CENRO_FOCAL = 'transit_to_cenro_focal';
     public const TRANSIT_CENRO_CHIEF = 'transit_to_cenro_chief';
     public const CENRO_CHIEF = 'cenro_chief';
     public const TRANSIT_CENRO_RECORDS = 'transit_to_cenro_records';
@@ -50,6 +51,9 @@ final class DocumentRoutingProfileRegistry
 
         $actions = [
             ['key' => 'forward_from_pamo', 'from' => self::PAMO_ORIGIN, 'to' => self::TRANSIT_PENRO_RECORDS, 'event_key' => 'forwarded', 'from_office' => 'PAMO', 'to_office' => 'PENRO Records Unit', 'categories' => [OrganizationalAccessService::PAMO], 'label' => 'Forwarded from PAMO to PENRO Records Unit', 'action_label' => 'Forward to PENRO Records'],
+            ['key' => 'forward_from_pamo_to_cenro_focal', 'from' => self::PAMO_ORIGIN, 'to' => self::TRANSIT_PAMO_CENRO_FOCAL, 'event_key' => 'forwarded', 'from_office' => 'PAMO', 'to_office' => 'CENRO CDS Focal Person', 'categories' => [OrganizationalAccessService::PAMO], 'label' => 'Forwarded from PAMO to assigned CENRO CDS Focal Person', 'action_label' => 'Forward to CENRO CDS Focal Person'],
+            ['key' => 'receive_at_cenro_focal', 'from' => self::TRANSIT_PAMO_CENRO_FOCAL, 'to' => self::PREPARATION, 'event_key' => 'received', 'from_office' => 'PAMO', 'to_office' => 'CENRO CDS Focal Person', 'categories' => [$focal], 'label' => 'Received by assigned CENRO CDS Focal Person', 'action_label' => 'Receive'],
+            ['key' => 'return_to_pamo_for_correction', 'from' => self::PREPARATION, 'to' => self::PAMO_ORIGIN, 'event_key' => 'returned_for_correction', 'from_office' => 'CENRO CDS Focal Person', 'to_office' => 'PAMO', 'categories' => [$focal], 'label' => 'Returned to PAMO for Correction', 'action_label' => 'Return to PAMO for Correction', 'correction' => true],
             ['key' => 'forward_from_penro_origin', 'from' => self::PENRO_ORIGIN, 'to' => self::TRANSIT_PENRO_RECORDS, 'event_key' => 'forwarded', 'from_office' => 'PENRO origin', 'to_office' => 'PENRO Records Unit', 'categories' => [$penroFocal], 'label' => 'Forwarded from PENRO origin to PENRO Records Unit', 'action_label' => 'Forward to PENRO Records'],
             ['key' => 'forward_to_cenro_chief', 'from' => self::PREPARATION, 'to' => self::TRANSIT_CENRO_CHIEF, 'event_key' => 'forwarded', 'from_office' => 'CENRO CDS Focal Person', 'to_office' => 'CENRO CDS Chief', 'categories' => [$focal], 'label' => 'Forwarded to CENRO CDS Chief', 'action_label' => 'Forward to CENRO Chief'],
             ['key' => 'receive_at_cenro_chief', 'from' => self::TRANSIT_CENRO_CHIEF, 'to' => self::CENRO_CHIEF, 'event_key' => 'received', 'from_office' => 'CENRO CDS Focal Person', 'to_office' => 'CENRO CDS Chief', 'categories' => [$chief], 'label' => 'Received by CENRO CDS Chief', 'action_label' => 'Receive'],
@@ -81,7 +85,7 @@ final class DocumentRoutingProfileRegistry
         // not a guess based on action-key wording. These actions hand the
         // submission onward after the current office has processed it.
         $outgoingDocumentActions = [
-            'forward_from_pamo', 'forward_from_penro_origin', 'forward_to_cenro_chief',
+            'forward_from_pamo', 'forward_from_pamo_to_cenro_focal', 'forward_from_penro_origin', 'forward_to_cenro_chief',
             'forward_to_cenro_records', 'forward_to_penro_records', 'forward_to_office_penro',
             'assign_to_tsd_chief', 'forward_to_cds_focal', 'forward_to_cds_chief',
             'recommend_to_office_penro', 'approve_for_regional_release', 'release_to_regional',

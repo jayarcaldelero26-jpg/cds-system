@@ -4,6 +4,7 @@ use Illuminate\Support\Facades\File;
 
 test('timeliness has one shared semantic presentation mapping', function (): void {
     $badge = File::get(resource_path('js/Components/TimelinessBadge.jsx'));
+    $presentation = File::get(resource_path('js/Components/timelinessPresentation.mjs'));
 
     expect($badge)->toContain("outstanding: 'bg-emerald-100 text-emerald-800")
         ->and($badge)->toContain("'very satisfactory': 'bg-blue-100 text-blue-800")
@@ -12,7 +13,8 @@ test('timeliness has one shared semantic presentation mapping', function (): voi
         ->and($badge)->toContain("poor: 'bg-red-100 text-red-800")
         ->and($badge)->toContain("default: 'bg-gray-100 text-gray-700")
         ->and($badge)->toContain('normalizeTimeliness')
-        ->and($badge)->toContain("? 'No Rating'");
+        ->and($badge)->toContain('presentTimeliness(value, { pendingAsUnrated })')
+        ->and($presentation)->toContain("? 'No Rating'");
 });
 
 test('active report surfaces use the shared timeliness presentation', function (): void {

@@ -14,6 +14,22 @@ use Tests\TestCase;
 
 class LocalNavigationTraceTest extends TestCase
 {
+    public function test_default_off_path_does_not_create_trace_state_or_response_headers(): void
+    {
+        $this->app['env'] = 'local';
+        config(['app.env' => 'local']);
+
+        $request = $this->request('GET', '127.0.0.1', false, 'submission-tracking.index', 'cds-system.test', false);
+        $request->setUserResolver(static fn () => new User(['section' => 'CENRO_CDS_FOCAL']));
+        $originalEvents = app('events');
+        $response = (new LocalNavigationTiming)->handle($request, static fn (): HttpResponse => new HttpResponse('ok'));
+
+        $this->assertNull($response->headers->get('Server-Timing'));
+        $this->assertNull($response->headers->get('X-CDS-Perf-Id'));
+        $this->assertSame($originalEvents, app('events'));
+        $this->assertFalse($request->attributes->has('_cds_local_navigation_trace'));
+    }
+
     public function test_web_timing_middleware_emits_trace_headers_on_full_html_and_cleans_up(): void
     {
         $this->app['env'] = 'local';
@@ -38,7 +54,7 @@ class LocalNavigationTraceTest extends TestCase
         $this->assertFalse($request->attributes->has('_cds_local_navigation_trace'));
     }
 
-    public function test_opt_in_trace_allows_full_and_partial_page_gets_and_emits_headers_for_authenticated_success(): void
+    public function test_opt_in_trace_allows_page_and_historical_detail_gets_and_emits_headers_for_authenticated_success(): void
     {
         config(['app.env' => 'local']);
         $this->app['env'] = 'local';
@@ -46,11 +62,18 @@ class LocalNavigationTraceTest extends TestCase
         $request = $this->request('GET', '127.0.0.1', false, 'submission-tracking.index');
         $this->assertTrue(LocalNavigationTrace::eligible($request));
         $this->assertTrue(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'submission-tracking.index')));
+        $detailRequest = $this->request('GET', '127.0.0.1', true, 'settings.historical-reports.show');
+        $this->assertTrue(LocalNavigationTrace::eligible($detailRequest));
+        $this->assertFalse(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', false, 'settings.historical-reports.show', 'cds-system.test', false)));
 
         $routeMiddleware = app('router')->getRoutes()->getByName('submission-tracking.index')->gatherMiddleware();
         $this->assertContains('web', $routeMiddleware);
         $this->assertContains('auth', $routeMiddleware);
         $this->assertContains('can:submission-tracking.view', $routeMiddleware);
+        $detailRouteMiddleware = app('router')->getRoutes()->getByName('settings.historical-reports.show')->gatherMiddleware();
+        $this->assertContains('web', $detailRouteMiddleware);
+        $this->assertContains('auth', $detailRouteMiddleware);
+        $this->assertContains('can:historical-reports.view', $detailRouteMiddleware);
         app(HttpKernelContract::class);
         $resolvedMiddleware = app('router')->gatherRouteMiddleware(app('router')->getRoutes()->getByName('submission-tracking.index'));
         $this->assertContains(LocalNavigationTiming::class, $resolvedMiddleware);
@@ -123,15 +146,22 @@ class LocalNavigationTraceTest extends TestCase
 
         $this->assertTrue(LocalNavigationTrace::begin($request));
         LocalNavigationTrace::activate($request);
+        LocalNavigationTrace::markInertiaEntry($request);
+        LocalNavigationTrace::measure($request, 'auth_user_resolution', static fn () => null);
         LocalNavigationTrace::context($request, ['view' => 'outgoing', 'selected' => false, 'incoming' => 3]);
         LocalNavigationTrace::increment($request, 'projected_rows', 12);
         LocalNavigationTrace::measure($request, 'st_source_load', static fn () => DB::select('select 1'));
+        LocalNavigationTrace::markInertiaExit($request);
 
         $response = new HttpResponse('', 200);
         LocalNavigationTrace::finish($request, $response);
         $timing = $response->headers->get('Server-Timing');
 
         $this->assertStringContainsString('st_source_load;dur=', $timing);
+        $this->assertStringContainsString('web_before_inertia;dur=', $timing);
+        $this->assertStringContainsString('auth_user_resolution;dur=', $timing);
+        $this->assertStringContainsString('web_after_inertia;dur=', $timing);
+        $this->assertStringContainsString('trace_event_hook_setup;dur=', $timing);
         $this->assertStringContainsString('queries 1', $timing);
         $this->assertSame('view=outgoing;selected=no;incoming=3', $response->headers->get('X-CDS-Perf-Context'));
         $this->assertSame('projected_rows=12', $response->headers->get('X-CDS-Perf-Counts'));

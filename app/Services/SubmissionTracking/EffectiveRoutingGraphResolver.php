@@ -13,8 +13,37 @@ final class EffectiveRoutingGraphResolver
     /** @return array{profile:array,actions:array,route_position:array} */
     public function resolve(string $source, bool $direct, array $position): array
     {
-        if (($position['graph_version'] ?? null) !== RoutingPositionSnapshotService::GRAPH_VERSION) throw new RuntimeException('Unsupported route graph version.');
+        $graphVersion = $position['graph_version'] ?? null;
+        $pamoOrigin = in_array($position['profile'] ?? null, ['pamo_regular', 'pamo_direct'], true)
+            && ($position['origin_kind'] ?? null) === 'pamo_pamb';
+        if ($graphVersion !== RoutingPositionSnapshotService::GRAPH_VERSION
+            && $graphVersion !== RoutingPositionSnapshotService::PAMO_GRAPH_VERSION) throw new RuntimeException('Unsupported route graph version.');
+        if (($graphVersion === RoutingPositionSnapshotService::PAMO_GRAPH_VERSION) !== $pamoOrigin) throw new RuntimeException('The captured route profile does not match its graph version.');
         $actions = $this->profiles->actionProfile($source, $direct)['actions'];
+        $actions = array_values(array_filter($actions, function (array $action) use ($pamoOrigin, $direct, $position): bool {
+            if ($action['key'] === 'forward_from_pamo') {
+                return ($position['graph_version'] ?? null) === RoutingPositionSnapshotService::GRAPH_VERSION || ($pamoOrigin && $direct);
+            }
+            if (in_array($action['key'], ['forward_from_pamo_to_cenro_focal', 'receive_at_cenro_focal', 'return_to_pamo_for_correction'], true)) return $pamoOrigin && ! $direct;
+            return true;
+        }));
+        if ($pamoOrigin) {
+            $pamoName = filled($position['pamo_office_name'] ?? null) ? (string) $position['pamo_office_name'] : null;
+            if (! $pamoName) throw new RuntimeException('The captured PAMO office label is missing; routing writes are disabled.');
+            $actions = array_map(function (array $action) use ($position, $pamoName): array {
+                if ($action['key'] === 'forward_from_pamo') {
+                    return [...$action, 'from_office' => $pamoName, 'label' => 'Forwarded from '.$pamoName.' to PENRO Records Unit'];
+                }
+                if ($action['key'] === 'forward_from_pamo_to_cenro_focal') {
+                    return [...$action, 'from_office' => $pamoName, 'to_office' => (string) ($position['responsible_cenro_name'] ?? 'CENRO').' CDS Focal Person'];
+                }
+                if ($action['key'] === 'receive_at_cenro_focal') {
+                    return [...$action, 'from_office' => $pamoName, 'to_office' => (string) ($position['responsible_cenro_name'] ?? 'CENRO').' CDS Focal Person'];
+                }
+                if ($action['key'] === 'return_to_pamo_for_correction') return [...$action, 'to_office' => $pamoName];
+                return $action;
+            }, $actions);
+        }
         $office = (bool) $position['office_penro_enabled'];
         $tsd = (bool) $position['penro_tsd_chief_enabled'];
         $remove = [];
