@@ -1,6 +1,9 @@
 <?php
 
 use App\Models\User;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\RoutingPositionSettingsService;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -35,9 +38,10 @@ function saveOperationalAccountRoutingFlags(User $actor, bool $office, bool $tsd
 test('registration exposes the supported operational group catalog without duplicate categories', function (): void {
     $this->get('/register')->assertInertia(fn (Assert $page) => $page
         ->component('Auth/Register')
-        ->has('registrationOptions.operationalGroups', 2)
+        ->has('registrationOptions.operationalGroups', 3)
         ->where('registrationOptions.operationalGroups.0.value', 'cenro')
-        ->where('registrationOptions.operationalGroups.1.value', 'penro'));
+        ->where('registrationOptions.operationalGroups.1.value', 'penro')
+        ->where('registrationOptions.operationalGroups.2.value', 'pamo'));
 
     $groups = app(OrganizationalAccessService::class)->operationalGroups();
     expect(collect(collect($groups)->firstWhere('value', 'penro')['categories'])
@@ -49,6 +53,78 @@ test('registration exposes the supported operational group catalog without dupli
             OrganizationalAccessService::PENRO_FOCAL,
             OrganizationalAccessService::PENRO_CHIEF,
         ]);
+});
+
+test('PAMO registration derives canonical office and supervisor and rejects submitted mapping overrides', function (): void {
+    $supervisor = OrganizationalOffice::query()->where('office_type', 'cenro')->where('name', 'CENRO Mati')->firstOrFail();
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'test_pamo_mpl_registration', 'name' => 'PAMO MPL Registration', 'office_type' => 'pamo', 'is_active' => true,
+    ]);
+    $area = ProtectedArea::query()->create([
+        'name' => 'Mati Protected Landscape', 'short_name' => 'MPL', 'category' => 'Protected Landscape',
+        'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->id, 'organizational_office_id' => $supervisor->id, 'assignment_type' => 'supervising',
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->id, 'organizational_office_id' => $pamoOffice->id, 'assignment_type' => 'pamo',
+    ]);
+
+    $this->get('/register')->assertInertia(fn (Assert $page) => $page
+        ->where('registrationOptions.operationalGroups.2.value', 'pamo')
+        ->where('registrationOptions.protectedAreas.0.pamo_office_name', 'PAMO MPL Registration')
+        ->where('registrationOptions.protectedAreas.0.supervising_office_name', 'CENRO Mati'));
+
+    $payload = [
+        'name' => 'PAMO Pilot User', 'email' => 'pamo-pilot-user@example.test',
+        'operational_group' => 'pamo', 'section' => 'PAMO', 'protected_area_id' => $area->id,
+        'password' => 'Passw0rd!123', 'password_confirmation' => 'Passw0rd!123',
+    ];
+
+    $this->post('/register', [...$payload, 'office_designated' => 'PAMO forged office'])
+        ->assertSessionHasErrors('office_designated');
+    $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
+
+    $this->post('/register', [...$payload, 'supervising_office_id' => $supervisor->id])
+        ->assertSessionHasErrors('supervising_office_id');
+    $this->assertDatabaseMissing('users', ['email' => $payload['email']]);
+
+    $this->post('/register', $payload)->assertRedirect(route('login'))->assertSessionHasNoErrors();
+    $user = User::query()->where('email', $payload['email'])->firstOrFail();
+    expect($user->office_designated)->toBe('PAMO MPL Registration')
+        ->and($user->protected_area_id)->toBe($area->id)
+        ->and($user->section)->toBe(OrganizationalAccessService::PAMO)
+        ->and($user->is_approved)->toBeFalse()
+        ->and($user->is_active)->toBeFalse()
+        ->and($user->roles()->pluck('name')->all())->toBe(['no_role']);
+});
+
+test('admin user management exposes unresolved legacy PAMO assignments for correction', function (): void {
+    $admin = User::factory()->create(['is_active' => true]);
+    $admin->assignRole('Super Admin');
+    $area = ProtectedArea::query()->create([
+        'name' => 'Unmapped Legacy PA', 'short_name' => 'ULPA', 'category' => 'Protected Landscape',
+        'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'status' => 'Active',
+    ]);
+    $legacy = User::factory()->create([
+        'section' => OrganizationalAccessService::PAMO,
+        'office_designated' => 'Legacy PAMO text',
+        'protected_area_id' => $area->id,
+        'is_approved' => false,
+        'is_active' => false,
+    ]);
+    $legacy->assignRole('no_role');
+
+    $this->actingAs($admin)->get(route('admin.users.index'))->assertInertia(fn (Assert $page) => $page
+        ->where('protectedAreaAssignments.0.eligible', false)
+        ->where('protectedAreaAssignments.0.issue', 'No stable PAMO office identity is mapped.')
+        ->where('users.data', fn ($users) => collect($users)->contains(fn ($user) => $user['id'] === $legacy->id && $user['pamo_assignment_issue'] === 'No stable PAMO office identity is mapped.')));
+
+    $this->actingAs($admin)->get(route('admin.users.edit', $legacy))->assertInertia(fn (Assert $page) => $page
+        ->where('user.protected_area_id', $area->id)
+        ->where('user.pamo_assignment_issue', 'No stable PAMO office identity is mapped.')
+        ->where('protectedAreas', fn ($areas) => collect($areas)->contains(fn ($option) => $option['id'] === $area->id && $option['eligible'] === false)));
 });
 
 test('registration choices follow all four routing-position combinations and return when re-enabled', function (): void {

@@ -167,7 +167,7 @@ final class OrganizationalAccessService
         if ($record instanceof EngpReportSubmission) return $this->canViewDevelopmentRecord($user, $record);
         if ($this->effectiveCategory($user) === self::PAMO) {
             return $record instanceof ConservationReportSubmission
-                && in_array($record->workflow_key, \App\Services\Conservation\PambComplianceCalculator::MEETING_WORKFLOWS, true)
+                && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key)
                 && $this->canAccessProtectedArea($user, $record->protected_area_id);
         }
         if ($record->getAttribute('protected_area_id') !== null) return $this->canAccessProtectedArea($user, $record->getAttribute('protected_area_id'));
@@ -412,6 +412,10 @@ final class OrganizationalAccessService
     {
         abort_unless($this->isGlobal($actor) || $actor->can('protected-areas.create') || $actor->can('protected-areas.update'), 403);
         $office = OrganizationalOffice::query()->where('is_active', true)->whereIn('office_type', ['cenro', 'penro'])->findOrFail($officeId);
+        $expectedType = app(\App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy::class)->isDirectProtectedArea($protectedArea) ? 'penro' : 'cenro';
+        if ($office->office_type !== $expectedType) {
+            throw ValidationException::withMessages(['supervising_office_id' => 'This Protected Area requires an active '.strtoupper($expectedType).' supervising office.']);
+        }
         ProtectedAreaOfficeAssignment::updateOrCreate(['protected_area_id' => $protectedArea->getKey(), 'assignment_type' => 'supervising'], ['organizational_office_id' => $office->getKey(), 'assigned_by' => $actor->getKey()]);
     }
 
@@ -463,46 +467,116 @@ final class OrganizationalAccessService
 
     public function pamoOfficeOptions(): array
     {
-        return OrganizationalOffice::query()->where('office_type', 'pamo')->where('is_active', true)->orderBy('name')->get(['id', 'name'])->map(fn (OrganizationalOffice $office): array => ['id' => (int) $office->id, 'name' => (string) $office->name])->all();
+        return OrganizationalOffice::query()->where('office_type', 'pamo')->where('is_active', true)->orderBy('name')->get(['id', 'code', 'name'])->map(fn (OrganizationalOffice $office): array => ['id' => (int) $office->id, 'code' => (string) $office->code, 'name' => (string) $office->name, 'label' => (string) $office->name])->all();
     }
 
     /** Active, explicitly mapped pilot origin facts; never use the legacy pamo string as access evidence. */
     public function pamoAssignmentForProtectedArea(int $protectedAreaId): ?array
     {
-        $area = ProtectedArea::query()->whereKey($protectedAreaId)->where('status', 'Active')->first();
-        if (! $area) return null;
+        return $this->pamoAssignmentReviewForProtectedArea($protectedAreaId)['facts'];
+    }
+
+    /** Return canonical mapping facts and an administrator-readable reason when the PA is not eligible. */
+    public function pamoAssignmentReviewForProtectedArea(int $protectedAreaId): array
+    {
+        $area = ProtectedArea::query()->find($protectedAreaId);
+        if (! $area) return ['eligible' => false, 'issue' => 'Protected Area is missing from the current registry.', 'area' => null, 'facts' => null, 'pamo_office_id' => null, 'pamo_office_name' => null, 'supervising_office_id' => null, 'supervising_office_name' => null, 'supervising_office_type' => null, 'required_supervisor_type' => null];
+
+        $direct = app(\App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy::class)->isDirectProtectedArea($area);
+        $requiredType = $direct ? 'penro' : 'cenro';
         $assignment = ProtectedAreaOfficeAssignment::query()->where('protected_area_id', $protectedAreaId)
             ->where('assignment_type', 'pamo')->with('office')->first();
         $pamoOffice = $assignment?->office;
-        if (! $pamoOffice || $pamoOffice->office_type !== 'pamo' || ! $pamoOffice->is_active) return null;
-
-        $direct = app(\App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy::class)->isDirectProtectedArea($area);
         $supervising = $area->supervisingOfficeAssignment()->with('office')->first();
         $responsible = $supervising?->office;
-        if (! $direct && (! $responsible || $responsible->office_type !== 'cenro' || ! $responsible->is_active)) return null;
-        if ($direct && (! $responsible || $responsible->office_type !== 'penro' || ! $responsible->is_active)) return null;
+        $facts = null;
+        $issue = null;
+
+        if ($area->status !== 'Active') {
+            $issue = 'Protected Area status is '.$area->status.'; only Active Protected Areas can register PAMO accounts.';
+        } elseif (! $assignment) {
+            $issue = 'No stable PAMO office identity is mapped.';
+        } elseif (! $pamoOffice || $pamoOffice->office_type !== 'pamo') {
+            $issue = 'The mapped office is missing or is not a PAMO office.';
+        } elseif (! $pamoOffice->is_active) {
+            $issue = 'The mapped PAMO office is inactive.';
+        } elseif (! $supervising || ! $responsible) {
+            $issue = 'No active supervising office is mapped.';
+        } elseif (! $responsible->is_active) {
+            $issue = 'The mapped supervising office is inactive.';
+        } elseif ($responsible->office_type !== $requiredType) {
+            $issue = 'This Protected Area requires an active '.strtoupper($requiredType).' supervising office; the current mapping is '.strtoupper((string) $responsible->office_type).'.';
+        } else {
+            $facts = [
+                'protected_area' => $area,
+                'protected_area_id' => (int) $area->getKey(),
+                'pamo_office_id' => (int) $pamoOffice->getKey(),
+                'pamo_office_name' => (string) $pamoOffice->name,
+                'responsible_cenro_office_id' => $responsible->office_type === 'cenro' ? (int) $responsible->getKey() : null,
+                'responsible_cenro_name' => $responsible->office_type === 'cenro' ? (string) $responsible->name : null,
+                'target_office' => (string) $responsible->name,
+                'profile' => $direct ? 'pamo_direct' : 'pamo_regular',
+            ];
+        }
 
         return [
-            'protected_area' => $area,
-            'protected_area_id' => (int) $area->getKey(),
-            'pamo_office_id' => (int) $pamoOffice->getKey(),
-            'pamo_office_name' => (string) $pamoOffice->name,
-            'responsible_cenro_office_id' => $responsible && $responsible->office_type === 'cenro' ? (int) $responsible->getKey() : null,
-            'responsible_cenro_name' => $responsible && $responsible->office_type === 'cenro' ? (string) $responsible->name : null,
-            'target_office' => (string) $responsible->name,
-            'profile' => $direct ? 'pamo_direct' : 'pamo_regular',
+            'eligible' => $facts !== null,
+            'issue' => $issue,
+            'area' => $area,
+            'facts' => $facts,
+            'pamo_office_id' => $pamoOffice?->getKey() ? (int) $pamoOffice->getKey() : null,
+            'pamo_office_name' => $pamoOffice?->name,
+            'supervising_office_id' => $responsible?->getKey() ? (int) $responsible->getKey() : null,
+            'supervising_office_name' => $responsible?->name,
+            'supervising_office_type' => $responsible?->office_type,
+            'required_supervisor_type' => $requiredType,
         ];
     }
 
-    /** @return list<array{id:int,name:string,short_name:?string,pamo_office_id:int}> */
+    /** @return list<array{id:int,name:string,short_name:?string,pamo_office_name:string,supervising_office_name:string,profile:string}> */
     public function pamoRegistrationProtectedAreas(): array
     {
-        return ProtectedArea::query()->where('status', 'Active')
-            ->whereHas('pamoOfficeAssignment.office', fn ($query) => $query->where('office_type', 'pamo')->where('is_active', true))
-            ->orderBy('name')->get(['id', 'name', 'short_name'])->map(function (ProtectedArea $area): array {
-                $facts = $this->pamoAssignmentForProtectedArea((int) $area->getKey());
-                return ['id' => (int) $area->getKey(), 'name' => (string) $area->name, 'short_name' => $area->short_name, 'pamo_office_id' => (int) ($facts['pamo_office_id'] ?? 0)];
-            })->filter(fn (array $row): bool => $row['pamo_office_id'] > 0)->values()->all();
+        return ProtectedArea::query()->where('status', 'Active')->orderBy('name')->get(['id', 'name', 'short_name'])
+            ->map(function (ProtectedArea $area): ?array {
+                $review = $this->pamoAssignmentReviewForProtectedArea((int) $area->getKey());
+                $facts = $review['facts'];
+                if (! $facts) return null;
+                return [
+                    'id' => (int) $area->getKey(),
+                    'name' => (string) $area->name,
+                    'short_name' => $area->short_name,
+                    'pamo_office_name' => $facts['pamo_office_name'],
+                    'supervising_office_name' => $facts['target_office'],
+                    'profile' => $facts['profile'],
+                ];
+            })->filter()->values()->all();
+    }
+
+    /** All registry rows for admin diagnosis and correction, including ineligible legacy rows. */
+    public function pamoAssignmentOptions(): array
+    {
+        return ProtectedArea::query()->orderBy('name')->get(['id', 'name', 'short_name', 'status'])
+            ->map(function (ProtectedArea $area): array {
+                $review = $this->pamoAssignmentReviewForProtectedArea((int) $area->getKey());
+                $label = (string) $area->name;
+                if (filled($area->short_name)) $label .= ' ('.$area->short_name.')';
+                if (! $review['eligible']) $label .= ' · Mapping required';
+                return [
+                    'id' => (int) $area->getKey(),
+                    'name' => (string) $area->name,
+                    'short_name' => $area->short_name,
+                    'label' => $label,
+                    'status' => (string) $area->status,
+                    'eligible' => (bool) $review['eligible'],
+                    'issue' => $review['issue'],
+                    'pamo_office_id' => $review['pamo_office_id'],
+                    'pamo_office_name' => $review['pamo_office_name'],
+                    'supervising_office_id' => $review['supervising_office_id'],
+                    'supervising_office_name' => $review['supervising_office_name'],
+                    'supervising_office_type' => $review['supervising_office_type'],
+                    'required_supervisor_type' => $review['required_supervisor_type'],
+                ];
+            })->all();
     }
 
     public function supervisingOfficeId(ProtectedArea $protectedArea): ?int { return $protectedArea->supervisingOfficeAssignment?->organizational_office_id; }
@@ -664,12 +738,7 @@ final class OrganizationalAccessService
     public function assertSubmittedPamoOfficeMatches(mixed $submittedOffice, mixed $protectedAreaId): void
     {
         if (blank($submittedOffice)) return;
-        $facts = is_numeric($protectedAreaId)
-            ? $this->pamoAssignmentForProtectedArea((int) $protectedAreaId)
-            : null;
-        if (! $facts || ! $this->same($this->normalizeOffice((string) $submittedOffice), $facts['pamo_office_name'])) {
-            throw ValidationException::withMessages(['office_designated' => 'PAMO office identity must match the selected Protected Area mapping.']);
-        }
+        throw ValidationException::withMessages(['office_designated' => 'PAMO office identity is set from the selected Protected Area mapping and cannot be submitted by the client.']);
     }
 
     public function supervisingOfficeNameForProtectedArea(?int $protectedAreaId): ?string
@@ -787,8 +856,9 @@ final class OrganizationalAccessService
         } elseif ($category === self::PAMO) {
             if (filled($unit) && $unit !== self::CONSERVATION) throw ValidationException::withMessages(['unit_assignment' => 'PAMO is a Conservation assignment.']);
             if (blank($protectedAreaId)) throw ValidationException::withMessages(['protected_area_id' => 'A protected-area assignment is required for PAMO users.']);
-            $facts = $this->pamoAssignmentForProtectedArea((int) $protectedAreaId);
-            if (! $facts) throw ValidationException::withMessages(['protected_area_id' => 'Select an active Protected Area with an approved PAMO office mapping and valid routing responsibility.']);
+            $review = $this->pamoAssignmentReviewForProtectedArea((int) $protectedAreaId);
+            $facts = $review['facts'];
+            if (! $facts) throw ValidationException::withMessages(['protected_area_id' => $review['issue'] ?? 'Select an eligible Protected Area with a valid PAMO mapping.']);
             if (filled($office) && ! $this->same($this->normalizeOffice($office), $facts['pamo_office_name'])) throw ValidationException::withMessages(['office_designated' => 'PAMO office identity is derived from the selected Protected Area mapping.']);
         } elseif (filled($unit) && ! in_array($unit, [self::CONSERVATION, self::DEVELOPMENT], true)) {
             throw ValidationException::withMessages(['unit_assignment' => 'Select a valid operational unit.']);

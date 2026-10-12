@@ -1,4 +1,6 @@
 import { FloatingSelect, FloatingTextarea } from "@/Components/Form";import { Link, router, useForm, usePage } from '@inertiajs/react';
+import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
+import { officeDisplayLabel, pamoEligibilityGuidance } from '@/Components/Form/officePresentation.mjs';
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
@@ -507,29 +509,32 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
                                 </div>
                             </div>
                             <div className="sm:col-span-2">
-                                <FloatingSelect size="sm" label="Mapped PAMO office" id="pamo_office_id" value={form.data.pamo_office_id} onChange={(event) => {
-                                    const office = pamoOfficeOptions.find((item) => String(item.id) === event.target.value);
-                                    form.setData((current) => ({ ...current, pamo_office_id: event.target.value, pamo: office?.name || '' }));
-                                }}>
-                                    <option value="">Create a PAMO office identity</option>
-                                    {pamoOfficeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}</option>)}
-                                </FloatingSelect>
+                                <ScopedOptionSelect id="pamo_office_id" label="PAMO office" value={form.data.pamo_office_id} options={[{ id: '', label: 'Add PAMO office' }, ...pamoOfficeOptions.map((office) => ({ ...office, label: officeDisplayLabel(office) }))]} onChange={(id) => {
+                                    const office = pamoOfficeOptions.find((item) => String(item.id) === id);
+                                    form.setData((current) => ({ ...current, pamo_office_id: id, pamo: office?.name || '' }));
+                                }} error={form.errors.pamo_office_id} placeholder="Search PAMO offices or add one" />
                                 {form.data.pamo_office_id
-                                    ? <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">This Protected Area shares the stable office identity with other mapped PAs.</p>
-                                    : <FormField size="sm" id="pamo" label="New PAMO office name" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} className="mt-2" />}
-                                {form.errors.pamo_office_id && <p className="mt-1.5 text-sm text-red-700 dark:text-red-300">{form.errors.pamo_office_id}</p>}
+                                    ? null
+                                    : <FormField size="sm" id="pamo" label="Office name" value={form.data.pamo} onChange={(event) => form.setData('pamo', event.target.value)} error={form.errors.pamo} className="mt-2" />}
+                                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Staff accounts and drafts are grouped under this office.</p>
+                                {protectedArea?.pamo_eligibility_issue === 'No stable PAMO office identity is mapped.' && <p role="status" className="mt-2 text-xs text-amber-800 dark:text-amber-300">{pamoEligibilityGuidance(protectedArea.pamo_eligibility_issue)}</p>}
                             </div>
                             <FormField size="sm" id="pasu" label="PASu" value={form.data.pasu} onChange={(event) => form.setData('pasu', event.target.value)} error={form.errors.pasu} />
-                            {select('supervising_office_id', 'Supervising Office',
-                                <><option value="">Select the authoritative office</option>{officeOptions.map((office) => <option key={office.id} value={office.id}>{office.name}{office.office_type === 'penro' ? ' (PENRO-managed)' : ''}</option>)}</>
-                            , true)}
+                            <div className="min-w-0">
+                                <ScopedOptionSelect id="supervising_office_id" label="Supervising office" value={form.data.supervising_office_id} options={officeOptions.map((office) => ({ ...office, label: officeDisplayLabel(office) }))} onChange={(id) => form.setData('supervising_office_id', id)} required error={form.errors.supervising_office_id} placeholder="Search active CENRO or PENRO offices" />
+                                <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{protectedArea?.required_supervisor_type === 'penro' ? 'Select the supervising PENRO.' : protectedArea?.required_supervisor_type === 'cenro' ? 'Select the supervising CENRO.' : 'Select the supervising CENRO or PENRO for this Protected Area.'}</p>
+                                {protectedArea?.pamo_eligibility_issue && !['No stable PAMO office identity is mapped.'].includes(protectedArea.pamo_eligibility_issue) && !protectedArea.pamo_eligibility_issue.startsWith('Protected Area status is ') && <p role="status" className="mt-2 text-xs text-amber-800 dark:text-amber-300">{pamoEligibilityGuidance(protectedArea.pamo_eligibility_issue)}</p>}
+                            </div>
                             <FormField size="sm" id="year_established" label="Year Established" type="number" min="1800" max={new Date().getFullYear() + 10} value={form.data.year_established} onChange={(event) => form.setData('year_established', event.target.value)} error={form.errors.year_established} />
                             <FormField size="sm" id="legal_basis" label="Legal Basis" value={form.data.legal_basis} onChange={(event) => form.setData('legal_basis', event.target.value)} error={form.errors.legal_basis} className="sm:col-span-2" />
 
                             {/* Status Dropdown */}
-                            {select('status', 'Status',
+                            <div>
+                                {select('status', 'Status',
         <><option>Proposed</option><option>Active</option><option>Inactive</option></>
         , true)}
+                                {protectedArea?.pamo_eligibility_issue?.startsWith('Protected Area status is ') && form.data.status !== 'Active' && <p role="status" className="mt-1 text-xs text-amber-800 dark:text-amber-300">{pamoEligibilityGuidance(protectedArea.pamo_eligibility_issue)}</p>}
+                            </div>
                         </div>
                     </FormSection>
 

@@ -3,6 +3,7 @@
 namespace App\Services\Conservation;
 
 use App\Models\ModuleDefinition;
+use App\Domain\Modules\ProgramArea;
 use App\Services\Reports\ReportRequirementRegistry;
 
 final class ConservationReportWorkflowRegistry
@@ -161,6 +162,33 @@ final class ConservationReportWorkflowRegistry
         return $definitions !== []
             ? $definitions
             : array_values(array_filter(array_map(fn (string $key) => $this->defaultFind($key), $this->defaultKeys())));
+    }
+
+    /** PAMO submission is limited to an active, generic PA report definition. */
+    public function supportsPamoSubmission(string $key): bool
+    {
+        return in_array($key, $this->pamoSubmissionKeys(), true);
+    }
+
+    /** @return list<string> Active generic PA report modules PAMO can submit. */
+    public function pamoSubmissionKeys(): array
+    {
+        $activeKeys = collect(app(ReportRequirementRegistry::class)->definitions(
+            ReportRequirementRegistry::PA,
+            true,
+            ModuleDefinition::IMPLEMENTATION_GENERIC,
+        ))->pluck('key')->all();
+
+        return ModuleDefinition::query()->active()->generic()->notRetired()
+            ->requirementDomain(ReportRequirementRegistry::PA)
+            ->whereIn('program_area', [
+                ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
+                ProgramArea::WILDLIFE_CONSERVATION_AND_PROTECTION->value,
+                ProgramArea::CONSERVATION->value,
+            ])
+            ->whereIn('code', $activeKeys)
+            ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
+            ->pluck('code')->all();
     }
 
     /** @return array{working_days: int, timeliness_standard: 'A'|'B'} */

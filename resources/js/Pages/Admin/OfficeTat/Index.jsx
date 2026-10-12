@@ -12,6 +12,7 @@ import UtilityIconButton from '@/Components/UtilityIconButton';
 import ComplianceFirstAssessments from './ComplianceFirstAssessments';
 import { formatDuration, rankTatRows, weightedAverageSeconds } from './ranking.mjs';
 import { assessmentPeriodKey, parseAssessmentPeriodKey, selectAssessmentType } from './assessmentPeriodSelection.mjs';
+import { officeTatDisplayUnit } from './unitPresentation.mjs';
 
 const categories = [
     ['PAMO', 'PAMO offices'],
@@ -31,7 +32,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
     const [secondaryOpen, setSecondaryOpen] = useState(false);
     const [requestedHistoricalBasis, setRequestedHistoricalBasis] = useState('processing');
     const [activeView, setActiveView] = useState(selectedView || filters.view || 'report-performance');
-    const [reportUnit, setReportUnit] = useState(selectedUnit || filters.unit || 'conservation');
+    const displayedReportUnit = officeTatDisplayUnit(recordedAssessment, selectedUnit);
     const [assessment, setAssessment] = useState(() => analytics.assessment_period || parseAssessmentPeriodKey(analytics.processing_period));
     const [draftFilters, setDraftFilters] = useState({
         processing_period: analytics.processing_period || filters.processing_period || '',
@@ -48,7 +49,6 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
         if (analytics.processing_period) setDraftFilters(current => ({ ...current, processing_period: analytics.processing_period }));
     }, [analytics.processing_period]);
     useEffect(() => setActiveView(selectedView || 'report-performance'), [selectedView]);
-    useEffect(() => setReportUnit(selectedUnit || 'conservation'), [selectedUnit]);
     const form = useForm({ office_category: '', office: '', period_key: '', volume_target: '', weights: defaultWeights });
     const selectedCategory = categories.find(([value]) => value === analytics.category);
     const evidenceType = analytics.evidence_type || filters.evidence_type || 'all';
@@ -83,7 +83,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
     const pamoPreparationMissing = sum(pamoPreparationRanking, row => row.missingDocuments);
 
     const applyValues = values => {
-        const query = { ...filters, ...values, category: values.category || analytics.category, view: values.view || activeView, unit: values.unit || reportUnit };
+        const query = { ...filters, ...values, category: values.category || analytics.category, view: values.view || activeView, unit: values.unit || selectedUnit };
         delete query.assessment_type;
         delete query.assessment_year;
         delete query.semester;
@@ -123,7 +123,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
     const chips = makeFilterChips(filters, analytics.options || {}, removeFilter);
     const switchCategory = value => applyValues({ ...draftFilters, category: value });
     const switchView = value => { setActiveView(value); applyValues({ ...draftFilters, view: value }); };
-    const switchReportUnit = value => { setReportUnit(value); applyValues({ ...draftFilters, unit: value }); };
+    const switchReportUnit = value => applyValues({ ...draftFilters, unit: value });
 
     const startConfig = row => {
         const currentWeights = row.weights || defaultWeights;
@@ -234,7 +234,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
                 periodLabel={periodLabel}
                 periodKey={analytics.processing_period}
                 asOfDate={analytics.as_of_date}
-                selectedUnit={reportUnit}
+                selectedUnit={displayedReportUnit}
                 authorizedUnits={authorizedUnits}
                 onUnitChange={switchReportUnit}
                 saved={assessmentSaved}

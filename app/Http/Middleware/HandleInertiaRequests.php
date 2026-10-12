@@ -63,6 +63,7 @@ class HandleInertiaRequests extends Middleware
         $can = static fn (?string $ability): bool => $isAdmin || ($user?->can($ability) ?? false);
         $canViewPambWorkflow = ($canBrowseConservation && $can('technical-reports.view'))
             || $organization->canViewPamoPilotWorkflow($user);
+        $canViewPamoReports = $organization->canViewPamoPilotWorkflow($user);
 
         // Susiha ang section sa user ('CDS' o 'MES')
         $userSection = $user?->section ?? '';
@@ -115,6 +116,7 @@ class HandleInertiaRequests extends Middleware
                     'isGlobal' => $isAdmin,
                 ],
                 'canViewPambWorkflow' => (bool) $canViewPambWorkflow,
+                'canViewPamoReports' => (bool) $canViewPamoReports,
                 'canManageAdministration' => $isAdmin || (!$isMes && $can('compliance-alerts.manage')),
                 'canViewOfficeTat' => $user?->can('office-tat.view') ?? false,
                 'canConfigureOfficeTat' => $user?->can('office-tat.configure') ?? false,
@@ -218,8 +220,10 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
                 : []),
-            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', fn () => $canBrowseConservation && ! $isMes && $can('technical-reports.view')
-                ? ModuleDefinition::query()->active()->generic()->notRetired()->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
+            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', fn () => ($canBrowseConservation || $canViewPamoReports) && ! $isMes && ($can('technical-reports.view') || $canViewPamoReports)
+                ? ModuleDefinition::query()->active()->generic()->notRetired()
+                    ->when($canViewPamoReports && ! $canBrowseConservation, fn ($query) => $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys()))
+                    ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
                     ->get(['name', 'code', 'program_area'])
                     ->map(fn (ModuleDefinition $module): array => ['label' => $module->name, 'href' => route('conservation-reports.index', $module->code), 'program_area' => $module->program_area->value])
                     ->values()

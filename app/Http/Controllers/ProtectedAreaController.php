@@ -107,6 +107,7 @@ class ProtectedAreaController extends Controller
     private function protectedAreaData(ProtectedArea $protectedArea): array
     {
         $protectedArea->loadMissing(['supervisingOffice', 'pamoOfficeAssignment.office']);
+        $pamoReview = $this->organization->pamoAssignmentReviewForProtectedArea((int) $protectedArea->getKey());
         return [
             'id' => $protectedArea->id,
             'name' => $protectedArea->name,
@@ -128,6 +129,10 @@ class ProtectedAreaController extends Controller
             'supervising_office_id' => $protectedArea->supervisingOffice?->id,
             'pamo_office_id' => $protectedArea->pamoOfficeAssignment?->organizational_office_id,
             'supervising_office_name' => $protectedArea->supervisingOffice?->name,
+            'supervising_office_type' => $protectedArea->supervisingOffice?->office_type,
+            'pamo_office_name' => $pamoReview['pamo_office_name'],
+            'pamo_eligibility_issue' => $pamoReview['issue'],
+            'required_supervisor_type' => $pamoReview['required_supervisor_type'],
         ];
     }
 }

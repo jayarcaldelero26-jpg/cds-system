@@ -14,6 +14,10 @@ use Spatie\Permission\Models\Role;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+});
+
 function p2PamoScopeUser(?int $protectedAreaId = null): User
 {
     $pamoOffice = OrganizationalOffice::query()->firstOrCreate(
@@ -66,7 +70,7 @@ function p2MapPamoArea(ProtectedArea $area, User $actor): void
     );
 }
 
-test('assigned PAMO sees only Regular and Special PAMB submissions for its assigned PA', function (): void {
+test('assigned PAMO sees active generic PA Conservation submissions only for its assigned PA', function (): void {
     $pamo = p2PamoScopeUser();
     $areaA = ProtectedArea::create(['name' => 'P2 PAMO Area A', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $pamo->id, 'updated_by' => $pamo->id]);
     $areaB = ProtectedArea::create(['name' => 'P2 PAMO Area B', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $pamo->id, 'updated_by' => $pamo->id]);
@@ -75,6 +79,12 @@ test('assigned PAMO sees only Regular and Special PAMB submissions for its assig
     $pamo->refresh();
     $regular = p2PambScopeReport($pamo, $areaA, 'regular_pamb');
     $special = p2PambScopeReport($pamo, $areaA, 'special_pamb');
+    $generic = ConservationReportSubmission::create([
+        'workflow_key' => 'maintenance_monuments', 'protected_area_id' => $areaA->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Maintenance of Monuments',
+        'document_type' => 'Progress Report', 'date_accomplished' => '2026-09-01',
+        'created_by' => $pamo->id, 'updated_by' => $pamo->id,
+    ]);
     $other = p2PambScopeReport($pamo, $areaB, 'regular_pamb');
     $access = app(PambSubmissionAccessService::class);
 
@@ -83,9 +93,10 @@ test('assigned PAMO sees only Regular and Special PAMB submissions for its assig
 
     expect($access->canView($pamo, $regular))->toBeTrue()
         ->and($access->canView($pamo, $special))->toBeTrue()
+        ->and($access->canView($pamo, $generic))->toBeTrue()
         ->and($access->canView($pamo, $other))->toBeFalse()
         ->and($access->canPerformForSubmission($pamo, 'submit', $regular))->toBeTrue()
-        ->and($visibleIds)->toContain($regular->id, $special->id)
+        ->and($visibleIds)->toContain($regular->id, $special->id, $generic->id)
         ->and($visibleIds)->not->toContain($other->id)
         ->and($organization->effectiveCategory($pamo))->toBe(OrganizationalAccessService::PAMO)
         ->and($organization->canAccessProtectedArea($pamo, $areaA->id))->toBeTrue()

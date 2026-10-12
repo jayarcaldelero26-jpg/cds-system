@@ -199,20 +199,27 @@ class ConservationReportSubmissionController extends Controller
         ];
     }
 
-    /** Existing full source contract exposed only to the scoped PAMO PAMB promotion endpoint. */
+    /** The same full source contract used by the scoped PAMO draft promotion endpoint. */
     public function pamoPilotReportRules(string $workflow, ?string $activityName, bool $requireMov): array
     {
-        abort_unless(in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 404);
+        abort_unless($this->workflows->supportsPamoSubmission($workflow), 404);
         $config = $this->workflow($workflow);
         $rules = $this->reportRules($config, null, $requireMov, $activityName);
-        $rules['activity_name'][] = Rule::in($config['activities'] ?? []);
+        if (! ($config['allow_custom_activity'] ?? false)) $rules['activity_name'][] = Rule::in($config['activities'] ?? []);
         return $rules;
     }
 
     public function assertPamoPilotActualDates(array $validated, Request $request, string $workflow): void
     {
-        abort_unless(in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 404);
+        abort_unless($this->workflows->supportsPamoSubmission($workflow), 404);
         $this->assertNoFutureActualDates($validated, $request, $workflow);
+    }
+
+    public function applyPamoDateConductedRanges(array $validated, string $workflow, mixed $ranges): array
+    {
+        return $this->dateConductedRanges->supportsWorkflow($workflow)
+            ? $this->dateConductedRanges->applyToPayload($validated, $ranges)
+            : $validated;
     }
 
     /** @param array<string, mixed> $validated */
@@ -324,7 +331,7 @@ class ConservationReportSubmissionController extends Controller
         }
         if ($this->pambAccess->isPamo($user)) {
             abort_unless($this->organization->canViewPamoPilotWorkflow($user)
-                && in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true)
+                && $this->workflows->supportsPamoSubmission($workflow)
                 && $user->protected_area_id !== null
                 && (int) $user->protected_area_id === (int) $protectedAreaId, 403);
         }
@@ -332,7 +339,7 @@ class ConservationReportSubmissionController extends Controller
 
     private function assertPamoCorrectionEdit(?\App\Models\User $user, string $workflow, ConservationReportSubmission $submission): void
     {
-        abort_unless($user && in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 403);
+        abort_unless($user && $this->workflows->supportsPamoSubmission($workflow), 403);
         $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($submission, 'conservation');
         $position = $state['route_position'] ?? [];
         $last = $state['events']->last();
@@ -395,7 +402,7 @@ class ConservationReportSubmissionController extends Controller
 
     private function canPamoCorrect(\App\Models\User $user, ConservationReportSubmission $submission): bool
     {
-        if (! in_array($submission->workflow_key, PambComplianceCalculator::MEETING_WORKFLOWS, true)
+        if (! $this->workflows->supportsPamoSubmission((string) $submission->workflow_key)
             || ! app(OrganizationalAccessService::class)->canViewPamoPilotWorkflow($user)
             || (int) $user->protected_area_id !== (int) $submission->protected_area_id) return false;
 

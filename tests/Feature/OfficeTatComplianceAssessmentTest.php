@@ -313,6 +313,29 @@ test('a configure-capable local viewer cannot read cross-unit assessments withou
         ->has('complianceAssessments.development'));
 });
 
+test('Office TAT route returns a roster whose selected unit and participant identities agree', function (): void {
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    $area = complianceAssessmentArea('Unit Response Test PA', 'Active', 'PAMO Unit Response');
+
+    $this->actingAs($actor)
+        ->get('/admin/office-tat?category=CENRO&unit=conservation&processing_period=2026-H2&as_of_date=2026-10-11')
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->where('selectedUnit', 'conservation')
+            ->where('filters.unit', 'conservation')
+            ->where('recordedAssessment.unit', 'conservation')
+            ->where('recordedAssessment.rows.0.participant_key', 'pa:'.$area->id));
+
+    $this->actingAs($actor)
+        ->get('/admin/office-tat?category=CENRO&unit=development&processing_period=2026-H2&as_of_date=2026-10-11')
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->where('selectedUnit', 'development')
+            ->where('filters.unit', 'development')
+            ->where('recordedAssessment.unit', 'development')
+            ->where('recordedAssessment.rows.0.participant_key', fn ($key) => str_starts_with($key, 'cenro:')));
+});
+
 test('Conservation applicability and highly technical workflow classifications remain separate and versioned', function (): void {
     $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
     $actor->givePermissionTo(Permission::findOrCreate('office-tat.configure', 'web'));

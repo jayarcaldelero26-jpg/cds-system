@@ -55,14 +55,19 @@ function Detail({ label, value }) {
 
 export function UserOrganizationDetails({ user }) {
     const category = hasDisplayValue(user.effective_category) ? user.effective_category : user.section;
+    const pamo = category === 'PAMO';
     const items = [
         ['User Category', userCategoryLabel(category)],
         ['Unit', user.unit_assignment],
-        ['Office', user.office_designated],
+        [pamo ? 'Canonical PAMO Office' : 'Office', pamo ? user.pamo_office_name : user.office_designated],
         ['Protected Area / PAMO Assignment', user.protected_area_name],
+        ...(pamo ? [['Supervising Office', user.supervising_office_name]] : []),
     ].filter(([, value]) => hasDisplayValue(value));
-    if (!items.length) return null;
-    return <CrudSection title="Organization"><dl className="grid min-w-0 gap-x-6 gap-y-5 sm:grid-cols-2">{items.map(([label, value]) => <Detail key={label} label={label} value={value} />)}</dl></CrudSection>;
+    if (!items.length && !user.pamo_assignment_issue) return null;
+    return <CrudSection title="Organization">
+        <dl className="grid min-w-0 gap-x-6 gap-y-5 sm:grid-cols-2">{items.map(([label, value]) => <Detail key={label} label={label} value={value} />)}</dl>
+        {user.pamo_assignment_issue && <p role="alert" className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">PAMO assignment needs correction: {user.pamo_assignment_issue}</p>}
+    </CrudSection>;
 }
 
 export function UserRecordInformation({ user }) {
@@ -71,8 +76,8 @@ export function UserRecordInformation({ user }) {
     return <CrudSection title="Record Information"><dl className="grid min-w-0 gap-x-6 gap-y-5 sm:grid-cols-2">{items.map(([label, value]) => <Detail key={label} label={label} value={value} />)}</dl></CrudSection>;
 }
 
-export default function Index({ users, status }) {
-    const { flash = {} } = usePage().props;
+export default function Index({ users, status, protectedAreaAssignments = [], canViewProtectedAreas = false, canManageProtectedAreas = false }) {
+    const { flash = {}, errors = {} } = usePage().props;
     const [selectedUser, setSelectedUser] = useState(null);
     const [userToDelete, setUserToDelete] = useState(null);
     const [userToApprove, setUserToApprove] = useState(null);
@@ -127,10 +132,11 @@ export default function Index({ users, status }) {
 
     const columns = [
         { key: 'name', label: 'User', render: (user) => <div className="min-w-[190px]"><div className="font-semibold text-gray-900 dark:text-white">{user.name}</div><div className="mt-0.5 text-xs font-normal text-gray-500 dark:text-gray-400">{user.email}</div></div> },
-        { key: 'account_role', label: 'Account Role', render: (user) => display(user.account_role) },
-        { key: 'scope', label: 'Office / Protected Area', render: (user) => <div className="min-w-0 whitespace-normal"><div className="font-medium">{display(user.office_designated)}</div>{user.protected_area_name && <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{user.protected_area_name}</div>}</div> },
+        { key: 'account_role', label: 'Account Type / Role', render: (user) => <div><div>{display(user.account_role)}</div><div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Profile: {display(user.role)}</div></div> },
+        { key: 'scope', label: 'Office / Protected Area', render: (user) => <div className="min-w-0 whitespace-normal"><div className="font-medium">{user.effective_category === 'PAMO' ? display(user.pamo_office_name) : display(user.office_designated)}</div>{user.protected_area_name && <div className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">{user.protected_area_name}</div>}{user.pamo_assignment_issue && <div className="mt-1 text-xs font-medium text-amber-800 dark:text-amber-300">Mapping needs correction</div>}</div> },
         { key: 'category', label: 'User Category', render: (user) => display(userCategoryLabel(user.effective_category || user.section)) },
-        { key: 'is_active', label: 'Account Status', render: (user) => { const current = accountStatus(user); return <StatusBadge variant={current.variant}>{current.label}</StatusBadge>; } },
+        { key: 'approval', label: 'Approval', render: (user) => <StatusBadge variant={user.is_approved ? 'active' : 'pending'}>{user.is_approved ? 'Approved' : 'Pending'}</StatusBadge> },
+        { key: 'is_active', label: 'Activity', render: (user) => <StatusBadge variant={user.is_active ? 'active' : 'inactive'}>{user.is_active ? 'Active' : 'Inactive'}</StatusBadge> },
     ];
 
     return (
@@ -140,10 +146,31 @@ export default function Index({ users, status }) {
                 description="Manage authorized CDS-SMART users, their office, section, and access roles. Click a user row to view details and administrative actions."
             />
 
-            <div className="cds-action-row"><Link href="/admin/users/create" data-cds-action="true" data-cds-action-variant="primary" className="cds-page-action inline-flex items-center justify-center text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2">Add user</Link></div>
+            <div className="cds-action-row"><Link href="/admin/users/create" data-cds-action="true" data-cds-action-variant="primary" className="cds-page-action inline-flex items-center justify-center text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-green-700 focus-visible:ring-offset-2">Add user</Link>{canViewProtectedAreas && <Link href="/protected-areas" className="cds-page-action inline-flex items-center justify-center border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">Review PA mappings</Link>}</div>
 
             {statusMessages[status] && <div className="mt-6 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800 dark:border-emerald-800/50 dark:bg-emerald-950/50 dark:text-emerald-300" role="status">{statusMessages[status]}</div>}
             {flash.error && <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200" role="alert">{flash.error}</div>}
+            {errors.assignment && <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-900 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-200" role="alert">Account approval was blocked: {errors.assignment}</div>}
+
+            <section className="mt-6 rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div><h2 className="text-sm font-bold text-gray-950 dark:text-white">Protected Area PAMO eligibility</h2><p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300">Each reason comes from the current active status, stable PAMO identity, and required supervising office mapping.</p></div>
+                    {canManageProtectedAreas && <Link href="/protected-areas" className="text-xs font-semibold text-green-800 underline dark:text-green-300">Open mapping controls</Link>}
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                    <table className="min-w-full text-left text-xs"><thead className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400"><tr><th className="px-2 py-2">Protected Area</th><th className="px-2 py-2">Status</th><th className="px-2 py-2">Canonical PAMO</th><th className="px-2 py-2">Supervisor</th><th className="px-2 py-2">Eligibility</th><th className="px-2 py-2">Action</th></tr></thead>
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-800">{protectedAreaAssignments.map((area) => <tr key={area.id}>
+                            <td className="px-2 py-2 font-semibold text-gray-900 dark:text-white">{area.name}{area.short_name ? ` (${area.short_name})` : ''}</td>
+                            <td className="px-2 py-2">{area.status}</td>
+                            <td className="px-2 py-2">{display(area.pamo_office_name)}</td>
+                            <td className="px-2 py-2">{display(area.supervising_office_name)}</td>
+                            <td className="px-2 py-2"><span className={area.eligible ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}>{area.eligible ? 'Eligible' : area.issue}</span></td>
+                            <td className="px-2 py-2">{canManageProtectedAreas ? <Link href={`/protected-areas/${area.id}/edit`} className="font-semibold text-green-800 underline dark:text-green-300">Edit mapping</Link> : display('—')}</td>
+                        </tr>)}</tbody>
+                    </table>
+                    {!protectedAreaAssignments.length && <p className="px-2 py-4 text-xs text-gray-600 dark:text-gray-300">No Protected Area records are available.</p>}
+                </div>
+            </section>
 
             <div className="mt-6">
                 <CrudTable
@@ -179,7 +206,7 @@ export default function Index({ users, status }) {
                 deleteLabel="Delete User"
             >
                 {selectedUser && <>
-                    <CrudSummaryGrid items={[{ label: 'Approval Status', render: () => <StatusBadge variant={selectedUser.is_approved ? 'active' : 'pending'}>{selectedUser.is_approved ? 'Approved' : 'Pending Approval'}</StatusBadge> }, { label: 'Account Status', render: () => <StatusBadge variant={selectedStatus.variant}>{selectedStatus.label}</StatusBadge> }, { label: 'Account Role', value: display(selectedUser.account_role) }]} />
+                    <CrudSummaryGrid items={[{ label: 'Approval Status', render: () => <StatusBadge variant={selectedUser.is_approved ? 'active' : 'pending'}>{selectedUser.is_approved ? 'Approved' : 'Pending Approval'}</StatusBadge> }, { label: 'Activity Status', render: () => <StatusBadge variant={selectedStatus.variant}>{selectedStatus.label}</StatusBadge> }, { label: 'Account Type', value: display(selectedUser.account_role) }, { label: 'Permission Profile', value: display(selectedUser.role) }]} />
                     <UserOrganizationDetails user={selectedUser} />
                     <UserRecordInformation user={selectedUser} />
                     <CrudSection title="Administrative Actions">

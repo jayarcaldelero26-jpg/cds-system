@@ -7,6 +7,7 @@ import CrudTable from '@/Components/Crud/CrudTable';
 import Modal from '@/Components/Modal';
 import OfficeTatAssessmentSettings from './OfficeTatAssessmentSettings';
 import { recordedResultPresentation } from './recordedResultPresentation.mjs';
+import { officeTatDisplayUnit } from './unitPresentation.mjs';
 
 const unitTabs = [['conservation', 'Conservation'], ['development', 'Development']];
 
@@ -18,7 +19,8 @@ export default function ComplianceFirstAssessments({
     const [showOfficial, setShowOfficial] = useState(false);
     const [detailRow, setDetailRow] = useState(null);
     const [settingsOpen, setSettingsOpen] = useState(false);
-    const official = complianceAssessments?.[selectedUnit] || null;
+    const assessmentUnit = officeTatDisplayUnit(data, selectedUnit);
+    const official = complianceAssessments?.[assessmentUnit] || null;
     const officialAvailable = Boolean(official?.coverage_complete);
     const activeOfficial = showOfficial && officialAvailable;
     const active = activeOfficial ? official : data;
@@ -27,7 +29,7 @@ export default function ComplianceFirstAssessments({
     useEffect(() => {
         setShowOfficial(false);
         setDetailRow(null);
-    }, [selectedUnit, periodKey, asOfDate]);
+    }, [assessmentUnit, periodKey, asOfDate]);
 
     const tableRows = rows.map(row => ({
         ...row,
@@ -53,7 +55,7 @@ export default function ComplianceFirstAssessments({
 
     const columns = [
         { key: 'rank', label: 'Rank', render: row => row.rank || rankStatus(row) },
-        { key: 'participant', label: selectedUnit === 'conservation' ? 'Protected Area' : 'CENRO', headerClassName: 'min-w-52', render: row => <div><p className="font-bold text-gray-950 dark:text-white">{row.name}</p>{selectedUnit === 'conservation' && <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">Directory status: {row.legal_status || 'Unknown'}{row.office_binding ? ' · PAMO ' + row.office_binding : ''}</p>}</div> },
+        { key: 'participant', label: assessmentUnit === 'conservation' ? 'Protected Area' : 'CENRO', headerClassName: 'min-w-52', render: row => <div><p className="font-bold text-gray-950 dark:text-white">{row.name}</p>{assessmentUnit === 'conservation' && <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">Directory status: {row.legal_status || 'Unknown'}{row.office_binding ? ' · PAMO ' + row.office_binding : ''}</p>}</div> },
         { key: 'activity', label: activeOfficial ? 'Submitted' : 'Recorded activities', render: row => displayCount(row.activityValue) },
         { key: 'received', label: 'Received by cutoff', render: row => displayCount(row.receivedValue) },
         { key: 'due', label: 'Assessable due (N)', render: row => row.dueValue == null ? '—' : displayCount(row.dueValue) },
@@ -69,13 +71,13 @@ export default function ComplianceFirstAssessments({
                 <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">{periodLabel} · As of {asOfDate}</p>
                 <h2 id="report-performance-heading" className="mt-1 text-xl font-extrabold text-gray-950 dark:text-white">Report Performance</h2>
                 <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600 dark:text-gray-300">Conservation uses the six Protected Area roster. Development uses the four CENRO ENGP roster. PA reporting remains attributed to its Protected Area, regardless of custody.</p>
-                {selectedUnit === 'conservation' && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">Proposed directory status is shown as stored. Registration eligibility is handled separately.</p>}
+                {assessmentUnit === 'conservation' && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">Proposed directory status is shown as stored. Registration eligibility is handled separately.</p>}
             </div>
             {canConfigure && complianceAssessments && <Button type="button" size="compact" variant="cancel" onClick={() => setSettingsOpen(true)} className="rounded-lg px-4 py-2.5 text-xs"><Icon icon="lucide:settings-2" width="15" height="15" className="mr-2" aria-hidden="true" />Assessment settings</Button>}
         </header>
 
         <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
-            <ComplianceTabList tabs={unitTabs.filter(([key]) => authorizedUnits.includes(key))} value={selectedUnit} onChange={onUnitChange} label="Report performance unit" />
+            <ComplianceTabList tabs={unitTabs.filter(([key]) => authorizedUnits.includes(key))} value={assessmentUnit} onChange={onUnitChange} label="Report performance unit" />
         </div>
 
         <div role="status" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
@@ -116,7 +118,7 @@ export default function ComplianceFirstAssessments({
 
         <CrudDetailsModal open={Boolean(detailRow)} title="Participant performance details" subtitle={detailRow ? detailRow.name + ' · ' + (activeOfficial ? 'official complete-period assessment' : 'recorded reports') + ' · ' + periodLabel : ''} icon={<Icon icon="lucide:clipboard-check" width="18" height="18" aria-hidden="true" />} onClose={() => setDetailRow(null)} compact maxWidth="max-w-4xl" summary={detailRow && <div className="space-y-2"><div className="grid gap-2 sm:grid-cols-4"><Metric label="Due denominator N" value={detailRow.dueValue == null ? 'N/A' : detailRow.dueValue} /><Metric label="Recorded activities" value={detailRow.activityValue} /><Metric label="Received by cutoff" value={detailRow.receivedValue} /><Metric label="Result" value={detailResult?.label || detailRow.score_status || 'Not assessed'} /></div>{detailResult?.nextDeadline && <p role="status" className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">Received — not yet due · Next deadline: <time dateTime={detailResult.nextDeadline}>{detailResult.nextDeadline}</time></p>}</div>}>
             {detailRow && <div className="space-y-3">
-                <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 dark:bg-gray-950 dark:text-gray-200">{activeOfficial ? 'This result covers the full official unit assessment and its all-required-obligations denominator.' : 'This result covers supported live report identities only. It does not assert that missing obligations or events did not occur.'}{selectedUnit === 'conservation' ? ' Proposed status is a directory fact; registration eligibility is separate.' : ''}</p>
+                <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 dark:bg-gray-950 dark:text-gray-200">{activeOfficial ? 'This result covers the full official unit assessment and its all-required-obligations denominator.' : 'This result covers supported live report identities only. It does not assert that missing obligations or events did not occur.'}{assessmentUnit === 'conservation' ? ' Proposed status is a directory fact; registration eligibility is separate.' : ''}</p>
                 {(detailRow.obligation_details || []).map((item, index) => <article key={detailRow.participant_key + '-' + index} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                     <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{item.label || 'Source activity'}</h3>
                     <p className="mt-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">{item.status || 'Source detail'}</p>
@@ -135,7 +137,7 @@ export default function ComplianceFirstAssessments({
 
         {canConfigure && complianceAssessments && <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Assessment settings" size="lg" footer={<Button type="button" variant="cancel" onClick={() => setSettingsOpen(false)} className="rounded-lg px-4 py-2">Close settings</Button>}>
             <div className="max-h-[70vh] overflow-y-auto">
-                <OfficeTatAssessmentSettings data={complianceAssessments} recordedAssessment={data} selectedUnit={selectedUnit} canConfigure={canConfigure} periodLabel={periodLabel} periodKey={periodKey} asOfDate={asOfDate} saved={saved} />
+            <OfficeTatAssessmentSettings data={complianceAssessments} recordedAssessment={data} selectedUnit={assessmentUnit} canConfigure={canConfigure} periodLabel={periodLabel} periodKey={periodKey} asOfDate={asOfDate} saved={saved} />
             </div>
         </Modal>}
     </section>;

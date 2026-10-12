@@ -74,14 +74,14 @@ class AppServiceProvider extends ServiceProvider
             $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
             if ($ability === 'technical-reports.update'
                 && $organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO) {
-                return in_array((string) request()->route('workflow'), \App\Services\Conservation\PambComplianceCalculator::MEETING_WORKFLOWS, true)
+                return app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) request()->route('workflow'))
                     && request()->routeIs('conservation-reports.update')
                     && $organization->canViewPamoPilotWorkflow($user);
             }
             if (in_array($ability, $conservationReadAbilities, true)) {
                 if ($organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO) {
-                    $pilotWorkflow = in_array((string) request()->route('workflow'), \App\Services\Conservation\PambComplianceCalculator::MEETING_WORKFLOWS, true);
-                    $pilotReadRoute = request()->routeIs('conservation-reports.index', 'conservation-reports.pamo-drafts.*');
+                    $pilotWorkflow = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) request()->route('workflow'));
+                    $pilotReadRoute = request()->routeIs('conservation-reports.index', 'conservation-reports.mov', 'conservation-reports.pamo-drafts.*');
 
                     return $pilotWorkflow && $organization->canViewPamoPilotWorkflow($user)
                         && $ability === 'technical-reports.view' && $pilotReadRoute;

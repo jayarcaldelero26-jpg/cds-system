@@ -38,7 +38,13 @@ class UserController extends Controller
                 ->with(['roles', 'protectedArea:id,name'])
                 ->latest()
                 ->paginate(15)
-                ->through(fn (User $user): array => [
+                ->through(function (User $user) use ($organization): array {
+                    $category = $organization->effectiveCategory($user);
+                    $pamoReview = $category === OrganizationalAccessService::PAMO && $user->protected_area_id
+                        ? $organization->pamoAssignmentReviewForProtectedArea((int) $user->protected_area_id)
+                        : null;
+
+                    return [
                     'id' => $user->id,
                     'name' => $user->name,
                     'email' => $user->email,
@@ -51,13 +57,20 @@ class UserController extends Controller
                     'role' => $user->roles->first()?->name,
                     'account_role' => $organization->accountType($user),
                     'protected_area_name' => $user->protectedArea?->name,
+                    'pamo_office_name' => $pamoReview['pamo_office_name'] ?? null,
+                    'supervising_office_name' => $pamoReview['supervising_office_name'] ?? null,
+                    'pamo_assignment_issue' => $pamoReview['issue'] ?? null,
                     'access_configured' => $user->roles->contains(fn ($role): bool => $role->name !== 'no_role'),
                     'is_approved' => (bool) $user->is_approved,
                     'is_active' => (bool) $user->is_active,
                     'created_at' => $user->created_at?->toDateString(),
                     'updated_at' => $user->updated_at?->toDateString(),
                     'can_delete' => request()->user()?->can('delete', $user) ?? false,
-                ]),
+                    ];
+                }),
+            'protectedAreaAssignments' => $organization->pamoAssignmentOptions(),
+            'canViewProtectedAreas' => request()->user()?->can('protected-areas.view') ?? false,
+            'canManageProtectedAreas' => request()->user()?->can('protected-areas.update') ?? false,
         ]);
     }
 
@@ -72,9 +85,10 @@ class UserController extends Controller
 
         return Inertia::render('Admin/Users/Create', [
             'operationalGroups' => $organization->operationalGroups($routingSettings->disabledAccountCategories()),
-            'protectedAreas' => $organization->pamoRegistrationProtectedAreas(),
+            'protectedAreas' => $organization->pamoAssignmentOptions(),
             'offices' => app(OrganizationalAccessService::class)->officeOptions(),
             'accountRoles' => $organization->accountRoleOptions(),
+            'canManageProtectedAreas' => request()->user()?->can('protected-areas.update') ?? false,
         ]);
     }
 
@@ -111,6 +125,10 @@ class UserController extends Controller
         $this->authorize('update', $user);
         $organization = app(OrganizationalAccessService::class);
         $routingSettings = app(RoutingPositionSettingsService::class);
+        $category = $organization->effectiveCategory($user);
+        $pamoReview = $category === OrganizationalAccessService::PAMO && $user->protected_area_id
+            ? $organization->pamoAssignmentReviewForProtectedArea((int) $user->protected_area_id)
+            : null;
 
         return Inertia::render('Admin/Users/Edit', [
             'user' => [
@@ -120,8 +138,12 @@ class UserController extends Controller
                 'office_designated' => $user->office_designated, // Ã°Å¸Å¡â‚¬ Gidugang para ma-load sa edit form
                 'section' => $user->section,                     // Ã°Å¸Å¡â‚¬ Gidugang para ma-load sa edit form
                     'protected_area_id' => $user->protected_area_id,
-                    'role' => $user->roles->first()?->name,
+                'role' => $user->roles->first()?->name,
                 'account_role' => $organization->accountType($user),
+                'protected_area_name' => $user->protectedArea?->name,
+                'pamo_office_name' => $pamoReview['pamo_office_name'] ?? null,
+                'supervising_office_name' => $pamoReview['supervising_office_name'] ?? null,
+                'pamo_assignment_issue' => $pamoReview['issue'] ?? null,
                 'unit_assignment' => $user->unit_assignment,
                 'effective_category' => app(OrganizationalAccessService::class)->effectiveCategory($user),
                 'operational_group' => $organization->operationalGroupForCategory(app(OrganizationalAccessService::class)->effectiveCategory($user), $user->unit_assignment),
@@ -132,9 +154,10 @@ class UserController extends Controller
                 $routingSettings->disabledAccountCategories(),
                 $organization->normalizeCategory($user->section),
             ),
-            'protectedAreas' => $organization->pamoRegistrationProtectedAreas(),
+            'protectedAreas' => $organization->pamoAssignmentOptions(),
             'offices' => app(OrganizationalAccessService::class)->officeOptions(),
             'accountRoles' => $organization->accountRoleOptions(),
+            'canManageProtectedAreas' => request()->user()?->can('protected-areas.update') ?? false,
         ]);
     }
 
@@ -441,8 +464,9 @@ class UserController extends Controller
 
         try {
             $organization->validateAssignment($unit !== '' ? $unit : null, $category, $office, $protectedAreaId);
-        } catch (ValidationException) {
-            return 'Please complete the user\'s access role and organizational assignment before activating this account.';
+        } catch (ValidationException $exception) {
+            return collect($exception->errors())->flatten()->first()
+                ?? 'Please complete the user\'s access role and organizational assignment before activating this account.';
         }
 
         return null;

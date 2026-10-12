@@ -200,13 +200,14 @@ function matchesNavigationItem(item, url) {
 
 function filterNavigationByUnit(items, unit, inheritedUnit = null, auth = {}) {
     return items.map((item) => {
-        if (item.permission && !auth[item.permission]) return null;
+        const pamoReportLink = auth.canViewPamoReports && item.href?.startsWith('/conservation-reports/');
+        if (item.permission && !auth[item.permission] && !pamoReportLink) return null;
         if (item.permissionAny?.length && !item.permissionAny.some(permission => auth[permission])) return null;
 
         const itemUnit = item.unit || inheritedUnit;
-        const containsPilotPambLink = item.children?.some(child => child.permission === 'canViewPambWorkflow') && auth.canViewPambWorkflow;
-        const isPilotPambLink = item.permission === 'canViewPambWorkflow' && auth.canViewPambWorkflow;
-        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false && !containsPilotPambLink && !isPilotPambLink) return null;
+        const containsPamoReportLink = item.children?.some(child => child.href?.startsWith('/conservation-reports/')) && auth.canViewPamoReports;
+        const isPamoReportLink = item.href?.startsWith('/conservation-reports/') && auth.canViewPamoReports;
+        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false && !containsPamoReportLink && !isPamoReportLink) return null;
         if (itemUnit === 'development' && auth.canBrowseDevelopmentModules === false) return null;
         if (unit && itemUnit && itemUnit !== unit) return null;
         const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit, auth) : null;

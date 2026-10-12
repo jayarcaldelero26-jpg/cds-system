@@ -1,154 +1,109 @@
 import { useForm } from '@inertiajs/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import Card from '@/Components/Card';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import CrudFormModal from '@/Components/Crud/CrudFormModal';
+import CrudSection from '@/Components/Crud/CrudSection';
+import CrudTable from '@/Components/Crud/CrudTable';
+import FileAttachmentPanel from '@/Components/Crud/FileAttachmentPanel';
+import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import DatePicker from '@/Components/DatePicker';
+import DateRangePicker from '@/Components/DateRangePicker';
 import { FloatingInput, FloatingSelect, FloatingTextarea } from '@/Components/Form';
-import PrimaryButton from '@/Components/PrimaryButton';
+import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
 import Button from '@/Components/Button';
 import { createUuid } from '@/Utils/createUuid.mjs';
+import { compactDateConductedRanges, emptyDateConductedRange, rangesFromRecord } from '@/Utils/dateConductedRanges';
 
-const emptyDraft = { activity_name: '', document_type: '', reporting_period: '', date_conducted: '', date_accomplished: '', remarks: '', mov: null, lock_version: 1 };
+const emptyDraft = { activity_name: '', document_type: '', reporting_period: '', date_conducted: '', date_conducted_ranges: [], date_accomplished: '', remarks: '', mov: null, lock_version: 1 };
 
-export default function PamoPambDraftWorkspace({ workflow, drafts = [] }) {
+const PamoPambDraftWorkspace = forwardRef(function PamoPambDraftWorkspace({ workflow, drafts = [], assignedProtectedArea }, ref) {
     const [selectedId, setSelectedId] = useState('');
+    const [open, setOpen] = useState(false);
+    const [preview, setPreview] = useState(null);
     const token = useRef(createUuid());
     const form = useForm(emptyDraft);
     const forwardForm = useForm({ lock_version: 1 });
+    const workspaceKey = `${workflow?.key || ''}:${assignedProtectedArea?.id || ''}`;
+    const previousWorkspaceKey = useRef(workspaceKey);
     const selected = drafts.find(draft => draft.id === selectedId) || null;
-    const documentOptions = useMemo(() => {
-        const byActivity = workflow.activity_documents || {};
-        return byActivity[form.data.activity_name] || workflow.documents || [];
-    }, [workflow.activity_documents, workflow.documents, form.data.activity_name]);
-
+    const rangeEnabled = Boolean(workflow.date_conducted_ranges_enabled);
+    const documentOptions = useMemo(() => (workflow.activity_documents || {})[form.data.activity_name] || workflow.documents || [], [workflow.activity_documents, workflow.documents, form.data.activity_name]);
+    const savedFile = selected?.mov_url ? { url: selected.mov_url, download_url: selected.mov_url, name: selected.mov_file_name } : null;
+    useEffect(() => () => { if (preview?.temporary) URL.revokeObjectURL(preview.url); }, [preview]);
     useEffect(() => {
-        if (!selectedId) return;
-        const latest = drafts.find(draft => draft.id === selectedId);
-        if (latest && !form.processing) form.setData('lock_version', latest.lock_version);
-    }, [drafts, selectedId]);
+        if (previousWorkspaceKey.current === workspaceKey) return;
+        previousWorkspaceKey.current = workspaceKey;
+        setSelectedId('');
+        setOpen(false);
+        setPreview(null);
+        token.current = createUuid();
+        form.reset();
+        form.clearErrors();
+        forwardForm.reset();
+    }, [workspaceKey]);
 
     const startNew = () => {
         setSelectedId('');
+        setPreview(null);
+        token.current = createUuid();
         form.clearErrors();
         forwardForm.clearErrors();
-        form.setData({ ...emptyDraft });
+        form.setData({ ...emptyDraft, activity_name: workflow.activities?.length === 1 ? workflow.activities[0] : workflow.default_activity || '', date_conducted_ranges: rangeEnabled ? [emptyDateConductedRange()] : [] });
+        setOpen(true);
     };
+    useImperativeHandle(ref, () => ({ startNew, openDraft }));
 
     const openDraft = draft => {
         setSelectedId(draft.id);
+        setPreview(null);
         form.clearErrors();
         forwardForm.clearErrors();
-        form.setData({ ...emptyDraft, ...(draft.report_payload || {}), mov: null, lock_version: draft.lock_version });
+        form.setData({ ...emptyDraft, ...(draft.report_payload || {}), date_conducted_ranges: rangeEnabled ? rangesFromRecord(draft.report_payload?.date_conducted_ranges, draft.report_payload?.date_conducted) : [], mov: null, lock_version: draft.lock_version });
         forwardForm.setData('lock_version', draft.lock_version);
+        setOpen(true);
     };
 
+    const close = () => { setOpen(false); setPreview(null); };
     const save = event => {
         event.preventDefault();
+        if (form.processing || selected?.status === 'forwarded') return;
+        const payload = data => ({ ...data, date_conducted_ranges: rangeEnabled ? compactDateConductedRanges(data.date_conducted_ranges) : undefined });
         if (selected) {
-            form.transform(data => ({ ...data, lock_version: selected.lock_version }));
-            form.put(route('conservation-reports.pamo-drafts.update', [workflow.key, selected.id]), {
-                forceFormData: true,
-                preserveScroll: true,
-                onSuccess: () => form.transform(data => data),
-                onError: () => form.transform(data => data),
-            });
+            form.transform(data => ({ ...payload(data), lock_version: selected.lock_version, _method: 'put' }));
+            form.post(route('conservation-reports.pamo-drafts.update', [workflow.key, selected.id]), { forceFormData: true, preserveScroll: true, onSuccess: () => { form.transform(data => data); close(); }, onError: () => form.transform(data => data) });
             return;
         }
-
-        form.transform(data => ({ ...data, start_idempotency_key: token.current }));
-        form.post(route('conservation-reports.pamo-drafts.store', workflow.key), {
-            forceFormData: true,
-            preserveScroll: true,
-            onSuccess: () => {
-                form.transform(data => data);
-                token.current = createUuid();
-                form.setData({ ...emptyDraft });
-                setSelectedId('');
-            },
-            onError: () => form.transform(data => data),
-        });
+        form.transform(data => ({ ...payload(data), start_idempotency_key: token.current }));
+        form.post(route('conservation-reports.pamo-drafts.store', workflow.key), { forceFormData: true, preserveScroll: true, onSuccess: () => { form.transform(data => data); token.current = createUuid(); close(); }, onError: () => form.transform(data => data) });
     };
-
-    const forward = event => {
-        event.preventDefault();
-        if (!selected) return;
+    const forward = () => {
+        if (!selected || forwardForm.processing) return;
         forwardForm.setData('lock_version', selected.lock_version);
-        forwardForm.post(route('conservation-reports.pamo-drafts.forward', [workflow.key, selected.id]), {
-            preserveScroll: true,
-            onError: errors => Object.entries(errors).forEach(([name, message]) => form.setError(name, message)),
-            onSuccess: () => { setSelectedId(''); form.setData({ ...emptyDraft }); },
-        });
+        forwardForm.post(route('conservation-reports.pamo-drafts.forward', [workflow.key, selected.id]), { preserveScroll: true, onError: errors => Object.entries(errors).forEach(([name, message]) => form.setError(name, message)), onSuccess: close });
     };
-
+    const updateRange = (index, value) => form.setData('date_conducted_ranges', form.data.date_conducted_ranges.map((range, at) => at === index ? { from: value?.from || '', to: value?.to || '' } : range));
     const forwarded = selected?.status === 'forwarded';
-    return <section className="mb-5 space-y-4" aria-labelledby="pamo-pamb-drafts-heading">
-        <Card className="border-emerald-200 dark:border-emerald-900">
-            <header className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-emerald-800 dark:text-emerald-300">PAMO preparation</p>
-                    <h2 id="pamo-pamb-drafts-heading" className="mt-1 text-lg font-extrabold text-gray-950 dark:text-white">PAMB report drafts</h2>
-                    <p className="mt-1 max-w-3xl text-xs leading-5 text-gray-600 dark:text-gray-300">Start and save a partial draft any time. Your preparation clock starts when the first draft is saved. Forward checks the complete report and MOV before creating an operational report.</p>
-                </div>
-                <Button type="button" size="compact" onClick={startNew}>New draft</Button>
-            </header>
 
-            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(19rem,0.82fr)]">
-                <form onSubmit={save} className="space-y-3 rounded-xl border border-gray-200 p-3 dark:border-gray-800 sm:p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                        <h3 className="text-sm font-bold text-gray-900 dark:text-white">{selected ? (forwarded ? 'Forwarded report' : 'Continue draft') : 'Start report preparation'}</h3>
-                        {selected && <span className="text-[11px] text-gray-500 dark:text-gray-400">Started {formatManila(selected.started_at)}</span>}
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                        <FloatingSelect label="Activity" required size="sm" value={form.data.activity_name || ''} disabled={forwarded} onChange={event => form.setData({ ...form.data, activity_name: event.target.value, document_type: '' })} error={form.errors.activity_name}>
-                            <option value="">Select activity</option>
-                            {(workflow.activities || []).map(activity => <option key={activity} value={activity}>{activity}</option>)}
-                        </FloatingSelect>
-                        <FloatingSelect label="Document type" size="sm" value={form.data.document_type || ''} disabled={forwarded} onChange={event => form.setData('document_type', event.target.value)} error={form.errors.document_type}>
-                            <option value="">Select document type</option>
-                            {documentOptions.map(document => <option key={document} value={document}>{document}</option>)}
-                        </FloatingSelect>
-                        <FloatingSelect label={workflow.period_label || 'Reporting period'} size="sm" value={form.data.reporting_period || ''} disabled={forwarded} onChange={event => form.setData('reporting_period', event.target.value)} error={form.errors.reporting_period}>
-                            <option value="">Select period (if applicable)</option>
-                            {(workflow.periods || []).map(period => <option key={period} value={period}>{period}</option>)}
-                        </FloatingSelect>
-                        <DatePicker id="pamo-pamb-date-conducted" label="Date conducted" required value={form.data.date_conducted || ''} actualDate disabled={forwarded} onChange={value => form.setData('date_conducted', value)} error={form.errors.date_conducted} />
-                        <DatePicker id="pamo-pamb-date-accomplished" label="Date accomplished" value={form.data.date_accomplished || ''} actualDate disabled={forwarded} onChange={value => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />
-                        <div className="sm:col-span-2">
-                            <label htmlFor="pamo-pamb-mov" className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300">Report / MOV {selected?.mov_file_name && <span className="font-normal text-gray-500">· {selected.mov_file_name}</span>}</label>
-                            {!forwarded && <input id="pamo-pamb-mov" type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={event => form.setData('mov', event.target.files?.[0] || null)} className="block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-xs text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-emerald-50 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-emerald-900 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:file:bg-emerald-950 dark:file:text-emerald-200" />}
-                            {selected?.mov_url && <a href={selected.mov_url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-xs font-semibold text-emerald-800 underline dark:text-emerald-300">Open saved MOV</a>}
-                            {form.errors.mov && <p className="mt-1 text-xs text-red-600" role="alert">{form.errors.mov}</p>}
-                            {!forwarded && <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">PDF, image or Office document · maximum 100 MB · saved privately.</p>}
-                        </div>
-                        <FloatingTextarea label="Remarks" value={form.data.remarks || ''} disabled={forwarded} onChange={event => form.setData('remarks', event.target.value)} error={form.errors.remarks} className="sm:col-span-2" rows={3} />
-                    </div>
-                    {!forwarded && <div className="flex flex-wrap items-center gap-2 pt-1">
-                        <PrimaryButton type="submit" disabled={form.processing}>{form.processing ? 'Saving…' : selected ? 'Save draft' : 'Start and save draft'}</PrimaryButton>
-                        {selected && selected.status === 'draft' && <Button type="button" variant="success" disabled={forwardForm.processing || !selected.mov_file_name} onClick={forward}>{forwardForm.processing ? 'Forwarding…' : 'Forward completed report'}</Button>}
-                        {(form.errors.draft || forwardForm.errors.draft) && <p role="alert" className="w-full text-xs text-red-600">{form.errors.draft || forwardForm.errors.draft}</p>}
-                    </div>}
-                    {selected?.source_url && <p className="text-xs text-emerald-800 dark:text-emerald-300">This draft was published. <a href={selected.source_url} className="font-semibold underline">Open operational report</a></p>}
-                </form>
+    return <>
+        <CrudFormModal open={open} mode={selected ? 'edit' : 'create'} title={selected ? (forwarded ? 'Forwarded report' : 'Edit draft') : `New ${workflow.label} draft`} subtitle={selected ? `Preparation started ${formatManila(selected.started_at)}` : 'Save work in progress, then Forward when complete.'} onClose={close} onSubmit={save} processing={form.processing || forwardForm.processing} progress={form.progress} errors={{ ...form.errors, ...forwardForm.errors }} canSave={!forwarded} saveLabel="Save draft" preview={<FilePreviewPanel file={preview || savedFile} title="Report / MOV preview" />}>
+            <CrudSection title="Report information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <p className="sm:col-span-2 text-xs text-gray-600 dark:text-gray-300">Protected Area: <span className="font-semibold">{assignedProtectedArea?.name || 'Your assigned Protected Area'}</span></p>
+                {workflow.activities?.length > 1 && <div>{workflow.allow_custom_activity ? <FloatingInput label="Activity" value={form.data.activity_name || ''} onChange={event => form.setData('activity_name', event.target.value)} /> : <ScopedOptionSelect id="pamo-draft-activity" label="Activity" value={form.data.activity_name || ''} options={workflow.activities.map(activity => ({ id: activity, label: activity }))} onChange={activity => form.setData({ ...form.data, activity_name: activity, document_type: '' })} error={form.errors.activity_name} placeholder="Search activities" />}</div>}
+                <FloatingSelect label="Document type" value={form.data.document_type || ''} onChange={event => form.setData('document_type', event.target.value)}><option value="">Select document type</option>{documentOptions.map(document => <option key={document} value={document}>{document}</option>)}</FloatingSelect>
+                <FloatingSelect label={workflow.period_label || 'Reporting period'} value={form.data.reporting_period || ''} onChange={event => form.setData('reporting_period', event.target.value)}><option value="">Select period</option>{(workflow.periods || []).map(period => <option key={period} value={period}>{period}</option>)}</FloatingSelect>
+                {rangeEnabled ? <div className="sm:col-span-2 space-y-2"><p className="text-xs font-semibold text-gray-700 dark:text-gray-200">Date conducted</p>{(form.data.date_conducted_ranges || []).map((range, index) => <div key={index} className="flex flex-wrap items-end gap-2"><div className="min-w-52 flex-1"><DateRangePicker id={`pamo-draft-range-${index}`} label={`Date ${index + 1}`} actualDate value={range} onChange={value => updateRange(index, value)} error={form.errors[`date_conducted_ranges.${index}.from`] || form.errors[`date_conducted_ranges.${index}.to`]} /></div><Button type="button" size="compact" variant="danger" onClick={() => form.setData('date_conducted_ranges', form.data.date_conducted_ranges.filter((_, at) => at !== index))}>Remove</Button></div>)}<Button type="button" size="compact" onClick={() => form.setData('date_conducted_ranges', [...form.data.date_conducted_ranges, emptyDateConductedRange()])}>Add date</Button></div> : <DatePicker id="pamo-draft-date-conducted" label="Date conducted" actualDate value={form.data.date_conducted || ''} onChange={value => form.setData('date_conducted', value)} error={form.errors.date_conducted} />}
+                <DatePicker id="pamo-draft-date-accomplished" label="Date accomplished" actualDate value={form.data.date_accomplished || ''} onChange={value => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />
+            </div></CrudSection>
+            <CrudSection title="Report attachment & remarks"><div className="space-y-4"><FileAttachmentPanel id="pamo-draft-mov" label="Report / MOV" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 100 MB" maxSizeBytes={100 * 1024 * 1024} existingFiles={savedFile ? [savedFile] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview || savedFile} onSelectFile={setPreview} onChange={file => { form.setData('mov', file); setPreview(file ? { url: URL.createObjectURL(file), name: file.name, type: file.type, temporary: true } : savedFile); }} error={form.errors.mov} disabled={forwarded || form.processing} canManage={!forwarded} /><FloatingTextarea label="Remarks" value={form.data.remarks || ''} onChange={event => form.setData('remarks', event.target.value)} error={form.errors.remarks} rows={3} /></div></CrudSection>
+            {selected?.status === 'draft' && <Button type="button" size="compact" variant="success" disabled={forwardForm.processing || form.processing} onClick={forward}>Forward when complete</Button>}
+            {selected?.source_url && <a href={selected.source_url} className="block text-xs font-semibold text-emerald-800 underline dark:text-emerald-300">Open submitted report</a>}
+        </CrudFormModal>
+    </>;
+});
 
-                <aside className="rounded-xl border border-gray-200 p-3 dark:border-gray-800 sm:p-4" aria-label="Saved PAMO PAMB drafts">
-                    <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold text-gray-900 dark:text-white">Saved work</h3><span className="text-[11px] text-gray-500 dark:text-gray-400">{drafts.length} report{drafts.length === 1 ? '' : 's'}</span></div>
-                    {drafts.length === 0 ? <p className="mt-3 rounded-lg bg-gray-50 px-3 py-4 text-xs text-gray-600 dark:bg-gray-950 dark:text-gray-300">No drafts yet. Start one when report preparation begins.</p> : <ul className="mt-3 divide-y divide-gray-100 dark:divide-gray-800">
-                        {drafts.map(draft => <li key={draft.id} className="py-2 first:pt-0 last:pb-0">
-                            <button type="button" onClick={() => openDraft(draft)} aria-pressed={selectedId === draft.id} className={`w-full rounded-lg px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-700 ${selectedId === draft.id ? 'bg-emerald-50 dark:bg-emerald-950/40' : 'hover:bg-gray-50 dark:hover:bg-gray-950'}`}>
-                                <span className="flex items-start justify-between gap-2"><span className="text-xs font-semibold text-gray-900 dark:text-white">{draft.report_payload?.activity_name || 'Untitled PAMB draft'}</span><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${draft.status === 'forwarded' ? 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200' : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200'}`}>{draft.status === 'forwarded' ? 'Forwarded' : 'Draft'}</span></span>
-                                <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">{draft.report_payload?.reporting_period || 'No period'} · started {formatManila(draft.started_at)}</span>
-                            </button>
-                        </li>)}
-                    </ul>}
-                    <p className="mt-4 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2.5 text-[11px] leading-4 text-blue-900 dark:border-blue-900/60 dark:bg-blue-950/30 dark:text-blue-200">Drafts stay out of live queues, received volumes, routing history, calendars and overdue report counts until Forward succeeds.</p>
-                </aside>
-            </div>
-        </Card>
-    </section>;
-}
+export default PamoPambDraftWorkspace;
 
 function formatManila(value) {
-    if (!value) return 'time unavailable';
+    if (!value) return '—';
     const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'time unavailable';
-    return new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' }).format(date);
+    return Number.isNaN(date.getTime()) ? '—' : new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' }).format(date);
 }

@@ -22,6 +22,10 @@ use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
+beforeEach(function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+});
+
 function pamoPilotActor(string $category, ?string $office, ?int $protectedAreaId = null): User
 {
     $user = User::factory()->create([
@@ -78,6 +82,163 @@ function pamoPilotUpload(): UploadedFile
     return UploadedFile::fake()->createWithContent('pamb-minutes.pdf', "%PDF-1.4\nPAMB test fixture\n%%EOF");
 }
 
+test('catalog-backed non-PAMB reports keep PA scope, source validation and first handoff', function (): void {
+    Storage::fake('local');
+    Notification::fake();
+    $owner = User::factory()->create();
+    [$area, $office] = pamoPilotArea($owner, 'APL', 'PAMO Catalog APL', 'cenro_baganga');
+    [$foreignArea, $foreignOffice] = pamoPilotArea($owner, 'OTHER', 'PAMO Catalog Other', 'cenro_mati');
+    $pamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+    $foreign = pamoPilotActor(OrganizationalAccessService::PAMO, $foreignOffice->name, (int) $foreignArea->getKey());
+
+    foreach ([
+        ['maintenance_monuments', ['activity_name' => 'Maintenance of Monuments', 'document_type' => 'Progress Report', 'date_conducted' => '2026-10-01', 'date_accomplished' => '2026-10-02']],
+        ['homestay', ['activity_name' => 'Training on Homestay Program', 'document_type' => 'Final Report', 'date_conducted_ranges' => [['from' => '2026-10-01', 'to' => '2026-10-02']], 'date_accomplished' => '2026-10-03']],
+    ] as [$workflow, $payload]) {
+        $this->actingAs($pamo)->get(route('conservation-reports.index', $workflow))
+            ->assertOk()->assertInertia(fn ($page) => $page
+                ->where('auth.canViewPamoReports', true)
+                ->where('pamoWorkspace', true)
+                ->where('workflow.key', $workflow)
+                ->where('protectedAreas', fn ($areas) => count($areas) === 1 && (int) $areas[0]['id'] === (int) $area->getKey())
+                ->where('genericModuleNavigation', fn ($links) => collect($links)->contains(fn (array $link) => $link['href'] === route('conservation-reports.index', $workflow))
+                    && collect($links)->doesntContain(fn (array $link) => str_starts_with($link['href'], '/bms') || str_starts_with($link['href'], '/aws'))));
+        $token = (string) Str::uuid();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
+            'start_idempotency_key' => $token, 'mov' => pamoPilotUpload(),
+        ])->assertRedirect();
+        $draft = PamoPambDraft::query()->where('start_idempotency_key', $token)->firstOrFail();
+        $this->actingAs($foreign)->get(route('conservation-reports.pamo-drafts.mov', [$workflow, $draft->draft_uuid]))->assertForbidden();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), ['lock_version' => $draft->fresh()->lock_version])->assertSessionHasErrors('activity_name');
+        expect($draft->fresh()->status)->toBe('draft');
+        $this->actingAs($pamo)->put(route('conservation-reports.pamo-drafts.update', [$workflow, $draft->draft_uuid]), [
+            'lock_version' => $draft->fresh()->lock_version, ...$payload,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), ['lock_version' => $draft->fresh()->lock_version])->assertRedirect()->assertSessionHasNoErrors();
+        $source = ConservationReportSubmission::query()->findOrFail($draft->fresh()->conservation_report_submission_id);
+        $event = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->firstOrFail();
+        expect($source->workflow_key)->toBe($workflow)
+            ->and((int) $source->protected_area_id)->toBe((int) $area->getKey())
+            ->and($source->target_office)->toBe('CENRO Baganga')
+            ->and($event->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL);
+        $this->actingAs($foreign)->get(route('conservation-reports.pamo-drafts.mov', [$workflow, $draft->draft_uuid]))->assertForbidden();
+        $this->actingAs($pamo)->get(route('conservation-reports.mov', [$workflow, $source->getKey()]))->assertOk();
+        $this->actingAs($foreign)->get(route('conservation-reports.mov', [$workflow, $source->getKey()]))->assertForbidden();
+        $wrongWorkflow = $workflow === 'homestay' ? 'maintenance_monuments' : 'homestay';
+        $this->actingAs($pamo)->get(route('conservation-reports.mov', [$wrongWorkflow, $source->getKey()]))->assertNotFound();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$wrongWorkflow, $draft->draft_uuid]), ['lock_version' => $draft->lock_version])->assertNotFound();
+
+        if ($workflow === 'maintenance_monuments') {
+            $focal = pamoPilotActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+            $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $source->getKey(), 'receive_at_cenro_focal']), ['stage' => 'receive_at_cenro_focal'])->assertRedirect()->assertSessionHasNoErrors();
+            $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $source->getKey(), 'return_to_pamo_for_correction']), ['stage' => 'return_to_pamo_for_correction', 'remarks' => 'Complete the report.'])->assertRedirect()->assertSessionHasNoErrors();
+            $this->actingAs($pamo)->post(route('submission-tracking.transition', ['conservation', $source->getKey(), 'receive_correction']), ['stage' => 'receive_correction'])->assertRedirect()->assertSessionHasNoErrors();
+            $this->actingAs($pamo)->put(route('conservation-reports.update', [$workflow, $source->getKey()]), [
+                'protected_area_id' => $area->getKey(), 'target_office' => 'CENRO Baganga', ...$payload,
+            ])->assertRedirect()->assertSessionHasNoErrors();
+            $this->actingAs($pamo)->post(route('submission-tracking.transition', ['conservation', $source->getKey(), 'forward_from_pamo_to_cenro_focal']), [
+                'stage' => 'forward_from_pamo_to_cenro_focal', 'official_document' => pamoPilotUpload(),
+            ])->assertRedirect()->assertSessionHasNoErrors();
+        }
+    }
+
+    $eligible = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys();
+    expect($eligible)->toHaveCount(22)
+        ->and($eligible)->toContain('regular_pamb', 'maintenance_monuments', 'homestay', 'water_quality_monitoring')
+        ->and($eligible)->not->toContain('bms', 'bams', 'imea', 'automated_weather_station', 'engp');
+});
+
+test('non-PAMB MHRWS draft routes directly to PENRO Records and inactive definitions stay closed', function (): void {
+    Storage::fake('local');
+    Notification::fake();
+    $owner = User::factory()->create();
+    [$area, $office] = pamoPilotArea($owner, 'MHRWS', 'PAMO Catalog MHRWS', 'penro_davao_oriental');
+    $pamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+
+    \App\Models\ModuleDefinition::query()->where('code', 'water_quality_monitoring')->update(['is_active' => false]);
+    $this->actingAs($pamo)->get(route('conservation-reports.index', 'water_quality_monitoring'))->assertForbidden();
+
+    $workflow = 'maintenance_monuments';
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
+        'start_idempotency_key' => (string) Str::uuid(),
+        'activity_name' => 'Maintenance of Monuments',
+        'document_type' => 'Final Report',
+        'date_accomplished' => '2026-10-02',
+        'mov' => pamoPilotUpload(),
+    ])->assertRedirect();
+    $draft = PamoPambDraft::query()->firstOrFail();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), ['lock_version' => $draft->fresh()->lock_version])->assertRedirect()->assertSessionHasNoErrors();
+    $source = ConservationReportSubmission::query()->findOrFail($draft->fresh()->conservation_report_submission_id);
+    $event = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->firstOrFail();
+    expect($source->target_office)->toBe('PENRO Davao Oriental')
+        ->and($event->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->count())->toBe(1);
+});
+
+test('every active generic PA Conservation workflow saves reopens validates and promotes once', function (): void {
+    Storage::fake('local');
+    Notification::fake();
+    $owner = User::factory()->create();
+    [$area, $office] = pamoPilotArea($owner, 'APL', 'PAMO Catalog Matrix', 'cenro_baganga');
+    $pamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+    $registry = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class);
+    $keys = $registry->pamoSubmissionKeys();
+    $promoted = 0;
+
+    foreach ($keys as $workflow) {
+        $definition = $registry->find($workflow);
+        $activity = $definition['default_activity'] ?? $definition['activities'][0];
+        $document = ($definition['activity_documents'][$activity] ?? $definition['documents'])[0];
+        $payload = [
+            'activity_name' => $activity,
+            'document_type' => $document,
+            'reporting_period' => $definition['periods'][0],
+            'date_conducted' => '2026-10-01',
+            'date_accomplished' => '2026-10-02',
+        ];
+        if (app(\App\Services\DateConductedRangeService::class)->supportsWorkflow($workflow)) {
+            $payload['date_conducted_ranges'] = [['from' => '2026-10-01', 'to' => '2026-10-01']];
+        }
+
+        $token = (string) Str::uuid();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
+            'start_idempotency_key' => $token,
+            'mov' => pamoPilotUpload(),
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        $draft = PamoPambDraft::query()->where('start_idempotency_key', $token)->firstOrFail();
+        expect(ConservationReportSubmission::query()->count())->toBe($promoted)
+            ->and(DocumentRoutingEvent::query()->count())->toBe($promoted);
+
+        $this->actingAs($pamo)->put(route('conservation-reports.pamo-drafts.update', [$workflow, $draft->draft_uuid]), [
+            'lock_version' => $draft->fresh()->lock_version,
+            ...$payload,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), [
+            'lock_version' => $draft->fresh()->lock_version,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $draft->refresh();
+        $source = ConservationReportSubmission::query()->findOrFail($draft->conservation_report_submission_id);
+        $events = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->get();
+        expect($draft->status)->toBe('forwarded')
+            ->and($source->workflow_key)->toBe($workflow)
+            ->and((int) $source->protected_area_id)->toBe((int) $area->getKey())
+            ->and($source->target_office)->toBe('CENRO Baganga')
+            ->and($events)->toHaveCount(1)
+            ->and($events->first()->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL);
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), [
+            'lock_version' => $draft->lock_version,
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        expect(ConservationReportSubmission::query()->where('workflow_key', $workflow)->count())->toBe(1)
+            ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->count())->toBe(1);
+        $promoted++;
+    }
+
+    expect($keys)->toHaveCount(22)
+        ->and(ConservationReportSubmission::query()->count())->toBe(22)
+        ->and(DocumentRoutingEvent::query()->count())->toBe(22);
+});
+
 test('PAMO registration stays pending and derives its stable office identity from the approved PA mapping', function (): void {
     Role::findOrCreate('no_role', 'web');
     $creator = User::factory()->create();
@@ -89,7 +250,8 @@ test('PAMO registration stays pending and derives its stable office identity fro
             ->where('registrationOptions.operationalGroups.2.value', 'pamo')
             ->where('registrationOptions.protectedAreas.0.id', $area->getKey())
             ->where('registrationOptions.protectedAreas.0.name', $area->name)
-            ->where('registrationOptions.protectedAreas.0.pamo_office_id', $office->getKey()));
+            ->where('registrationOptions.protectedAreas.0.pamo_office_name', $office->name)
+            ->where('registrationOptions.protectedAreas.0.supervising_office_name', 'CENRO Baganga'));
 
     $this->post(route('register'), [
         'name' => 'Pending PAMO Operator',
@@ -212,6 +374,13 @@ test('partial PAMO drafts remain private until exact-once APL promotion and CENR
             'start_idempotency_key' => (string) Str::uuid(),
             'started_at' => '2026-10-01 00:00:00',
         ])->assertSessionHasErrors('started_at');
+        $overrideToken = (string) Str::uuid();
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', 'regular_pamb'), [
+            'start_idempotency_key' => $overrideToken,
+            'protected_area_id' => $foreignArea->getKey(),
+            'pamo_office_id' => $foreignOffice->getKey(),
+        ])->assertSessionHasErrors(['protected_area_id', 'pamo_office_id']);
+        expect(PamoPambDraft::query()->where('start_idempotency_key', $overrideToken)->exists())->toBeFalse();
         $this->actingAs($pamo)->get(route('conservation-reports.pamo-drafts.mov', ['regular_pamb', $draft->draft_uuid]))->assertOk();
         $this->actingAs($foreign)->get(route('conservation-reports.pamo-drafts.mov', ['regular_pamb', $draft->draft_uuid]))->assertForbidden();
         $this->actingAs($unapproved)->get(route('conservation-reports.index', 'regular_pamb'))

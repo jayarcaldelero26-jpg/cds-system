@@ -2,6 +2,8 @@ import { Icon } from '@iconify/react';
 import { Link, useForm } from '@inertiajs/react';
 import { useState } from 'react';
 import { AuthField, AuthSelect } from '../../Components/AuthField';
+import ScopedOptionSelect from '../../Components/Form/ScopedOptionSelect';
+import { officeDisplayLabel } from '../../Components/Form/officePresentation.mjs';
 import PrimaryButton from '../../Components/PrimaryButton';
 import AuthLayout from '../../Layouts/AuthLayout';
 
@@ -31,6 +33,7 @@ export default function Register({ registrationOptions = {} }) {
     const isPamo = data.operational_group === 'pamo';
     const hasPamoAssignments = protectedAreas.length > 0;
     const cenroOffices = offices.filter((office) => office?.office_type === 'cenro');
+    const selectedPamoArea = protectedAreas.find((area) => String(area.id) === String(data.protected_area_id));
 
     const changeGroup = (event) => {
         const group = operationalGroups.find((item) => item.value === event.target.value);
@@ -79,7 +82,7 @@ export default function Register({ registrationOptions = {} }) {
 
                     {isCenroGroup && <AuthSelect id="office-designated" label="CENRO Office" name="office_designated" icon="building-2" value={data.office_designated} onChange={(event) => setData('office_designated', event.target.value)} required error={errors.office_designated} hint="CENRO office jurisdiction applies to the account's authorized work.">
                         <option value="">Select CENRO office</option>
-                        {cenroOffices.map((office) => <option key={office.id} value={office.name}>{office.label || office.name}</option>)}
+                        {cenroOffices.map((office) => <option key={office.id} value={office.name}>{officeDisplayLabel(office)}</option>)}
                     </AuthSelect>}
 
                     {isPenroGroup && selectedCategory && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-900 dark:border-emerald-100/20 dark:bg-emerald-950/30 dark:text-emerald-200">
@@ -91,10 +94,11 @@ export default function Register({ registrationOptions = {} }) {
                     </p>}
 
                     {isPamo && <>
-                        <AuthSelect id="protected-area-id" label="Protected Area / PAMO assignment" name="protected_area_id" icon="map" value={data.protected_area_id} onChange={(event) => setData('protected_area_id', event.target.value)} required disabled={!hasPamoAssignments} error={errors.protected_area_id} hint={hasPamoAssignments ? 'Choose an eligible Protected Area for the requested PAMO account.' : 'No eligible Protected Area / PAMO assignment is currently available.'}>
-                            <option value="">{hasPamoAssignments ? 'Select protected area' : 'No eligible protected area available'}</option>
-                        {protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-                        </AuthSelect>
+                        <ScopedOptionSelect id="protected-area-id" label="Protected Area / PAMO assignment" value={data.protected_area_id} options={protectedAreas.map((area) => ({ ...area, label: area.short_name ? `${area.name} (${area.short_name})` : area.name }))} onChange={(id) => setData('protected_area_id', id)} required disabled={!hasPamoAssignments} error={errors.protected_area_id} placeholder={hasPamoAssignments ? 'Search eligible Protected Areas' : 'No eligible Protected Area available'} />
+                        {selectedPamoArea && <div className="-mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-950 dark:border-emerald-100/20 dark:bg-emerald-950/30 dark:text-emerald-100">
+                            <p><span className="font-semibold">Canonical PAMO office:</span> {selectedPamoArea.pamo_office_name}</p>
+                            <p><span className="font-semibold">Supervising office:</span> {selectedPamoArea.supervising_office_name}</p>
+                        </div>}
                         {!hasPamoAssignments && <p role="status" aria-live="polite" className="-mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-950 dark:border-amber-100/20 dark:bg-amber-950/30 dark:text-amber-100">
                             PAMO registration is unavailable until an active Protected Area has an active PAMO office assignment and an active supervising CENRO or PENRO assignment. Contact a CDS administrator to review the mappings.
                         </p>}

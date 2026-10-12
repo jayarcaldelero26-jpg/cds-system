@@ -3,7 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Services\Authorization\OrganizationalAccessService;
-use App\Services\Conservation\PambComplianceCalculator;
+use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -26,10 +26,11 @@ final class EnsureOrganizationalUnit
         $pamoPilotRequest = $unit === OrganizationalAccessService::CONSERVATION
             && $request->routeIs(
                 'conservation-reports.index',
+                'conservation-reports.mov',
                 'conservation-reports.pamo-drafts.*',
                 'conservation-reports.update',
             )
-            && in_array($request->route('workflow'), PambComplianceCalculator::MEETING_WORKFLOWS, true)
+            && app(ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $request->route('workflow'))
             && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
             && $organization->canViewPamoPilotWorkflow($user);
 

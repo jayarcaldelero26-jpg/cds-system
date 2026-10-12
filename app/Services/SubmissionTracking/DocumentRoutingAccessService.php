@@ -21,7 +21,7 @@ final class DocumentRoutingAccessService
         if ($this->organization->effectiveCategory($user) === OrganizationalAccessService::PAMO) {
             return $sourceKey === 'conservation'
                 && $record instanceof ConservationReportSubmission
-                && in_array($record->workflow_key, \App\Services\Conservation\PambComplianceCalculator::MEETING_WORKFLOWS, true)
+                && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key)
                 && $this->organization->canViewSubmission($user, $record);
         }
         return $sourceKey === 'engp'

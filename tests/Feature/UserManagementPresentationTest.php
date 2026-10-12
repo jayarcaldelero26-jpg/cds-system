@@ -9,7 +9,9 @@ test('user management uses clickable rows instead of a table action column', fun
 
     expect($columns)
         ->toContain("label: 'User'")
-        ->toContain("label: 'Account Status'")
+        ->toContain("label: 'Approval'")
+        ->toContain("label: 'Activity'")
+        ->toContain("label: 'Account Type / Role'")
         ->not->toContain("key: 'actions'")
         ->not->toContain('>Edit<')
         ->not->toContain('>Delete<')
@@ -35,6 +37,10 @@ test('user details exposes the saved assignment and state-specific administrativ
         ->toContain('Approve Account')
         ->toContain('Deactivate Account')
         ->toContain('Approval Status')
+        ->toContain('Canonical PAMO Office')
+        ->toContain('Supervising Office')
+        ->toContain('PAMO assignment needs correction')
+        ->toContain('Protected Area PAMO eligibility')
         ->toContain('Delete User')
         ->toContain('router.patch(`/admin/users/${userToActivate.id}/activate`');
 });
@@ -59,6 +65,11 @@ test('user access forms separate Spatie role from organizational assignments', f
         ->toContain('label="User Category"')
         ->toContain('label="CENRO Office"')
         ->toContain('Protected Area / PAMO assignment');
+
+    expect($form)
+        ->toContain('ScopedOptionSelect')
+        ->toContain('Canonical PAMO office:')
+        ->toContain('Review this Protected Area mapping');
 
     expect($controller)
         ->toContain("'accountRoles' => \$organization->accountRoleOptions()")

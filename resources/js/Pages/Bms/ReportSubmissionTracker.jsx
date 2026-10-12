@@ -1,7 +1,8 @@
 import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 import DatePicker from "@/Components/DatePicker";import { router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import PamoPambDraftWorkspace from '@/Components/PamoPambDraftWorkspace';
 import CrudTable from '@/Components/Crud/CrudTable';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudFormModal from '@/Components/Crud/CrudFormModal';
@@ -97,7 +98,7 @@ function HistoricalOriginalDates({ report }) {
   </div>;
 }
 
-export default function ReportSubmissionTracker({ submissions, protectedAreas, protectedAreasByOffice = {}, filters, moduleLabel = 'BMS', historicalSource = null, submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov', dateConductedRangesEnabled = false }) {
+export default function ReportSubmissionTracker({ submissions, protectedAreas, protectedAreasByOffice = {}, filters, moduleLabel = 'BMS', historicalSource = null, submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov', dateConductedRangesEnabled = false, pamoDrafts = [], pamoWorkspace = undefined }) {
   if (!submissionRoutes || typeof submissionRoutes.store !== 'string' || typeof submissionRoutes.index !== 'string' || typeof submissionRoutes.update !== 'function' || typeof submissionRoutes.destroy !== 'function' || typeof submissionRoutes.mov !== 'function') {
     throw new Error(`${moduleLabel} ReportSubmissionTracker requires store, index, update, destroy, and MOV routes.`);
   }
@@ -106,7 +107,8 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
   const canCreate = permissions?.create ?? Boolean(auth.canCreateBms);
   const canUpdate = permissions?.update ?? Boolean(auth.canUpdateBms);
   const canDelete = permissions?.delete ?? Boolean(auth.canDeleteBms);
-  const pamoPilotMode = workflowConfig?.key && ['regular_pamb', 'special_pamb', 'twc_meetings'].includes(workflowConfig.key) && permissions?.pamoCorrectionOnly === true;
+  const pamoPilotMode = permissions?.pamoCorrectionOnly === true;
+  const pamoDraftRef = useRef(null);
   const periodField = workflowConfig?.period_field || 'semester';
   const periodLabel = workflowConfig?.period_label || 'Semester';
   const periods = workflowConfig?.periods || ['1st Semester', '2nd Semester'];
@@ -277,9 +279,19 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
         <div className="cds-card-surface flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-end sm:justify-between">
             <FilterToolbar chips={appliedFilterChips} onClear={() => applyFilters({ [semesterFilter]: '', [protectedAreaFilter]: '', [pageFilter]: 1 })}><div className="grid gap-3 sm:grid-cols-2"><div className="text-xs font-bold text-gray-600 dark:text-gray-300"><FloatingSelect id="reportsubmissiontracker-semester" label={periodLabel} value={reportingPeriodValue} onChange={(event) => applyFilters({ [semesterFilter]: event.target.value, [pageFilter]: 1 })}><option value="">All {periodLabel}s</option>{periods.map((period) => <option key={period} value={period}>{period}</option>)}</FloatingSelect></div><div className="text-xs font-bold text-gray-600 dark:text-gray-300"><FloatingSelect id="reportsubmissiontracker-protected-area" label="Protected Area" value={protectedAreaValue} onChange={(event) => applyFilters({ [protectedAreaFilter]: event.target.value, [pageFilter]: 1 })}><option value="">All Protected Areas</option>{protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</FloatingSelect></div></div></FilterToolbar>
             {canCreate && <button type="button" onClick={openCreate} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">+ Add Report</button>}
+            {pamoWorkspace === true && <Button type="button" size="compact" variant="primary" className="h-10 shrink-0 rounded-xl px-5 text-xs" onClick={() => pamoDraftRef.current?.startNew()}>New draft</Button>}
         </div>
 
+        {pamoWorkspace === false && <p role="status" className="text-xs text-amber-800 dark:text-amber-300">Drafts are temporarily unavailable. Contact an administrator.</p>}
+
         <CrudTable compactEmpty={true} title={rows.length > 0 ? `${moduleLabel} Report` : undefined} subtitle={rows.length > 0 ? `${submissions?.total ?? rows.length} report submission${(submissions?.total ?? rows.length) === 1 ? '' : 's'}` : undefined} helperText={rows.length > 0 ? 'Click any row to view full details' : undefined} caption={`${moduleLabel} report submission tracker`} columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} emptyTitle="No report submissions found" emptyDescription={`No ${moduleLabel} report submissions match the selected filters.`} pagination={rows.length > 0 ? pagination : null} />
+        {pamoWorkspace === true && <CrudTable compact title="Saved drafts" subtitle="Drafts stay separate from submitted reports until Forward succeeds." columns={[
+          { key: 'activity', label: 'Activity', render: draft => draft.report_payload?.activity_name || workflowConfig?.label },
+          { key: 'period', label: workflowConfig?.period_label || 'Reporting period', render: draft => draft.report_payload?.reporting_period || '—' },
+          { key: 'started', label: 'Preparation started', render: draft => formatManila(draft.started_at) },
+          { key: 'status', label: 'Status', render: draft => draft.status === 'forwarded' ? 'Forwarded' : 'Draft' },
+        ]} rows={pamoDrafts} onRowClick={draft => pamoDraftRef.current?.openDraft(draft)} emptyTitle="No saved drafts" emptyDescription="Choose New draft when report preparation begins." />}
+        {pamoWorkspace === true && <PamoPambDraftWorkspace ref={pamoDraftRef} workflow={workflowConfig} drafts={pamoDrafts} assignedProtectedArea={protectedAreas?.[0]} />}
         {isMeetingPamb && <p className="mt-3 text-xs italic text-gray-600 dark:text-gray-400"><span className="text-red-600 dark:text-red-400">Note:</span> The term "report" in the Column "Status of Submission" is used as a general term to refer to the required means of verification (MOVs) submitted after the conduct of an activity. These may include, but are not limited to, accomplishment reports, minutes of meetings, and resolutions. Remarks such as "Report Submitted" or "Report Not Yet Submitted" reflect the status of submission of these required documents.</p>}
 
         <CrudDetailsModal report open={modal === 'details' && Boolean(selectedReport)} title={`${moduleLabel} Report Submission Full Details`} subtitle={selectedReport ? `${selectedReport.protected_area?.name || 'No protected area'} - ${selectedReport[periodField] || 'No reporting period'}` : ''} onClose={closeAll} canEdit={canEditSelected} onEdit={() => openEdit(selectedReport)} editLabel="Edit This Submission" summary={selectedReport && <CrudSummaryGrid items={[

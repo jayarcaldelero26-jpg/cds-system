@@ -46,6 +46,8 @@ class UpdateUserRequest extends FormRequest
             'section' => ['required', 'string', Rule::in(['CENRO_RECORDS', 'PENRO_RECORDS', 'OFFICE_OF_THE_PENRO', 'PENRO_TSD_CHIEF', 'CENRO_CDS_CHIEF', 'CENRO_CDS_FOCAL', 'PENRO_CDS_CHIEF', 'PENRO_CDS_FOCAL', OrganizationalAccessService::PAMO])],
             'unit_assignment' => ['nullable', 'string', 'in:conservation,development'],
             'protected_area_id' => [Rule::requiredIf($this->input('section') === OrganizationalAccessService::PAMO), 'nullable', 'integer', 'exists:protected_areas,id'],
+            'pamo_office_id' => ['prohibited'],
+            'supervising_office_id' => ['prohibited'],
             'password' => ['nullable', 'string', 'confirmed', Password::defaults()],
             'is_active' => ['sometimes', 'boolean'],
         ];

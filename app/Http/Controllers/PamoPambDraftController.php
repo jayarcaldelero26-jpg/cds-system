@@ -11,7 +11,6 @@ use App\Services\Attachments\CurrentDocumentReplacementService;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
-use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\RoutingPositionSnapshotService;
@@ -82,7 +81,7 @@ final class PamoPambDraftController extends Controller
         if ($existing) {
             $this->assertDraftAccess($actor, $existing, $workflow, $facts);
             $this->saveLocked($request, $existing, $workflow, $facts, $data, $file, null);
-            return back()->with('success', 'PAMO PAMB draft saved.');
+            return back()->with('success', 'Draft saved.');
         }
 
         $uuid = (string) Str::uuid();
@@ -111,7 +110,7 @@ final class PamoPambDraftController extends Controller
 
         if ($file) $this->saveLocked($request, $draft, $workflow, $facts, $data, $file, 1);
 
-        return back()->with('success', 'PAMO PAMB draft started and saved.');
+        return back()->with('success', 'Draft saved.');
     }
 
     public function update(Request $request, string $workflow, PamoPambDraft $draft): RedirectResponse
@@ -132,7 +131,7 @@ final class PamoPambDraftController extends Controller
         ])['lock_version'];
         $this->saveLocked($request, $draft, $workflow, $facts, $data, $file, $expectedVersion);
 
-        return back()->with('success', 'PAMO PAMB draft saved.');
+        return back()->with('success', 'Draft saved.');
     }
 
     public function forward(Request $request, string $workflow, PamoPambDraft $draft): RedirectResponse
@@ -166,7 +165,7 @@ final class PamoPambDraftController extends Controller
 
             $path = $locked->mov_path;
             if (! $this->isDraftPath($locked, $path) || ! Storage::disk(self::PRIVATE_DISK)->exists($path)) {
-                throw ValidationException::withMessages(['mov' => 'Upload the required PAMB report or MOV before forwarding.']);
+                throw ValidationException::withMessages(['mov' => 'Upload the required report or MOV before forwarding.']);
             }
             $absolutePath = Storage::disk(self::PRIVATE_DISK)->path($path);
             $storedFile = new UploadedFile($absolutePath, (string) $locked->mov_file_name, mime_content_type($absolutePath) ?: 'application/octet-stream', UPLOAD_ERR_OK, true);
@@ -180,6 +179,7 @@ final class PamoPambDraftController extends Controller
             $validated = $validator->validate();
             $dateRequest = Request::create('/', 'POST', $attributes);
             $this->reports->assertPamoPilotActualDates($validated, $dateRequest, $workflow);
+            $validated = $this->reports->applyPamoDateConductedRanges($validated, $workflow, $attributes['date_conducted_ranges'] ?? null);
             unset($validated['mov']);
 
             $submission = ConservationReportSubmission::query()->create([
@@ -238,7 +238,7 @@ final class PamoPambDraftController extends Controller
 
         if ($oldDraftPathToClean) Storage::disk(self::PRIVATE_DISK)->delete($oldDraftPathToClean);
 
-        return back()->with('success', 'PAMB report forwarded successfully.')->with('forwarded_submission_id', $submission->getKey());
+        return back()->with('success', 'Report forwarded successfully.')->with('forwarded_submission_id', $submission->getKey());
     }
 
     public function showMov(Request $request, string $workflow, PamoPambDraft $draft): HttpResponse
@@ -276,7 +276,7 @@ final class PamoPambDraftController extends Controller
                 $locked = PamoPambDraft::query()->lockForUpdate()->findOrFail($draft->getKey());
                 $actor = $request->user();
                 $this->assertDraftAccess($actor, $locked, $workflow, $facts);
-                if ($locked->status !== 'draft') throw ValidationException::withMessages(['draft' => 'A forwarded PAMB report cannot be edited as a draft.']);
+                if ($locked->status !== 'draft') throw ValidationException::withMessages(['draft' => 'A forwarded report cannot be edited as a draft.']);
                 if ($expectedVersion !== null && $expectedVersion !== (int) $locked->lock_version) throw ValidationException::withMessages(['draft' => 'This draft changed in another session. Reload it before saving.']);
                 $oldPath = $locked->mov_path;
                 $locked->update([
@@ -303,11 +303,14 @@ final class PamoPambDraftController extends Controller
         $documents = array_values(array_unique(array_merge(...array_values($definition['activity_documents'] ?? ['default' => ($definition['documents'] ?? [])]))));
         $periods = $definition['periods'] ?? [];
         $rules = [
-            'activity_name' => ['sometimes', 'nullable', 'string', 'max:255', Rule::in($activities)],
+            'activity_name' => ['sometimes', 'nullable', 'string', 'max:255', ...(($definition['allow_custom_activity'] ?? false) ? [] : [Rule::in($activities)])],
             'document_type' => ['sometimes', 'nullable', 'string', 'max:100', Rule::in($documents)],
             'reporting_period' => ['sometimes', 'nullable', 'string', 'max:100', Rule::in($periods)],
             'date_conducted' => ['sometimes', 'nullable', 'date'],
             'date_accomplished' => ['sometimes', 'nullable', 'date'],
+            'date_conducted_ranges' => app(\App\Services\DateConductedRangeService::class)->supportsWorkflow($workflow) ? ['sometimes', 'nullable', 'array'] : ['prohibited'],
+            'date_conducted_ranges.*.from' => ['nullable', 'date_format:Y-m-d'],
+            'date_conducted_ranges.*.to' => ['nullable', 'date_format:Y-m-d'],
             'remarks' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'mov' => ['sometimes', 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:'.self::MAX_FILE_KB],
             'protected_area_id' => ['prohibited'], 'pamo_office_id' => ['prohibited'],
@@ -320,6 +323,9 @@ final class PamoPambDraftController extends Controller
         $validated = Validator::make($request->all(), $rules)->validate();
         foreach (['date_conducted', 'date_accomplished'] as $field) {
             if (! empty($validated[$field])) app(\App\Services\ActualActivityDateGuard::class)->assertNotFuture($validated[$field], $field, $field === 'date_conducted' ? 'Date Conducted' : 'Date Accomplished');
+        }
+        if (! empty($validated['date_conducted_ranges'])) {
+            app(\App\Services\ActualActivityDateGuard::class)->assertDateConductedRanges($validated['date_conducted_ranges'], null, null);
         }
         return collect($validated)->except('mov')->all();
     }
@@ -336,7 +342,7 @@ final class PamoPambDraftController extends Controller
 
     private function assertDraftAccess(?User $actor, PamoPambDraft $draft, string $workflow, array $facts): void
     {
-        abort_unless($draft->workflow_key === $workflow && in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 404);
+        abort_unless($draft->workflow_key === $workflow && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow), 404);
         abort_unless((int) $draft->protected_area_id === (int) $actor?->protected_area_id
             && (int) $draft->protected_area_id === (int) $facts['protected_area_id']
             && (int) $draft->pamo_office_id === (int) $facts['pamo_office_id'], 403);
@@ -345,7 +351,7 @@ final class PamoPambDraftController extends Controller
 
     private function assertPilotWorkflow(string $workflow): void
     {
-        abort_unless(in_array($workflow, PambComplianceCalculator::MEETING_WORKFLOWS, true), 404);
+        abort_unless(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow), 404);
     }
 
     private function isDraftPath(PamoPambDraft $draft, ?string $path): bool

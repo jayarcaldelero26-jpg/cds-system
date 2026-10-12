@@ -5,6 +5,7 @@ use App\Models\User;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedAreaOfficeAssignment;
 use Inertia\Testing\AssertableInertia as Assert;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -112,6 +113,25 @@ test('protected area forms expose active organizational offices without retired 
             ->where('officeOptions.0.name', 'CENRO Baganga'));
 });
 
+test('PAMO office options retain IDs and codes while presenting only office names', function (): void {
+    $office = OrganizationalOffice::create([
+        'code' => 'pamo_label_presentation',
+        'name' => 'PAMO Label Presentation',
+        'office_type' => 'pamo',
+        'is_active' => true,
+    ]);
+
+    $option = collect(app(\App\Services\Authorization\OrganizationalAccessService::class)->pamoOfficeOptions())
+        ->firstWhere('id', $office->id);
+
+    expect($option)->toMatchArray([
+        'id' => $office->id,
+        'code' => 'pamo_label_presentation',
+        'name' => 'PAMO Label Presentation',
+        'label' => 'PAMO Label Presentation',
+    ]);
+});
+
 test('protected area edit form binds existing, preserves unassigned, and updates one supervising assignment', function (): void {
     $admin = User::factory()->create();
     $admin->assignRole('CDS Admin');
@@ -160,4 +180,27 @@ test('protected area edit form binds existing, preserves unassigned, and updates
             ->where('protected_area_id', $aliwagwag->id)
             ->where('assignment_type', 'supervising')
             ->value('organizational_office_id'))->toBe($mati->id);
+});
+
+test('supervising assignments follow the routing policy office type and report mapping gaps', function (): void {
+    $admin = User::factory()->create();
+    $admin->assignRole('CDS Admin');
+    $service = app(\App\Services\Authorization\OrganizationalAccessService::class);
+    $cenro = OrganizationalOffice::where('code', 'cenro_mati')->firstOrFail();
+    $penro = OrganizationalOffice::where('code', 'penro_davao_oriental')->firstOrFail();
+    $directArea = ProtectedArea::create([...protectedAreaPayload([
+        'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary', 'short_name' => 'MHRWS',
+    ]), 'created_by' => $admin->id, 'updated_by' => $admin->id]);
+
+    expect(fn () => $service->assignSupervisingOffice($directArea, (int) $cenro->id, $admin))
+        ->toThrow(ValidationException::class);
+
+    $service->assignSupervisingOffice($directArea, (int) $penro->id, $admin);
+    expect($service->pamoAssignmentReviewForProtectedArea((int) $directArea->id))
+        ->toMatchArray([
+            'eligible' => false,
+            'issue' => 'No stable PAMO office identity is mapped.',
+            'supervising_office_name' => 'PENRO Davao Oriental',
+            'required_supervisor_type' => 'penro',
+        ]);
 });
