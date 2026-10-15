@@ -53,13 +53,21 @@ export function reportContextFields(row, expanded = false) {
     const activity = text(row.activity_name) || text(row.activity);
     const documentType = text(row.document_type) || text(row.report_type);
     const custody = custodyContext(row);
+    const routing = routingFor(row);
+    const pamoOrigin = routing.route_position?.origin_kind === "pamo_pamb"
+        && Boolean(text(routing.originating_office));
+    const sourceOffice = text(row.target_office);
     const fields = [
         ["Tracking Reference", row.tracking_number],
         ["Workflow / Module", module],
         ["Activity", sameText(activity, module) || sameText(activity, documentType) ? null : activity],
         ["Report / Document Type", documentType],
         ["Protected Area", row.protected_area],
-        [custody.officeMatchesOrigin ? "Originating / Current Office" : "Originating Office", row.target_office],
+        [pamoOrigin ? "Originating Office" : custody.officeMatchesOrigin ? "Originating / Current Office" : "Originating Office", pamoOrigin ? routing.originating_office : sourceOffice],
+        ...(pamoOrigin && text(routing.responsible_office) ? [[
+            routing.current_stage === "transit_to_cenro_focal" ? "Receiving Office" : "Current Office",
+            routing.responsible_office,
+        ]] : []),
         ["Reporting Period", text(row.reporting_period) || text(row.period_label)],
     ];
     if (expanded) fields.push(

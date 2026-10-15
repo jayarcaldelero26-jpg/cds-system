@@ -11,7 +11,7 @@ use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
 /** Private My Drive adapter. Drive IDs and private appProperties are the archive identities. */
-class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
+class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGateway
 {
     private const API = 'https://www.googleapis.com/drive/v3';
     private const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
@@ -86,19 +86,24 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
 
     public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
+        return $this->uploadWithMime($localPath, $filename, $identity, $sha256, $folderId, $archiveContext, 'application/pdf');
+    }
+
+    public function uploadWithMime(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext, string $mimeType): array
+    {
         $this->assertLocalContent($localPath, $sha256);
         $parent = $this->folderForIdentity($folderId, $archiveContext);
-        $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, 'application/pdf');
+        $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, $mimeType);
         try {
-            return $this->uploadFile($localPath, $metadata, null, 'application/pdf');
+            return $this->uploadFile($localPath, $metadata, null, $mimeType);
         } catch (GoogleDriveArchiveException $exception) {
             // A cached Drive folder can be deleted or trashed between writes.
             // Only a rejected session-init is safe to retry: no upload body has
             // been sent, so this cannot create a duplicate remote document.
             if ($exception->httpStatus !== 404 || $this->uploadPhase !== 'UPLOAD_INIT') throw $exception;
             $parent = $this->folderForIdentity($folderId, $archiveContext, true);
-            $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, 'application/pdf');
-            return $this->uploadFile($localPath, $metadata, null, 'application/pdf');
+            $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, $mimeType);
+            return $this->uploadFile($localPath, $metadata, null, $mimeType);
         }
     }
 
@@ -141,9 +146,14 @@ class GoogleDriveDocumentArchiveGateway implements GoogleDriveArchiveGateway
 
     public function replace(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
+        return $this->replaceWithMime($fileId, $localPath, $filename, $identity, $sha256, $folderId, $archiveContext, 'application/pdf');
+    }
+
+    public function replaceWithMime(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext, string $mimeType): array
+    {
         $this->assertLocalContent($localPath, $sha256);
-        $metadata = $this->fileMetadata($filename, null, $identity, $sha256, 'application/pdf');
-        return $this->uploadFile($localPath, $metadata, $fileId, 'application/pdf');
+        $metadata = $this->fileMetadata($filename, null, $identity, $sha256, $mimeType);
+        return $this->uploadFile($localPath, $metadata, $fileId, $mimeType);
     }
 
     /** Returns a readable PHP stream; caller must authorize before invoking. */

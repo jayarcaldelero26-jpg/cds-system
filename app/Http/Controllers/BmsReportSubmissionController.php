@@ -112,7 +112,7 @@ class BmsReportSubmissionController extends Controller
         return redirect()->back()->withErrors(['mov' => 'An existing MOV cannot be removed without a replacement.']);
     }
 
-    private function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
+    public function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
     {
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
@@ -134,7 +134,7 @@ class BmsReportSubmissionController extends Controller
     }
 
     /** @param array<string, mixed> $validated */
-    private function assertNoFutureActualDates(Request $request, array $validated, ?BmsReportSubmission $existing = null): void
+    public function assertNoFutureActualDates(Request $request, array $validated, ?BmsReportSubmission $existing = null): void
     {
         $dates = app(\App\Services\ActualActivityDateGuard::class);
         $dates->assertDateConductedRanges($request->input('date_conducted_ranges'), $existing?->date_conducted_ranges, $existing?->date_conducted);

@@ -50,9 +50,13 @@ export function monthLabel(value) {
     return new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(monthStart(value));
 }
 
-export function formatDisplayDate(value) {
+export function formatDisplayDate(value, { compactSeptember = false } = {}) {
     const date = parseDateOnly(value);
-    return date ? new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).format(date) : '';
+    if (!date) return '';
+    const parts = new Intl.DateTimeFormat('en-US', { month: 'short', day: '2-digit', year: 'numeric' }).formatToParts(date);
+    const values = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+    const month = compactSeptember && values.month === 'Sep' ? 'Sept' : values.month;
+    return `${month} ${values.day}, ${values.year}`;
 }
 
 export function calendarDays(value) {

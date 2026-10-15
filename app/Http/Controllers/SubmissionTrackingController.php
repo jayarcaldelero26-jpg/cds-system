@@ -77,6 +77,9 @@ class SubmissionTrackingController extends Controller
             ...$this->tracking->filterOptions($filters),
             'protectedAreas' => app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
         ]);
+        $organization = app(OrganizationalAccessService::class);
+        $pamoWorkspace = $organization->effectiveCategory($request->user()) === OrganizationalAccessService::PAMO
+            && $organization->canViewPamoPilotWorkflow($request->user());
         $context = LocalNavigationTrace::measure($request, 'st_context', fn () => [
             'archive_checkpoint_enabled' => (bool) config('services.google_drive_archive.enabled'),
             'is_cenro_user' => $this->pambAccess->isCenro($request->user())
@@ -99,6 +102,7 @@ class SubmissionTrackingController extends Controller
             'filterOptions' => $filterOptions,
             'trackingContext' => $context,
             'pagination' => $pagination,
+            'pamoWorkspace' => $pamoWorkspace,
         ]));
 
         return $response;

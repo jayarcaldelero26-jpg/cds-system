@@ -4,6 +4,7 @@ return [
 
     'document_archive' => [
         'driver' => env('DOCUMENT_ARCHIVE_DRIVER', 'unconfigured'),
+        'final_return_archive_enabled' => (bool) env('FINAL_RETURN_ARCHIVE_ENABLED', false),
         'client_id' => env('GOOGLE_DRIVE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_DRIVE_CLIENT_SECRET'),
         'refresh_token' => env('GOOGLE_DRIVE_REFRESH_TOKEN'),

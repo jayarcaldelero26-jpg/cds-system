@@ -8,7 +8,7 @@ import Tooltip from '../Components/Tooltip';
 import NotificationBell from '../Components/Notifications/NotificationBell';
 import Button from '../Components/Button';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
-import { withGenericModuleNavigation } from './navigation.mjs';
+import { buildSidebarNavigation } from './navigation.mjs';
 import { settingsNavigationItem } from './settingsNavigation.mjs';
 
 const allNavigation = [
@@ -166,6 +166,9 @@ const lucideSidebarIcons = {
     activities: 'lucide:clipboard-list',
     photos: 'lucide:image',
     reports: 'lucide:file-text',
+    clock: 'lucide:clock-3',
+    check: 'lucide:circle-check',
+    archive: 'lucide:archive',
     chart: 'lucide:chart-no-axes-column-increasing',
 };
 
@@ -186,6 +189,7 @@ function matchesNavigationItem(item, url) {
     if (item.children?.length) return item.children.some((child) => matchesNavigationItem(child, url));
     const currentPath = url.split('?')[0];
     if (item.activePrefix && (currentPath === item.activePrefix || currentPath.startsWith(`${item.activePrefix}/`))) return true;
+    if (item.activePrefixes?.some(prefix => currentPath === prefix || currentPath.startsWith(`${prefix}/`))) return true;
     if (!item.href || item.href === '#') return false;
     const [targetPath, targetQuery = ''] = item.href.split('?');
     if (!(item.exact ? currentPath === targetPath : (currentPath === targetPath || currentPath.startsWith(targetPath + '/')))) return false;
@@ -198,26 +202,8 @@ function matchesNavigationItem(item, url) {
     return Object.entries(item.activeQuery || {}).every(([key, value]) => value === null ? !currentParams.has(key) : currentParams.get(key) === value);
 }
 
-function filterNavigationByUnit(items, unit, inheritedUnit = null, auth = {}) {
-    return items.map((item) => {
-        const pamoReportLink = auth.canViewPamoReports && item.href?.startsWith('/conservation-reports/');
-        if (item.permission && !auth[item.permission] && !pamoReportLink) return null;
-        if (item.permissionAny?.length && !item.permissionAny.some(permission => auth[permission])) return null;
-
-        const itemUnit = item.unit || inheritedUnit;
-        const containsPamoReportLink = item.children?.some(child => child.href?.startsWith('/conservation-reports/')) && auth.canViewPamoReports;
-        const isPamoReportLink = item.href?.startsWith('/conservation-reports/') && auth.canViewPamoReports;
-        if (itemUnit === 'conservation' && auth.canBrowseConservationModules === false && !containsPamoReportLink && !isPamoReportLink) return null;
-        if (itemUnit === 'development' && auth.canBrowseDevelopmentModules === false) return null;
-        if (unit && itemUnit && itemUnit !== unit) return null;
-        const children = item.children ? filterNavigationByUnit(item.children, unit, itemUnit, auth) : null;
-        if (item.children && !children?.length) return null;
-        return children ? { ...item, children } : item;
-    }).filter(Boolean);
-}
-
-function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [] }) {
-    const { url } = usePage();
+function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], pamoNativeModuleNavigation = [] }) {
+    const { url, props = {} } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
     const isGlobalUnitScope = auth?.unitVisibility?.isGlobal === true;
@@ -226,10 +212,13 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         : auth?.user?.unit_assignment || auth?.organizationalUnit || (userSection === 'ENGP' ? 'development' : null);
     const isSubmissionTrackingPage = url.split('?')[0] === '/submission-tracking';
     const trackingView = new URLSearchParams(url.split('?')[1] || '').get('view') || 'incoming';
-    const trackingViewLabel = ({ incoming: 'Incoming', outgoing: 'Outgoing', history: 'History' })[trackingView] || 'Incoming';
+    const trackingViewLabel = props.pamoWorkspace
+        ? ({ incoming: 'For Action', outgoing: 'Sent Reports', history: 'Completed Reports' })[trackingView] || 'For Action'
+        : ({ incoming: 'Incoming', outgoing: 'Outgoing', history: 'History' })[trackingView] || 'Incoming';
+    const trackingPageTitle = props.pamoWorkspace ? trackingViewLabel : 'Submission Tracking';
     const [openDropdowns, setOpenDropdowns] = useState({});
     const navigationRef = useRef(null);
-    const navigation = useMemo(() => withGenericModuleNavigation(allNavigation, genericModuleNavigation), [genericModuleNavigation]);
+    const navigation = useMemo(() => buildSidebarNavigation(allNavigation, genericModuleNavigation, safeAuth, pamoNativeModuleNavigation, userUnit), [genericModuleNavigation, pamoNativeModuleNavigation, safeAuth, userUnit]);
 
     const toggleDropdown = (label) => {
         setOpenDropdowns((prev) => ({
@@ -242,12 +231,12 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         const activeGroups = {};
         const visit = (items) => items.forEach((item) => {
             if (!item.children?.length) return;
-            if (matchesNavigationItem(item, url)) activeGroups[item.label] = true;
+            if (item.defaultExpanded || matchesNavigationItem(item, url)) activeGroups[item.label] = true;
             visit(item.children);
         });
         visit(navigation);
         setOpenDropdowns((prev) => ({ ...prev, ...activeGroups }));
-    }, [url]);
+    }, [url, navigation]);
 
     useEffect(() => {
         const navigationElement = navigationRef.current;
@@ -289,12 +278,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     const systemTitle = "CDS-SMART";
     const systemSubtitle = "Submission Monitoring and Reminder Tool";
 
-    const filteredNavigation = filterNavigationByUnit(
-        navigation.filter(item => !userUnit || item.section === 'BOTH' || item.section === 'CDS'),
-        userUnit,
-        null,
-        safeAuth,
-    );
+    const filteredNavigation = navigation;
 
     const renderChildren = (children, depth = 0, engpContext = false) => children.map((child) => {
         if (child.permission && !safeAuth[child.permission]) return null;
@@ -447,9 +431,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                     })}
                 </nav>
                 {isSubmissionTrackingPage && (
-                    <div className="mx-3 mb-3 rounded-lg border border-green-300/35 bg-green-900/70 px-3 py-2.5" role="status" aria-label={`Current page: Submission Tracking, ${trackingViewLabel}`}>
+                    <div className="mx-3 mb-3 rounded-lg border border-green-300/35 bg-green-900/70 px-3 py-2.5" role="status" aria-label={`Current page: ${trackingPageTitle}`}>
                         <p className="text-[9px] font-bold uppercase tracking-[0.12em] text-green-200">Current page</p>
-                        <p className="mt-0.5 text-xs font-bold text-white">Submission Tracking <span className="font-medium text-green-200">/ {trackingViewLabel}</span></p>
+                        <p className="mt-0.5 text-xs font-bold text-white">{props.pamoWorkspace ? trackingViewLabel : <>Submission Tracking <span className="font-medium text-green-200">/ {trackingViewLabel}</span></>}</p>
                     </div>
                 )}
                 <div className="border-t border-white/10 p-4 text-xs leading-5 text-green-200">CDS-SMART<br />Conservation and Development Section · PENRO Davao Oriental</div>
@@ -459,7 +443,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 }
 
 export function AuthenticatedShell({ children }) {
-    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, demoDataNotice } = usePage().props;
+    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, pamoNativeModuleNavigation, demoDataNotice } = usePage().props;
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [darkMode, setDarkMode] = useState(() => {
@@ -497,7 +481,7 @@ export function AuthenticatedShell({ children }) {
         <>
             <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} />
+                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} pamoNativeModuleNavigation={pamoNativeModuleNavigation} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" data-cds-action="true" data-cds-action-variant="primary">

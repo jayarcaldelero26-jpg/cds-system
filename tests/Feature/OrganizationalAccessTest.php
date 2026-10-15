@@ -55,28 +55,32 @@ test('registration exposes the canonical Operational Group catalog and no Super 
     $this->get('/register')
         ->assertOk()
         ->assertInertia(fn (Assert $page) => $page
-            ->has('registrationOptions.operationalGroups', 2)
+            ->has('registrationOptions.operationalGroups', 3)
             ->where('registrationOptions.operationalGroups.0.value', 'cenro')
             ->where('registrationOptions.operationalGroups.1.value', 'penro')
-            ->where('registrationOptions.operationalGroups.1.categories.2.value', 'PENRO_TSD_CHIEF'));
+            ->where('registrationOptions.operationalGroups.1.categories.2.value', 'PENRO_TSD_CHIEF')
+            ->where('registrationOptions.operationalGroups.2.value', 'pamo')
+            ->where('registrationOptions.operationalGroups.2.categories.0.value', 'PAMO'));
 });
-test('public registration rejects unsupported PAMO accounts', function () {
+test('public PAMO registration requires a protected area identity', function () {
     $this->post('/register', [
         'name' => 'PAMO Applicant', 'email' => 'pamo-applicant@example.com',
         'operational_group' => 'pamo', 'section' => 'PAMO',
         'password' => 'password', 'password_confirmation' => 'password',
-    ])->assertSessionHasErrors(['operational_group', 'section']);
+    ])->assertSessionHasErrors('protected_area_id');
 
     expect(User::where('email', 'pamo-applicant@example.com')->exists())->toBeFalse();
 });
 
-test('invalid development PAMO request and PA scope are rejected', function () {
+test('public PAMO registration rejects a client-submitted office identity', function () {
     $this->post('/register', [
         'name' => 'Invalid Applicant', 'email' => 'invalid-org@example.com',
         'operational_group' => 'cenro', 'unit_assignment' => null, 'section' => 'PAMO',
         'office_designated' => 'CENRO Baganga',
         'password' => 'password', 'password_confirmation' => 'password',
-    ])->assertSessionHasErrors('section');
+    ])->assertSessionHasErrors('office_designated');
+
+    expect(User::where('email', 'invalid-org@example.com')->exists())->toBeFalse();
 });
 
 test('CENRO focal users cover both units at the route boundary', function () {

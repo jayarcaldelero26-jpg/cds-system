@@ -56,6 +56,36 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('submission-tracking.view', fn ($user) =>
             app(\App\Services\Authorization\OrganizationalAccessService::class)->canViewSubmissionTracking($user));
 
+        Gate::define('pamo-native-reports.view', function ($user): bool {
+            $workflow = (string) request()->route('workflow');
+            $sources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+            $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+
+            return $sources->isSchemaReady() && $sources->isEligible($workflow)
+                && $user->is_active && $user->is_approved
+                && $organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO
+                && $organization->canViewPamoPilotWorkflow($user);
+        });
+
+        Gate::define('pamo-reports.view', function ($user): bool {
+            $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+
+            return $user->is_active && $user->is_approved
+                && $organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO
+                && $organization->canViewPamoPilotWorkflow($user);
+        });
+
+        Gate::define('pamo-archives.view', function ($user): bool {
+            $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
+
+            return $user->is_active && $user->is_approved
+                && $organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO
+                && $organization->canViewPamoPilotWorkflow($user);
+        });
+
+        Gate::define('final-archives.view', fn ($user): bool =>
+            app(\App\Services\Archive\FinalDocumentArchiveService::class)->canBrowse($user));
+
         Gate::define('passkeys.manage', fn ($user) =>
             app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($user));
 
@@ -80,10 +110,14 @@ class AppServiceProvider extends ServiceProvider
             }
             if (in_array($ability, $conservationReadAbilities, true)) {
                 if ($organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO) {
-                    $pilotWorkflow = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) request()->route('workflow'));
+                    $workflow = (string) request()->route('workflow');
+                    $pilotWorkflow = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow);
+                    $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+                    $nativeDraftWorkflow = $nativeSources->isSchemaReady() && $nativeSources->isEligible($workflow);
                     $pilotReadRoute = request()->routeIs('conservation-reports.index', 'conservation-reports.mov', 'conservation-reports.pamo-drafts.*');
 
-                    return $pilotWorkflow && $organization->canViewPamoPilotWorkflow($user)
+                    return ($pilotWorkflow || ($nativeDraftWorkflow && request()->routeIs('conservation-reports.pamo-drafts.*')))
+                        && $organization->canViewPamoPilotWorkflow($user)
                         && $ability === 'technical-reports.view' && $pilotReadRoute;
                 }
                 if ($organization->canViewConservationModules($user)) return true;

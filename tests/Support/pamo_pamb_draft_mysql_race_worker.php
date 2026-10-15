@@ -5,6 +5,7 @@ use App\Models\PamoPambDraft;
 use App\Models\User;
 use App\Services\Archive\FakeDocumentArchiveGateway;
 use App\Services\Archive\GoogleDriveArchiveGateway;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -19,11 +20,15 @@ require $basePath.'/vendor/autoload.php';
 
 try {
     $payload = json_decode(base64_decode($argv[1] ?? '', true) ?: '', true, flags: JSON_THROW_ON_ERROR);
-    $taskRoot = (string) ($payload['task_root'] ?? '');
-    $expectedRoot = $basePath.DIRECTORY_SEPARATOR.'.tmp'.DIRECTORY_SEPARATOR.'pamo-pilot-mysql-';
+    $taskRoot = realpath((string) ($payload['task_root'] ?? '')) ?: (string) ($payload['task_root'] ?? '');
+    $expectedRoot = realpath($basePath.DIRECTORY_SEPARATOR.'.tmp').DIRECTORY_SEPARATOR.'cds-pamo-native-mysql-';
     $database = (string) getenv('CDS_ROUTING_MYSQL_TEST_DB');
     $databaseUrl = getenv('DB_URL');
+    $ownerPath = $taskRoot.DIRECTORY_SEPARATOR.'ownership.json';
+    $owner = is_file($ownerPath) ? json_decode((string) file_get_contents($ownerPath), true) : null;
+    $marker = (string) getenv('CDS_PAMO_TASK_MARKER');
     if (! str_starts_with($taskRoot, $expectedRoot)
+        || $taskRoot !== (realpath((string) getenv('CDS_PAMO_TASK_ROOT')) ?: (string) getenv('CDS_PAMO_TASK_ROOT'))
         || ! in_array((string) ($payload['mode'] ?? ''), ['forward', 'update'], true)
         || ! in_array((string) ($payload['role'] ?? ''), ['first', 'contender', 'replay'], true)
         || getenv('APP_ENV') !== 'testing'
@@ -31,7 +36,14 @@ try {
         || ($databaseUrl !== false && trim((string) $databaseUrl) !== '')
         || $database === ''
         || getenv('DB_DATABASE') !== $database
-        || ! preg_match('/^cds_routing_uat_pamo_20261011_[a-f0-9]{8}$/', $database)) {
+        || ! preg_match('/^cds_routing_uat_pamo_20261011_[a-f0-9]{8}$/', $database)
+        || ! is_array($owner)
+        || realpath((string) ($owner['task_root'] ?? '')) !== $taskRoot
+        || ($owner['schema'] ?? null) !== $database
+        || ($owner['task_id'] ?? null) !== getenv('CDS_PAMO_TASK_ID')
+        || ($owner['marker'] ?? null) !== $marker
+        || ($owner['server_uuid'] ?? null) !== getenv('CDS_PAMO_TASK_SERVER_UUID')
+        || ! preg_match('/^[a-f0-9]{64}$/', $marker)) {
         throw new RuntimeException('The worker did not receive explicit isolated MySQL test settings.');
     }
 
@@ -53,9 +65,13 @@ try {
         throw new RuntimeException('The worker Laravel connection did not resolve to the explicit test database.');
     }
     $connection = DB::connection();
-    $identity = $connection->selectOne('SELECT DATABASE() AS database_name, @@transaction_isolation AS isolation_level');
-    if ($identity->database_name !== $database || $identity->isolation_level !== 'REPEATABLE-READ') {
+    $identity = $connection->selectOne('SELECT DATABASE() AS database_name, @@server_uuid AS server_uuid, @@transaction_isolation AS isolation_level');
+    if ($identity->database_name !== $database || $identity->server_uuid !== $owner['server_uuid'] || $identity->isolation_level !== 'REPEATABLE-READ') {
         throw new RuntimeException('The worker live database identity/isolation did not match the isolated test schema.');
+    }
+    $markerHash = $connection->table('cds_task_ownership_marker')->where('task_id', $owner['task_id'])->value('marker_sha256');
+    if (! hash_equals(hash('sha256', $marker), (string) $markerHash)) {
+        throw new RuntimeException('The worker ownership marker did not match before its data queries.');
     }
 
     $controlRoot = $taskRoot.DIRECTORY_SEPARATOR.'control';
@@ -125,6 +141,10 @@ try {
         ];
     } catch (ValidationException $exception) {
         $result = ['outcome' => 'validation', 'errors' => $exception->errors()];
+    } catch (AuthorizationException $exception) {
+        $result = ['outcome' => 'denied', 'status' => 403];
+    } catch (Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+        $result = ['outcome' => 'denied', 'status' => $exception->getStatusCode()];
     }
     echo json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
 } catch (Throwable $exception) {

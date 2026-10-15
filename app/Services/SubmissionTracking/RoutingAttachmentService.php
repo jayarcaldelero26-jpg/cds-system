@@ -130,6 +130,7 @@ final class RoutingAttachmentService
                 'url' => $url,
                 'download_url' => $original['download_url'] ?? $url,
                 'preview_url' => $original['preview_url'] ?? $url,
+                'protected' => (bool) ($original['protected'] ?? false),
             ];
         }
 

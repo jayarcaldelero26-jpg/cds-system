@@ -11,6 +11,8 @@ class PamoPambDraft extends Model
         'draft_uuid', 'start_idempotency_key', 'protected_area_id', 'pamo_office_id', 'pamo_office_name', 'originator_user_id',
         'created_by', 'updated_by', 'workflow_key', 'report_payload', 'mov_path',
         'mov_file_name', 'started_at', 'status', 'conservation_report_submission_id',
+        'bms_report_submission_id', 'bams_report_submission_id', 'imea_report_submission_id',
+        'imea_facility_maintenance_report_id', 'aws_report_id', 'ipaf_management_report_id', 'ipaf_revenue_collection_id',
         'forwarded_at', 'lock_version',
     ];
 

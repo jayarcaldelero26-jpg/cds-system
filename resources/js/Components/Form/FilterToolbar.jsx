@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import AppliedFilterChip from './AppliedFilterChip';
 
-export default function FilterToolbar({ label = 'Filters', chips = [], onClear, children, className = '', panelClassName = '' }) {
+export default function FilterToolbar({ label = 'Filters', chips = [], onClear, children, className = '', panelClassName = '', triggerClassName = '' }) {
     const triggerRef = useRef(null);
     const panelRef = useRef(null);
     const [open, setOpen] = useState(false);
@@ -53,7 +53,7 @@ export default function FilterToolbar({ label = 'Filters', chips = [], onClear, 
 
     return <div className={`min-w-0 ${className}`}>
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <button ref={triggerRef} type="button" aria-expanded={open} aria-controls="shared-filter-panel" onClick={() => setOpen(value => !value)} className="inline-flex h-10 min-w-[7rem] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 hover:border-green-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">
+            <button ref={triggerRef} type="button" aria-expanded={open} aria-controls="shared-filter-panel" onClick={() => setOpen(value => !value)} className={`inline-flex h-10 min-w-[7rem] items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 text-sm font-semibold text-gray-800 hover:border-green-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100 ${triggerClassName}`}>
                 <Icon icon="lucide:sliders-horizontal" width="16" height="16" aria-hidden="true" className={`transition-transform duration-200 motion-reduce:transition-none ${open ? 'rotate-180' : ''}`} />
                 <span className="transition-opacity duration-200 motion-reduce:transition-none">{chips.length ? `${label} · ${chips.length} selected` : label}</span>
             </button>

@@ -94,7 +94,7 @@ class ImeaFacilityMaintenanceReportController extends Controller
         return back()->with('success', $wasExisting ? 'Maintenance report updated successfully.' : 'Maintenance report added successfully.');
     }
 
-    private function rules(bool $requireMov = false): array
+    public function rules(bool $requireMov = false): array
     {
         return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['required', 'date'], 'date_accomplished' => ['required', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:20480'], 'remarks' => ['nullable', 'string']];
     }

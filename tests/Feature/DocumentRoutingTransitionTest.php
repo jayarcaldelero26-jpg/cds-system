@@ -395,7 +395,7 @@ test('legacy milestone state starts the canonical routing timeline at its curren
 
     expect($canonicalTimeline->first()['key'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
         ->and($canonicalTimeline->first()['status'])->toBe('current')
-        ->and($routing['current_location'])->toBe('PENRO Records Unit')
+        ->and($routing['current_location'])->toBe('PENRO Davao Oriental')
         ->and($record->fresh()->deadline_submission)->toBe($deadline)
         ->and($record->fresh()->date_received_penro->toDateString())->toBe('2026-08-05');
 });

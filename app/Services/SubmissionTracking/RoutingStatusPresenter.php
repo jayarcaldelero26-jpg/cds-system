@@ -4,11 +4,13 @@ namespace App\Services\SubmissionTracking;
 
 use App\Models\EngpReportSubmission;
 use App\Models\ConservationReportSubmission;
+use App\Models\SubmissionRoutingSnapshot;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Support\DatePresentationNormalizer;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * The single presentation contract for report routing status.
@@ -33,6 +35,27 @@ final class RoutingStatusPresenter
 
     public function status(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null, ?string $routeProfile = null): string
     {
+        $sourceKey ??= $this->sourceKey($record);
+        $isPamoOrigin = $record instanceof ConservationReportSubmission && $sourceKey === 'conservation'
+            && Schema::hasTable('submission_routing_snapshots')
+            && SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)
+                ->where('source_id', $record->getKey())->value('origin_kind') === 'pamo_pamb';
+        if ($isPamoOrigin) {
+            $routing = $this->genericRouting->state($record, $sourceKey, $routingEvents);
+            if (($routing['route_position']['origin_kind'] ?? null) === 'pamo_pamb') {
+                $action = collect($routing['actions'] ?? [])->first(fn (array $item): bool =>
+                    ($item['from'] ?? null) === ($routing['stage'] ?? null)
+                    && ! ($item['internal_only'] ?? false)
+                    && ! ($item['correction'] ?? false)
+                );
+                if ($action) {
+                    $direct = ($routing['route_profile'] ?? null) === 'direct';
+                    $canonicalActions = app(DocumentRoutingProfileRegistry::class)->actionProfile('conservation', $direct)['actions'];
+                    return $this->pamoPendingContext($action, $canonicalActions);
+                }
+            }
+        }
+
         return match ($this->stage($record, $sourceKey, $routingEvents, $routeProfile)) {
             'not_ready' => self::NO_ACTIVITY,
             SubmissionTrackingService::CENRO_RELEASE => self::PENDING_CENRO,
@@ -40,6 +63,23 @@ final class RoutingStatusPresenter
             SubmissionTrackingService::REGIONAL_ENDORSEMENT => self::PENDING_REGIONAL,
             default => self::COMPLETED,
         };
+    }
+
+    /** @param array<string,mixed> $action */
+    private function pamoPendingContext(array $action, array $routeActions): string
+    {
+        $key = (string) ($action['key'] ?? '');
+        $canonical = collect($routeActions)->firstWhere('key', $key);
+        $office = trim((string) ($canonical['to_office'] ?? $action['to_office'] ?? ''));
+        $label = trim((string) ($action['action_label'] ?? $canonical['action_label'] ?? ''));
+        if (str_starts_with($key, 'receive_at_')) return 'Awaiting receipt by '.($office ?: 'the assigned office');
+        if (($action['correction_cycle'] ?? false) === true) return 'Awaiting resubmission to '.($office ?: 'the assigned office');
+        if (preg_match('/^Forward to (.+)$/i', $label, $matches)) return 'Awaiting forward to '.trim($matches[1]);
+        if (preg_match('/^Release to (.+)$/i', $label, $matches)) return 'Awaiting release to '.trim($matches[1]);
+        if (preg_match('/^Assign to (.+)$/i', $label, $matches)) return 'Awaiting assignment to '.trim($matches[1]);
+        if (preg_match('/^Recommend to (.+)$/i', $label, $matches)) return 'Awaiting recommendation to '.trim($matches[1]);
+        if (preg_match('/^Approve for (.+)$/i', $label, $matches)) return 'Awaiting approval for '.mb_strtolower(trim($matches[1]));
+        return 'Awaiting '.mb_strtolower($label ?: 'the next routing action');
     }
 
     public function stage(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null, ?string $routeProfile = null): string

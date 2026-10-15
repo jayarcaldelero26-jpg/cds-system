@@ -60,3 +60,16 @@ export function formatReportDateTime(value, fallback = '\u2014') {
 
     return datePart + ', ' + timePart;
 }
+
+/** Format persisted workflow timestamps in the established Manila display format. */
+export function formatManila(value, fallback = '\u2014') {
+    if (!value) return fallback;
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+        ? fallback
+        : new Intl.DateTimeFormat('en-PH', {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+            timeZone: 'Asia/Manila',
+        }).format(date);
+}

@@ -184,6 +184,43 @@ test('resumable upload resolves unit, office, and module folders and returns a D
         ->and(collect($history)->pluck('request')->filter(fn ($request) => $request->getUri()->getPath() === '/drive/v3/files')->count())->toBe(6);
 });
 
+test('MIME-aware archive upload preserves AWS spreadsheet content types', function (): void {
+    configureMockDrive(bin2hex(random_bytes(4)));
+    \Illuminate\Support\Facades\Cache::flush();
+    $history = [];
+    $responses = [oauthMockResponse()];
+    foreach (['Conservation Unit', 'CENRO Mati', 'Automated Weather Station'] as $index => $segment) {
+        $responses[] = new Response(200, [], json_encode(['files' => []], JSON_THROW_ON_ERROR));
+        $responses[] = new Response(200, [], json_encode(['id' => 'aws-folder-'.$index, 'mimeType' => 'application/vnd.google-apps.folder'], JSON_THROW_ON_ERROR));
+    }
+    $responses[] = new Response(200, ['Location' => 'https://www.googleapis.com/upload/drive/v3/files?upload_id=aws-xlsx-session']);
+    $responses[] = new Response(200, [], json_encode(['id' => 'aws-xlsx-file', 'parents' => ['aws-folder-2']], JSON_THROW_ON_ERROR));
+    $gateway = mockedDriveGateway($responses, $history);
+    $path = tempnam(sys_get_temp_dir(), 'cds-drive-xlsx-');
+    $content = "synthetic spreadsheet bytes";
+    file_put_contents($path, $content);
+    $mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    try {
+        $result = $gateway->uploadWithMime(
+            $path, 'AWS-returned-report.xlsx',
+            ['source_type' => 'aws', 'source_id' => 42, 'logical_slot' => 'regional-return-final'],
+            hash('sha256', $content), config('services.document_archive.folder_id'),
+            ['folder_path' => ['Conservation Unit', 'CENRO Mati', 'Automated Weather Station']], $mime,
+        );
+    } finally {
+        @unlink($path);
+    }
+
+    $init = collect($history)->first(fn (array $entry): bool => str_contains((string) $entry['request']->getUri(), 'uploadType=resumable'))['request'];
+    $put = collect($history)->first(fn (array $entry): bool => $entry['request']->getMethod() === 'PUT')['request'];
+    $metadata = json_decode((string) $init->getBody(), true, flags: JSON_THROW_ON_ERROR);
+    expect($result['file_id'])->toBe('aws-xlsx-file')
+        ->and($metadata['mimeType'])->toBe($mime)
+        ->and($init->getHeaderLine('X-Upload-Content-Type'))->toBe($mime)
+        ->and($put->getHeaderLine('Content-Type'))->toBe($mime);
+});
+
 test('archive folder identifiers are cached so subsequent writes skip folder lookups', function (): void {
     configureMockDrive(bin2hex(random_bytes(4)));
     \Illuminate\Support\Facades\Cache::flush();

@@ -139,6 +139,7 @@ final class PambSubmissionAccessService
      */
     public function canPerformForSubmission(User $user, string $action, ConservationReportSubmission $submission, ?array $routingState = null): bool
     {
+        if (! $user->is_active || ! $user->is_approved) return false;
         if (! $this->canView($user, $submission)) return false;
 
         $category = $this->categoryFor($user);
@@ -147,7 +148,8 @@ final class PambSubmissionAccessService
         return match ($action) {
             'submit' => in_array($category, [self::CENRO_FOCAL, self::PAMO], true)
                 && ($status === PambMovProcessingService::ACTIVITY_CONDUCTED
-                    || ($status === PambMovProcessingService::NEEDS_CORRECTION && $this->hasReceivedCorrection($submission, $routingState))),
+                    || ($status === PambMovProcessingService::NEEDS_CORRECTION && $this->hasReceivedCorrection($submission, $routingState)))
+                && $this->canSubmitAtCurrentCustodyPosition($user, $submission, $routingState),
             // Direct-PENRO PAMB submissions enter the explicit PENRO Records
             // receipt queue before the shared PENRO internal chain.
             'review' => $this->routeProfile($submission) !== 'direct'
@@ -226,6 +228,34 @@ final class PambSubmissionAccessService
 
         return $last?->event_key === 'correction_received'
             && data_get($last->metadata, 'action_key') === 'receive_correction';
+    }
+
+    /** Submit only at the current preparation owner; a pending inbound receipt is not receipt evidence. */
+    private function canSubmitAtCurrentCustodyPosition(User $user, ConservationReportSubmission $submission, ?array $routingState): bool
+    {
+        $state = $this->routingState($submission, $routingState);
+        $category = $this->categoryFor($user);
+        $stage = $state['stage'] ?? null;
+        $events = $state['events'] ?? collect();
+        $last = $events->last();
+
+        if ($category === self::PAMO) {
+            return $stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN;
+        }
+        if ($category !== self::CENRO_FOCAL || $stage !== DocumentRoutingProfileRegistry::PREPARATION) return false;
+
+        if ($last === null) {
+            // CENRO-origin reports already in their preparation stage have no
+            // inbound handoff to acknowledge.
+            return true;
+        }
+
+        return $last->event_key === 'received'
+            && $last->to_stage === DocumentRoutingProfileRegistry::PREPARATION
+            && data_get($last->metadata, 'action_key') === 'receive_at_cenro_focal'
+            || $last->event_key === 'correction_received'
+                && $last->to_stage === DocumentRoutingProfileRegistry::PREPARATION
+                && data_get($last->metadata, 'action_key') === 'receive_correction';
     }
 
     /** MOV review is available only after the shared custody graph records the Chief's receipt. */

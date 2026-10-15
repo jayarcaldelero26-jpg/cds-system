@@ -281,6 +281,8 @@ test('populated PAMB meeting timeline exposes the pending Office forwarding acti
             onRecord: () => {},
         }));
 
+        assert.match(html, /Routing Progress/);
+        assert.match(html, /Shows the completed, current and upcoming stages of this report\./);
         assert.match(html, /Forwarded to Office of the PENRO/);
         assert.match(html, /<button[^>]*type="button"[^>]*>Forward<\/button>/);
     }
@@ -316,7 +318,7 @@ test('projected focal custody action renders in sidebar and Full Details while M
     assert.match(sidebarHtml, /Preview/);
     assert.match(sidebarHtml, /data-cds-action-variant="cancel"[^>]*>Preview<\/button>/);
     assert.match(detailsHtml, />Forward</);
-    assert.match(detailsHtml, /Canonical Routing Progress/);
+    assert.match(detailsHtml, /Routing Progress/);
 
     const panelTree = SubmissionDetailsPanel({ row, onAction: (next) => actionCalls.push(next), onPreview: (next) => previewCalls.push(next) });
     const walk = (node) => {
@@ -479,6 +481,39 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
     assert.match(completed, />3<\/span>/);
     assert.match(completed, /Sep 1, 2026|September 1, 2026/);
     assert.match(completed, /Sep 5, 2026|September 5, 2026/);
+
+    const { default: PamoSavedDraftsTable } = await load('Components/PamoSavedDraftsTable.jsx');
+    const drafts = renderToStaticMarkup(React.createElement(PamoSavedDraftsTable, {
+        workflow: { period_field: 'reporting_period', period_label: 'Reporting period' },
+        drafts: [
+            { id: 1, status: 'draft', report_payload: { activity_name: 'Preparing report' } },
+            { id: 2, status: 'forwarded', report_payload: { activity_name: 'Forwarded report' } },
+        ],
+        onRowClick() {},
+    }));
+    assert.match(drafts, /PAMO drafts/);
+    assert.match(drafts, /Forwarded report/);
+    assert.match(drafts, /Forwarded/);
+    assert.equal((drafts.match(/<tr tabindex="0"/g) || []).length, 1, 'only the editable draft row can open the workspace');
+    assert.equal((drafts.match(/<tr/g) || []).length, 3, 'both draft statuses remain visible in the table');
+
+    const pamo = render({ ...pendingBase, pamo_origin: true, workflow_key: 'homestay' }, { isMeetingPamb: false });
+    assert.match(pamo, /Total Number of Days Delayed at PENRO:<\/span><span[^>]*>Not yet available/);
+    assert.doesNotMatch(pamo, /Please Update Date Endorsed/);
+    const completedZero = render({
+        ...pendingBase,
+        pamo_origin: true,
+        date_received_penro: '2026-10-08',
+        date_endorsed_regional: '2026-10-08',
+        total_days_delayed_penro: 0,
+    }, { isMeetingPamb: false });
+    assert.match(completedZero, /Total Number of Days Delayed at PENRO:<\/span><span[^>]*>0/);
+    const { daysCompliedDisplay } = await load('Pages/Bms/ReportSubmissionTracker.jsx');
+    assert.equal(daysCompliedDisplay({ pamo_origin: true, date_received_penro: null }, 'Pending Submission by CENRO'), 'Not yet available');
+    assert.equal(daysCompliedDisplay({ pamo_origin: true, date_received_penro: null }, 0), 0);
+    assert.equal(daysCompliedDisplay({ pamo_origin: false, date_received_penro: null }, 'Pending Submission by CENRO'), 'Pending Submission by CENRO');
+    assert.equal(daysCompliedDisplay({ pamo_origin: true, date_received_penro: '2026-10-08' }, 12), 12);
+    assert.equal(daysCompliedDisplay({ pamo_origin: true, is_historical: true, date_received_penro: null }, 'Missing historical evidence'), 'Missing historical evidence');
 });
 
 test('correction reference upload appears only for return actions that allow it and never replaces the official copy', async () => {
@@ -535,6 +570,16 @@ test('protected preview explains projected denial without offering download or a
     assert.match(source, /!canPreview \? <p role="alert"[^>]*>Your current account is not authorized to access this document\./);
     assert.match(source, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
     assert.ok(source.indexOf('!canPreview ?') < source.indexOf(': inline ? previewReady ?'));
+
+    const { default: FilePreviewPanel } = await load('Components/Crud/FilePreviewPanel.jsx');
+    const protectedPanel = renderToStaticMarkup(React.createElement(FilePreviewPanel, {
+        file: { protected: true, name: 'Protected report.pdf', mime_type: 'application/pdf', preview_url: '/attachments/conservation-report/42/mov?preview=1' },
+    }));
+    assert.match(protectedPanel, /Loading protected preview/);
+    assert.doesNotMatch(protectedPanel, /<iframe/);
+    const panelSource = readFileSync(resolve('resources/js/Components/Crud/FilePreviewPanel.jsx'), 'utf8');
+    assert.match(panelSource, /startProtectedPreview/);
+    assert.match(panelSource, /role="alert"/);
 });
 
 test('Create Module close control is a neutral accessible icon button wired to its callback', async () => {
@@ -588,4 +633,114 @@ test('optional User Details assignments are omitted while category codes get dis
     assert.doesNotMatch(emptyHtml, />Office</);
     assert.equal(userCategoryLabel('OFFICE_OF_THE_PENRO'), 'Office of the PENRO');
     assert.equal(userCategoryLabel('PENRO_RECORDS'), 'PENRO Records');
+});
+
+test('PAMO outgoing sender sees no Submit for Review while a non-PAMO recipient keeps its eligible action', async () => {
+    const { SubmissionDetailsPanel } = await load('Pages/SubmissionTracking/Index.jsx');
+    const baseRow = {
+        source: 'conservation', source_id: 108, module: 'Special PAMB', workflow_key: 'special_pamb',
+        protected_area: 'Sample Protected Area', protected_area_name: 'Sample Protected Area', target_office: 'CENRO Baganga',
+        mov_url: '/attachments/conservation-report/108/mov',
+        mov_processing: { applicable: true, status_key: 'activity_conducted', status_label: 'MOV Uploaded / Ready for Submission', workflow_status: 'In Progress', milestones: [], turnaround: {} },
+        pamb_action_flags: { can_submit: true, can_review: false, can_release: false },
+        routing: { current_stage: 'transit_to_cenro_focal', current_status: 'In Transit', current_location: 'CENRO Baganga CDS Focal Person', responsible_office: 'CENRO Baganga', next_expected_action: 'Receive', actions: [], timeline: [] },
+    };
+    const pamoHtml = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, {
+        row: baseRow, pamoWorkspace: true, context: { view: 'outgoing', can_submit_mov: true },
+    }));
+    assert.doesNotMatch(pamoHtml, />Submit for Review<\/button>/);
+
+    const recipientRow = { ...baseRow, routing: { ...baseRow.routing, current_stage: 'cenro_preparation' } };
+    const cenroHtml = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, {
+        row: recipientRow, pamoWorkspace: false, context: { view: 'incoming', can_submit_mov: true },
+    }));
+    assert.match(cenroHtml, />Submit for Review<\/button>/);
+
+    const correctionRow = {
+        ...baseRow,
+        mov_processing: { ...baseRow.mov_processing, status_key: 'needs_correction', status_label: 'Needs Correction' },
+        routing: { ...baseRow.routing, current_stage: 'pamo_origin' },
+    };
+    const correctionHtml = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, {
+        row: correctionRow, pamoWorkspace: true, context: { view: 'incoming', can_submit_mov: true },
+    }));
+    assert.match(correctionHtml, />Resubmit for Review<\/button>/);
+});
+
+test('PAMO Report Details displays the protected official file from the tracking payload', async () => {
+    const { default: OfficialReportFileSection } = await load('Components/SubmissionTracking/OfficialReportFileSection.jsx');
+    const { default: CrudDetailsModal } = await load('Components/Crud/CrudDetailsModal.jsx');
+    const row = {
+        source: 'conservation', source_id: 109,
+        current_document: {
+            name: 'PAMO source report.pdf', mime_type: 'application/pdf', protected: true,
+            source: 'Original MOV / report', can_preview: true,
+            preview_url: '/attachments/conservation-report/109/mov?preview=1',
+            download_url: '/attachments/conservation-report/109/mov?download=1',
+        },
+    };
+    const previewed = [];
+    const section = React.createElement(OfficialReportFileSection, { row, onPreview: value => previewed.push(value) });
+    const html = renderToStaticMarkup(React.createElement(CrudDetailsModal, {
+        open: true, title: 'Report Details', attachments: section,
+    }));
+    assert.match(html, /Official Report File/);
+    assert.match(html, /PAMO source report\.pdf/);
+    assert.match(html, /Preview file/);
+    assert.doesNotMatch(html, /No MOV \/ attachment has been submitted/);
+    assert.doesNotMatch(html, /attachments\/conservation-report\/109\/mov/);
+
+    const tree = OfficialReportFileSection({ row, onPreview: value => previewed.push(value) });
+    const clickPreview = node => {
+        if (!React.isValidElement(node)) return false;
+        if (node.props.children === 'Preview file') { node.props.onClick(); return true; }
+        let found = false;
+        React.Children.forEach(node.props.children, child => { if (!found) found = clickPreview(child); });
+        return found;
+    };
+    assert.equal(clickPreview(tree), true);
+    assert.deepEqual(previewed, [row]);
+
+    const unavailable = renderToStaticMarkup(React.createElement(OfficialReportFileSection, {
+        row: { mov_processing: { status_label: 'MOV Uploaded / Ready for Submission' } },
+    }));
+    assert.match(unavailable, /source records a MOV upload, but its protected report file is currently unavailable/);
+});
+
+test('PAMO pending presentation fits the success-sized host and keeps modal content mounted', async () => {
+    const { default: CrudFormModal } = await load('Components/Crud/CrudFormModal.jsx');
+    const { default: PamoReportPendingAnimation } = await load('Components/PamoReportPendingAnimation.jsx');
+    const pending = React.createElement(PamoReportPendingAnimation, { intent: 'save' });
+    const pamoHtml = renderToStaticMarkup(React.createElement(CrudFormModal, {
+        open: true, title: 'Edit draft', processing: true, busyOverlayPresentation: 'success-sized', busyOverlay: pending,
+        children: React.createElement('input', { name: 'activity_name', value: 'Kept form value', readOnly: true }),
+    }));
+    assert.match(pamoHtml, /data-cds-busy-presentation="success-sized"/);
+    assert.match(pamoHtml, /max-w-\[390px\][^\"]*min-h-\[320px\]/);
+    assert.match(pamoHtml, /role="status"[^>]*data-cds-busy-status/);
+    assert.match(pamoHtml, /Kept form value/);
+    assert.match(pamoHtml, /inert="" aria-hidden="true"/);
+
+    const sharedHtml = renderToStaticMarkup(React.createElement(CrudFormModal, {
+        open: true, title: 'Unchanged shared form', processing: true, busyOverlay: React.createElement('span', null, 'Working'),
+    }));
+    assert.match(sharedHtml, /data-cds-busy-presentation="default"/);
+    assert.match(sharedHtml, /absolute inset-0 z-30[^\"]*bg-slate-50\/95/);
+});
+
+test('PAMO date controls show Sept without changing shared picker defaults', async () => {
+    const { default: DatePicker } = await load('Components/DatePicker.jsx');
+    const { default: DateRangePicker } = await load('Components/DateRangePicker.jsx');
+    const compact = renderToStaticMarkup(React.createElement(DatePicker, {
+        id: 'pamo-date', value: '2026-09-08', compactSeptember: true,
+    }));
+    const sharedDefault = renderToStaticMarkup(React.createElement(DatePicker, {
+        id: 'shared-date', value: '2026-09-08',
+    }));
+    const range = renderToStaticMarkup(React.createElement(DateRangePicker, {
+        id: 'pamo-range', compactSeptember: true, value: { from: '2026-09-08', to: '2026-09-09' },
+    }));
+    assert.match(compact, />Sept 08, 2026<\/span>/);
+    assert.match(sharedDefault, />Sep 08, 2026<\/span>/);
+    assert.match(range, /Sept 08, 2026 → Sept 09, 2026/);
 });

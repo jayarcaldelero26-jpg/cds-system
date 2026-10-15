@@ -3,17 +3,31 @@
 namespace App\Services\Archive;
 
 /** Explicit non-persistent local fake; never selected as a fallback for Google Drive. */
-final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
+final class FakeDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGateway
 {
     private array $objects = [];
     private int $nextId = 0;
     private array $archiveContexts = [];
     private int $uploadAttempts = 0;
     private bool $rejectNextUpload = false;
+    private ?int $rejectUploadAtAttempt = null;
+    private bool $throwAfterNextUpload = false;
+    private array $mimeTypes = [];
 
     public function rejectNextUpload(): void
     {
         $this->rejectNextUpload = true;
+    }
+
+    public function rejectUploadAtAttempt(int $attempt): void
+    {
+        $this->rejectUploadAtAttempt = max(1, $attempt);
+    }
+
+    /** Simulate a provider that persisted the object but lost its response. */
+    public function throwAfterNextUpload(): void
+    {
+        $this->throwAfterNextUpload = true;
     }
 
     public function uploadAttempts(): int
@@ -33,14 +47,25 @@ final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
 
     public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
+        return $this->uploadWithMime($localPath, $filename, $identity, $sha256, $folderId, $archiveContext, 'application/pdf');
+    }
+
+    public function uploadWithMime(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext, string $mimeType): array
+    {
         $this->uploadAttempts++;
-        if ($this->rejectNextUpload) {
+        if ($this->rejectNextUpload || $this->rejectUploadAtAttempt === $this->uploadAttempts) {
             $this->rejectNextUpload = false;
+            $this->rejectUploadAtAttempt = null;
             throw new \RuntimeException('Injected fake archive rejection.');
         }
         $id = 'fake-archive-'.(++$this->nextId);
         $this->objects[$id] = ['identity' => $identity, 'sha256' => $sha256, 'bytes' => file_get_contents($localPath), 'folder_id' => $folderId];
         $this->archiveContexts[] = ['filename' => $filename, 'identity' => $identity, 'context' => $archiveContext];
+        $this->mimeTypes[$id] = $mimeType;
+        if ($this->throwAfterNextUpload) {
+            $this->throwAfterNextUpload = false;
+            throw new \RuntimeException('Injected lost provider response after object creation.');
+        }
         return ['file_id' => $id, 'folder_id' => $folderId];
     }
 
@@ -59,8 +84,14 @@ final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
 
     public function replace(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
+        return $this->replaceWithMime($fileId, $localPath, $filename, $identity, $sha256, $folderId, $archiveContext, 'application/pdf');
+    }
+
+    public function replaceWithMime(string $fileId, string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext, string $mimeType): array
+    {
         $this->objects[$fileId] = ['identity' => $identity, 'sha256' => $sha256, 'bytes' => file_get_contents($localPath), 'folder_id' => $folderId];
         $this->archiveContexts[] = ['filename' => $filename, 'identity' => $identity, 'context' => $archiveContext];
+        $this->mimeTypes[$fileId] = $mimeType;
         return ['file_id' => $fileId, 'folder_id' => $folderId];
     }
 
@@ -68,6 +99,11 @@ final class FakeDocumentArchiveGateway implements GoogleDriveArchiveGateway
     public function archiveContexts(): array
     {
         return $this->archiveContexts;
+    }
+
+    public function mimeTypes(): array
+    {
+        return $this->mimeTypes;
     }
 
     public function retrieve(string $fileId)

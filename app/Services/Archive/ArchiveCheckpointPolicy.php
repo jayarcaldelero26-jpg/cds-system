@@ -7,9 +7,22 @@ use Illuminate\Validation\ValidationException;
 /** Shared gate for the mandatory initial PENRO Records dispatch checkpoint. */
 final class ArchiveCheckpointPolicy
 {
+    public function __construct(private readonly FinalReturnArchiveAvailability $availability) {}
+
+    /** The old remote checkpoint remains mandatory until the final lifecycle is fully available. */
+    public function requiresInitialRemoteArchive(): bool
+    {
+        return ! $this->availability->enabled();
+    }
+
+    public function finalReturnLifecycleEnabled(): bool
+    {
+        return $this->availability->enabled();
+    }
+
     public function isCheckpoint(string $action, string $from, string $to): bool
     {
-        if ($from !== 'penro_records') return false;
+        if (! $this->requiresInitialRemoteArchive() || $from !== 'penro_records') return false;
         return match ($action) {
             'forward_to_office_penro' => $to === 'transit_to_office_of_penro',
             'dispatch_penro_records_to_tsd' => $to === 'transit_to_tsd_chief',

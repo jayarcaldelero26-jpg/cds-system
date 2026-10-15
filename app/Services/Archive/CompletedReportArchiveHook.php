@@ -66,6 +66,9 @@ final class CompletedReportArchiveHook
     /** PAMB keeps its existing historical checkpoint behavior, independent of generic route actions. */
     public function afterPambTransition(string $source, int $recordId, string $actionKey, ?User $actor): array
     {
+        if (! $this->checkpointPolicy->requiresInitialRemoteArchive()) {
+            return ['status' => 'initial_remote_checkpoint_retired'];
+        }
         if ($this->checkpointAction($source, $actionKey) !== PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO) {
             return ['status' => 'not_records_checkpoint'];
         }
@@ -183,9 +186,31 @@ final class CompletedReportArchiveHook
             ->where('source_key', $persisted->source_type)->where('source_id', $persisted->source_id)
             ->where('setting_version_id', data_get($persisted->metadata, 'route_setting_version_id'))
             ->where('graph_version', data_get($persisted->metadata, 'route_graph_version'))
-            ->where('graph_version', \App\Services\SubmissionTracking\RoutingPositionSnapshotService::GRAPH_VERSION)
-            ->where('profile', data_get($persisted->metadata, 'route_profile'))->first();
+            ->first();
         if (! $snapshot || (int) data_get($persisted->metadata, 'route_setting_version', 0) < 1) return false;
+
+        $routeProfile = (string) data_get($persisted->metadata, 'route_profile');
+        $snapshotProfileMatches = match ($snapshot->graph_version) {
+            \App\Services\SubmissionTracking\RoutingPositionSnapshotService::GRAPH_VERSION =>
+                in_array($routeProfile, ['regular', 'direct'], true) && $snapshot->profile === $routeProfile,
+            \App\Services\SubmissionTracking\RoutingPositionSnapshotService::PAMO_GRAPH_VERSION =>
+                $snapshot->origin_kind === 'pamo_pamb'
+                    && $snapshot->profile === match ($routeProfile) {
+                        'regular' => 'pamo_regular',
+                        'direct' => 'pamo_direct',
+                        default => null,
+                    }
+                    && (int) $snapshot->protected_area_id > 0
+                    && (int) $snapshot->pamo_office_id > 0
+                    && $snapshot->originator_user_id !== null
+                    && $snapshot->origin_started_at !== null
+                    && ($snapshot->profile === 'pamo_regular'
+                        ? (int) $snapshot->responsible_cenro_office_id > 0 && filled($snapshot->responsible_cenro_name)
+                        : $snapshot->responsible_cenro_office_id === null),
+            default => false,
+        };
+        if (! $snapshotProfileMatches) return false;
+
         $settings = RoutingPositionSettingVersion::query()->find($snapshot->setting_version_id);
         if (! $settings || (int) $settings->version !== (int) data_get($persisted->metadata, 'route_setting_version')) return false;
 

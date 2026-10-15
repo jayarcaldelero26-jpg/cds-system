@@ -385,6 +385,53 @@ test('submitting for review is idempotent within a review cycle', function (): v
         ->and($snapshot['queues']['for_review']->pluck('source_id')->all())->toContain($report->id);
 });
 
+test('a PAMB MOV cannot be submitted while an inbound CENRO focal receipt is pending', function (): void {
+    Storage::fake('local');
+    $focal = pambRoleUser('CENRO CDS Focal Person', 'CENRO_CDS_FOCAL', 'CENRO Baganga');
+    $area = ProtectedArea::create([
+        'name' => 'Pending Receipt PAMB Area', 'category' => 'Protected Landscape', 'municipality' => 'Baganga',
+        'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_baganga')->value('id'),
+        'assignment_type' => 'supervising', 'assigned_by' => $focal->id,
+    ]);
+    $report = pambReport($focal, [
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga',
+        'mov_file_path' => 'conservation-report-movs/pending-receipt.pdf',
+        'mov_file_name' => 'pending-receipt.pdf',
+    ]);
+    Storage::disk('local')->put($report->mov_file_path, '%PDF pending receipt');
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'conservation', 'source_id' => $report->id, 'workflow_key' => $report->workflow_key,
+        'event_key' => 'forwarded', 'from_stage' => 'pamo_origin', 'to_stage' => 'transit_to_cenro_focal',
+        'from_office' => 'PAMO', 'to_office' => 'CENRO CDS Focal Person', 'occurred_at' => '2026-10-13 09:00:00',
+        'recorded_by' => $focal->id, 'metadata' => ['action_key' => 'forward_from_pamo_to_cenro_focal'],
+    ]);
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertForbidden();
+    expect($report->fresh()->mov_processing_status)->toBeNull()
+        ->and($report->movReviewEvents()->count())->toBe(0)
+        ->and($report->routingEvents()->count())->toBe(0)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(1);
+
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'conservation', 'source_id' => $report->id, 'workflow_key' => $report->workflow_key,
+        'event_key' => 'received', 'from_stage' => 'transit_to_cenro_focal', 'to_stage' => 'cenro_preparation',
+        'from_office' => 'PAMO', 'to_office' => 'CENRO CDS Focal Person', 'occurred_at' => '2026-10-13 09:15:00',
+        'recorded_by' => $focal->id, 'metadata' => ['action_key' => 'receive_at_cenro_focal'],
+    ]);
+    $row = app(SubmissionTrackingService::class)->records()->firstWhere('source_id', $report->id);
+    expect(data_get($row, 'pamb_action_flags.can_submit'))->toBeTrue();
+
+    $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['conservation', $report->id]))->assertSessionHasNoErrors();
+    expect($report->fresh()->mov_processing_status)->toBe(PambMovProcessingService::SUBMITTED_FOR_REVIEW)
+        ->and($report->movReviewEvents()->where('event_key', PambMovProcessingService::SUBMITTED_FOR_REVIEW)->count())->toBe(1)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(2);
+});
+
 test('the active MOV marker uses a compact concentric pulse ring with reduced-motion fallback', function (): void {
     $component = file_get_contents(resource_path('js/Components/SubmissionTracking/PambMovProgress.jsx'));
     $styles = file_get_contents(resource_path('css/app.css'));

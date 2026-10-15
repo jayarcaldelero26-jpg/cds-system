@@ -70,6 +70,9 @@ Route::middleware('auth')->group(function () {
     Route::delete('protected-areas/{protectedArea}', [ProtectedAreaController::class, 'destroy'])->middleware('can:protected-areas.delete')->name('protected-areas.destroy');
 
     Route::get('reports', [ReportController::class, 'index'])->middleware('can:reports.view')->name('reports.index');
+    Route::get('pamo/reports', [\App\Http\Controllers\PamoReportWorkspaceController::class, 'index'])->middleware(['unit:conservation', 'can:pamo-reports.view'])->name('pamo-reports.index');
+    Route::get('pamo/archives', [\App\Http\Controllers\PamoArchiveController::class, 'index'])->middleware(['unit:conservation', 'can:pamo-archives.view'])->name('pamo-archives.index');
+    Route::get('pamo/archives/{archive}/file', [\App\Http\Controllers\PamoArchiveController::class, 'file'])->whereNumber('archive')->middleware(['unit:conservation', 'can:pamo-archives.view'])->name('pamo-archives.file');
     Route::get('reports/export/{format}', [ReportController::class, 'export'])->whereIn('format', ['pdf', 'xlsx', 'docx'])->middleware(['can:reports.view', 'can:reports.export'])->name('reports.export');
     Route::get('engp-reports/summary', [EngpReportController::class, 'index'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.summary');
     Route::get('engp-reports/{workflow}', [EngpReportController::class, 'index'])->middleware(['unit:development', 'can:technical-reports.view'])->name('engp-reports.index');
@@ -85,6 +88,11 @@ Route::middleware('auth')->group(function () {
         ->where('attachment', '[A-Za-z0-9_-]+')
         ->name('attachments.show');
     Route::get('submission-tracking', [SubmissionTrackingController::class, 'index'])->middleware('can:submission-tracking.view')->name('submission-tracking.index');
+    Route::get('submission-tracking/archives', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'index'])->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.index');
+    Route::post('submission-tracking/archives/{source}/{record}/receipt', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'receive'])->whereNumber('record')->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.receipts.store');
+    Route::post('submission-tracking/archives/{source}/{record}/archive', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'archive'])->whereNumber('record')->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.store');
+    Route::post('submission-tracking/final-archives/{manifest}/retry', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'retry'])->whereNumber('manifest')->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.retry');
+    Route::get('submission-tracking/final-archives/files/{file}', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'file'])->whereNumber('file')->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.files.show');
     Route::get('submission-tracking/{source}/{record}/routing-attachments/{attachment}', [SubmissionRoutingAttachmentController::class, 'show'])->middleware('can:submission-tracking.view')->name('submission-tracking.routing-attachments.show');
     Route::get('submission-tracking/{source}/{record}/admin-override/options', [AdminRoutingOverrideController::class, 'options'])->middleware(['admin', 'can:submission-tracking.admin-override'])->name('submission-tracking.admin-override.options');
     Route::post('submission-tracking/{source}/{record}/admin-override', [AdminRoutingOverrideController::class, 'execute'])->middleware(['admin', 'can:submission-tracking.admin-override'])->name('submission-tracking.admin-override.execute');
@@ -237,10 +245,14 @@ Route::middleware('auth')->group(function () {
     Route::put('conservation-reports/{workflow}/pamo-drafts/{draft}', [\App\Http\Controllers\PamoPambDraftController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.update');
     Route::post('conservation-reports/{workflow}/pamo-drafts/{draft}/forward', [\App\Http\Controllers\PamoPambDraftController::class, 'forward'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.forward');
     Route::get('conservation-reports/{workflow}/pamo-drafts/{draft}/mov', [\App\Http\Controllers\PamoPambDraftController::class, 'showMov'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.mov');
+    Route::get('conservation-reports/{workflow}/pamo-drafts/{draft}/source-mov', [\App\Http\Controllers\PamoPambDraftController::class, 'showSourceMov'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.pamo-drafts.source-mov');
     Route::post('conservation-reports/{workflow}', [ConservationReportSubmissionController::class, 'store'])->middleware(['unit:conservation', 'can:technical-reports.create', 'pa-preparation:technical-reports'])->name('conservation-reports.store');
     Route::put('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'update'])->middleware(['unit:conservation', 'can:technical-reports.update', 'pa-preparation:technical-reports'])->name('conservation-reports.update');
     Route::delete('conservation-reports/{workflow}/{submission}', [ConservationReportSubmissionController::class, 'destroy'])->middleware(['unit:conservation', 'can:technical-reports.delete'])->name('conservation-reports.destroy');
     Route::get('conservation-reports/{workflow}/{submission}/mov', [ConservationReportSubmissionController::class, 'showMov'])->middleware(['unit:conservation', 'can:technical-reports.view'])->name('conservation-reports.mov');
+    Route::get('pamo-native-reports/{workflow}', [\App\Http\Controllers\PamoNativeReportsController::class, 'index'])->middleware(['unit:conservation', 'can:pamo-native-reports.view'])->name('pamo-native-reports.index');
+    Route::put('pamo-native-reports/{workflow}/records/{record}', [\App\Http\Controllers\PamoNativeReportsController::class, 'updateCorrection'])->whereNumber('record')->middleware(['unit:conservation', 'can:pamo-native-reports.view'])->name('pamo-native-reports.correction.update');
+    Route::get('pamo-native-reports/{workflow}/records/{record}/mov', [\App\Http\Controllers\PamoNativeReportsController::class, 'mov'])->whereNumber('record')->middleware(['unit:conservation', 'can:pamo-native-reports.view'])->name('pamo-native-reports.mov');
     // IPAF ROUTES
     Route::get('ipaf', [IpafController::class, 'index'])->middleware('can:technical-reports.view')->name('ipaf.index');
     Route::redirect('ipaf-collection', '/ipaf')->middleware('can:technical-reports.view')->name('ipaf-collection.index');

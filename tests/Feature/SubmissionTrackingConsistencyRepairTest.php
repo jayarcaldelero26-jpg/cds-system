@@ -46,11 +46,11 @@ test('Super Admin receives active global tracking rows without normal actions', 
         ->and(app(OrganizationalAccessService::class)->canActOnSubmission($admin, $report))->toBeFalse();
 });
 
-test('new registration rejects PAMO instead of deriving a legacy account', function (): void {
+test('new PAMO registration requires a protected area and creates no account without one', function (): void {
     $this->post('/register', [
         'name' => 'Derived PAMO Applicant', 'email' => 'derived-pamo@example.com',
         'operational_group' => 'pamo', 'password' => 'Password!123', 'password_confirmation' => 'Password!123',
-    ])->assertSessionHasErrors('operational_group');
+    ])->assertSessionHasErrors('protected_area_id');
 
     expect(User::where('email', 'derived-pamo@example.com')->exists())->toBeFalse();
 
@@ -58,5 +58,7 @@ test('new registration rejects PAMO instead of deriving a legacy account', funct
         'name' => 'Tampered PAMO Applicant', 'email' => 'tampered-pamo@example.com',
         'operational_group' => 'pamo', 'section' => OrganizationalAccessService::CENRO_FOCAL,
         'password' => 'Password!123', 'password_confirmation' => 'Password!123',
-    ])->assertSessionHasErrors('operational_group');
+    ])->assertSessionHasErrors('protected_area_id');
+
+    expect(User::where('email', 'tampered-pamo@example.com')->exists())->toBeFalse();
 });

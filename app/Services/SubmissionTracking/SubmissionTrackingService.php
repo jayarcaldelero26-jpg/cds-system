@@ -287,6 +287,7 @@ final class SubmissionTrackingService
             && in_array(OrganizationalAccessService::CONSERVATION, $this->organization->effectiveUnits($user), true)) {
             return [
                 'for_submission' => $merge($records->filter(fn (array $record): bool => in_array(data_get($record, 'mov_processing.queue'), ['for_submission', 'for_review', 'for_release'], true)), $genericQueue('pamo_origin')),
+                'correction' => $genericQueue('pamo_correction'),
                 'needs_correction' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'needs_correction')->values(),
                 'release_history' => $records->filter(fn (array $record): bool => data_get($record, 'mov_processing.queue') === 'release_history')->values(),
             ];
@@ -480,6 +481,7 @@ final class SubmissionTrackingService
     {
         $keys = match ($queue) {
             'pamo_origin' => ['forward_from_pamo', 'forward_from_pamo_to_cenro_focal'],
+            'pamo_correction' => ['receive_correction'],
             'cenro_focal' => ['forward_to_cenro_chief'],
             'cenro_correction' => ['receive_correction', 'forward_to_cenro_chief'],
             'cenro_chief' => ['receive_at_cenro_chief', 'forward_to_cenro_records'],
@@ -497,7 +499,7 @@ final class SubmissionTrackingService
             default => [],
         };
 
-        $correctionQueue = in_array($queue, ['cenro_correction', 'cds_correction'], true);
+        $correctionQueue = in_array($queue, ['pamo_correction', 'cenro_correction', 'cds_correction'], true);
         return $records->filter(function (array $record) use ($keys, $correctionQueue): bool {
             if ((bool) data_get($record, 'routing.correction', false) !== $correctionQueue) return false;
             return collect(data_get($record, 'routing.actions', []))->pluck('key')->intersect($keys)->isNotEmpty();
@@ -682,9 +684,35 @@ final class SubmissionTrackingService
         if (! $user) return false;
 
         if ($this->pambAccess->isPamo($user)) {
-            return ($row['pamb_routing_applicable'] ?? false)
-                && ! ($row['routing_complete'] ?? false)
-                && (bool) data_get($row, 'pamb_action_flags.can_submit');
+            if (($row['pamb_routing_applicable'] ?? false)
+                && ! ($row['canonical_custody_applicable'] ?? false)) {
+                return ! ($row['routing_complete'] ?? false)
+                    && (bool) data_get($row, 'pamb_action_flags.can_submit');
+            }
+
+            // PAMO-origin canonical Conservation records use the shared
+            // custody graph rather than the separate PAMB MOV queue. A
+            // returned record remains actionable at the captured PAMO office
+            // while the correction is received, edited, and resubmitted.
+            if (($row['source'] ?? null) !== 'conservation'
+                || ($row['routing_complete'] ?? false)
+                || data_get($row, 'routing.current_stage') !== DocumentRoutingProfileRegistry::PAMO_ORIGIN
+                || $this->organization->normalizeCategory(data_get($row, 'routing.responsible_user_category')) !== OrganizationalAccessService::PAMO) {
+                return false;
+            }
+
+            $areaId = (int) ($row['protected_area_id'] ?? 0);
+            if ($areaId <= 0 || (int) $user->protected_area_id !== $areaId
+                || ! $this->organization->canViewPamoPilotWorkflow($user)) {
+                return false;
+            }
+
+            $facts = $this->organization->pamoAssignmentForProtectedArea($areaId);
+            $capturedOffice = data_get($row, 'routing.route_position.pamo_office_name');
+
+            return $facts !== null
+                && $this->organization->normalizeOffice($capturedOffice) === $this->organization->normalizeOffice($facts['pamo_office_name'])
+                && $this->organization->normalizeOffice($user->office_designated) === $this->organization->normalizeOffice($facts['pamo_office_name']);
         }
 
         $category = $this->organization->effectiveCategory($user);
@@ -867,6 +895,21 @@ final class SubmissionTrackingService
     public function source(string $key): ?array
     {
         return $this->sources()[$key] ?? null;
+    }
+
+    /** Reuse the tracking workspace's source and actor scope for archive reads. */
+    public function archiveSourceQuery(string $key, array $filters = []): ?\Illuminate\Database\Eloquent\Builder
+    {
+        $source = $this->sources()[$key] ?? null;
+        if (! $source || ! auth()->user()) return null;
+
+        return $this->sourceQuery($key, $source, $filters, false);
+    }
+
+    /** @return list<string> */
+    public function archiveSourceKeys(): array
+    {
+        return array_keys($this->sources());
     }
 
     /** Build one authorization-first query for a registered active source. */

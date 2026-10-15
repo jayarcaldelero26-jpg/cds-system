@@ -9,7 +9,8 @@ export function presentOperationalStatus(value) {
     const pendingSubmission = context.match(/^Pending Submission by (.+)$/i);
     const compact = Boolean(pendingSubmission)
         || PENDING_ROUTE_STATUSES.has(normalized)
-        || /^awaiting forward to .+$/i.test(context)
+        || /^awaiting (forward|release) to .+$/i.test(context)
+        || /^awaiting resubmission to .+$/i.test(context)
         || /^awaiting receipt by .+$/i.test(context);
     const displayContext = pendingSubmission
         ? `Submission by ${pendingSubmission[1].trim()}`

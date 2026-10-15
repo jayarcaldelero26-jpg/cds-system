@@ -43,6 +43,46 @@ final class ArchiveOfficeResolver
         return (string) $matches->first()->name;
     }
 
+    /** Resolve the originating office for final Regional-return copies, including direct-PENRO PA assignments. */
+    public function resolveRegionalReturn(array $source, Model $record): string
+    {
+        $officeResolver = $source['archive_office'] ?? null;
+        $officeAttribute = $source['archive_office_attribute'] ?? $source['target_office'] ?? 'target_office';
+        $rawOffice = is_callable($officeResolver)
+            ? $officeResolver($record)
+            : (is_string($officeAttribute) ? $record->getAttribute($officeAttribute) : null);
+        $officeName = is_string($rawOffice) ? $this->organization->normalizeOffice($rawOffice) : null;
+        if (! $officeName) $this->unmapped();
+
+        if (in_array($officeName, $this->organization->cenroOffices(), true)) {
+            return $this->resolve($source, $record);
+        }
+
+        $matches = OrganizationalOffice::query()
+            ->where('is_active', true)
+            ->where('office_type', 'penro')
+            ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower($officeName)])
+            ->limit(2)
+            ->get(['id', 'name']);
+        if ($matches->count() !== 1
+            || ! in_array($officeName, $this->organization->penroOffices(), true)
+            || ! in_array($officeName, $this->organization->activeOfficeNames(), true)) {
+            $this->unmapped();
+        }
+
+        $protectedAreaId = (int) $record->getAttribute('protected_area_id');
+        if ($protectedAreaId > 0) {
+            $supervisingOffice = $this->organization->supervisingOfficeNameForProtectedArea($protectedAreaId);
+            if (! filled($supervisingOffice) || mb_strtolower(trim($supervisingOffice)) !== mb_strtolower($officeName)) {
+                $this->unmapped();
+            }
+        } elseif (($source['archive_unit'] ?? null) !== 'Development Unit') {
+            $this->unmapped();
+        }
+
+        return (string) $matches->first()->name;
+    }
+
     private function supervisingCenroFor(Model $record): ?OrganizationalOffice
     {
         if (! filled($record->getAttribute('protected_area_id'))) {

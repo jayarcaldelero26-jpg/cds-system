@@ -328,7 +328,7 @@ test('Full Details hides duplicate inline routing history while Review history k
     const timeline = renderToStaticMarkup(React.createElement(RoutingTimeline, { row, hideRoutingHistory: true }));
     const history = renderToStaticMarkup(React.createElement(ReviewHistory, { row: { routing: { routing_history: routingHistory } } }));
     assert.doesNotMatch(timeline, /Complete Routing \/ Correction History|First cycle correction|cycle-one\.pdf/);
-    assert.match(timeline, /Canonical Routing Progress/);
+    assert.match(timeline, /Routing Progress/);
     assert.equal((history.match(/Returned for Correction/g) || []).length, 2);
     assert.match(history, /Admin Override/);
     assert.match(history, /Override for: CENRO CDS Chief/);
@@ -388,6 +388,38 @@ test('routing timeline omits absent summary values and wraps long office destina
     assert.match(markup, new RegExp(destination));
     assert.match(markup, /break-words/);
     assert.doesNotMatch(markup, /Last Updated|Recorded By/);
+});
+
+test('synthetic PAMO origin renders provenance without an invented incoming handoff', () => {
+    const markup = renderToStaticMarkup(React.createElement(RoutingTimeline, {
+        row: {
+            can_transition: false,
+            routing: {
+                profile_label: 'Conservation routing',
+                actions: [],
+                routing_history: [],
+                timeline: [{
+                    key: 'pamo_origin',
+                    label: 'Report prepared by PAMO',
+                    status: 'completed',
+                    display_status: 'completed',
+                    display_status_label: 'Origin',
+                    event_type: 'origin',
+                    from: null,
+                    to: null,
+                    office: 'PAMO Aliwagwag',
+                    occurred_at: null,
+                }],
+            },
+        },
+    }));
+
+    assert.match(markup, /Routing Progress/);
+    assert.match(markup, /Shows the completed, current and upcoming stages of this report\./);
+    assert.match(markup, /Report prepared by PAMO/);
+    assert.match(markup, />Origin<\/span>/);
+    assert.match(markup, /Office: PAMO Aliwagwag/);
+    assert.doesNotMatch(markup, /From:|To:|STAGE/);
 });
 
 test('terminal release presents Completed without a Current badge, pending age, or routing action', () => {
@@ -618,13 +650,31 @@ test('Manual PAMB canonical workspace payload renders through the shared details
     const markup = renderToStaticMarkup(React.createElement(RoutingTimeline, { row }));
     const progress = renderToStaticMarkup(React.createElement(Progress, { row }));
 
-    assert.match(markup, /Canonical Routing Progress/);
-    assert.match(markup, /CENRO-to-PENRO canonical routing/);
+    assert.match(markup, /Routing Progress/);
+    assert.match(markup, /Shows the completed, current and upcoming stages of this report\./);
+    assert.doesNotMatch(markup, /CENRO-to-PENRO canonical routing/);
     assert.match(markup, /Forwarded to CENRO CDS Chief/);
     assert.match(markup, /CENRO CDS Focal Person/);
     assert.match(markup, /Receive/);
     assert.match(progress, /aria-valuenow="20"/);
     assert.doesNotMatch(markup, /PAMB detailed routing|MOV Review/);
+});
+
+test('PAMO tracking labels stay distinct while the general tracking labels remain intact', () => {
+    const pamoEmpty = renderToStaticMarkup(React.createElement(SidebarDetails, { row: null, pamoWorkspace: true }));
+    const generalEmpty = renderToStaticMarkup(React.createElement(SidebarDetails, { row: null }));
+    assert.match(pamoEmpty, /No report selected/);
+    assert.match(pamoEmpty, /There are no reports available in this view/);
+    assert.match(generalEmpty, /No submission selected/);
+    assert.match(generalEmpty, /There are no records available in this queue/);
+    assert.match(submissionTrackingSource, /incoming: "For Action"/);
+    assert.match(submissionTrackingSource, /outgoing: "Sent Reports"/);
+    assert.match(submissionTrackingSource, /history: "Completed Reports"/);
+    assert.match(submissionTrackingSource, /incoming: "Incoming Submissions"/);
+    assert.match(submissionTrackingSource, /outgoing: "Outgoing Submissions"/);
+    assert.match(submissionTrackingSource, /history: "Submission History"/);
+    assert.match(submissionTrackingSource, /Recipient's Next Expected Action/);
+    assert.match(submissionTrackingSource, /Shown for reference at the destination office/);
 });
 
 test('user organization details render saved office and protected-area assignments', () => {

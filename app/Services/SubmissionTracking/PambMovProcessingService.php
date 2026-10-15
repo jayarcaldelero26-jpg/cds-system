@@ -207,7 +207,7 @@ final class PambMovProcessingService
     public function submit(ConservationReportSubmission $submission, User $actor): void
     {
         $this->assertScoped($submission, $actor);
-        abort_unless($this->access->canPerform($actor, 'submit'), 403);
+        abort_unless($this->access->canPerformForSubmission($actor, 'submit', $submission), 403);
         if (! $submission->mov_file_path) throw ValidationException::withMessages(['mov' => 'Upload the MOV/report before submitting it for review.']);
 
         DB::transaction(function () use ($submission, $actor): void {
@@ -217,6 +217,7 @@ final class PambMovProcessingService
             // A repeated request for the same review cycle is a safe no-op.
             // The lock also closes the race between two rapid submissions.
             if ($status === self::SUBMITTED_FOR_REVIEW) return;
+            abort_unless($this->access->canPerformForSubmission($actor, 'submit', $locked), 403);
             if (! in_array($status, [self::ACTIVITY_CONDUCTED, self::NEEDS_CORRECTION], true)) throw ValidationException::withMessages(['status' => 'This MOV/report is not available for submission.']);
 
             $isResubmission = $locked->movReviewEvents()->where('event_key', self::NEEDS_CORRECTION)->exists();

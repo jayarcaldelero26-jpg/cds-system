@@ -250,7 +250,11 @@ function routingPositionRegressionNotices(string $source, int $recordId): Collec
 }
 
 beforeEach(function (): void {
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => false,
+    ]);
 });
 
 test('the effective graph preserves the all-enabled contract and resolves all four independent branches', function (): void {
@@ -298,6 +302,7 @@ test('the effective graph preserves the all-enabled contract and resolves all fo
 });
 
 test('new routes capture one immutable settings version and execute the actual Records, receipt, and final recommendation actions', function (): void {
+    config(['services.document_archive.final_return_archive_enabled' => true]);
     $focal = positionControlActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $cenroChief = positionControlActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
     $cenroRecords = positionControlActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
@@ -379,12 +384,10 @@ test('new routes capture one immutable settings version and execute the actual R
         }
         expect($beforeKeys)->toContain($case['dispatch']);
         $dispatchEvent = positionControlTransition($routing, $record, $case['dispatch'], $penroRecords);
-        $archive = DocumentArchive::query()->where('source_type', 'bms')->where('source_id', $record->id)->where('logical_slot', 'mov')->firstOrFail();
-        $archiveContext = collect($archiveFake->archiveContexts())->last();
-        expect(data_get($dispatchEvent->metadata, 'routing_checkpoint'))->toBe('penro_records_initial_dispatch')
+        expect(data_get($dispatchEvent->metadata, 'routing_checkpoint'))->toBeNull()
             ->and(data_get($dispatchEvent->metadata, 'route_snapshot_id'))->toBe($captured->id)
-            ->and($archive->archive_status)->toBe('ARCHIVED')
-            ->and(data_get($archiveContext, 'context.folder_path'))->toBe(['Conservation Unit', 'CENRO Mati', 'BMS']);
+            ->and(DocumentArchive::query()->where('source_type', 'bms')->where('source_id', $record->id)->exists())->toBeFalse()
+            ->and($archiveFake->uploadAttempts())->toBe(0);
 
         $recipient = match ($case['next']) {
             OrganizationalAccessService::OFFICE_PENRO => $office,
@@ -849,7 +852,11 @@ test('Regular PAMB Special PAMB and TWC execute all four saved graphs through re
 });
 
 test('direct MHRWS Regular PAMB Special PAMB and TWC execute all four saved graphs through HTTP', function (): void {
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => true,
+    ]);
     $this->seed(ModuleDefinitionSeeder::class);
     Storage::fake('local');
     $gateway = new FakeDocumentArchiveGateway();
@@ -907,8 +914,9 @@ test('direct MHRWS Regular PAMB Special PAMB and TWC execute all four saved grap
             $event = routingPositionRegressionTransition('conservation', $report, $dispatch, $penroRecords);
             expect(data_get($event->metadata, 'route_profile'))->toBe('direct')
                 ->and(data_get($event->metadata, 'route_snapshot_id'))->toBe($snapshot->getKey())
-                ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->where('logical_slot', 'mov')->value('archive_status'))->toBe('ARCHIVED')
-                ->and(data_get(collect($gateway->archiveContexts())->last(), 'context.folder_path.1'))->toBe('CENRO Mati');
+                ->and(data_get($event->metadata, 'routing_checkpoint'))->toBeNull()
+                ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->exists())->toBeFalse()
+                ->and($gateway->uploadAttempts())->toBe(0);
 
             if ($officeEnabled) {
                 routingPositionRegressionTransition('conservation', $report, 'receive_at_office_penro', $office);

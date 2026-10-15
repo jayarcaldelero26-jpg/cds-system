@@ -35,6 +35,31 @@ test('same originating/current office is represented once, while a different cur
     assert.equal(new Map(reportContextFields(moved)).get('Originating Office'), 'CENRO Baganga');
 });
 
+test('PAMO route context keeps captured origin, protected area, and receiving/current office separate', () => {
+    const pending = {
+        target_office: 'CENRO Baganga',
+        protected_area: 'Aliwagwag Protected Landscape',
+        routing: {
+            originating_office: 'APL-PAMO',
+            responsible_office: 'CENRO Baganga',
+            responsible_user_category: 'CENRO CDS Focal Person',
+            current_stage: 'transit_to_cenro_focal',
+            route_position: { origin_kind: 'pamo_pamb', pamo_office_name: 'APL-PAMO' },
+        },
+    };
+    const pendingFields = new Map(reportContextFields(pending));
+    assert.equal(pendingFields.get('Originating Office'), 'APL-PAMO');
+    assert.equal(pendingFields.get('Protected Area'), 'Aliwagwag Protected Landscape');
+    assert.equal(pendingFields.get('Receiving Office'), 'CENRO Baganga');
+    assert.equal(pendingFields.has('Originating / Current Office'), false);
+
+    const receivedFields = new Map(reportContextFields({
+        ...pending,
+        routing: { ...pending.routing, current_stage: 'cenro_preparation' },
+    }));
+    assert.equal(receivedFields.get('Current Office'), 'CENRO Baganga');
+});
+
 test('duplicate activity is omitted and ENGP absent PA/receipt are not invented', () => {
     const fields = new Map(reportContextFields({ module: 'Regular PAMB', activity_name: 'Regular PAMB', document_type: 'Minutes' }, true));
     assert.equal(fields.has('Activity'), false);

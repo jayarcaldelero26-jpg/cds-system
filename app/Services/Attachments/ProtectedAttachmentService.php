@@ -239,6 +239,9 @@ final class ProtectedAttachmentService
             'type' => $info['mime_type'],
             'size' => $info['size'],
             'url' => $this->url($source, $record, $key),
+            'preview_url' => $this->url($source, $record, $key).'?preview=1',
+            'download_url' => $this->url($source, $record, $key).'?download=1',
+            'protected' => true,
             'external' => false,
         ];
     }
@@ -284,6 +287,7 @@ final class ProtectedAttachmentService
             'url' => $url,
             'preview_url' => $previewUrl,
             'download_url' => $url.'?download=1',
+            'protected' => true,
             'external' => false,
         ];
     }

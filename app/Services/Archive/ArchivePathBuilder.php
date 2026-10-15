@@ -9,7 +9,7 @@ use RuntimeException;
 final class ArchivePathBuilder
 {
     /** @return array{unit:string,office:string,module:string,segments:list<string>,filename:string} */
-    public function build(ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $filenameBase): array
+    public function build(ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $filenameBase, string $extension = 'pdf', bool $allowPenroOffice = false): array
     {
         if (! $module->is_active || $module->isRetired() || ! filled($module->name)) {
             throw new RuntimeException('The active submission module is unmapped for archive storage.');
@@ -19,11 +19,13 @@ final class ArchivePathBuilder
         }
 
         $officeName = $this->safeSegment($archiveOffice);
-        if (! str_starts_with($officeName, 'CENRO ')) {
+        if (! str_starts_with($officeName, 'CENRO ') && ! ($allowPenroOffice && str_starts_with($officeName, 'PENRO '))) {
             throw new RuntimeException('The active submission source has no defensible CENRO archive office.');
         }
         $moduleName = $this->safeSegment((string) $module->name);
-        $filename = $this->safePdfFilename($filenameBase);
+        $filename = strtolower($extension) === 'pdf'
+            ? $this->safePdfFilename($filenameBase)
+            : $this->safeFilenameWithExtension($filenameBase, $extension);
 
         return [
             'unit' => $archiveUnit,
@@ -70,5 +72,20 @@ final class ArchivePathBuilder
         $stem = rtrim(mb_substr($this->safeFilename($stem), 0, 251), ' .');
 
         return $stem.'.pdf';
+    }
+
+    private function safeFilenameWithExtension(string $filenameBase, string $extension): string
+    {
+        $extension = strtolower(preg_replace('/[^a-z0-9]+/i', '', $extension) ?? '');
+        if ($extension === '') throw new RuntimeException('The archive filename extension is unsafe.');
+
+        $stem = pathinfo($filenameBase, PATHINFO_FILENAME);
+        $stem = trim($this->safeFilename($stem), " .\t\n\r\0\x0B");
+        if ($stem === '' || in_array($stem, ['.', '..'], true)) {
+            throw new RuntimeException('The archive filename is unsafe.');
+        }
+
+        $stem = rtrim(mb_substr($stem, 0, max(1, 254 - mb_strlen($extension))), ' .');
+        return $stem.'.'.$extension;
     }
 }

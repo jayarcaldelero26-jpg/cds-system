@@ -258,6 +258,7 @@ final class DocumentRoutingTransitionService
     {
         if (! $actor || ! $actor->is_active) return false;
         if (app(OrganizationalAccessService::class)->isGlobal($actor)) return true;
+        if ($this->access->canViewPamoOriginConservationDocument($actor, $record, $sourceKey)) return true;
 
         $resolvedEvents = $resolvedState['events'] ?? null;
         $state = $resolvedEvents instanceof Collection && $this->stateMatches($record, $sourceKey, $resolvedEvents, $resolvedState)
@@ -277,6 +278,11 @@ final class DocumentRoutingTransitionService
         }
 
         return $this->canAccessAsPriorRecordsCustodian($record, $sourceKey, $actor, $state);
+    }
+
+    public function canAccessPamoOriginCurrentDocument(EloquentModel $record, string $sourceKey, ?User $actor): bool
+    {
+        return $actor !== null && $this->access->canViewPamoOriginConservationDocument($actor, $record, $sourceKey);
     }
 
     /**

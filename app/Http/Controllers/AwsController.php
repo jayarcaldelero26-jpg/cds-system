@@ -873,7 +873,7 @@ class AwsController extends Controller
         return $record;
     }
 
-    private function validationRules(bool $fileRequired, ?string $legacyDocumentType = null): array
+    public function validationRules(bool $fileRequired, ?string $legacyDocumentType = null): array
     {
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
@@ -902,7 +902,7 @@ class AwsController extends Controller
     }
 
     /** @param array<string, mixed> $validated */
-    private function assertNoFutureActualDates(array $validated, ?Aws $existing = null): void
+    public function assertNoFutureActualDates(array $validated, ?Aws $existing = null): void
     {
         $dates = app(\App\Services\ActualActivityDateGuard::class);
         // AWS report rows use these as actual activity dates. Monitoring and
@@ -911,7 +911,7 @@ class AwsController extends Controller
         $dates->assertNotFuture($validated['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $existing?->date_accomplished);
     }
 
-    private function normalizeReportInput(Request $request): void
+    public function normalizeReportInput(Request $request): void
     {
         if ($request->has('remarks') && ! $request->has('recommendation_remarks')) {
             $request->merge(['recommendation_remarks' => $request->input('remarks')]);
@@ -927,7 +927,7 @@ class AwsController extends Controller
     }
 
     /** @param array<string, mixed> $validated */
-    private function deriveCanonicalPeriod(array $validated, ?Aws $existing = null): array
+    public function deriveCanonicalPeriod(array $validated, ?Aws $existing = null): array
     {
         $start = $validated['monitoring_period_start'] ?? $existing?->monitoring_period_start;
         $end = $validated['monitoring_period_end'] ?? $existing?->monitoring_period_end;
@@ -957,7 +957,7 @@ class AwsController extends Controller
         return $validated;
     }
 
-    private function validateMonitoringPeriod(array $validated): void
+    public function validateMonitoringPeriod(array $validated): void
     {
         $start = CarbonImmutable::parse($validated['monitoring_period_start']);
         $end = CarbonImmutable::parse($validated['monitoring_period_end']);

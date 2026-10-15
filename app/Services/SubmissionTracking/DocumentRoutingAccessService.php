@@ -3,6 +3,7 @@
 namespace App\Services\SubmissionTracking;
 
 use App\Models\ConservationReportSubmission;
+use App\Models\PamoPambDraft;
 use App\Models\SubmissionRoutingSnapshot;
 use Illuminate\Database\Eloquent\Model;
 use App\Models\User;
@@ -17,16 +18,49 @@ final class DocumentRoutingAccessService
     public function canView(User $user, Model $record, string $sourceKey, ?string $ability = null): bool
     {
         if ($this->organization->isGlobal($user)) return true;
-        if ($ability && ! $this->organization->canUseSubmissionTrackingSource($user, $sourceKey, $ability)) return false;
-        if ($this->organization->effectiveCategory($user) === OrganizationalAccessService::PAMO) {
-            return $sourceKey === 'conservation'
-                && $record instanceof ConservationReportSubmission
-                && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key)
-                && $this->organization->canViewSubmission($user, $record);
+        $isPamo = $this->organization->effectiveCategory($user) === OrganizationalAccessService::PAMO;
+        if (! $isPamo && $ability && ! $this->organization->canUseSubmissionTrackingSource($user, $sourceKey, $ability)) return false;
+        if ($isPamo) {
+            if ($sourceKey === 'conservation') {
+                return $record instanceof ConservationReportSubmission
+                    && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key)
+                    && $this->organization->canViewSubmission($user, $record);
+            }
+            return $this->canViewPamoNativeRecord($user, $record, $sourceKey);
         }
         return $sourceKey === 'engp'
             ? $this->organization->canViewDevelopmentRecord($user, $record)
             : $this->organization->canAccessProtectedAreaRecord($user, $record);
+    }
+
+    /** PAMO may preview only the Conservation source row linked to its forwarded, captured origin draft. */
+    public function canViewPamoOriginConservationDocument(User $user, Model $record, string $sourceKey): bool
+    {
+        if ($sourceKey !== 'conservation' || ! $record instanceof ConservationReportSubmission
+            || ! $user->is_active || ! $user->is_approved
+            || ! $this->organization->canViewPamoPilotWorkflow($user)
+            || ! app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)
+                ->supportsPamoSubmission((string) $record->workflow_key)) return false;
+
+        $areaId = (int) $record->protected_area_id;
+        if ($areaId <= 0 || (int) $user->protected_area_id !== $areaId
+            || ! $this->organization->canAccessProtectedArea($user, $areaId)) return false;
+
+        $facts = $this->organization->pamoAssignmentForProtectedArea($areaId);
+        if (! $facts || ! Schema::hasTable('submission_routing_snapshots')) return false;
+        $position = SubmissionRoutingSnapshot::query()
+            ->where('source_key', $sourceKey)->where('source_id', $record->getKey())->first();
+        if (! $position || $position->origin_kind !== 'pamo_pamb'
+            || (int) $position->protected_area_id !== $areaId
+            || (int) $position->pamo_office_id !== (int) $facts['pamo_office_id']) return false;
+
+        return PamoPambDraft::query()
+            ->where('workflow_key', $record->workflow_key)
+            ->where('protected_area_id', $areaId)
+            ->where('pamo_office_id', $facts['pamo_office_id'])
+            ->where('status', 'forwarded')
+            ->where('conservation_report_submission_id', $record->getKey())
+            ->exists();
     }
 
     /** @param array<string,mixed> $action */
@@ -51,6 +85,7 @@ final class DocumentRoutingAccessService
             if (! $this->organization->canAccessProtectedArea($user, $record->getAttribute('protected_area_id'))) return false;
             $facts = $this->organization->pamoAssignmentForProtectedArea((int) $record->getAttribute('protected_area_id'));
             if (! $facts) return false;
+            if ($sourceKey !== 'conservation' && ! $this->isPamoNativeOrigin($user, $record, $sourceKey, $facts)) return false;
             $position = Schema::hasTable('submission_routing_snapshots')
                 ? SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $record->getKey())->first()
                 : null;
@@ -89,5 +124,45 @@ final class DocumentRoutingAccessService
     private function same(?string $left, ?string $right): bool
     {
         return filled($left) && filled($right) && mb_strtolower(trim($left)) === mb_strtolower(trim($right));
+    }
+
+    private function canViewPamoNativeRecord(User $user, Model $record, string $sourceKey): bool
+    {
+        $registry = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+        if (! $registry->isSchemaReady() || ! $this->organization->canViewPamoPilotWorkflow($user)
+            || ! $this->organization->canAccessProtectedArea($user, $record->getAttribute('protected_area_id'))) return false;
+        $registered = $registry->findBySource($sourceKey);
+        if (! $registered) return false;
+        $workflow = $registered['workflow'];
+        $definition = $registered['definition'];
+        if (! $registry->isEligible($workflow) || ! $record instanceof $definition['model']) return false;
+        $areaId = (int) $record->getAttribute('protected_area_id');
+        $facts = $this->organization->pamoAssignmentForProtectedArea($areaId);
+        if (! $facts || (int) $user->protected_area_id !== $areaId) return false;
+        return true;
+    }
+
+    /** Native PAMO routing actions are limited to reports promoted from this actor's linked draft. */
+    private function isPamoNativeOrigin(User $user, Model $record, string $sourceKey, array $facts): bool
+    {
+        $registry = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+        if (! $registry->isSchemaReady()) return false;
+        $registered = $registry->findBySource($sourceKey);
+        if (! $registered || ! $registry->isEligible($registered['workflow'])) return false;
+        $definition = $registered['definition'];
+        $linked = PamoPambDraft::query()
+            ->where('workflow_key', $registered['workflow'])
+            ->where('protected_area_id', $record->getAttribute('protected_area_id'))
+            ->where('pamo_office_id', $facts['pamo_office_id'])
+            ->where('status', 'forwarded')
+            ->where($definition['column'], $record->getKey())
+            ->exists();
+        if (! $linked) return false;
+        $position = SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $record->getKey())->first();
+
+        return $position?->origin_kind === 'pamo_pamb'
+            && (int) $position->protected_area_id === (int) $record->getAttribute('protected_area_id')
+            && (int) $position->pamo_office_id === (int) $facts['pamo_office_id']
+            && (int) $user->protected_area_id === (int) $record->getAttribute('protected_area_id');
     }
 }

@@ -189,7 +189,13 @@ final class OrganizationalAccessService
     {
         if (! $this->canViewSubmissionTracking($user)) return false;
         if ($this->isGlobal($user)) return true;
-        if ($this->effectiveCategory($user) === self::PAMO) return $source === 'conservation';
+        if ($this->effectiveCategory($user) === self::PAMO) {
+            if ($source === 'conservation') return true;
+            $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->findBySource($source);
+            return $native !== null
+                && app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->isEligible($native['workflow'])
+                && $this->canViewPamoPilotWorkflow($user);
+        }
         if ($source === 'engp') return in_array(self::DEVELOPMENT, $this->effectiveUnits($user), true);
         return in_array(self::CONSERVATION, $this->effectiveUnits($user), true);
     }

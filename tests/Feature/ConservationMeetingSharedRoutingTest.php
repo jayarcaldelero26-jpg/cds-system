@@ -20,11 +20,10 @@ use Inertia\Testing\AssertableInertia as Assert;
 function meetingSharedActor(string $category, string $office): User
 {
     $user = User::factory()->create([
-        'unit_assignment' => OrganizationalAccessService::CONSERVATION,
         'section' => $category,
         'office_designated' => $office,
     ]);
-    foreach (['reports.view', 'technical-reports.update'] as $permission) {
+    foreach (['reports.view', 'technical-reports.update', 'submission-tracking.view'] as $permission) {
         $user->givePermissionTo(Permission::findOrCreate($permission, 'web'));
     }
     return $user;
@@ -59,6 +58,16 @@ function meetingSharedReport(string $workflow, User $owner, bool $direct = false
     ]);
 }
 
+function meetingSharedTransition(DocumentRoutingTransitionService $routing, ConservationReportSubmission $report, string $workflow, string $action, User $actor): DocumentRoutingEvent
+{
+    try {
+        return $routing->transition($report->fresh(), 'conservation', $action, $actor->getKey());
+    } catch (\Throwable $exception) {
+        $status = $exception instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface ? $exception->getStatusCode() : $exception->getCode();
+        throw new RuntimeException("{$workflow} {$action} failed for {$actor->section} at {$actor->office_designated} (".$exception::class.", {$status}): ".$exception->getMessage(), 0, $exception);
+    }
+}
+
 test('Regular Special and TWC meetings use the shared Conservation route end to end with an independent MOV gate', function (string $workflow): void {
     config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
     Storage::fake('local');
@@ -71,6 +80,7 @@ test('Regular Special and TWC meetings use the shared Conservation route end to 
     $penroFocal = meetingSharedActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
     $penroChief = meetingSharedActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
     $report = meetingSharedReport($workflow, $focal);
+    Storage::disk('local')->put($report->mov_file_path, "%PDF-1.4\n{$workflow} source MOV for independent dispatch checkpoint");
     $routing = app(DocumentRoutingTransitionService::class);
     $mov = app(PambMovProcessingService::class);
 
@@ -80,12 +90,11 @@ test('Regular Special and TWC meetings use the shared Conservation route end to 
         ->and($initial['allowed_actions'])->toBe([]);
 
     $this->actingAs($focal)->post(route('submission-tracking.mov.submit-review', ['source' => 'conservation', 'record' => $report->id]))->assertRedirect();
-    $mov->submit($report->fresh()->load('protectedArea'), $focal);
     expect(collect($routing->presentation($report->fresh(), 'conservation', null, $focal)['allowed_actions'])->pluck('key')->all())
         ->toBe(['forward_to_cenro_chief']);
 
-    $routing->transition($report->fresh(), 'conservation', 'forward_to_cenro_chief', $focal->id);
-    $routing->transition($report->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
+    meetingSharedTransition($routing, $report, $workflow, 'forward_to_cenro_chief', $focal);
+    meetingSharedTransition($routing, $report, $workflow, 'receive_at_cenro_chief', $chief);
     $mov->review($report->fresh()->load('protectedArea'), $chief, PambMovProcessingService::READY_FOR_RELEASE);
     $ready = $routing->presentation($report->fresh(), 'conservation', null, $chief);
     expect($ready['stage'])->toBe(DocumentRoutingProfileRegistry::CENRO_CHIEF)
@@ -103,7 +112,7 @@ test('Regular Special and TWC meetings use the shared Conservation route end to 
         [$office, 'approve_for_regional_release'], [$penroRecords, 'receive_at_penro_records_final'],
         [$penroRecords, 'release_to_regional'],
     ];
-    foreach ($steps as [$actor, $action]) $routing->transition($report->fresh(), 'conservation', $action, $actor->id);
+    foreach ($steps as [$actor, $action]) meetingSharedTransition($routing, $report, $workflow, $action, $actor);
 
     $complete = $report->fresh();
     expect($routing->state($complete, 'conservation')['stage'])->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL)

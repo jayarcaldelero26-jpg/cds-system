@@ -113,12 +113,16 @@ test('Super Admin retains global conservation navigation and administration', fu
 });
 
 test('sidebar filters unauthorized children before hiding empty parents', function () {
-    $source = file_get_contents(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
+    $layout = file_get_contents(resource_path('js/Layouts/AuthenticatedLayout.jsx'));
+    $navigation = file_get_contents(resource_path('js/Layouts/navigation.mjs'));
 
-    expect($source)
+    expect($layout)
+        ->toContain("import { buildSidebarNavigation } from './navigation.mjs';")
+        ->toContain('buildSidebarNavigation(allNavigation, genericModuleNavigation, safeAuth');
+
+    expect($navigation)
         ->toContain('if (item.permission && !auth[item.permission]) return null;')
-        ->toContain('if (item.children && !children?.length) return null;')
-        ->toContain('safeAuth,');
+        ->toContain('if (item.children && !children?.length) return null;');
 });
 test('scoped conservation read access returns only authorized specialized records', function (): void {
     $user = conservationNavigationUser('CENRO_CDS_CHIEF');

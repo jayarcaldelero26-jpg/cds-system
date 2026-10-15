@@ -286,11 +286,10 @@ export default function PambRoutingTimeline({
             <section className="space-y-3">
                 <div>
                     <h3 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">
-                        Routing Timeline
+                        Routing Progress
                     </h3>
                     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Detailed internal routing records real-world events;
-                        CDS-SMART does not transmit documents.
+                        Shows the completed, current and upcoming stages of this report. Detailed internal routing records real-world events; CDS-SMART does not transmit documents.
                     </p>
                 </div>
                 {row.cenro_release_applicable === false && (

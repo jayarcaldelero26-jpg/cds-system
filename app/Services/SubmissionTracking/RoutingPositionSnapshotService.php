@@ -210,12 +210,14 @@ final class RoutingPositionSnapshotService
             return $scopeCurrentProfile($query);
         }
 
-        return $query->where(function (Builder $effectiveProfile) use ($source, $table, $profile, $scopeCurrentProfile): void {
-            $effectiveProfile->whereExists(function ($snapshot) use ($source, $table, $profile): void {
+        $capturedProfiles = $profile === 'regular' ? ['regular', 'pamo_regular'] : ['direct', 'pamo_direct'];
+
+        return $query->where(function (Builder $effectiveProfile) use ($source, $table, $capturedProfiles, $scopeCurrentProfile): void {
+            $effectiveProfile->whereExists(function ($snapshot) use ($source, $table, $capturedProfiles): void {
                 $snapshot->selectRaw('1')
                     ->from('submission_routing_snapshots as captured_route')
                     ->where('captured_route.source_key', $source)
-                    ->where('captured_route.profile', $profile)
+                    ->whereIn('captured_route.profile', $capturedProfiles)
                     ->whereColumn('captured_route.source_id', $table.'.id');
             })->orWhere(function (Builder $uncaptured) use ($source, $table, $scopeCurrentProfile): void {
                 $uncaptured->whereNotExists(function ($snapshot) use ($source, $table): void {

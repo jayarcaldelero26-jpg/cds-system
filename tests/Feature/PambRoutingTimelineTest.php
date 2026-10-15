@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Models\DocumentArchive;
 use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\Archive\CompletedReportArchiveHook;
+use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\DocumentRoutingPresenter;
@@ -393,6 +394,42 @@ test('disabled PAMB forwarding archive checkpoint blocks the forward without und
         ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->get()->map(fn (DocumentRoutingEvent $event) => data_get($event->metadata, 'action_key'))->all())->toBe(['receive_at_penro_records'])
         ->and($report->fresh()->routingEvents()->exists())->toBeFalse()
         ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
+});
+
+test('enabled final return lifecycle retires the legacy PAMB dispatch checkpoint without provider calls', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    $this->user->update([
+        'section' => OrganizationalAccessService::PENRO_RECORDS,
+        'unit_assignment' => 'conservation',
+        'office_designated' => 'PENRO Davao Oriental',
+    ]);
+    config([
+        'services.document_archive.final_return_archive_enabled' => true,
+        'services.google_drive_archive.enabled' => false,
+        'services.document_archive.driver' => 'fake',
+    ]);
+    Storage::fake('local');
+    $path = 'conservation-report-movs/legacy-pamb-retarget.pdf';
+    $report = timelinePambReport($this, [
+        'date_report_released_cenro' => '2026-08-04',
+        'mov_file_path' => $path,
+        'mov_file_name' => 'Legacy PAMB dispatch.pdf',
+    ]);
+    Storage::disk('local')->put($path, "%PDF-1.4\nLegacy PAMB checkpoint fixture");
+    $gateway = new PambRoutingTestArchiveGateway();
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+    $event = $report->routingEvents()->create([
+        'workflow_key' => $report->workflow_key,
+        'stage_key' => PambRoutingTimelineService::FORWARDED_RECORDS_TO_PENRO,
+        'occurred_at' => '2026-08-05 09:00:00',
+        'recorded_by' => $this->user->getKey(),
+    ]);
+
+    $result = app(\App\Services\SubmissionTracking\RoutingTransitionLifecycle::class)->afterTransition($event, $this->user);
+
+    expect($result['status'])->toBe('initial_remote_checkpoint_retired')
+        ->and($gateway->objects)->toBeEmpty()
+        ->and(DocumentArchive::query()->where('source_type', 'conservation')->where('source_id', $report->getKey())->exists())->toBeFalse();
 });
 
 test('PAMB checkpoint lifecycle rejects a missing routing actor', function (): void {

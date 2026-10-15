@@ -35,6 +35,8 @@ final class FinalDocumentArchiver
         ?ModuleDefinition $module = null,
         ?string $archiveUnit = null,
         ?string $archiveOffice = null,
+        string $archivePhase = 'dispatch_checkpoint',
+        array $allowedMimeTypes = ['application/pdf'],
     ): array {
         return $this->archiveFinalDocumentUsingAdapter(
             $record,
@@ -48,6 +50,8 @@ final class FinalDocumentArchiver
             $module,
             $archiveUnit,
             $archiveOffice,
+            $archivePhase,
+            $allowedMimeTypes,
         );
     }
 
@@ -64,11 +68,17 @@ final class FinalDocumentArchiver
         ?ModuleDefinition $module = null,
         ?string $archiveUnit = null,
         ?string $archiveOffice = null,
+        string $archivePhase = 'dispatch_checkpoint',
+        array $allowedMimeTypes = ['application/pdf'],
     ): array {
         $archiveStartedAt = hrtime(true);
         $assertFinalAndAuthorized($record);
         $identity = ['source_type' => $sourceType, 'source_id' => (int) $record->getKey(), 'logical_slot' => $logicalSlot];
-        $archive = DocumentArchive::query()->firstOrCreate($identity, ['archive_status' => 'PENDING']);
+        $archive = DocumentArchive::query()->firstOrCreate($identity, ['archive_status' => 'PENDING', 'archive_phase' => $archivePhase]);
+        if ($archive->archive_phase !== $archivePhase) {
+            Log::warning('Archive identity is already bound to a different lifecycle phase.', ['source' => $sourceType, 'record_id' => $record->getKey(), 'logical_slot' => $logicalSlot]);
+            return ['status' => 'failed'];
+        }
 
         try {
             // A records checkpoint is frozen. Later working-document changes
@@ -95,7 +105,14 @@ final class FinalDocumentArchiver
 
                 $this->logPhase('existing_archive_availability_check', $phaseStartedAt);
                 Log::debug('Existing archived checkpoint rechecked without path resolution or upload.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
-                return ['status' => 'archived', 'file_id' => $archive->google_drive_file_id, 'working_file_removed' => false];
+                if ($availability === 'verified') {
+                    return ['status' => 'archived', 'file_id' => $archive->google_drive_file_id, 'working_file_removed' => false];
+                }
+                // Historical dispatch checkpoints remain frozen and fail closed.
+                // A final-return revision may reconcile its exact identity/hash
+                // before uploading a replacement object; it never overwrites an
+                // existing Drive object as a recovery shortcut.
+                if ($archivePhase !== \App\Models\FinalDocumentArchiveManifest::PHASE) return ['status' => 'failed'];
             }
 
             $phaseStartedAt = hrtime(true);
@@ -119,31 +136,48 @@ final class FinalDocumentArchiver
             $phaseStartedAt = hrtime(true);
             $mime = mime_content_type($absolute);
             $this->logPhase('local_document_mime_check', $phaseStartedAt);
-            if (! is_string($sha256) || $size < 1 || $mime !== 'application/pdf') {
+            if (! is_string($sha256) || $size < 1 || ! is_string($mime) || ! in_array($mime, $allowedMimeTypes, true)) {
                 throw new \RuntimeException('The final working document failed type or integrity validation.');
+            }
+            if ($mime !== 'application/pdf' && ! $this->drive instanceof MimeAwareGoogleDriveArchiveGateway) {
+                throw new \RuntimeException('The configured archive provider cannot preserve this source file type.');
             }
             $this->logPhase('local_document_validation', $validationStartedAt);
 
             $phaseStartedAt = hrtime(true);
             if (! $module || ! $archiveUnit || ! $archiveOffice) throw new \RuntimeException('The active submission module, unit, or CENRO office is unmapped for archive storage.');
-            $archiveContext = $this->archiveContext($record, $sourceType, $module, $archiveUnit, $archiveOffice);
+            $fileExtension = $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE
+                ? pathinfo((string) $filename, PATHINFO_EXTENSION)
+                : 'pdf';
+            $archiveContext = $this->archiveContext(
+                $record, $sourceType, $module, $archiveUnit, $archiveOffice, $fileExtension,
+                $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE,
+            );
             $archiveFilename = $archiveContext['filename'];
             $this->logPhase('archive_path_resolution', $phaseStartedAt);
 
             $phaseStartedAt = hrtime(true);
             $remote = null;
             $existing = $this->drive->findByIdentityAndHash($identity, $sha256);
-            if ($existing && $this->drive->verify($existing['file_id'], $sha256, $size)) {
+            if ($existing) {
+                if (! $this->drive->verify($existing['file_id'], $sha256, $size)) {
+                    throw new \RuntimeException('An exact-identity archive object was found but its content could not be verified.');
+                }
                 $remote = $existing;
             }
             $this->logPhase('existing_archive_reconciliation', $phaseStartedAt);
 
             if (! $remote) {
                 $phaseStartedAt = hrtime(true);
-                if ($archive->google_drive_file_id) {
-                    $remote = $this->drive->replace($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
+                $mimeAware = $this->drive instanceof MimeAwareGoogleDriveArchiveGateway;
+                if ($archive->google_drive_file_id && $archivePhase !== \App\Models\FinalDocumentArchiveManifest::PHASE) {
+                    $remote = $mimeAware
+                        ? $this->drive->replaceWithMime($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime)
+                        : $this->drive->replace($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
                 } else {
-                    $remote = $this->drive->upload($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
+                    $remote = $mimeAware
+                        ? $this->drive->uploadWithMime($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime)
+                        : $this->drive->upload($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
                 }
                 $this->logPhase('archive_upload', $phaseStartedAt);
             }
@@ -154,7 +188,7 @@ final class FinalDocumentArchiver
             $this->logPhase('archive_upload_verification', $phaseStartedAt);
 
             $phaseStartedAt = hrtime(true);
-            DB::transaction(function () use ($identity, $remote, $sha256, $size, $actorId, $archiveFilename, $record, $adapter, $logicalSlot, $path): void {
+            DB::transaction(function () use ($identity, $remote, $sha256, $size, $actorId, $archiveFilename, $record, $adapter, $logicalSlot, $path, $archivePhase): void {
                 $locked = $record->newQuery()->lockForUpdate()->findOrFail($record->getKey());
                 if ($adapter->read($locked, $logicalSlot)['path'] !== $path) {
                     throw new \RuntimeException('The working document changed while archival was in progress.');
@@ -168,6 +202,7 @@ final class FinalDocumentArchiver
                     'archived_at' => now(),
                     'archived_by' => $actorId,
                     'archive_status' => 'ARCHIVED',
+                    'archive_phase' => $archivePhase,
                     'remote_availability' => 'verified',
                     'last_verified_at' => now(),
                     'last_verification_error_class' => null,
@@ -207,6 +242,34 @@ final class FinalDocumentArchiver
         }
     }
 
+    /** Validate the currently attached source document without creating an archive row or calling Drive. */
+    public function validateLocalDocumentUsingAdapter(
+        Model $record,
+        string $logicalSlot,
+        DocumentReferenceAdapter $adapter,
+        array $allowedMimeTypes = ['application/pdf'],
+    ): array {
+        $reference = $adapter->read($record, $logicalSlot);
+        $path = $reference['path'] ?? null;
+        $filename = $reference['filename'] ?? null;
+        if (! is_string($path) || ! $this->safeRelativePath($path)
+            || ! is_string($filename) || trim($filename) === ''
+            || ! Storage::disk('local')->exists($path)) {
+            throw new \RuntimeException('The official source document is unavailable.');
+        }
+
+        $absolute = Storage::disk('local')->path($path);
+        $size = (int) Storage::disk('local')->size($path);
+        $sha256 = hash_file('sha256', $absolute);
+        $mime = mime_content_type($absolute);
+        if ($size < 1 || ! is_string($sha256) || ! is_string($mime)
+            || ! in_array($mime, $allowedMimeTypes, true)) {
+            throw new \RuntimeException('The official source document failed its type or integrity validation.');
+        }
+
+        return ['path' => $path, 'filename' => $filename, 'size' => $size, 'sha256' => $sha256, 'mime_type' => $mime];
+    }
+
     public function verifyArchivedDocument(DocumentArchive $archive): bool
     {
         return $archive->archive_status === 'ARCHIVED'
@@ -230,7 +293,7 @@ final class FinalDocumentArchiver
     }
 
     /** @return array{year:string,protected_area:string,archive_unit:string,archive_office:string,module_name:string,folder_path:list<string>,filename:string} */
-    private function archiveContext(Model $record, string $sourceType, ModuleDefinition $module, string $archiveUnit, string $archiveOffice): array
+    private function archiveContext(Model $record, string $sourceType, ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $extension = 'pdf', bool $allowPenroOffice = false): array
     {
         $tracking = ReportTrackingReference::query()
             ->where('source_type', $sourceType)
@@ -263,7 +326,7 @@ final class FinalDocumentArchiver
             ? $activityName
             : (string) ($trackingNumber ?: 'Report-'.$record->getKey());
 
-        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase);
+        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase, $extension, $allowPenroOffice);
 
         return [
             'year' => (string) ($year ?: now()->format('Y')),

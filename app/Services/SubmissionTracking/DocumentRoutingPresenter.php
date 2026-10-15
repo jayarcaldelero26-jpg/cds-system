@@ -201,27 +201,43 @@ final class DocumentRoutingPresenter
             $event = $latestReturnIndex !== null && $currentPosition !== false && $position > $currentPosition
                 ? $activeEventsByStage->get($stage)
                 : $eventByStage->get($stage);
+            if ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN
+                && ($state['correction_event'] ?? null) instanceof \App\Models\DocumentRoutingEvent) {
+                $event = $state['correction_event'];
+            }
             $action = $routeActions->firstWhere('to', $stage);
             $isCurrent = $stage === $currentStage;
+            $syntheticPamoOrigin = $pamoOrigin
+                && $stage === $start
+                && $stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN
+                && $event === null;
             $isCompletedTerminal = $isCurrent && $stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL;
             $timeline[] = [
                 'key' => $stage,
-                'label' => $this->stageLabel($stage, $action, $start),
+                'label' => $syntheticPamoOrigin
+                    ? 'Report prepared by PAMO'
+                    : ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN && $event?->event_key === 'returned_for_correction'
+                        ? 'Returned to PAMO for Correction'
+                        : $this->stageLabel($stage, $action, $start)),
                 // A start/current stage can have an incoming correction action
                 // in the profile even when no such event occurred. Only real
                 // events may classify a stage as a correction.
-                'event_type' => $event?->event_key ?? ($stage === $start ? 'stage' : (data_get($action, 'event_key') ?? 'stage')),
+                'event_type' => $syntheticPamoOrigin ? 'origin' : ($event?->event_key ?? ($stage === $start ? 'stage' : (data_get($action, 'event_key') ?? 'stage'))),
                 'action_label' => data_get($action, 'action_label'),
-                'from' => $event?->from_office ?? data_get($action, 'from_office'),
-                'to' => $event?->to_office ?? data_get($action, 'to_office'),
-                'office' => $event?->to_office ?? data_get($action, 'to_office'),
+                'from' => $syntheticPamoOrigin ? null : ($event?->from_office ?? data_get($action, 'from_office')),
+                'to' => $syntheticPamoOrigin ? null : ($event?->to_office ?? data_get($action, 'to_office')),
+                'office' => $this->organizationalOffice(
+                    $record,
+                    $stage,
+                    $syntheticPamoOrigin ? data_get($state, 'route_position.pamo_office_name') : ($event?->to_office ?? data_get($action, 'to_office')),
+                ),
                 'occurred_at' => $event?->occurred_at?->toIso8601String(),
                 'recorded_at' => $event?->created_at?->toIso8601String(),
                 'status' => $isCurrent ? 'current' : ($event || ($stage === $start && $currentStage !== $start) ? 'completed' : 'pending'),
                 // Keep the resolved stage current for route/location/action
                 // logic while exposing its terminal display state separately.
                 'display_status' => $isCompletedTerminal ? 'completed' : ($isCurrent ? 'current' : ($event || ($stage === $start && $currentStage !== $start) ? 'completed' : 'pending')),
-                'display_status_label' => $isCompletedTerminal ? 'Completed' : null,
+                'display_status_label' => $isCompletedTerminal ? 'Completed' : ($syntheticPamoOrigin ? 'Origin' : null),
                 'pending_since' => $isCurrent && ! $isCompletedTerminal ? $this->pendingSince($state, $record, $event) : null,
                 'working_days_pending' => $isCurrent && ! $isCompletedTerminal ? $this->pendingDays($state, $record, $event, $sourceKey) : null,
                 'recorded_by' => $event?->recordedBy?->name,
@@ -327,7 +343,10 @@ final class DocumentRoutingPresenter
         return [
             'profile_key' => $profile['key'], 'profile_label' => $profile['label'], 'route_granularity' => $profile['route_granularity'],
             'business_route_confirmation' => $profile['business_route_confirmation'], 'detailed_route_requires_confirmation' => $profile['detailed_route_requires_confirmation'],
-            'originating_office' => $profile['originating_office'], 'final_destination' => $profile['final_destination'],
+            'originating_office' => $pamoOrigin
+                ? (string) data_get($state, 'route_position.pamo_office_name')
+                : $profile['originating_office'],
+            'final_destination' => $profile['final_destination'],
             'current_location' => $this->stageLocation($current, $record, $state), 'current_status' => $this->stageStatus($current, $record, $state),
             'processing_percentage' => $this->processingPercentage($sourceKey, $currentStage),
             'responsible_office' => $this->organizationalOffice($record, data_get($current, 'key'), data_get($current, 'office') ?: $record->getAttribute('target_office')),
@@ -351,6 +370,9 @@ final class DocumentRoutingPresenter
                 'preview' => (bool) ($position['preview'] ?? false),
                 'snapshot_id' => $position['snapshot_id'] ?? null,
                 'graph_version' => $position['graph_version'] ?? null,
+                'origin_kind' => $position['origin_kind'] ?? null,
+                'pamo_office_name' => $position['pamo_office_name'] ?? null,
+                'responsible_cenro_name' => $position['responsible_cenro_name'] ?? null,
             ],
         ];
     }
@@ -606,6 +628,10 @@ final class DocumentRoutingPresenter
     }
     private function organizationalOffice(Model $record, ?string $stage, ?string $fallback = null): ?string
     {
+        if ($stage === DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL) {
+            $snapshot = \App\Models\SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')->where('source_id', $record->getKey())->first();
+            return $snapshot?->responsible_cenro_name ?: $fallback;
+        }
         $cenroStages = [
             DocumentRoutingProfileRegistry::PREPARATION,
             DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF,

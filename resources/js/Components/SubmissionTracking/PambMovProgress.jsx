@@ -19,7 +19,7 @@ function MilestoneMarker({ item }) {
     return <span className="flex h-3 w-3 shrink-0 rounded-full border border-gray-400" aria-hidden="true" />;
 }
 
-export default function PambMovProgress({ row, context = {}, onSubmit, onReview, onRelease, hideReleaseAction = false }) {
+export default function PambMovProgress({ row, context = {}, onSubmit, onReview, onRelease, hideReleaseAction = false, hideSubmitAction = false }) {
     const progress = row?.mov_processing;
     if (!progress?.applicable) return null;
 
@@ -55,7 +55,7 @@ export default function PambMovProgress({ row, context = {}, onSubmit, onReview,
         <div className="flex flex-wrap gap-2">
             {correction && canEditCorrection && row.source_url && <a href={row.source_url} data-cds-action="true" data-cds-action-variant="primary" className="cds-button-interaction inline-flex rounded-lg px-2.5 py-1.5 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-400 focus-visible:ring-offset-2">Edit / Correct Submission</a>}
         </div>
-        <PambMovActions row={row} context={context} onSubmit={onSubmit} onReview={onReview} onRelease={onRelease} hideReleaseAction={hideReleaseAction} />
+        <PambMovActions row={row} context={context} onSubmit={onSubmit} onReview={onReview} onRelease={onRelease} hideReleaseAction={hideReleaseAction} hideSubmitAction={hideSubmitAction} />
         {progress.chief_verdict_label && <div className="border-t border-green-100 pt-2 text-[11px] text-gray-600 dark:border-green-900/60 dark:text-gray-300"><span className="font-bold uppercase tracking-wide text-gray-500">Final Chief Verdict:</span> {progress.chief_verdict_label}</div>}
     </section>;
 }

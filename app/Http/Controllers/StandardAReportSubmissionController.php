@@ -146,7 +146,7 @@ abstract class StandardAReportSubmissionController extends Controller
         return $this->attachments->response($this->attachmentSource(), $submission, 'mov');
     }
 
-    private function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
+    public function rules(?string $legacyDocumentType = null, bool $requireMov = false): array
     {
         $documentTypes = array_values(array_unique(array_filter(['Final Report', 'Progress Report', $legacyDocumentType])));
 
@@ -192,7 +192,7 @@ abstract class StandardAReportSubmissionController extends Controller
         return $data;
     }
 
-    private function prepareDateConductedPayload(Request $request, array $validated, ?Model $existing = null): array
+    public function prepareDateConductedPayload(Request $request, array $validated, ?Model $existing = null): array
     {
         $dates = app(\App\Services\ActualActivityDateGuard::class);
         if ($this->dateConductedRangesEnabled) {

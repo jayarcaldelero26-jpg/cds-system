@@ -4,7 +4,7 @@ import CalendarPanel from './Calendar/CalendarPanel';
 import CalendarPopover from './Calendar/CalendarPopover';
 import { formatDateKey, formatDisplayDate, monthStart, parseDateOnly, philippinesTodayDate, todayDate } from './Calendar/calendarUtils';
 
-export default function DateRangePicker({ value = {}, onChange, label, placeholder = 'Select date range', minDate = '', maxDate = '', actualDate = false, disabled = false, error = '', helperText = '', id, required = false, className = '' }) {
+export default function DateRangePicker({ value = {}, onChange, label, placeholder = 'Select date range', minDate = '', maxDate = '', actualDate = false, disabled = false, error = '', helperText = '', id, required = false, className = '', compactSeptember = false }) {
     const triggerRef = useRef(null);
     const popoverRef = useRef(null);
     const applied = { from: formatDateKey(value?.from), to: formatDateKey(value?.to) };
@@ -36,8 +36,8 @@ export default function DateRangePicker({ value = {}, onChange, label, placehold
     const apply = () => { if (!draft.from || !draft.to) return; onChange?.({ ...draft }); setOpen(false); window.requestAnimationFrame(() => triggerRef.current?.focus()); };
     const clear = () => { onChange?.({ from: '', to: '' }); setDraft({ from: '', to: '' }); setOpen(false); window.requestAnimationFrame(() => triggerRef.current?.focus()); };
     const arrow = String.fromCharCode(0x2192);
-    const display = applied.from && applied.to ? [formatDisplayDate(applied.from), formatDisplayDate(applied.to)].join(' ' + arrow + ' ') : '';
-    const draftDisplay = draft.from ? formatDisplayDate(draft.from) + (draft.to ? ' ' + arrow + ' ' + formatDisplayDate(draft.to) : ' ' + arrow + ' Select end date') : 'Select a start date';
+    const display = applied.from && applied.to ? [formatDisplayDate(applied.from, { compactSeptember }), formatDisplayDate(applied.to, { compactSeptember })].join(' ' + arrow + ' ') : '';
+    const draftDisplay = draft.from ? formatDisplayDate(draft.from, { compactSeptember }) + (draft.to ? ' ' + arrow + ' ' + formatDisplayDate(draft.to, { compactSeptember }) : ' ' + arrow + ' Select end date') : 'Select a start date';
     const describedBy = [error ? id + '-error' : '', effectiveHelperText ? id + '-help' : ''].filter(Boolean).join(' ') || undefined;
 
     return <div className={`relative ${className}`}>

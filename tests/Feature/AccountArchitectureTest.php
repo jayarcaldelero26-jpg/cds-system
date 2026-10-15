@@ -39,10 +39,10 @@ test('the explicit bootstrap administrator is seeded approved and active', funct
         ->and($admin->hasRole('CDS Admin'))->toBeTrue();
 });
 
-test('supported operational groups contain every category once with PENRO TSD Chief in the PENRO group', function (): void {
+test('supported operational groups contain every category once with PAMO separated from CENRO and PENRO', function (): void {
     $groups = collect(app(OrganizationalAccessService::class)->operationalGroups());
 
-    expect($groups->pluck('value')->all())->toBe(['cenro', 'penro'])
+    expect($groups->pluck('value')->all())->toBe(['cenro', 'penro', 'pamo'])
         ->and(collect($groups->firstWhere('value', 'penro')['categories'])->pluck('value')->all())
         ->toBe([
             'PENRO_RECORDS',
@@ -52,7 +52,8 @@ test('supported operational groups contain every category once with PENRO TSD Ch
             'PENRO_CDS_CHIEF',
         ])
         ->and(collect($groups->firstWhere('value', 'cenro')['categories'])->pluck('value')->all())
-        ->toBe(['CENRO_CDS_FOCAL', 'CENRO_CDS_CHIEF', 'CENRO_RECORDS']);
+        ->toBe(['CENRO_CDS_FOCAL', 'CENRO_CDS_CHIEF', 'CENRO_RECORDS'])
+        ->and(collect($groups->firstWhere('value', 'pamo')['categories'])->pluck('value')->all())->toBe(['PAMO']);
 });
 
 test('MHRWS remains direct PENRO while PBPLS remains CENRO Mati', function (): void {
@@ -73,12 +74,12 @@ test('MHRWS remains direct PENRO while PBPLS remains CENRO Mati', function (): v
         ->and($organization->supervisingOfficeNameForProtectedArea($pbpls->id))->toBe('CENRO Mati');
 });
 
-test('public registration rejects unsupported PAMO accounts', function (): void {
+test('public PAMO registration requires a protected area identity', function (): void {
     $this->post('/register', [
         'name' => 'MHRWS PAMO Applicant', 'email' => 'architecture-mhrws@example.com',
         'operational_group' => 'pamo', 'section' => 'PAMO',
         'password' => 'password', 'password_confirmation' => 'password',
-    ])->assertSessionHasErrors(['operational_group', 'section']);
+    ])->assertSessionHasErrors('protected_area_id');
 
     expect(User::where('email', 'architecture-mhrws@example.com')->exists())->toBeFalse();
 });

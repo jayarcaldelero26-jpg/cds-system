@@ -11,6 +11,8 @@ use App\Services\Attachments\CurrentDocumentReplacementService;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
+use App\Services\Pamo\PamoNativeDraftAdapter;
+use App\Services\Pamo\PamoNativeSourceRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\RoutingPositionSnapshotService;
@@ -41,6 +43,8 @@ final class PamoPambDraftController extends Controller
         private readonly RoutingPositionSnapshotService $routePositions,
         private readonly DocumentRoutingTransitionService $routing,
         private readonly PambMovProcessingService $pambMov,
+        private readonly PamoNativeDraftAdapter $nativeDrafts,
+        private readonly PamoNativeSourceRegistry $nativeSources,
     ) {}
 
     public function index(Request $request, string $workflow): array
@@ -144,24 +148,36 @@ final class PamoPambDraftController extends Controller
             'protected_area_id' => ['prohibited'], 'pamo_office_id' => ['prohibited'],
             'source' => ['prohibited'], 'source_key' => ['prohibited'], 'source_id' => ['prohibited'],
             'target_office' => ['prohibited'], 'conservation_report_submission_id' => ['prohibited'],
+            'bms_report_submission_id' => ['prohibited'], 'bams_report_submission_id' => ['prohibited'], 'imea_report_submission_id' => ['prohibited'],
+            'imea_facility_maintenance_report_id' => ['prohibited'], 'aws_report_id' => ['prohibited'], 'ipaf_management_report_id' => ['prohibited'], 'ipaf_revenue_collection_id' => ['prohibited'],
             'office_designated' => ['prohibited'], 'pamo_office_name' => ['prohibited'],
             'workflow_key' => ['prohibited'], 'started_at' => ['prohibited'], 'originator_user_id' => ['prohibited'],
             'draft_uuid' => ['prohibited'],
         ]);
+        // Forward carries the current modal values so the final validation and
+        // promotion use what the user sees, even when those values have not
+        // been saved as a separate draft update yet.
+        $currentPayload = $this->partialPayload($request, $workflow);
 
         $sourcePathToClean = null;
         $oldDraftPathToClean = null;
         try {
-            $submission = DB::transaction(function () use ($request, $draft, $workflow, $facts, $actor, &$sourcePathToClean, &$oldDraftPathToClean): ConservationReportSubmission {
+            $submission = DB::transaction(function () use ($request, $draft, $workflow, $facts, $actor, $currentPayload, &$sourcePathToClean, &$oldDraftPathToClean) {
             $locked = PamoPambDraft::query()->lockForUpdate()->findOrFail($draft->getKey());
             $this->assertDraftAccess($actor, $locked, $workflow, $facts);
             if ($locked->status === 'forwarded' && $locked->conservation_report_submission_id) {
                 return ConservationReportSubmission::query()->findOrFail($locked->conservation_report_submission_id);
             }
+            $native = $this->nativeSources->find($workflow);
+            if ($locked->status === 'forwarded' && $native && $locked->getAttribute($native['column'])) {
+                $model = $native['model'];
+                return $model::query()->findOrFail($locked->getAttribute($native['column']));
+            }
             if ($locked->status !== 'draft') throw ValidationException::withMessages(['draft' => 'This draft is no longer available to forward.']);
             $version = (int) $request->integer('lock_version');
             if ($version !== (int) $locked->lock_version) throw ValidationException::withMessages(['draft' => 'This draft changed in another session. Reload it before forwarding.']);
             $this->assertPilotWorkflow($workflow);
+            $payload = [...($locked->report_payload ?? []), ...$currentPayload];
 
             $path = $locked->mov_path;
             if (! $this->isDraftPath($locked, $path) || ! Storage::disk(self::PRIVATE_DISK)->exists($path)) {
@@ -169,8 +185,22 @@ final class PamoPambDraftController extends Controller
             }
             $absolutePath = Storage::disk(self::PRIVATE_DISK)->path($path);
             $storedFile = new UploadedFile($absolutePath, (string) $locked->mov_file_name, mime_content_type($absolutePath) ?: 'application/octet-stream', UPLOAD_ERR_OK, true);
+            if ($native) {
+                [$nativeRecord, $sourcePathToClean] = $this->nativeDrafts->promote($locked, $workflow, $facts, $actor, $storedFile, $payload);
+                $locked->update([
+                    'report_payload' => $payload,
+                    $native['column'] => $nativeRecord->getKey(),
+                    'status' => 'forwarded',
+                    'forwarded_at' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
+                    'updated_by' => $actor->getKey(),
+                    'mov_path' => null,
+                    'lock_version' => ((int) $locked->lock_version) + 1,
+                ]);
+                $oldDraftPathToClean = $path;
+                return $nativeRecord;
+            }
             $attributes = [
-                ...($locked->report_payload ?? []),
+                ...$payload,
                 'protected_area_id' => $facts['protected_area_id'],
                 'target_office' => $facts['target_office'],
                 'mov' => $storedFile,
@@ -221,6 +251,7 @@ final class PamoPambDraftController extends Controller
             $this->routing->transition($submission, 'conservation', $action, (int) $actor->getKey(), null, null, null, true);
 
             $locked->update([
+                'report_payload' => $payload,
                 'status' => 'forwarded',
                 'conservation_report_submission_id' => $submission->getKey(),
                 'forwarded_at' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE),
@@ -256,6 +287,20 @@ final class PamoPambDraftController extends Controller
             'Content-Disposition' => ($inline ? 'inline' : 'attachment').'; filename="'.$filename.'"',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    public function showSourceMov(Request $request, string $workflow, PamoPambDraft $draft): HttpResponse
+    {
+        $actor = $request->user();
+        $facts = $this->assertPamoActor($actor);
+        $this->assertDraftAccess($actor, $draft, $workflow, $facts);
+        $source = $this->nativeSources->find($workflow);
+        abort_unless($source && $draft->status === 'forwarded' && $draft->getAttribute($source['column']), 404);
+        $model = $source['model'];
+        $record = $model::query()->findOrFail($draft->getAttribute($source['column']));
+        abort_unless((int) $record->protected_area_id === (int) $draft->protected_area_id, 404);
+        $this->organization->assertCanAccessProtectedArea($actor, $record->protected_area_id);
+        return $this->attachments->response($source['attachment'], $record, $source['file_field']);
     }
 
     private function saveLocked(Request $request, PamoPambDraft $draft, string $workflow, array $facts, array $data, ?UploadedFile $file, ?int $expectedVersion): void
@@ -298,6 +343,7 @@ final class PamoPambDraftController extends Controller
     private function partialPayload(Request $request, string $workflow): array
     {
         $this->assertPilotWorkflow($workflow);
+        if ($this->nativeSources->find($workflow)) return $this->nativeDrafts->partialPayload($request, $workflow);
         $definition = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->find($workflow) ?? [];
         $activities = $definition['activities'] ?? [];
         $documents = array_values(array_unique(array_merge(...array_values($definition['activity_documents'] ?? ['default' => ($definition['documents'] ?? [])]))));
@@ -342,7 +388,7 @@ final class PamoPambDraftController extends Controller
 
     private function assertDraftAccess(?User $actor, PamoPambDraft $draft, string $workflow, array $facts): void
     {
-        abort_unless($draft->workflow_key === $workflow && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow), 404);
+        abort_unless($draft->workflow_key === $workflow && $this->supportsWorkflow($workflow), 404);
         abort_unless((int) $draft->protected_area_id === (int) $actor?->protected_area_id
             && (int) $draft->protected_area_id === (int) $facts['protected_area_id']
             && (int) $draft->pamo_office_id === (int) $facts['pamo_office_id'], 403);
@@ -351,7 +397,15 @@ final class PamoPambDraftController extends Controller
 
     private function assertPilotWorkflow(string $workflow): void
     {
-        abort_unless(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow), 404);
+        if (app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow)) return;
+        abort_unless($this->nativeSources->isEligible($workflow), 404);
+        $this->nativeSources->assertSchemaReady();
+    }
+
+    private function supportsWorkflow(string $workflow): bool
+    {
+        return app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow)
+            || ($this->nativeSources->isSchemaReady() && $this->nativeSources->isEligible($workflow));
     }
 
     private function isDraftPath(PamoPambDraft $draft, ?string $path): bool
@@ -363,6 +417,36 @@ final class PamoPambDraftController extends Controller
 
     private function present(PamoPambDraft $draft): array
     {
+        $native = $this->nativeSources->find((string) $draft->workflow_key);
+        $nativeId = $native ? $draft->getAttribute($native['column']) : null;
+        $sourceKey = $native['source'] ?? 'conservation';
+        $sourceId = $nativeId ?: $draft->conservation_report_submission_id;
+        $sourceRecord = null;
+        $sourceMovUrl = null;
+        $sourceUrl = null;
+        if ($nativeId && $native) {
+            $model = $native['model'];
+            $sourceRecord = $model::query()->find($nativeId);
+            if ($sourceRecord
+                && (int) $sourceRecord->protected_area_id === (int) $draft->protected_area_id
+                && $this->attachments->descriptor($native['attachment'], $sourceRecord, $native['file_field']) !== null) {
+                $sourceMovUrl = route('conservation-reports.pamo-drafts.source-mov', [$draft->workflow_key, $draft->draft_uuid]);
+            }
+        } elseif ($draft->conservation_report_submission_id) {
+            $sourceRecord = ConservationReportSubmission::query()->find($draft->conservation_report_submission_id);
+            if ($sourceRecord
+                && $sourceRecord->workflow_key === $draft->workflow_key
+                && (int) $sourceRecord->protected_area_id === (int) $draft->protected_area_id) {
+                if ($this->attachments->descriptor('conservation-report', $sourceRecord, 'mov') !== null) {
+                    $sourceMovUrl = route('conservation-reports.mov', [$draft->workflow_key, $sourceRecord->getKey()]);
+                }
+            }
+        }
+        if ($sourceId && $sourceRecord) {
+            $view = $this->trackingView($sourceRecord, $sourceKey);
+            $sourceUrl = route('submission-tracking.index', ['view' => $view, 'source' => $sourceKey, 'source_id' => $sourceId]);
+        }
+
         return [
             'id' => $draft->draft_uuid,
             'workflow_key' => $draft->workflow_key,
@@ -373,9 +457,28 @@ final class PamoPambDraftController extends Controller
             'lock_version' => (int) $draft->lock_version,
             'mov_file_name' => $draft->mov_file_name,
             'mov_url' => $draft->mov_path ? route('conservation-reports.pamo-drafts.mov', [$draft->workflow_key, $draft->draft_uuid]) : null,
-            'source_submission_id' => $draft->conservation_report_submission_id,
-            'source_url' => $draft->conservation_report_submission_id ? route('submission-tracking.index', ['source' => 'conservation', 'source_id' => $draft->conservation_report_submission_id]) : null,
+            'source_mov_url' => $sourceMovUrl,
+            'source_key' => $nativeId ? $sourceKey : ($sourceId ? 'conservation' : null),
+            'source_submission_id' => $sourceId,
+            'source_url' => $sourceUrl,
         ];
+    }
+
+    private function trackingView(\Illuminate\Database\Eloquent\Model $record, string $sourceKey): string
+    {
+        $state = $this->routing->state($record, $sourceKey);
+        if ($state['stage'] === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::RELEASED_REGIONAL) {
+            return 'history';
+        }
+        $lastEvent = $state['events']->last();
+        if ($state['stage'] === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PAMO_ORIGIN
+            && $lastEvent?->event_key === 'correction_received') {
+            return 'incoming';
+        }
+
+        return ($state['route_position']['origin_kind'] ?? null) === 'pamo_pamb'
+            ? 'outgoing'
+            : 'incoming';
     }
 
     private function attachmentMessages(?string $documentType): array

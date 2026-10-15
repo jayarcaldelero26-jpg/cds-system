@@ -24,7 +24,8 @@ final class ProtectedAttachmentController extends Controller
         $ability = $definition['ability'] ?? null;
         $user = request()->user();
         $sourceAuthorized = is_string($ability) && $ability !== ''
-            && (bool) $user?->can($ability)
+            && ((bool) $user?->can($ability)
+                || $this->routing->canAccessPamoOriginCurrentDocument($recordModel, $definition['routing_source'] ?? '', $user))
             && $this->organization->canViewSubmissionAttachment($user, $recordModel);
         $routingSource = $definition['routing_source'] ?? null;
         $isCurrentOfficialDocument = is_string($routingSource)

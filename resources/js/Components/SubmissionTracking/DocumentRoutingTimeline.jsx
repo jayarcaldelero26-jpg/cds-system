@@ -131,15 +131,15 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
             </CrudSection>
 
             <CrudSection
-                title="Canonical Routing Progress"
+                title="Routing Progress"
                 cardSurface
-                subtitle={`${routing.profile_label}. Canonical routing path showing completed, current, and upcoming stages.`}
+                subtitle="Shows the completed, current and upcoming stages of this report."
             >
                 {hasToggle && <div className="mb-2 flex justify-end"><button type="button" aria-expanded={showRemainingSteps} aria-controls="document-routing-timeline-stages" onClick={() => setShowRemainingSteps((shown) => !shown)} className="rounded-md px-2 py-1 text-xs font-semibold text-green-800 outline-none hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-800 dark:text-green-200 dark:hover:bg-green-950/50">{showRemainingSteps ? "Show fewer steps" : `Show ${hiddenSteps.length} more steps`}</button></div>}
                 <ol
                     id="document-routing-timeline-stages"
                     className="divide-y divide-gray-100 rounded-xl border border-gray-200 bg-white dark:divide-gray-700 dark:border-gray-700 dark:bg-gray-800"
-                    aria-label="Document routing history"
+                    aria-label="Routing progress"
                 >
                     {visibleTimeline.map((event) => {
                         const displayStatus = event.display_status || event.status;

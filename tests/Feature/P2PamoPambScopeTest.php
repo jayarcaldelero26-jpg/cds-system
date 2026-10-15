@@ -95,7 +95,8 @@ test('assigned PAMO sees active generic PA Conservation submissions only for its
         ->and($access->canView($pamo, $special))->toBeTrue()
         ->and($access->canView($pamo, $generic))->toBeTrue()
         ->and($access->canView($pamo, $other))->toBeFalse()
-        ->and($access->canPerformForSubmission($pamo, 'submit', $regular))->toBeTrue()
+        // Directly created rows have no captured PAMO origin route to submit from.
+        ->and($access->canPerformForSubmission($pamo, 'submit', $regular))->toBeFalse()
         ->and($visibleIds)->toContain($regular->id, $special->id, $generic->id)
         ->and($visibleIds)->not->toContain($other->id)
         ->and($organization->effectiveCategory($pamo))->toBe(OrganizationalAccessService::PAMO)
@@ -125,7 +126,8 @@ test('assigned PAMO sees active generic PA Conservation submissions only for its
     $trackingProps = $trackingResponse->inertiaProps();
     expect($trackingProps)->not->toHaveKey('queues')
         ->and($trackingProps['trackingContext']['selected_record']['source_id'])->toBe($regular->id)
-        ->and(collect($trackingProps['workspaceQueues'])->flatten(1)->pluck('source_id')->map(fn ($id): int => (int) $id))->toContain($regular->id);
+        // Direct fixtures without a captured PAMO origin route stay outside operational queues.
+        ->and(collect($trackingProps['workspaceQueues'])->flatten(1)->pluck('source_id')->map(fn ($id): int => (int) $id))->not->toContain($regular->id);
 
     $this->actingAs($pamo)
         ->get(route('settings.index'))

@@ -1236,6 +1236,81 @@ test('archive verification failure at the records checkpoint preserves routing s
         ->assertOk()->assertStreamedContent("%PDF-1.4\nfinal official MOV");
 });
 
+test('unverified existing checkpoint blocks dispatch and retry reuses the same archived object', function (): void {
+    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    Storage::fake('local');
+    $report = attachmentRoutingReport('Existing Checkpoint Retry');
+    $path = 'bms-report-movs/existing-checkpoint-'.$report->id.'.pdf';
+    $bytes = "%PDF-1.4\nexisting official checkpoint";
+    $report->update(['mov_file_path' => $path, 'mov_file_name' => 'Existing official MOV.pdf']);
+    Storage::disk('local')->put($path, $bytes);
+    $actors = [
+        'focal' => attachmentRoutingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati'),
+        'chief' => attachmentRoutingActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati'),
+        'cenro_records' => attachmentRoutingActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati'),
+        'penro_records' => attachmentRoutingActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental'),
+    ];
+    $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class);
+    foreach ([
+        ['focal', 'forward_to_cenro_chief'], ['chief', 'receive_at_cenro_chief'],
+        ['chief', 'forward_to_cenro_records'], ['cenro_records', 'receive_at_cenro_records'],
+        ['cenro_records', 'forward_to_penro_records'], ['penro_records', 'receive_at_penro_records'],
+    ] as [$actor, $action]) {
+        $routing->transition($report->fresh(), 'bms', $action, $actors[$actor]->id);
+    }
+
+    $fileId = 'existing-verified-checkpoint';
+    $identity = ['source_type' => 'bms', 'source_id' => (int) $report->getKey(), 'logical_slot' => 'mov'];
+    $sha256 = hash('sha256', $bytes);
+    $archive = DocumentArchive::query()->create([
+        ...$identity,
+        'google_drive_file_id' => $fileId,
+        'google_drive_folder_id' => 'existing-checkpoint-folder',
+        'archived_sha256' => $sha256,
+        'archived_size' => strlen($bytes),
+        'archived_at' => now(),
+        'archived_by' => $actors['penro_records']->id,
+        'archive_status' => 'ARCHIVED',
+        'remote_availability' => 'verified',
+        'original_filename' => 'Existing official MOV.pdf',
+    ]);
+    $gateway = new FinalArchiveWorkflowGateway();
+    $gateway->objects[$fileId] = [
+        'identity' => $identity, 'sha256' => $sha256, 'size' => strlen($bytes),
+        'folder_id' => 'existing-checkpoint-folder', 'bytes' => $bytes,
+    ];
+    $gateway->failVerify = true;
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+    $route = route('submission-tracking.transition', ['bms', $report->id, 'forward_to_office_penro']);
+    $events = DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $report->id);
+    $before = $events->count();
+
+    $this->actingAs($actors['penro_records'])->post($route, ['stage' => 'forward_to_office_penro'])
+        ->assertRedirect()->assertSessionHasErrors('archive');
+    expect($events->count())->toBe($before)
+        ->and($routing->state($report->fresh(), 'bms')['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PENRO_RECORDS)
+        ->and($archive->fresh()->archive_status)->toBe('ARCHIVED')
+        ->and($archive->fresh()->google_drive_file_id)->toBe($fileId)
+        ->and($archive->fresh()->archived_sha256)->toBe($sha256)
+        ->and($archive->fresh()->remote_availability)->toBe('verified')
+        ->and($archive->fresh()->last_verification_error_class)->toBeNull()
+        ->and($gateway->uploads)->toBe(0);
+
+    $gateway->failVerify = false;
+    $this->actingAs($actors['penro_records'])->post($route, ['stage' => 'forward_to_office_penro'])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    expect($events->count())->toBe($before + 1)
+        ->and($routing->state($report->fresh(), 'bms')['stage'])->toBe(\App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->and($archive->fresh()->archive_status)->toBe('ARCHIVED')
+        ->and($archive->fresh()->google_drive_file_id)->toBe($fileId)
+        ->and($archive->fresh()->remote_availability)->toBe('verified')
+        ->and($gateway->uploads)->toBe(0);
+
+    $this->actingAs($actors['penro_records'])->post($route, ['stage' => 'forward_to_office_penro'])
+        ->assertRedirect()->assertSessionHasErrors('stage');
+    expect($events->count())->toBe($before + 1)->and($gateway->uploads)->toBe(0);
+});
+
 test('disabled archive blocks the normal checkpoint and rolls back the forward event', function (): void {
     config(['services.google_drive_archive.enabled' => false, 'services.document_archive.driver' => 'fake']);
     Storage::fake('local');

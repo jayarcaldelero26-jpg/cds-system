@@ -28,6 +28,7 @@ import { visibleTimelineForCapturedRoute } from "@/Utils/submissionTrackingPrese
 import DocumentRoutingTimeline from "@/Components/SubmissionTracking/DocumentRoutingTimeline";
 import SubmissionReportContext from "@/Components/SubmissionTracking/SubmissionReportContext";
 import DocumentPreviewDialog from "@/Components/SubmissionTracking/DocumentPreviewDialog";
+import OfficialReportFileSection from "@/Components/SubmissionTracking/OfficialReportFileSection";
 import RoutingAttachmentField from "@/Components/SubmissionTracking/RoutingAttachmentField";
 import PremiumTimePicker from "@/Components/PremiumTimePicker";
 import { Link, router, useForm, usePage } from "@inertiajs/react";
@@ -280,15 +281,15 @@ const formatActionDate = (value) =>
         : String(value).length <= 10
           ? plainDate(value)
           : formatReportDateTime(value, FALLBACK);
-export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPreview, context, onSubmitMov, onReviewMov }) => {
+export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPreview, context, onSubmitMov, onReviewMov, pamoWorkspace = false }) => {
     if (!row)
         return (
             <aside className="rounded-xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
                 <p className="font-semibold text-gray-700 dark:text-gray-200">
-                    No submission selected
+                    {pamoWorkspace ? 'No report selected' : 'No submission selected'}
                 </p>
                 <p className="mt-1 text-xs">
-                    There are no records available in this queue.
+                    {pamoWorkspace ? 'There are no reports available in this view.' : 'There are no records available in this queue.'}
                 </p>
             </aside>
         );
@@ -299,14 +300,19 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
             ? row.routing_timeline
             : routing.timeline) || [];
     const progress = compactProgressFor(row);
+    const hasMovActions = Boolean(row.pamb_action_flags && (
+        row.pamb_action_flags.can_submit || row.pamb_action_flags.can_review || row.pamb_action_flags.can_release
+    ));
+    const custodyActions = routing.actions || [];
+    const showCustodyActions = Boolean(row.can_transition && custodyActions.length > 0);
     return (
         <aside className="cds-card-surface flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <p className="text-sm font-extrabold text-gray-900 dark:text-white">
-                    Submission Details
+                    {pamoWorkspace ? 'Report Details' : 'Submission Details'}
                 </p>
                 <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                    Current record context and routing state
+                    {pamoWorkspace ? 'Current report information and routing status' : 'Current record context and routing state'}
                 </p>
             </div>
             <div className="space-y-4 p-4 text-xs">
@@ -325,23 +331,24 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                             <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{plainDate(row.deadline_submission) || "—"}</p>
                         </div>
                         <div className="sm:col-span-2 xl:col-span-1">
-                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Next Expected Action</p>
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{pamoWorkspace && context?.view === 'outgoing' ? "Recipient's Next Expected Action" : 'Next Expected Action'}</p>
                             <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{nextActionFor(row) || "No action pending"}</p>
+                            {pamoWorkspace && context?.view === 'outgoing' && <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Shown for reference at the destination office.</p>}
                         </div>
                     </div>
                 </div>
                 {!custody.officeMatchesOrigin && custody.office && <div>
-                    <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-500">Current Office</p>
+                    <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-500">{pamoWorkspace && context?.view === 'outgoing' && String(routing.current_stage || '').startsWith('transit_') ? 'Destination' : 'Current Office'}</p>
                     <p className="font-semibold text-gray-900 dark:text-white">{custody.office}</p>
                 </div>}
                 <SubmissionReportContext row={row} />
-                {row.can_transition && availableActionsFor(row).length > 0 && (
+                {(showCustodyActions || hasMovActions) && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                             Available Custody Actions
                         </p>
                         <div className="mt-2 flex flex-wrap gap-2">
-                            {(routing.actions || []).map((action) => (
+                            {showCustodyActions && custodyActions.map((action) => (
                                 <Button
                                     type="button"
                                     size="compact"
@@ -353,6 +360,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                                     {standardActionLabel(action.action_label || action.label)}
                                 </Button>
                             ))}
+                            {row.mov_processing?.applicable && <PambMovActions row={row} context={context} onSubmit={onSubmitMov} onReview={onReviewMov} hideReleaseAction hideSubmitAction={pamoWorkspace && context?.view === 'outgoing' && String(routing.current_stage || '').startsWith('transit_')} showContextLabel />}
                         </div>
                     </div>
                 )}
@@ -365,10 +373,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                         {row.current_document.can_preview ? <Button type="button" size="compact" variant="cancel" onClick={() => onPreview?.(row)} className="shrink-0 rounded-lg px-3 py-2 text-xs">Preview</Button> : <span className="shrink-0 text-xs text-gray-500 dark:text-gray-400">Preview unavailable for this account</span>}
                     </div>
                 )}
-                {row.mov_processing?.applicable && <>
-                    <PambMovActions row={row} context={context} onSubmit={onSubmitMov} onReview={onReviewMov} hideReleaseAction showContextLabel />
-                    <PambMovCorrectionNotice row={row} />
-                </>}
+                {row.mov_processing?.applicable && <PambMovCorrectionNotice row={row} />}
                 <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2 xl:grid-cols-1">
                     <div>
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">
@@ -474,6 +479,7 @@ export default function Index({
     filterOptions = {},
     trackingContext = {},
     pagination = {},
+    pamoWorkspace = false,
 }) {
     const { props: pageProps } = usePage();
     const canCorrectSubmissionRouting = Boolean(
@@ -891,13 +897,13 @@ export default function Index({
                         },
                         {
                             key: "destination",
-                            label: "Next Action / Destination",
+                            label: pamoWorkspace ? "Destination" : "Next Action / Destination",
                             headerClassName: "min-w-[165px]",
                             cellClassName: "min-w-[165px]",
                             render: (row) => (
                                 <div className="min-w-0">
                                     <p className="break-words text-xs font-semibold text-gray-800 dark:text-gray-200">
-                                        {nextActionFor(row) || "Next action not specified"}
+                                        {pamoWorkspace ? `Recipient action: ${nextActionFor(row) || "Not specified"}` : nextActionFor(row) || "Next action not specified"}
                                     </p>
                                     <p className="mt-0.5 break-words text-[11px] text-gray-500 dark:text-gray-400">
                                         {routingFor(row).current_location || routingFor(row).responsible_office || row.target_office || "Destination not assigned"}
@@ -1257,14 +1263,24 @@ export default function Index({
         setCorrection(row);
     };
 
-    const viewLabels = {
+    const viewLabels = pamoWorkspace ? {
+        incoming: "For Action",
+        outgoing: "Sent Reports",
+        history: "Completed Reports",
+    } : {
         incoming: "Incoming Submissions",
         outgoing: "Outgoing Submissions",
         history: "Submission History",
     };
     const tabLabel = viewLabels[tab] || viewLabels.incoming;
-    const queueHelper =
-        (isGlobalMonitoring
+    const pamoViewDescriptions = {
+        incoming: "Reports requiring action from your PAMO office.",
+        outgoing: "Reports your PAMO office has submitted or forwarded.",
+        history: "Reports with completed routing within your authorized scope.",
+    };
+    const queueHelper = pamoWorkspace
+        ? pamoViewDescriptions[tab]
+        : (isGlobalMonitoring
             ? monitoringViewDescriptions
             : operationalViewDescriptions)[tab] || "Submission workspace.";
     const currentPage = pagination.current_page || 1;
@@ -1357,7 +1373,7 @@ export default function Index({
     );
 
     return (
-        <AuthenticatedLayout title="Submission Tracking">
+        <AuthenticatedLayout title={pamoWorkspace ? tabLabel : "Submission Tracking"}>
             <div className="submission-tracking-page">
                 <PageHeader title={tabLabel} description={queueHelper} />
                 <div className="mt-4 space-y-4 sm:mt-5">
@@ -1484,14 +1500,14 @@ export default function Index({
                                 onRowClick={setDetails}
                                 emptyTitle={
                                     tab === "history"
-                                        ? "No completed submissions found."
+                                        ? pamoWorkspace ? "No completed reports found." : "No completed submissions found."
                                         : tab === "incoming"
                                           ? incomingActionTab
                                             ? `No documents currently require ${incomingActionLabels[incomingActionTab].toLowerCase()} action from your office.`
-                                            : "No incoming submissions require your action."
+                                            : pamoWorkspace ? "No reports currently require action from your PAMO office." : "No incoming submissions require your action."
                                           : tab === "outgoing"
-                                            ? "No outgoing submissions found."
-                                            : "No submissions found."
+                                            ? pamoWorkspace ? "No sent reports found." : "No outgoing submissions found."
+                                          : pamoWorkspace ? "No reports found." : "No submissions found."
                                 }
                                 emptyDescription={
                                     filtersActive
@@ -1512,6 +1528,7 @@ export default function Index({
                             <SubmissionDetailsPanel
                                 row={visibleDetails}
                                 context={trackingContext}
+                                pamoWorkspace={pamoWorkspace}
                                 onSubmitMov={submitMovForReview}
                                 onReviewMov={reviewMov}
                                 onPreview={setPreviewRow}
@@ -1540,9 +1557,10 @@ export default function Index({
             <CrudDetailsModal
                 compact
                 open={Boolean(showFullDetails && details)}
-                title="Submission Details"
-                subtitle="Report identity, custody, and routing history"
+                title={pamoWorkspace ? "Report Details" : "Submission Details"}
+                subtitle={pamoWorkspace ? "Current report information and routing status" : "Report identity, custody, and routing history"}
                 onClose={() => setShowFullDetails(false)}
+                attachments={pamoWorkspace && details ? <OfficialReportFileSection row={details} onPreview={setPreviewRow} /> : null}
                 closeOnEscape={!reviewHistoryRecord}
                 footerActions={<>
                     {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="warning" onClick={() => openCorrection(details)} className="rounded-xl px-3 py-2 text-xs">Correct routing</Button>}
@@ -1571,7 +1589,7 @@ export default function Index({
                                 <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{detailsCustody.holder}</dd>
                             </div>}
                             {!detailsCustody.officeMatchesOrigin && detailsCustody.office && <div className="min-w-0">
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Current Office</dt>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{pamoWorkspace && tab === "outgoing" && String(details.routing?.current_stage || "").startsWith("transit_") ? "Destination" : "Current Office"}</dt>
                                 <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-slate-100">{detailsCustody.office}</dd>
                             </div>}
                             <div>
@@ -1579,8 +1597,9 @@ export default function Index({
                                 <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "—"}</dd>
                             </div>
                             <div>
-                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Next Expected Action</dt>
+                                <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{pamoWorkspace && tab === "outgoing" ? "Recipient's Next Expected Action" : "Next Expected Action"}</dt>
                                 <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{nextActionFor(details) || "No action pending"}</dd>
+                                {pamoWorkspace && tab === "outgoing" && <dd className="mt-1 text-xs text-gray-500 dark:text-gray-400">Shown for reference at the destination office.</dd>}
                             </div>
                             {(details.routing?.pending_since || details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined) && (
                                 <div>
@@ -1701,6 +1720,7 @@ export default function Index({
                     <PambMovProgress
                         row={details}
                         hideReleaseAction={Boolean(details.canonical_custody_applicable)}
+                        hideSubmitAction={pamoWorkspace && String(details.routing?.current_stage || '').startsWith('transit_')}
                         context={trackingContext}
                         onSubmit={submitMovForReview}
                         onReview={reviewMov}

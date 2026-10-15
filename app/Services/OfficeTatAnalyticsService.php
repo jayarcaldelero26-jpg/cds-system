@@ -254,7 +254,7 @@ final class OfficeTatAnalyticsService
     {
         $base = [
             'available' => Schema::hasTable('pamo_pamb_drafts') && Schema::hasTable('document_routing_events'),
-            'basis' => 'First persisted PAMO PAMB draft started_at in the selected Asia/Manila assessment period.',
+            'basis' => 'First persisted PAMO draft started_at in the selected Asia/Manila assessment period.',
             'processing_period' => $periodKey,
             'cohort_start' => $periodStart->toDateString(),
             'cohort_end' => $cohortEndExclusive->greaterThan($periodStart) ? $cohortEndExclusive->subMicrosecond()->toDateString() : $periodStart->subDay()->toDateString(),
@@ -294,10 +294,30 @@ final class OfficeTatAnalyticsService
         }
 
         $workflowFilter = trim((string) ($filters['workflow'] ?? 'all'));
-        $workflowKey = $workflowFilter !== '' && $workflowFilter !== 'all' && str_starts_with($workflowFilter, 'conservation:')
-            ? substr($workflowFilter, strlen('conservation:'))
-            : null;
-        if ($workflowFilter !== '' && $workflowFilter !== 'all' && ($workflowKey === null || ! in_array($workflowKey, PambComplianceCalculator::MEETING_WORKFLOWS, true))) {
+        $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+        $nativeReady = $nativeSources->isSchemaReady();
+        // Keep the cohort aligned with the active generic PA module catalog
+        // accepted by PAMO submission authorization. Meeting workflows are
+        // only a subset of that catalog (for example, Homestay is also a
+        // supported PAMO workflow).
+        $eligiblePreparationWorkflows = [...$this->conservation->pamoSubmissionKeys(), ...($nativeReady ? array_keys($nativeSources->all()) : [])];
+        $workflowKey = null;
+        $selectedSource = null;
+        $validWorkflowFilter = $workflowFilter === '' || $workflowFilter === 'all';
+        if (str_starts_with($workflowFilter, 'conservation:')) {
+            $workflowKey = substr($workflowFilter, strlen('conservation:'));
+            $selectedSource = 'conservation';
+            $validWorkflowFilter = $this->conservation->supportsPamoSubmission($workflowKey);
+        } elseif (str_contains($workflowFilter, ':')) {
+            [$sourceCandidate, $sourceSelection] = explode(':', $workflowFilter, 2);
+            $native = $nativeReady ? $nativeSources->findBySource($sourceCandidate) : null;
+            if ($native && $sourceSelection === $sourceCandidate) {
+                $workflowKey = $native['workflow'];
+                $selectedSource = $sourceCandidate;
+                $validWorkflowFilter = true;
+            }
+        }
+        if (! $validWorkflowFilter) {
             return [...$base, 'available' => true, 'rows' => array_values($rows)];
         }
 
@@ -305,11 +325,11 @@ final class OfficeTatAnalyticsService
             ->whereIn('pamo_office_id', $officeIds)
             ->where('started_at', '>=', $periodStart)
             ->where('started_at', '<', $cohortEndExclusive)
-            ->whereIn('workflow_key', $workflowKey ? [$workflowKey] : PambComplianceCalculator::MEETING_WORKFLOWS);
+            ->whereIn('workflow_key', $workflowKey ? [$workflowKey] : $eligiblePreparationWorkflows);
         if (! $organization->isGlobal($user)) $draftQuery->where('protected_area_id', (int) $user->protected_area_id);
         if (filled($filters['protected_area_id'] ?? null)) $draftQuery->where('protected_area_id', (int) $filters['protected_area_id']);
         $cutoff = $cohortEndExclusive;
-        $draftQuery->with('pamoOffice:id,name')->orderBy('id')->chunkById($this->documentBatchSize, function (Collection $drafts) use (&$rows, $officeNames, $cutoff, $filters): void {
+        $draftQuery->with('pamoOffice:id,name')->orderBy('id')->chunkById($this->documentBatchSize, function (Collection $drafts) use (&$rows, $officeNames, $cutoff, $filters, $nativeSources, $nativeReady, $selectedSource): void {
             $documents = [];
             foreach ($drafts as $draft) {
                 $payload = $draft->report_payload ?? [];
@@ -318,13 +338,19 @@ final class OfficeTatAnalyticsService
                 if (filled($filters['reporting_year'] ?? null) && $payloadYear !== (string) $filters['reporting_year']) continue;
                 $officeId = (int) $draft->pamo_office_id;
                 $officeName = (string) ($draft->pamo_office_name ?: ($draft->pamoOffice?->name ?: ($officeNames[$officeId] ?? 'PAMO')));
+                $native = $nativeReady ? $nativeSources->find((string) $draft->workflow_key) : null;
+                $sourceKey = $native['source'] ?? 'conservation';
+                if ($selectedSource !== null && $sourceKey !== $selectedSource) continue;
                 $rows[$officeId] ??= ['office_category' => 'PAMO', 'office_id' => $officeId, 'office' => $officeName, 'documents_started' => 0, 'completed_documents' => 0, 'pending_documents' => 0, 'missing_evidence' => 0, 'elapsed_seconds_total' => 0.0, 'average_elapsed_seconds' => null, 'rank' => null];
                 $rows[$officeId]['documents_started']++;
+                $nativeSourceId = $native ? $draft->getAttribute($native['column']) : null;
+                $sourceId = $nativeSourceId ?: $draft->conservation_report_submission_id;
                 $documents[(int) $draft->id] = [
                     'office_id' => $officeId,
                     'started_at' => CarbonImmutable::parse($draft->started_at, BusinessCalendarService::TIMEZONE),
                     'status' => (string) $draft->status,
-                    'source_id' => $draft->conservation_report_submission_id ? (int) $draft->conservation_report_submission_id : null,
+                    'source_key' => $sourceId ? $sourceKey : null,
+                    'source_id' => $sourceId ? (int) $sourceId : null,
                     'forwarded_at' => $draft->forwarded_at ? CarbonImmutable::parse($draft->forwarded_at, BusinessCalendarService::TIMEZONE) : null,
                     'initial_seconds' => null,
                     'correction_seconds' => 0.0,
@@ -336,44 +362,48 @@ final class OfficeTatAnalyticsService
 
             $sourceToDraft = [];
             foreach ($documents as $draftId => $document) {
-                if ($document['source_id'] !== null) $sourceToDraft[$document['source_id']] = $draftId;
+                if ($document['source_id'] !== null) $sourceToDraft[$document['source_key'].':'.$document['source_id']] = $draftId;
             }
             if ($sourceToDraft !== [] && Schema::hasTable('document_routing_events')) {
-                $events = DB::table('document_routing_events')
-                    ->select(['id', 'source_id', 'event_key', 'from_stage', 'to_stage', 'occurred_at', 'metadata'])
-                    ->where('source_type', 'conservation')->whereIn('source_id', array_keys($sourceToDraft))
-                    ->where('occurred_at', '<', $cutoff);
-                $this->forEachOrderedEventPage($events, 'source_id', function (object $event) use (&$documents, $sourceToDraft): void {
-                    $draftId = $sourceToDraft[(int) $event->source_id] ?? null;
-                    if ($draftId === null) return;
-                    $document = &$documents[$draftId];
-                    $occurredAt = CarbonImmutable::parse($event->occurred_at, BusinessCalendarService::TIMEZONE);
-                    if ($occurredAt->lessThan($document['started_at'])) return;
-                    $metadata = is_array($event->metadata) ? $event->metadata : (json_decode((string) $event->metadata, true) ?: []);
-                    $action = (string) ($metadata['action_key'] ?? '');
-                    if ($event->event_key === 'correction_received' && $action === 'receive_correction' && $event->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
-                        if ($document['initial_seconds'] !== null && $document['correction_started_at'] === null) {
-                            $document['correction_started_at'] = $occurredAt;
-                            $document['correction_return_pending'] = false;
+                foreach (collect($documents)->pluck('source_key')->filter()->unique() as $eventSource) {
+                    $sourceIds = collect($documents)->filter(fn (array $document): bool => $document['source_key'] === $eventSource && $document['source_id'] !== null)->pluck('source_id')->unique()->values();
+                    if ($sourceIds->isEmpty()) continue;
+                    $events = DB::table('document_routing_events')
+                        ->select(['id', 'source_id', 'event_key', 'from_stage', 'to_stage', 'occurred_at', 'metadata'])
+                        ->where('source_type', $eventSource)->whereIn('source_id', $sourceIds)
+                        ->where('occurred_at', '<', $cutoff);
+                    $this->forEachOrderedEventPage($events, 'source_id', function (object $event) use (&$documents, $sourceToDraft, $eventSource): void {
+                        $draftId = $sourceToDraft[$eventSource.':'.(int) $event->source_id] ?? null;
+                        if ($draftId === null) return;
+                        $document = &$documents[$draftId];
+                        $occurredAt = CarbonImmutable::parse($event->occurred_at, BusinessCalendarService::TIMEZONE);
+                        if ($occurredAt->lessThan($document['started_at'])) return;
+                        $metadata = is_array($event->metadata) ? $event->metadata : (json_decode((string) $event->metadata, true) ?: []);
+                        $action = (string) ($metadata['action_key'] ?? '');
+                        if ($event->event_key === 'correction_received' && $action === 'receive_correction' && $event->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
+                            if ($document['initial_seconds'] !== null && $document['correction_started_at'] === null) {
+                                $document['correction_started_at'] = $occurredAt;
+                                $document['correction_return_pending'] = false;
+                            }
+                        } elseif ($event->event_key === 'returned_for_correction' && $event->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
+                            $document['correction_return_pending'] = true;
+                        } elseif ($event->event_key === 'forwarded'
+                            && in_array($action, ['forward_from_pamo', 'forward_from_pamo_to_cenro_focal'], true)
+                            && $event->from_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
+                            if ($document['initial_seconds'] === null) {
+                                $seconds = $document['started_at']->diffInSeconds($occurredAt, false);
+                                if ($seconds < 0) $document['invalid'] = true;
+                                else $document['initial_seconds'] = (float) $seconds;
+                            } elseif ($document['correction_started_at'] instanceof CarbonImmutable) {
+                                $seconds = $document['correction_started_at']->diffInSeconds($occurredAt, false);
+                                if ($seconds < 0) $document['invalid'] = true;
+                                else $document['correction_seconds'] += (float) $seconds;
+                                $document['correction_started_at'] = null;
+                                $document['correction_return_pending'] = false;
+                            }
                         }
-                    } elseif ($event->event_key === 'returned_for_correction' && $event->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
-                        $document['correction_return_pending'] = true;
-                    } elseif ($event->event_key === 'forwarded'
-                        && in_array($action, ['forward_from_pamo', 'forward_from_pamo_to_cenro_focal'], true)
-                        && $event->from_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
-                        if ($document['initial_seconds'] === null) {
-                            $seconds = $document['started_at']->diffInSeconds($occurredAt, false);
-                            if ($seconds < 0) $document['invalid'] = true;
-                            else $document['initial_seconds'] = (float) $seconds;
-                        } elseif ($document['correction_started_at'] instanceof CarbonImmutable) {
-                            $seconds = $document['correction_started_at']->diffInSeconds($occurredAt, false);
-                            if ($seconds < 0) $document['invalid'] = true;
-                            else $document['correction_seconds'] += (float) $seconds;
-                            $document['correction_started_at'] = null;
-                            $document['correction_return_pending'] = false;
-                        }
-                    }
-                });
+                    });
+                }
             }
 
             foreach ($documents as $document) {
@@ -1104,7 +1134,18 @@ final class OfficeTatAnalyticsService
         ] as $source => [$ability, $label]) {
             if ($user->can($ability)) $options[] = ['value' => $source.':'.$source, 'label' => $label];
         }
-        return $options;
+        if ($this->organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
+            && (int) $user->protected_area_id > 0) {
+            $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+            if ($nativeSources->isSchemaReady()) {
+                foreach ($nativeSources->all() as $workflow => $native) {
+                    if ($nativeSources->isEligible($workflow)) {
+                        $options[] = ['value' => $native['source'].':'.$native['source'], 'label' => $native['label']];
+                    }
+                }
+            }
+        }
+        return collect($options)->keyBy('value')->values()->all();
     }
 
     public function canonicalPeriodKey(mixed $input): string

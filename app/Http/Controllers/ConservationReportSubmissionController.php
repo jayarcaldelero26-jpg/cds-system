@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ConservationReportSubmission;
 use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
+use App\Models\SubmissionRoutingSnapshot;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\DateConductedRangeService;
 use App\Services\Conservation\PambComplianceCalculator;
@@ -25,6 +26,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
 class ConservationReportSubmissionController extends Controller
@@ -371,6 +373,11 @@ class ConservationReportSubmissionController extends Controller
             ? app(ConservationHistoricalEvidenceProjection::class)->forRecord($submission)
             : null;
         $presentation = $historical['record'] ?? $submission;
+        $originSnapshot = ! $historical && Schema::hasTable('submission_routing_snapshots')
+            ? SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')
+                ->where('source_id', $submission->getKey())->first()
+            : null;
+        $pamoOrigin = $originSnapshot?->origin_kind === 'pamo_pamb';
 
         $original = $this->attachments->descriptor('conservation-report', $submission, 'mov');
 
@@ -387,6 +394,8 @@ class ConservationReportSubmissionController extends Controller
             'mov' => $original,
             'mov_url' => $submission->mov_file_path ? $this->attachments->url('conservation-report', $submission, 'mov') : null,
             'current_document' => $this->routingAttachments->currentDescriptor('conservation', (int) $submission->getKey(), $original),
+            'pamo_origin' => $pamoOrigin,
+            'pamo_origin_office' => $pamoOrigin ? $originSnapshot?->pamo_office_name : null,
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
             'cenro_release_applicable' => ! $directPenro,
             ...($this->dateConductedRanges->supportsWorkflow($submission->workflow_key) ? [
