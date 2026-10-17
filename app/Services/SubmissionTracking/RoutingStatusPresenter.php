@@ -4,13 +4,12 @@ namespace App\Services\SubmissionTracking;
 
 use App\Models\EngpReportSubmission;
 use App\Models\ConservationReportSubmission;
-use App\Models\SubmissionRoutingSnapshot;
 use App\Services\Conservation\PambComplianceCalculator;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use App\Support\DatePresentationNormalizer;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * The single presentation contract for report routing status.
@@ -31,15 +30,13 @@ final class RoutingStatusPresenter
         private readonly ProtectedAreaRoutingPolicy $routingPolicy,
         private readonly PambComplianceCalculator $pambCompliance,
         private readonly DocumentRoutingTransitionService $genericRouting,
+        private readonly PamoOriginSchemaReadiness $pamoOrigins,
     ) {}
 
     public function status(Model $record, ?string $sourceKey = null, ?Collection $routingEvents = null, ?string $routeProfile = null): string
     {
         $sourceKey ??= $this->sourceKey($record);
-        $isPamoOrigin = $record instanceof ConservationReportSubmission && $sourceKey === 'conservation'
-            && Schema::hasTable('submission_routing_snapshots')
-            && SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)
-                ->where('source_id', $record->getKey())->value('origin_kind') === 'pamo_pamb';
+        $isPamoOrigin = $this->pamoOrigins->isPamoConservationOrigin($record, $sourceKey);
         if ($isPamoOrigin) {
             $routing = $this->genericRouting->state($record, $sourceKey, $routingEvents);
             if (($routing['route_position']['origin_kind'] ?? null) === 'pamo_pamb') {

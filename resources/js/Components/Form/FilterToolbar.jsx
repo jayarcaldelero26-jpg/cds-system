@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState } from 'react';
 import AppliedFilterChip from './AppliedFilterChip';
 
-export default function FilterToolbar({ label = 'Filters', chips = [], onClear, children, className = '', panelClassName = '', triggerClassName = '' }) {
+export default function FilterToolbar({ label = 'Filters', chips = [], onClear, children, className = '', panelClassName = '', triggerClassName = '', clearClassName = '' }) {
     const triggerRef = useRef(null);
     const panelRef = useRef(null);
     const [open, setOpen] = useState(false);
@@ -60,7 +60,7 @@ export default function FilterToolbar({ label = 'Filters', chips = [], onClear, 
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5" aria-label="Applied filters" aria-live="polite">
                 {chips.map(chip => <AppliedFilterChip key={chip.key} label={chip.label} value={chip.value} onRemove={chip.onRemove} />)}
             </div>
-            {onClear && chips.length > 0 && <button type="button" onClick={onClear} className="min-h-9 shrink-0 rounded-md px-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:text-gray-300 dark:hover:bg-gray-800">Clear all</button>}
+            {onClear && chips.length > 0 && <button type="button" onClick={onClear} className={`min-h-9 shrink-0 rounded-md px-2.5 text-xs font-semibold text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:text-gray-300 dark:hover:bg-gray-800 ${clearClassName}`}>Clear all</button>}
         </div>
         {panel}
     </div>;

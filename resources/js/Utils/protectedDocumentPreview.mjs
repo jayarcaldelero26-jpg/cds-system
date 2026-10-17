@@ -59,7 +59,9 @@ export async function loadProtectedPreview(url, {
     if (response.status === 401 || response.status === 419) throw new PreviewLoadError('session');
     if (response.status === 403) throw new PreviewLoadError('forbidden');
     if (response.status === 404) throw new PreviewLoadError('missing');
-    if (!response.ok || response.redirected) throw new PreviewLoadError('response');
+    // Preview consumers need the complete document body. A successful partial
+    // response can start with a valid signature while still being truncated.
+    if (response.status !== 200 || response.redirected) throw new PreviewLoadError('response');
 
     const type = inlinePreviewType(response.headers.get('content-type'));
     if (!type) throw new PreviewLoadError('response');

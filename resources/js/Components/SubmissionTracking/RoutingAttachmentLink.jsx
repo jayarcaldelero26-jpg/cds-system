@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { usePage } from "@inertiajs/react";
 import { downloadWithProgress } from "@/Utils/downloadWithProgress";
 import Button from "@/Components/Button";
+import DocumentPreviewDialog from "@/Components/SubmissionTracking/DocumentPreviewDialog";
 
 const size = (value) =>
     !Number.isFinite(Number(value))
@@ -9,9 +11,11 @@ const size = (value) =>
           ? `${(Number(value) / 1024).toFixed(1)} KB`
           : `${(Number(value) / 1024 / 1024).toFixed(1)} MB`;
 
-export default function RoutingAttachmentLink({ attachment }) {
+export default function RoutingAttachmentLink({ attachment, row = null, contextLabel = '' }) {
     const [progress, setProgress] = useState(null);
     const [error, setError] = useState("");
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const accountKey = usePage().props.auth?.user?.id ?? null;
     if (!attachment) return null;
     const download = async () => {
         setError("");
@@ -43,14 +47,13 @@ export default function RoutingAttachmentLink({ attachment }) {
             </p>
             <div className="mt-1.5 flex gap-2">
                 {attachment.preview_url && (
-                    <a
-                        href={attachment.preview_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="font-bold text-green-800 hover:underline"
+                    <button
+                        type="button"
+                        onClick={event => { event.stopPropagation(); setPreviewOpen(true); }}
+                        className="font-bold text-green-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600"
                     >
                         Preview
-                    </a>
+                    </button>
                 )}
                 <Button
                     size="compact"
@@ -92,6 +95,18 @@ export default function RoutingAttachmentLink({ attachment }) {
                     {error}
                 </p>
             )}
+            <DocumentPreviewDialog
+                open={previewOpen}
+                row={row}
+                accountKey={accountKey}
+                attachment={attachment}
+                previewAllowed={Boolean(attachment.preview_url)}
+                downloadAllowed={Boolean(attachment.download_url)}
+                presentation="document-only"
+                contextLabel={[row?.module, row?.protected_area, contextLabel].filter(Boolean).join(" · ")}
+                contextDetails={contextLabel ? [["Routing event", contextLabel]] : []}
+                onClose={() => setPreviewOpen(false)}
+            />
         </div>
     );
 }

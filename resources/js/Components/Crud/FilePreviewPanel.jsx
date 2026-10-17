@@ -9,7 +9,7 @@ const PdfDocumentViewer = lazy(() => import('@/Components/SubmissionTracking/Pdf
 
 const extensionOf = file => file?.name?.split('.').pop()?.toLowerCase() || '';
 
-export default function FilePreviewPanel({ file, title = 'Live Document Preview', emptyText = 'No file selected for preview', className = '', heightClass = 'h-[650px]', hideHeader = false }) {
+export default function FilePreviewPanel({ file, title = 'Live Document Preview', emptyText = 'No file selected for preview', className = '', heightClass = 'h-[650px]', hideHeader = false, bare = false, viewerOptions = {} }) {
     const reportDetails = useReportDetails();
     const insideReportDetailsCard = useContext(CrudModalCardContext) && Boolean(reportDetails);
     if (reportDetails) {
@@ -30,7 +30,7 @@ export default function FilePreviewPanel({ file, title = 'Live Document Preview'
     }, [fileUrl, isPdf]);
 
     if (file?.protected) {
-        return <ProtectedAttachmentPreview file={file} title={title} className={className} heightClass={heightClass} hideHeader={hideHeader} />;
+        return <ProtectedAttachmentPreview file={file} title={title} className={className} heightClass={heightClass} hideHeader={hideHeader} bare={bare} viewerOptions={viewerOptions} />;
     }
 
     return <aside className={`${insideReportDetailsCard ? '' : 'cds-card-surface '}overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 ${className}`}>
@@ -39,7 +39,7 @@ export default function FilePreviewPanel({ file, title = 'Live Document Preview'
     </aside>;
 }
 
-function ProtectedAttachmentPreview({ file, title, className, heightClass, hideHeader }) {
+function ProtectedAttachmentPreview({ file, title, className, heightClass, hideHeader, bare, viewerOptions }) {
     const [state, setState] = useState(null);
     const [imageUrl, setImageUrl] = useState(null);
     const url = file?.preview_url || file?.url;
@@ -55,8 +55,11 @@ function ProtectedAttachmentPreview({ file, title, className, heightClass, hideH
         setImageUrl(objectUrl);
         return () => URL.revokeObjectURL(objectUrl);
     }, [state]);
+    const readerDownload = viewerOptions?.archiveReader && file?.download_url
+        ? <a href={file.download_url} download={file.name || undefined} className="mt-2 inline-flex rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">Download</a>
+        : null;
     const embedded = state?.status === 'ready' && state.type === 'application/pdf'
-        ? <Suspense fallback={<p role="status" className="m-auto text-sm text-gray-500">Preparing PDF preview…</p>}><PdfDocumentViewer blob={state.blob} title={file.name || 'PDF document'} className="h-full w-full" /></Suspense>
+        ? <Suspense fallback={<div className="m-auto text-center"><p role="status" className="text-sm text-gray-500">Preparing PDF preview…</p>{readerDownload}</div>}><PdfDocumentViewer {...viewerOptions} blob={state.blob} title={file.name || 'PDF document'} className="h-full w-full" /></Suspense>
         : state?.status === 'ready' && imageUrl
             ? <img src={imageUrl} alt={file.name || 'Attachment preview'} className="max-h-full w-full object-contain" />
             : state?.status === 'error'
@@ -64,8 +67,9 @@ function ProtectedAttachmentPreview({ file, title, className, heightClass, hideH
                 : state?.status === 'unsupported'
                     ? <div className="p-8 text-center"><p className="text-sm text-gray-600 dark:text-gray-300">{state.error.message}</p>{file.download_url && <a href={file.download_url} className="mt-3 inline-flex rounded-xl px-4 py-2.5 text-xs font-bold text-green-700 hover:underline" data-cds-action="true" data-cds-action-variant="primary">Open Document</a>}</div>
                     : <p role="status" className="text-sm text-gray-500 dark:text-gray-400">Loading protected preview…</p>;
-    return <aside className={`${className} overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900`}>
+    return <aside className={`${className} overflow-hidden ${bare ? 'flex h-full min-h-0 flex-col bg-white dark:bg-gray-950' : 'rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'}`}>
         {!hideHeader && <div className="border-b border-gray-100 px-5 py-4 dark:border-gray-800"><h3 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400">{title}</h3><p className="mt-1 truncate text-xs font-medium text-gray-600 dark:text-gray-300">{file.name}</p></div>}
-        <div className={`flex w-full items-center justify-center overflow-hidden bg-gray-100 dark:bg-gray-950 ${heightClass}`}>{embedded}</div>
+        {bare && mime === 'application/pdf' && state?.status !== 'ready' && readerDownload && <div className="flex shrink-0 justify-end border-b border-slate-200 bg-white px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900">{readerDownload}</div>}
+        <div className={`flex w-full items-center justify-center overflow-hidden bg-gray-100 dark:bg-gray-950 ${bare ? 'min-h-0 flex-1' : heightClass}`}>{embedded}</div>
     </aside>;
 }

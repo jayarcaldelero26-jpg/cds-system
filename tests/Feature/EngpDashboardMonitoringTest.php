@@ -254,16 +254,19 @@ test('legacy combined view is safely redirected to PA monitoring', function (): 
         ->assertRedirect(route('dashboard', ['view' => 'pa']));
 });
 
-test('PA dashboard remains available and keeps the existing monitoring contract', function (): void {
+test('PA dashboard remains available with the current unified monitoring projection', function (): void {
     $user = User::factory()->create(['section' => 'CDS']);
 
     $this->actingAs($user)->get(route('dashboard', ['view' => 'pa']))
         ->assertInertia(fn (Assert $page) => $page
             ->component('Dashboard')
             ->where('view', 'pa')
-            ->has('summary')
-            ->has('rows')
-            ->has('filterOptions.programs'));
+            ->where('dashboard.filters.program', 'pa')
+            ->where('dashboard.trackingTotal', 0)
+            ->has('dashboard.programs', 2)
+            ->has('dashboard.trackingRows', 0)
+            ->missing('summary')
+            ->missing('actionQueue'));
 });
 
 test('ENGP monitoring status boundary is characterized separately from submitted state', function (): void {

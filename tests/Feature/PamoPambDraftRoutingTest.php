@@ -108,7 +108,7 @@ test('catalog-backed non-PAMB reports keep PA scope, source validation and first
                 ->where('pamoWorkspace', true)
                 ->where('workflow.key', $workflow)
                 ->where('protectedAreas', fn ($areas) => count($areas) === 1 && (int) $areas[0]['id'] === (int) $area->getKey())
-                ->where('genericModuleNavigation', fn ($links) => count($links) === 22 && collect($links)->contains(fn (array $link) => $link['href'] === route('conservation-reports.index', $workflow))
+                ->where('genericModuleNavigation', fn ($links) => count($links) === 22 && collect($links)->contains(fn (array $link) => $link['href'] === route('conservation-reports.index', $workflow, false))
                     && collect($links)->doesntContain(fn (array $link) => str_starts_with($link['href'], '/bms') || str_starts_with($link['href'], '/aws'))));
         $token = (string) Str::uuid();
         $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
@@ -230,6 +230,109 @@ test('the Reports workspace exposes the active PA catalog and only the actor PA 
             ->where('archives.total', 0));
     $pamo->forceFill(['is_active' => false])->save();
     $this->actingAs($pamo)->get(route('pamo-reports.index'))->assertRedirect(route('login'));
+});
+
+test('PAMO activity titles remain free text from draft save through restoration report promotion', function (): void {
+    Storage::fake('local');
+    Notification::fake();
+    $owner = User::factory()->create();
+    [$area, $office] = pamoPilotArea($owner, 'APL', 'PAMO Free Title APL', 'cenro_baganga');
+    $pamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+    [$foreignArea, $foreignOffice] = pamoPilotArea($owner, 'OTHER', 'PAMO Free Title Other', 'cenro_mati');
+    $foreign = pamoPilotActor(OrganizationalAccessService::PAMO, $foreignOffice->name, (int) $foreignArea->getKey());
+    $token = (string) Str::uuid();
+    $workflow = 'restoration_plan_5_year';
+    $activity = 'Restoration Plan Workshop';
+
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
+        'start_idempotency_key' => $token,
+        'activity_name' => $activity,
+        'document_type' => 'Progress Report',
+        'reporting_period' => 'Quarter 3',
+        'date_accomplished' => '2026-10-02',
+        'mov' => pamoPilotUpload(),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $draft = PamoPambDraft::query()->where('start_idempotency_key', $token)->firstOrFail();
+    $initialLockVersion = (int) $draft->lock_version;
+    expect(data_get($draft->report_payload, 'activity_name'))->toBe($activity)
+        ->and($draft->status)->toBe('draft');
+
+    $forwardRoute = route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]);
+    $forwardBase = ['lock_version' => $draft->lock_version];
+    $this->actingAs($foreign)->post($forwardRoute, $forwardBase + ['activity_name' => $activity])->assertForbidden();
+    $this->actingAs($pamo)->post($forwardRoute, $forwardBase + ['activity_name' => ''])
+        ->assertRedirect()->assertSessionHasErrors('activity_name');
+    $this->actingAs($pamo)->post($forwardRoute, $forwardBase + ['activity_name' => ['invalid' => 'array']])
+        ->assertRedirect()->assertSessionHasErrors('activity_name');
+    $this->actingAs($pamo)->post($forwardRoute, $forwardBase + ['activity_name' => str_repeat('x', 256)])
+        ->assertRedirect()->assertSessionHasErrors('activity_name');
+
+    expect(ConservationReportSubmission::query()->count())->toBe(0)
+        ->and($draft->fresh()->status)->toBe('draft')
+        ->and((int) $draft->fresh()->lock_version)->toBe($initialLockVersion);
+
+    $this->actingAs($pamo)->post($forwardRoute, [
+        ...$forwardBase,
+        'activity_name' => $activity,
+        'document_type' => 'Progress Report',
+        'reporting_period' => 'Quarter 3',
+        'date_accomplished' => '2026-10-02',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $draft->refresh();
+    $source = ConservationReportSubmission::query()->findOrFail($draft->conservation_report_submission_id);
+    $snapshot = SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')->where('source_id', $source->getKey())->firstOrFail();
+    $event = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->firstOrFail();
+
+    expect($draft->status)->toBe('forwarded')
+        ->and($draft->workflow_key)->toBe($workflow)
+        ->and($draft->report_payload['activity_name'])->toBe($activity)
+        ->and($source->workflow_key)->toBe($workflow)
+        ->and($source->activity_name)->toBe($activity)
+        ->and($source->document_type)->toBe('Progress Report')
+        ->and((int) $source->protected_area_id)->toBe((int) $area->getKey())
+        ->and($source->target_office)->toBe('CENRO Baganga')
+        ->and(Storage::disk('local')->exists($source->mov_file_path))->toBeTrue()
+        ->and($snapshot->graph_version)->toBe(RoutingPositionSnapshotService::PAMO_GRAPH_VERSION)
+        ->and($snapshot->profile)->toBe('pamo_regular')
+        ->and($snapshot->origin_kind)->toBe('pamo_pamb')
+        ->and((int) $snapshot->protected_area_id)->toBe((int) $area->getKey())
+        ->and((int) $snapshot->pamo_office_id)->toBe((int) $office->getKey())
+        ->and((int) $snapshot->originator_user_id)->toBe((int) $pamo->getKey())
+        ->and($event->event_key)->toBe('forwarded')
+        ->and($event->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL)
+        ->and(ConservationReportSubmission::query()->count())->toBe(1)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->count())->toBe(1);
+
+    $this->actingAs($pamo)->post($forwardRoute, ['lock_version' => $draft->lock_version, 'activity_name' => $activity])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    expect(ConservationReportSubmission::query()->count())->toBe(1)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->count())->toBe(1);
+
+    $unicodeToken = (string) Str::uuid();
+    $unicodeTitle = 'Restoration Plan Workshop – Davao Oriental';
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
+        'start_idempotency_key' => $unicodeToken,
+        'activity_name' => $unicodeTitle,
+        'document_type' => 'Final Report',
+        'reporting_period' => 'Quarter 4',
+        'date_accomplished' => '2026-10-03',
+        'mov' => pamoPilotUpload(),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $unicodeDraft = PamoPambDraft::query()->where('start_idempotency_key', $unicodeToken)->firstOrFail();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $unicodeDraft->draft_uuid]), [
+        'lock_version' => $unicodeDraft->lock_version,
+        'activity_name' => $unicodeTitle,
+        'document_type' => 'Final Report',
+        'reporting_period' => 'Quarter 4',
+        'date_accomplished' => '2026-10-03',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $unicodeSource = ConservationReportSubmission::query()->findOrFail($unicodeDraft->fresh()->conservation_report_submission_id);
+    expect($unicodeSource->workflow_key)->toBe($workflow)
+        ->and($unicodeSource->activity_name)->toBe($unicodeTitle)
+        ->and($unicodeSource->document_type)->toBe('Final Report')
+        ->and(ConservationReportSubmission::query()->count())->toBe(2);
 });
 
 test('Forward validates current Homestay modal dates and promotes once without a separate draft save', function (): void {
@@ -380,18 +483,18 @@ test('native module lists are bound to the authenticated PAMO PA and omit financ
             ->where('pamoDrafts', [])
             ->where('genericModuleNavigation', fn ($links) => count($links) === 22)
             ->where('pamoNativeModuleNavigation', fn ($links) => count($links) === 7
-                && collect($links)->contains(fn (array $link) => $link['href'] === route('pamo-native-reports.index', 'bms')))
+                && collect($links)->contains(fn (array $link) => $link['href'] === route('pamo-native-reports.index', 'bms', false)))
             ->missing('revenueTargets')
             ->missing('provincialAccountingRows')
             ->missing('bankBalances'));
 
     $expectedGenericPaths = collect(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys())
-        ->map(fn (string $key) => route('conservation-reports.index', $key))->all();
+        ->map(fn (string $key) => route('conservation-reports.index', $key, false))->all();
     $nativeDefinitions = \App\Models\ModuleDefinition::query()->active()->notRetired()
         ->where('implementation_type', \App\Models\ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
         ->where('requirement_domain', 'pa')->whereIn('code', array_keys(app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->all()))
         ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')->get(['name', 'code']);
-    $expectedNativePaths = $nativeDefinitions->map(fn ($definition) => route('pamo-native-reports.index', $definition->code))->all();
+    $expectedNativePaths = $nativeDefinitions->map(fn ($definition) => route('pamo-native-reports.index', $definition->code, false))->all();
     $expectedNativeLabels = $nativeDefinitions->pluck('name')->all();
     $awsPage = $this->actingAs($pamo)->get(route('pamo-native-reports.index', 'automated_weather_station'));
     $awsPage->assertOk()->assertInertia(fn ($page) => $page
@@ -591,7 +694,7 @@ test('all seven native adapters promote into their own source rows with protecte
         'date_accomplished' => '2026-10-03', 'remarks' => 'Native pilot fixture',
     ];
     $payloads = [
-        'bms' => $base,
+        'bms' => [...$base, 'activity_name' => 'Conduct 1st Semester Biodiversity Monitoring System'],
         'bams' => $base,
         'imea' => $base,
         'imea_facility_maintenance' => [...$base, 'quarter' => 'Quarter 4'],
@@ -647,6 +750,7 @@ test('all seven native adapters promote into their own source rows with protecte
         ]))->toThrow(\Illuminate\Database\QueryException::class);
 
         $event = DocumentRoutingEvent::query()->where('source_type', $sourceKey)->where('source_id', $recordId)->firstOrFail();
+        $snapshotId = (int) SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('id');
         expect($event->event_key)->toBe('forwarded')
             ->and($event->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL)
             ->and(SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('origin_kind'))->toBe('pamo_pamb');
@@ -671,12 +775,69 @@ test('all seven native adapters promote into their own source rows with protecte
         $this->actingAs($cenro)->post(route('submission-tracking.transition', [$sourceKey, $recordId, 'return_to_pamo_for_correction']), [
             'stage' => 'return_to_pamo_for_correction', 'remarks' => 'Correct the report fields.', 'correction_reason_key' => 'incomplete_document',
         ])->assertRedirect()->assertSessionHasNoErrors();
+
+        $focusedIncoming = $this->actingAs($pamo)->get(route('submission-tracking.index', [
+            'view' => 'incoming', 'focus_source' => $sourceKey, 'focus_id' => $recordId,
+            'source' => $sourceKey, 'source_id' => $recordId,
+        ]))->assertOk()->inertiaPage();
+        $pamoIncomingRow = collect(data_get($focusedIncoming, 'props.workspaceQueues.incoming'))
+            ->first(fn (array $row): bool => ($row['source'] ?? null) === $sourceKey && (int) ($row['source_id'] ?? 0) === $recordId);
+        $selectedRow = data_get($focusedIncoming, 'props.trackingContext.selected_record');
+        expect($pamoIncomingRow)->not->toBeNull()
+            ->and(collect(data_get($pamoIncomingRow, 'routing.actions'))->pluck('key'))->toContain('receive_correction')
+            ->and(data_get($pamoIncomingRow, 'incoming_action_category'))->toBe('correction')
+            ->and(data_get($selectedRow, 'source'))->toBe($sourceKey)
+            ->and((int) data_get($selectedRow, 'source_id'))->toBe($recordId)
+            ->and(collect(data_get($selectedRow, 'routing.actions'))->pluck('key'))->toContain('receive_correction');
+
+        $foreignIncoming = $this->actingAs($foreign)->get(route('submission-tracking.index', [
+            'view' => 'incoming', 'focus_source' => $sourceKey, 'focus_id' => $recordId,
+            'source' => $sourceKey, 'source_id' => $recordId,
+        ]))->assertOk()->inertiaPage();
+        expect(collect(data_get($foreignIncoming, 'props.workspaceQueues.incoming'))
+            ->first(fn (array $row): bool => ($row['source'] ?? null) === $sourceKey && (int) ($row['source_id'] ?? 0) === $recordId))
+            ->toBeNull()
+            ->and(data_get($foreignIncoming, 'props.trackingContext.selected_record'))->toBeNull();
+
+        if ($workflow === 'bms') {
+            $unrelatedOffice = pamoPilotActor(OrganizationalAccessService::PAMO, 'PAMO Unassigned Office', (int) $area->getKey());
+            $pendingPamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+            $pendingPamo->update(['is_approved' => false]);
+            $inactivePamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+            $inactivePamo->update(['is_active' => false]);
+
+            foreach ([$unrelatedOffice, $pendingPamo, $inactivePamo] as $ineligiblePamo) {
+                $ineligibleResponse = $this->actingAs($ineligiblePamo)->get(route('submission-tracking.index', [
+                    'view' => 'incoming', 'focus_source' => $sourceKey, 'focus_id' => $recordId,
+                    'source' => $sourceKey, 'source_id' => $recordId,
+                ]));
+                if (! $ineligiblePamo->is_active || ! $ineligiblePamo->is_approved) {
+                    $ineligibleResponse->assertRedirect(route('login'));
+                    continue;
+                }
+                $ineligibleIncoming = $ineligibleResponse->assertOk()->inertiaPage();
+                expect(collect(data_get($ineligibleIncoming, 'props.workspaceQueues.incoming'))
+                    ->first(fn (array $row): bool => ($row['source'] ?? null) === $sourceKey && (int) ($row['source_id'] ?? 0) === $recordId))
+                    ->toBeNull()
+                    ->and(data_get($ineligibleIncoming, 'props.trackingContext.selected_record'))->toBeNull();
+            }
+        }
+
+        $nativeModel = $this->app->make(\App\Services\Pamo\PamoNativeSourceRegistry::class)->find($workflow)['model'];
+        $beforeReceipt = $nativeModel::query()->findOrFail($recordId);
+        $this->actingAs($pamo)->put(route('pamo-native-reports.correction.update', [$workflow, $recordId]), [
+            ...$payloads[$workflow], 'source_updated_at' => $beforeReceipt->updated_at->toISOString(),
+        ])->assertForbidden();
+        expect($nativeModel::query()->findOrFail($recordId)->updated_at->equalTo($beforeReceipt->updated_at))->toBeTrue();
+
         $this->actingAs($pamo)->post(route('submission-tracking.transition', [$sourceKey, $recordId, 'receive_correction']), ['stage' => 'receive_correction'])->assertRedirect()->assertSessionHasNoErrors();
+        $this->actingAs($pamo)->post(route('submission-tracking.transition', [$sourceKey, $recordId, 'receive_correction']), ['stage' => 'receive_correction'])
+            ->assertRedirect()->assertSessionHasErrors('stage');
+        expect(DocumentRoutingEvent::query()->where('source_type', $sourceKey)->where('source_id', $recordId)->count())->toBe(4);
         $this->actingAs($pamo)->get(route('pamo-native-reports.index', $workflow))->assertOk()->assertInertia(fn ($page) => $page
             ->where('reports.data.0.id', $recordId)
             ->where('reports.data.0.can_edit_correction', true)
             ->where('reports.data.0.source_url', route('submission-tracking.index', ['view' => 'incoming', 'source' => $sourceKey, 'source_id' => $recordId])));
-        $nativeModel = $this->app->make(\App\Services\Pamo\PamoNativeSourceRegistry::class)->find($workflow)['model'];
         $freshNative = $nativeModel::query()->findOrFail($recordId);
         $this->actingAs($pamo)->put(route('pamo-native-reports.correction.update', [$workflow, $recordId]), [
             ...$payloads[$workflow], 'source_id' => $recordId + 100, 'record_id' => $recordId + 100,
@@ -689,11 +850,19 @@ test('all seven native adapters promote into their own source rows with protecte
         $this->actingAs($pamo)->post(route('submission-tracking.transition', [$sourceKey, $recordId, 'forward_from_pamo_to_cenro_focal']), [
             'stage' => 'forward_from_pamo_to_cenro_focal',
         ])->assertRedirect()->assertSessionHasNoErrors();
+        if ($workflow === 'bms') {
+            $correctedBms = $nativeModel::query()->findOrFail($recordId);
+            expect($correctedBms->activity_name)->toBe('Conduct 1st Semester Biodiversity Monitoring System')
+                ->and((int) $correctedBms->protected_area_id)->toBe((int) $area->getKey())
+                ->and($correctedBms->target_office)->toBe('CENRO Baganga')
+                ->and((int) SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('id'))->toBe($snapshotId)
+                ->and(SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('origin_kind'))->toBe('pamo_pamb');
+        }
         expect(DocumentRoutingEvent::query()->where('source_type', $sourceKey)->where('source_id', $recordId)->count())->toBe(5)
             ->and(DocumentRoutingEvent::query()->where('source_type', $sourceKey)->where('source_id', $recordId)->latest('id')->value('event_key'))->toBe('forwarded');
 
         $analytics = app(OfficeTatAnalyticsService::class)->analytics($pamo, [
-            'category' => 'PAMO', 'processing_period' => '2026-H2', 'as_of_date' => '2026-10-14',
+            'category' => 'PAMO', 'processing_period' => '2026-H2', 'as_of_date' => CarbonImmutable::now('Asia/Manila')->toDateString(),
             'workflow' => $sourceKey.':'.$sourceKey, 'protected_area_id' => $area->getKey(), 'evidence_type' => 'none',
         ]);
         $preparation = collect($analytics['pamo_preparation']['rows'])->firstWhere('office_id', $office->getKey());

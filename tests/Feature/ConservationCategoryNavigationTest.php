@@ -117,7 +117,7 @@ test('sidebar filters unauthorized children before hiding empty parents', functi
     $navigation = file_get_contents(resource_path('js/Layouts/navigation.mjs'));
 
     expect($layout)
-        ->toContain("import { buildSidebarNavigation } from './navigation.mjs';")
+        ->toMatch('/import\s*\{[^}]*\bbuildSidebarNavigation\b[^}]*\}\s*from\s*[\'\"]\.\/navigation\.mjs[\'\"]/s')
         ->toContain('buildSidebarNavigation(allNavigation, genericModuleNavigation, safeAuth');
 
     expect($navigation)

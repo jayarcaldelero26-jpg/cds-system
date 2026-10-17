@@ -100,7 +100,7 @@ export default function FloatingSelect({
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(activeOption); }
     };
 
-    return <FloatingField label={label} hideLabel={!label} value={selectedValue} defaultValue={defaultValue} error={error} hint={hint} size={size} focusTone={focusTone || (variant === 'legacy' ? 'blue' : 'green')} variant={variant} disabled={disabled} readOnly={readOnly} required={required} className={className} hasLeadingIcon={Boolean(leadingIcon)} showFocusRing={showFocusRing}>
+    return <FloatingField id={fieldId} label={label} hideLabel={!label} value={selectedValue} defaultValue={defaultValue} error={error} hint={hint} size={size} focusTone={focusTone || (variant === 'legacy' ? 'blue' : 'green')} variant={variant} disabled={disabled} readOnly={readOnly} required={required} className={className} hasLeadingIcon={Boolean(leadingIcon)} showFocusRing={showFocusRing}>
         {({ nativeProps, sizeClasses, fieldShapeClass }) => {
             const selectClasses = ['absolute left-0 top-0 h-px w-px opacity-0', 'pointer-events-none'];
             const triggerClasses = ['flex w-full items-center justify-between gap-2 border-0 bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-700 dark:focus-visible:ring-green-400', fieldShapeClass, sizeClasses, leadingIcon ? 'pl-10' : '', 'text-gray-800 dark:text-gray-100', isDisabled ? 'cursor-not-allowed text-gray-500 dark:text-gray-400' : 'cursor-pointer'];

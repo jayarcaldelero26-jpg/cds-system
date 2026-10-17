@@ -63,7 +63,7 @@ final class RegionalReceivingOfficeResolver
                 return $this->canonicalActivePenro((string) $assignmentOffice->name);
             }
 
-            if (mb_strtolower(trim((string) $area->province)) !== 'davao oriental') return null;
+            if (! $this->provinceListContains((string) $area->province, 'Davao Oriental')) return null;
             return $this->penroForCenro((string) $assignmentOffice->code);
         }
 
@@ -89,6 +89,22 @@ final class RegionalReceivingOfficeResolver
     {
         $penro = self::CENRO_TO_PENRO[$cenroCode] ?? null;
         return $penro ? $this->canonicalActivePenro($penro) : null;
+    }
+
+    /** Match a canonical province as a complete member of the stored comma/semicolon list. */
+    private function provinceListContains(string $provinceValue, string $expectedProvince): bool
+    {
+        $parts = preg_split('/[,;]/u', $provinceValue);
+        if (! is_array($parts) || $parts === [] || count($parts) > 4) return false;
+
+        $members = [];
+        foreach ($parts as $part) {
+            $normalized = mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', trim($part))));
+            if ($normalized === '' || in_array($normalized, $members, true)) return false;
+            $members[] = $normalized;
+        }
+
+        return in_array(mb_strtolower(trim($expectedProvince)), $members, true);
     }
 
     private function canonicalActivePenro(string $officeName): ?string

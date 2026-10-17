@@ -11,12 +11,17 @@ use Psr\Http\Message\ResponseInterface;
 use Throwable;
 
 /** Private My Drive adapter. Drive IDs and private appProperties are the archive identities. */
-class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGateway
+class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArchiveGateway
 {
     private const API = 'https://www.googleapis.com/drive/v3';
     private const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3';
     private const OAUTH = 'https://oauth2.googleapis.com/token';
     private const FOLDER_MIME = 'application/vnd.google-apps.folder';
+    private const SAFE_OAUTH_ERRORS = [
+        'invalid_request', 'invalid_client', 'invalid_grant', 'unauthorized_client',
+        'unsupported_grant_type', 'invalid_scope', 'deleted_client', 'admin_policy_enforced',
+        'invalid_dpop_proof', 'use_dpop_nonce',
+    ];
 
     private ClientInterface $client;
     private string $uploadPhase = '';
@@ -84,6 +89,57 @@ class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGa
             : null;
     }
 
+    public function generatePreGeneratedFileId(): string
+    {
+        $data = $this->json($this->driveRequest('GET', self::API.'/files/generateIds', [
+            'query' => ['count' => 1, 'space' => 'drive', 'type' => 'files'],
+        ]));
+        $id = $data['ids'][0] ?? null;
+        if (! is_string($id) || trim($id) === '') {
+            throw new GoogleDriveArchiveException('Google Drive did not provide a file identity for the pending archive operation.');
+        }
+
+        return $id;
+    }
+
+    public function verifyPreGeneratedObject(
+        string $fileId,
+        array $identity,
+        string $sha256,
+        int $size,
+        ?string $folderId,
+        array $archiveContext,
+    ): array {
+        $stream = null;
+        $expectedParent = null;
+        try {
+            $expectedParent = $this->folderForIdentity($folderId, $archiveContext);
+            $metadata = $this->json($this->driveRequest('GET', self::API.'/files/'.rawurlencode($fileId), [
+                'query' => ['fields' => 'id,size,trashed,parents,appProperties'],
+            ]));
+            $metadataMatches = ($metadata['id'] ?? null) === $fileId
+                && ! ($metadata['trashed'] ?? false)
+                && (int) ($metadata['size'] ?? -1) === $size
+                && in_array($expectedParent, $metadata['parents'] ?? [], true)
+                && ($metadata['appProperties']['cds_identity'] ?? null) === $this->identityHash($identity)
+                && ($metadata['appProperties']['cds_sha256'] ?? null) === $sha256;
+            if (! $metadataMatches) return ['status' => 'content_mismatch', 'file_id' => null, 'folder_id' => $expectedParent];
+
+            $stream = $this->retrieve($fileId);
+            if (! is_resource($stream)) return ['status' => 'unknown', 'file_id' => null, 'folder_id' => $expectedParent];
+            $context = hash_init('sha256');
+            $bytes = hash_update_stream($context, $stream);
+            $status = $bytes === $size && hash_equals($sha256, hash_final($context)) ? 'verified' : 'content_mismatch';
+            return ['status' => $status, 'file_id' => $status === 'verified' ? $fileId : null, 'folder_id' => $expectedParent];
+        } catch (GoogleDriveArchiveException $exception) {
+            return ['status' => $exception->httpStatus === 404 ? 'unavailable' : 'unknown', 'file_id' => null, 'folder_id' => $expectedParent];
+        } catch (Throwable) {
+            return ['status' => 'unknown', 'file_id' => null, 'folder_id' => $expectedParent];
+        } finally {
+            if (is_resource($stream)) fclose($stream);
+        }
+    }
+
     public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
         return $this->uploadWithMime($localPath, $filename, $identity, $sha256, $folderId, $archiveContext, 'application/pdf');
@@ -104,6 +160,33 @@ class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGa
             $parent = $this->folderForIdentity($folderId, $archiveContext, true);
             $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, $mimeType);
             return $this->uploadFile($localPath, $metadata, null, $mimeType);
+        }
+    }
+
+    public function uploadUsingPreGeneratedId(
+        string $preGeneratedFileId,
+        string $localPath,
+        string $filename,
+        array $identity,
+        string $sha256,
+        ?string $folderId,
+        array $archiveContext,
+        string $mimeType,
+    ): array {
+        $this->assertLocalContent($localPath, $sha256);
+        $parent = $this->folderForIdentity($folderId, $archiveContext);
+        $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, $mimeType);
+        $metadata['id'] = $preGeneratedFileId;
+        try {
+            return $this->uploadFile($localPath, $metadata, $preGeneratedFileId, $mimeType, true);
+        } catch (GoogleDriveArchiveException $exception) {
+            // A stale cached parent is safe to resolve again because no file
+            // body was accepted during a rejected session-init request.
+            if ($exception->httpStatus !== 404 || $this->uploadPhase !== 'UPLOAD_INIT') throw $exception;
+            $parent = $this->folderForIdentity($folderId, $archiveContext, true);
+            $metadata = $this->fileMetadata($filename, $parent, $identity, $sha256, $mimeType);
+            $metadata['id'] = $preGeneratedFileId;
+            return $this->uploadFile($localPath, $metadata, $preGeneratedFileId, $mimeType, true);
         }
     }
 
@@ -353,14 +436,14 @@ class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGa
         }
     }
 
-    private function uploadFile(string $localPath, array $metadata, ?string $fileId, string $mime): array
+    private function uploadFile(string $localPath, array $metadata, ?string $fileId, string $mime, bool $createWithPreGeneratedId = false): array
     {
         $this->uploadDiagnostics = [];
         $size = filesize($localPath);
         if (! is_int($size) || $size < 1) throw new GoogleDriveArchiveException('Archive file is empty or unavailable.');
-        $url = self::UPLOAD_API.'/files'.($fileId ? '/'.rawurlencode($fileId) : '');
+        $url = self::UPLOAD_API.'/files'.($fileId && ! $createWithPreGeneratedId ? '/'.rawurlencode($fileId) : '');
         $this->uploadPhase = 'UPLOAD_INIT';
-        $response = $this->driveRequest($fileId ? 'PATCH' : 'POST', $url, [
+        $response = $this->driveRequest($fileId && ! $createWithPreGeneratedId ? 'PATCH' : 'POST', $url, [
             'query' => ['uploadType' => 'resumable', 'fields' => 'id,name,mimeType,size,parents,md5Checksum,appProperties'],
             'json' => $metadata,
             'headers' => ['X-Upload-Content-Type' => $mime, 'X-Upload-Content-Length' => (string) $size],
@@ -444,7 +527,7 @@ class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGa
             return $cached;
         }
 
-        return Cache::lock($cacheKey.'.lock', 30)->block(10, function () use ($parentId, $name, $cacheKey, $bypassCache): string {
+        return Cache::lock($cacheKey.'.lock', 180)->block(15, function () use ($parentId, $name, $cacheKey, $bypassCache): string {
             if (! $bypassCache && is_string($cached = Cache::get($cacheKey)) && $cached !== '') {
                 Log::debug('Google Drive archive folder cache hit after lock.', ['cache_hit' => true]);
                 return $cached;
@@ -532,10 +615,24 @@ class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGa
             Log::debug('Google Drive OAuth refresh failed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'oauth_refresh', 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
             throw new GoogleDriveArchiveException('Google Drive OAuth token request failed.');
         }
-        Log::debug('Google Drive OAuth refresh completed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'oauth_refresh', 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000, 'http_status' => $response->getStatusCode()]);
         if ($response->getStatusCode() < 200 || $response->getStatusCode() >= 300) {
-            throw new GoogleDriveArchiveException('Google Drive OAuth token request failed.', $response->getStatusCode());
+            $details = $this->safeOAuthErrorDetails($response);
+            Log::debug('Google Drive OAuth refresh rejected.', [
+                'request_id' => ArchiveRequestTrace::currentId(),
+                'phase' => 'oauth_refresh',
+                'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000,
+                'http_status' => $response->getStatusCode(),
+                'error_category' => $details['category'] ?? 'unclassified',
+                'error_subtype' => $details['subtype'],
+            ]);
+            throw new GoogleDriveArchiveException(
+                'Google Drive OAuth token request failed.',
+                $response->getStatusCode(),
+                $details['category'],
+                $details['subtype'],
+            );
         }
+        Log::debug('Google Drive OAuth refresh completed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'oauth_refresh', 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000, 'http_status' => $response->getStatusCode()]);
         try {
             $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable) {
@@ -633,6 +730,23 @@ class GoogleDriveDocumentArchiveGateway implements MimeAwareGoogleDriveArchiveGa
         $value = config('services.document_archive.'.$key);
         if (! is_string($value) || trim($value) === '') throw new GoogleDriveArchiveException('Google Drive archive configuration is incomplete.');
         return trim($value);
+    }
+
+    /** @return array{category:?string,subtype:?string} */
+    private function safeOAuthErrorDetails(ResponseInterface $response): array
+    {
+        try {
+            $data = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            $data = null;
+        }
+
+        $rawCategory = is_array($data) && is_string($data['error'] ?? null) ? $data['error'] : null;
+        $category = in_array($rawCategory, self::SAFE_OAUTH_ERRORS, true) ? $rawCategory : null;
+        $rawSubtype = is_array($data) && is_string($data['error_subtype'] ?? null) ? $data['error_subtype'] : null;
+        $subtype = $category === 'invalid_grant' && $rawSubtype === 'invalid_rapt' ? $rawSubtype : null;
+
+        return ['category' => $category, 'subtype' => $subtype];
     }
 
     private function json(ResponseInterface $response): array

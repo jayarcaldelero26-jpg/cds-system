@@ -11,6 +11,7 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Pamo\PamoNativeSourceRegistry;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Inertia\Inertia;
@@ -22,6 +23,7 @@ final class PamoReportWorkspaceController extends Controller
         private readonly OrganizationalAccessService $organization,
         private readonly ConservationReportWorkflowRegistry $workflows,
         private readonly PamoNativeSourceRegistry $nativeSources,
+        private readonly PamoOriginSchemaReadiness $pamoOrigins,
         private readonly PamoNativeReportsController $nativeReports,
         private readonly ProtectedAttachmentService $attachments,
     ) {}
@@ -38,6 +40,7 @@ final class PamoReportWorkspaceController extends Controller
             ], static fn (mixed $value): bool => $value !== null));
         }
 
+        $this->pamoOrigins->assertDraftAndOriginSchemaReady();
         $area = ProtectedArea::query()->findOrFail($facts['protected_area_id']);
         $workflowCatalog = $this->workflowCatalog();
         $workflowKeys = array_fill_keys(array_column($workflowCatalog, 'key'), true);

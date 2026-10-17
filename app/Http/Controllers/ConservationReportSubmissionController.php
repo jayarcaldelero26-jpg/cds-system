@@ -202,13 +202,13 @@ class ConservationReportSubmissionController extends Controller
     }
 
     /** The same full source contract used by the scoped PAMO draft promotion endpoint. */
-    public function pamoPilotReportRules(string $workflow, ?string $activityName, bool $requireMov): array
+    public function pamoPilotReportRules(string $workflow, bool $requireMov): array
     {
         abort_unless($this->workflows->supportsPamoSubmission($workflow), 404);
         $config = $this->workflow($workflow);
-        $rules = $this->reportRules($config, null, $requireMov, $activityName);
-        if (! ($config['allow_custom_activity'] ?? false)) $rules['activity_name'][] = Rule::in($config['activities'] ?? []);
-        return $rules;
+        // PAMO activity_name is a user-entered title; the trusted workflow key
+        // selects its document contract independently of that title.
+        return $this->reportRules($config, null, $requireMov);
     }
 
     public function assertPamoPilotActualDates(array $validated, Request $request, string $workflow): void

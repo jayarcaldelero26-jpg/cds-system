@@ -8,6 +8,7 @@ use App\Models\ReportTrackingReference;
 use App\Services\Attachments\DocumentReferenceAdapter;
 use App\Services\Attachments\ScalarDocumentReferenceAdapter;
 use App\Support\ArchiveRequestTrace;
+use App\Services\Archive\PreGeneratedIdGoogleDriveArchiveGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
@@ -156,36 +157,85 @@ final class FinalDocumentArchiver
             $archiveFilename = $archiveContext['filename'];
             $this->logPhase('archive_path_resolution', $phaseStartedAt);
 
+            $folderId = null;
             $phaseStartedAt = hrtime(true);
             $remote = null;
-            $existing = $this->drive->findByIdentityAndHash($identity, $sha256);
-            if ($existing) {
-                if (! $this->drive->verify($existing['file_id'], $sha256, $size)) {
-                    throw new \RuntimeException('An exact-identity archive object was found but its content could not be verified.');
+            $preGeneratedDrive = $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE
+                && $this->drive instanceof PreGeneratedIdGoogleDriveArchiveGateway;
+
+            if ($preGeneratedDrive) {
+                if (! filled($archive->google_drive_file_id)) {
+                    // The manifest/file intent and this DocumentArchive row are
+                    // durable before Drive allocates an ID or receives bytes.
+                    $candidateId = $this->drive->generatePreGeneratedFileId();
+                    DB::transaction(function () use ($identity, $candidateId, &$archive): void {
+                        $lockedArchive = DocumentArchive::query()->where($identity)->lockForUpdate()->firstOrFail();
+                        if (! filled($lockedArchive->google_drive_file_id)) {
+                            $lockedArchive->forceFill(['google_drive_file_id' => $candidateId, 'archive_status' => 'PENDING', 'last_error' => null])->saveOrFail();
+                        }
+                        $archive = $lockedArchive;
+                    }, 3);
+                } else {
+                    $archive->refresh();
                 }
-                $remote = $existing;
+
+                $preGeneratedId = (string) $archive->google_drive_file_id;
+                $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                if (($reconciled['status'] ?? null) === 'verified') {
+                    $remote = ['file_id' => $preGeneratedId, 'folder_id' => $reconciled['folder_id'] ?? null];
+                } elseif (($reconciled['status'] ?? null) === 'unavailable') {
+                    try {
+                        $remote = $this->drive->uploadUsingPreGeneratedId($preGeneratedId, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime);
+                    } catch (Throwable $uploadException) {
+                        // A timeout, lost response, or 409 is ambiguous. Only
+                        // the exact reserved ID and exact app identity/hash/
+                        // destination may reconcile as this operation.
+                        $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                        if (($reconciled['status'] ?? null) !== 'verified') throw $uploadException;
+                        $remote = ['file_id' => $preGeneratedId, 'folder_id' => $reconciled['folder_id'] ?? null];
+                    }
+                } else {
+                    throw new \RuntimeException('The reserved Drive identity could not be reconciled to this exact final file.');
+                }
+
+                if (($remote['file_id'] ?? null) !== $preGeneratedId) {
+                    throw new \RuntimeException('Google Drive returned a different identity for the reserved final file.');
+                }
+                $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                if (($reconciled['status'] ?? null) !== 'verified') {
+                    throw new \RuntimeException('The reserved archive object did not pass exact identity and content verification.');
+                }
+                $remote['folder_id'] = $reconciled['folder_id'] ?? $remote['folder_id'] ?? null;
+            } else {
+                $existing = $this->drive->findByIdentityAndHash($identity, $sha256);
+                if ($existing) {
+                    if (! $this->drive->verify($existing['file_id'], $sha256, $size)) {
+                        throw new \RuntimeException('An exact-identity archive object was found but its content could not be verified.');
+                    }
+                    $remote = $existing;
+                }
+
+                if (! $remote) {
+                    $phaseStartedAt = hrtime(true);
+                    $mimeAware = $this->drive instanceof MimeAwareGoogleDriveArchiveGateway;
+                    if ($archive->google_drive_file_id && $archivePhase !== \App\Models\FinalDocumentArchiveManifest::PHASE) {
+                        $remote = $mimeAware
+                            ? $this->drive->replaceWithMime($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime)
+                            : $this->drive->replace($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
+                    } else {
+                        $remote = $mimeAware
+                            ? $this->drive->uploadWithMime($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime)
+                            : $this->drive->upload($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
+                    }
+                    $this->logPhase('archive_upload', $phaseStartedAt);
+                }
+                $phaseStartedAt = hrtime(true);
+                if (! $this->drive->verify($remote['file_id'], $sha256, $size)) {
+                    throw new \RuntimeException('The archive object did not pass verification.');
+                }
+                $this->logPhase('archive_upload_verification', $phaseStartedAt);
             }
             $this->logPhase('existing_archive_reconciliation', $phaseStartedAt);
-
-            if (! $remote) {
-                $phaseStartedAt = hrtime(true);
-                $mimeAware = $this->drive instanceof MimeAwareGoogleDriveArchiveGateway;
-                if ($archive->google_drive_file_id && $archivePhase !== \App\Models\FinalDocumentArchiveManifest::PHASE) {
-                    $remote = $mimeAware
-                        ? $this->drive->replaceWithMime($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime)
-                        : $this->drive->replace($archive->google_drive_file_id, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
-                } else {
-                    $remote = $mimeAware
-                        ? $this->drive->uploadWithMime($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime)
-                        : $this->drive->upload($absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext);
-                }
-                $this->logPhase('archive_upload', $phaseStartedAt);
-            }
-            $phaseStartedAt = hrtime(true);
-            if (! $this->drive->verify($remote['file_id'], $sha256, $size)) {
-                throw new \RuntimeException('The archive object did not pass verification.');
-            }
-            $this->logPhase('archive_upload_verification', $phaseStartedAt);
 
             $phaseStartedAt = hrtime(true);
             DB::transaction(function () use ($identity, $remote, $sha256, $size, $actorId, $archiveFilename, $record, $adapter, $logicalSlot, $path, $archivePhase): void {
@@ -229,6 +279,9 @@ final class FinalDocumentArchiver
             return ['status' => 'archived', 'file_id' => $remote['file_id'], 'working_file_removed' => false];
         } catch (Throwable $exception) {
             try {
+                // A request that lost its manifest/file claim must not overwrite
+                // the shared archive row owned by a newer retry.
+                $assertFinalAndAuthorized($record);
                 $archive->refresh();
                 if ($archive->archive_status !== 'ARCHIVED') {
                     $archive->forceFill(['archive_status' => 'FAILED', 'last_error' => 'Archive operation failed; working document retained.'])->save();
@@ -238,7 +291,12 @@ final class FinalDocumentArchiver
             }
             Log::error('Final document archive failed; private working file retained.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'exception' => $exception::class]);
             Log::debug('Synchronous document archive failed.', ['request_id' => ArchiveRequestTrace::currentId(), 'phase' => 'archive_total', 'duration_ms' => (hrtime(true) - $archiveStartedAt) / 1_000_000]);
-            return ['status' => 'failed'];
+            $failure = ['status' => 'failed'];
+            if ($exception instanceof GoogleDriveArchiveException && $exception->oauthErrorCategory !== null) {
+                $failure['oauth_error_category'] = $exception->oauthErrorCategory;
+                if ($exception->oauthErrorSubtype !== null) $failure['oauth_error_subtype'] = $exception->oauthErrorSubtype;
+            }
+            return $failure;
         }
     }
 

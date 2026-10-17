@@ -42,6 +42,23 @@ function genericForm(workflow) {
     };
 }
 
+function findElement(root, predicate) {
+    if (Array.isArray(root)) {
+        for (const child of root) {
+            const found = findElement(child, predicate);
+            if (found) return found;
+        }
+        return null;
+    }
+    if (!React.isValidElement(root)) return null;
+    if (predicate(root)) return root;
+    for (const child of React.Children.toArray(root.props.children)) {
+        const found = findElement(child, predicate);
+        if (found) return found;
+    }
+    return null;
+}
+
 test('populated Homestay saved-draft row renders the Manila preparation timestamp through the actual shared table', async () => {
     const { default: PamoSavedDraftsTable } = await load('Components/PamoSavedDraftsTable.jsx');
     const html = renderToStaticMarkup(React.createElement(PamoSavedDraftsTable, {
@@ -119,6 +136,63 @@ test('rendered generic Homestay fields use its source activity, document options
     assert.match(html, /Date Accomplished/);
     assert.match(html, /Date 1/);
     assert.match(html, /Add Date/);
+});
+
+test('single-catalog, multi-catalog, and custom PAMO workflows all keep activity titles as text', async () => {
+    const { default: PamoGenericSubmissionFields } = await load('Components/PamoGenericSubmissionFields.jsx');
+    const cepa = {
+        key: 'cepa_plan', label: 'CEPA Plan',
+        activities: [
+            'CEPA Plan preparation (Analysis/Stocktaking)',
+            'CEPA Plan preparation (Branding)',
+            'CEPA Plan preparation (Identification of strategies)',
+            'CEPA Plan preparation (Action Planning)',
+            'CEPA Plan preparation (Writing the Communication Plan)',
+            'Submission of Final CEPA Plan',
+        ],
+        documents: ['Progress Report', 'Final Report'],
+        default_activity: 'CEPA Plan preparation (Analysis/Stocktaking)',
+        activity_documents: {
+            'CEPA Plan preparation (Analysis/Stocktaking)': ['Progress Report'],
+            'Submission of Final CEPA Plan': ['Final Report'],
+        },
+    };
+    const restoration = {
+        key: 'restoration_plan_5_year', label: '5 Year Restoration Plan Preparation',
+        activities: ['Preparation of 5-Year Restoration Plan'],
+        documents: ['Progress Report', 'Final Report'],
+        default_activity: 'Preparation of 5-Year Restoration Plan',
+    };
+    const customWorkflow = {
+        key: 'owner_defined_activity', activities: ['Suggested planning session', 'Suggested field visit'],
+        allow_custom_activity: true, documents: ['Progress Report'],
+    };
+
+    for (const workflow of [restoration, cepa, customWorkflow]) {
+        for (const draftMode of [true, false]) {
+            const form = genericForm(workflow);
+            form.data.activity_name = 'Owner supplied activity title';
+            form.data.document_type = workflow.documents.at(-1);
+            let changed;
+            const tree = PamoGenericSubmissionFields({
+                workflow, form, draftMode, rangeEnabled: false,
+                periodField: 'reporting_period', periodOptions: [], onActivityChange(value) { changed = value; },
+                onPeriodChange() {}, onDateConductedChange() {}, onDateAccomplishedChange() {},
+                onRangeChange() {}, onAddRange() {}, onRemoveRange() {}, fieldError: () => null,
+            });
+            const activityField = findElement(tree, element => element.props.id === 'pamo-draft-activity');
+            assert.equal(activityField.type.name, 'FloatingInput', `${workflow.key} renders a free-text title in ${draftMode ? 'draft' : 'submit'} mode`);
+            assert.equal(activityField.props.label, 'Name of Activity');
+            assert.equal(activityField.props.value, 'Owner supplied activity title');
+            assert.equal(activityField.props.required, !draftMode);
+            activityField.props.onChange({ target: { value: 'Restoration Plan Workshop' } });
+            assert.equal(changed, 'Restoration Plan Workshop', `${workflow.key} sends the event's scalar value`);
+            const documentField = findElement(tree, element => element.props.id === 'pamo-draft-document');
+            assert.equal(documentField.type.name, 'FloatingSelect', 'document type remains a coded workflow field');
+            assert.deepEqual(React.Children.toArray(documentField.props.children).slice(1).map(option => option.props.value), workflow.documents,
+                'the document options follow the workflow contract and do not depend on the title text');
+        }
+    }
 });
 
 test('rendered PAMO draft modals leave report content optional while submission modals retain field requirements', async () => {

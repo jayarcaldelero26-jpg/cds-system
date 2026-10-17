@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fitPageScale, nearestPageToViewportCenter, nextPage, nextZoom, zoomedScrollOffset } from '../../resources/js/Utils/pdfViewerGeometry.mjs';
+import { fitPageScale, fitWidthScale, nearestPageToViewportCenter, nextPage, nextZoom, zoomedScrollOffset } from '../../resources/js/Utils/pdfViewerGeometry.mjs';
 
 test('Fit Page contains a portrait or landscape page without changing its aspect ratio', () => {
     for (const [width, height, containerWidth, containerHeight] of [[612, 792, 800, 500], [792, 612, 500, 800]]) {
@@ -14,6 +14,12 @@ test('Fit Page contains a portrait or landscape page without changing its aspect
 test('Fit Page falls back safely for a not-yet-sized container', () => {
     assert.equal(fitPageScale(612, 792, 0, 0), 1);
     assert.equal(fitPageScale(Number.NaN, 792, 400, 600), 1);
+});
+
+test('Fit width fills the measured viewer width and recomputes for a resized viewport', () => {
+    assert.equal(612 * fitWidthScale(612, 480), 480);
+    assert.equal(612 * fitWidthScale(612, 760), 760);
+    assert.equal(fitWidthScale(612, 0), 1);
 });
 
 test('multipage controls stay within document boundaries', () => {

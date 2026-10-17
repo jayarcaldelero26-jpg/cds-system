@@ -50,30 +50,31 @@ test('native source links join PAMO catalog navigation only after server eligibi
 });
 
 test('authenticated PAMO identity uses the workspace hub when a browse flag is also present', () => {
-    const mixedFlags = { ...pamo, canBrowseConservationModules: true, canViewSubmissionTracking: true };
+    const mixedFlags = { ...pamo, canBrowseConservationModules: true, canViewSubmissionTracking: true, canViewFinalArchives: true };
     const native = ['bms', 'bams', 'imea', 'imea_facility_maintenance', 'ipaf_management', 'revenue_collection']
         .map((key, index) => ({ key, program_area: 'protected_area_management_and_development', label: key, href: `/pamo-native-reports/${key}`, display_order: 23 + index }))
         .concat([{ key: 'automated_weather_station', program_area: 'conservation', label: 'Automated Weather Station', href: '/pamo-native-reports/automated_weather_station', display_order: 7 }]);
     const navigation = buildSidebarNavigation(staticNavigation(), catalog(22), mixedFlags, native, 'conservation');
     assert.ok(!navigation.some(item => item.label === label || item.label === 'Conservation'));
     assert.ok(navigation.some(item => item.label === 'Reports' && item.href === '/pamo/reports'));
-    assert.ok(navigation.some(item => item.label === 'Archives' && item.href === '/pamo/archives'));
+    assert.ok(navigation.some(item => item.label === 'Archives' && item.href === '/submission-tracking/archives'));
     assert.ok(navigation.some(item => item.label === 'For Action' && item.href === '/submission-tracking?view=incoming'));
 });
 
 test('PAMO dashboard, generic pages, and native pages retain the same workspace sidebar', () => {
     const workflows = catalog(22);
+    const authorizedPamo = { ...pamo, canViewFinalArchives: true };
     const native = ['bms', 'bams', 'imea', 'imea_facility_maintenance', 'ipaf_management', 'revenue_collection']
         .map((key, index) => ({ key, program_area: 'protected_area_management_and_development', label: key, href: `/pamo-native-reports/${key}`, display_order: 23 + index }))
         .concat([{ key: 'automated_weather_station', program_area: 'conservation', label: 'Automated Weather Station', href: '/pamo-native-reports/automated_weather_station', display_order: 7 }]);
     const urls = ['/dashboard', href('regular_pamb'), '/pamo-native-reports/automated_weather_station'];
-    const models = urls.map(() => buildSidebarNavigation(staticNavigation(), workflows, pamo, native, 'conservation'));
-    const menu = model => model.find(item => item.label === label);
+    const models = urls.map(() => buildSidebarNavigation(staticNavigation(), workflows, authorizedPamo, native, 'conservation'));
     const hrefs = models.map(model => model.filter(item => item.href).map(item => item.href).sort());
     assert.deepEqual(hrefs[0], hrefs[1]);
     assert.deepEqual(hrefs[1], hrefs[2]);
     assert.ok(hrefs[0].includes('/pamo/reports'));
-    assert.ok(hrefs[0].includes('/pamo/archives'));
+    assert.ok(hrefs[0].includes('/submission-tracking/archives'));
+    assert.ok(!hrefs[0].includes('/pamo/archives'));
     assert.ok(!JSON.stringify(models).includes('/pamo-native-reports/'));
 });
 

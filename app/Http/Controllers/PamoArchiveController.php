@@ -13,6 +13,7 @@ use App\Services\Archive\FinalDocumentArchiver;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Pamo\PamoNativeSourceRegistry;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use App\Services\SubmissionTracking\DocumentRoutingAccessService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Http\Request;
@@ -27,6 +28,7 @@ final class PamoArchiveController extends Controller
         private readonly OrganizationalAccessService $organization,
         private readonly ConservationReportWorkflowRegistry $workflows,
         private readonly PamoNativeSourceRegistry $nativeSources,
+        private readonly PamoOriginSchemaReadiness $pamoOrigins,
         private readonly SubmissionTrackingService $tracking,
         private readonly DocumentRoutingAccessService $routingAccess,
         private readonly FinalDocumentArchiver $archiver,
@@ -159,6 +161,7 @@ final class PamoArchiveController extends Controller
             && $actor->protected_area_id !== null, 403);
         $facts = $this->organization->pamoAssignmentForProtectedArea((int) $actor->protected_area_id);
         abort_unless($facts && $this->organization->canAccessProtectedArea($actor, $facts['protected_area_id']), 403);
+        $this->pamoOrigins->assertDraftAndOriginSchemaReady();
 
         return [$facts, ProtectedArea::query()->findOrFail($facts['protected_area_id'])];
     }

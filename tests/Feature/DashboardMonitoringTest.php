@@ -9,6 +9,8 @@ use App\Services\Dashboard\DashboardMonitoringService;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use Carbon\CarbonImmutable;
 use Inertia\Testing\AssertableInertia as Assert;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
 
 beforeEach(function (): void {
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-29 09:00:00', 'Asia/Manila'));
@@ -86,7 +88,17 @@ test('dashboard page exposes the unified monitoring props', function () {
             ->where('dashboard.filters.program', 'pa'));
 });
 
-test('PA Monitoring excludes CBEP and every ENGP registry workflow before aggregation', function (): void {
+test('default dashboard defers ENGP aggregation to the ENGP view', function (): void {
+    $controller = file_get_contents(app_path('Http/Controllers/DashboardController.php'));
+    $engpBranch = strpos($controller, 'if ($view === \'engp\')');
+    $engpOverview = strpos($controller, '\'engp\' => $this->engpMonitoring->overview($filters)');
+
+    expect($engpBranch)->not->toBeFalse()
+        ->and($engpOverview)->toBeGreaterThan($engpBranch)
+        ->and(substr($controller, 0, $engpBranch))->not->toContain('$this->engpMonitoring->overview($filters)');
+});
+
+test('PA dashboard ignores stale ENGP filters and keeps its visible rows PA-scoped', function (): void {
     $pa = conservationReport($this->normalPa, $this->user, ['date_accomplished' => '2026-08-26']);
     foreach (app(EngpReportWorkflowRegistry::class)->keys() as $index => $workflowKey) {
         EngpReportSubmission::create([
@@ -103,10 +115,12 @@ test('PA Monitoring excludes CBEP and every ENGP registry workflow before aggreg
 
     $this->actingAs($this->user)->get(route('dashboard', ['view' => 'pa', 'program' => 'engp', 'report_type' => 'CBEP']))
         ->assertInertia(fn (Assert $page) => $page
-            ->where('summary.tracked_reports', 0)
-            ->has('rows', 0)
-            ->where('filters.program', 'conservation')
-            ->has('paMatrix', 0));
+            ->where('dashboard.trackingTotal', 1)
+            ->where('dashboard.filters.program', 'pa')
+            ->has('dashboard.programs', 2)
+            ->where('dashboard.trackingRows.0.id', 'conservation-'.$pa->getKey())
+            ->where('dashboard.programs.0.metrics.pending', 0)
+            ->missing('summary'));
 });
 
 test('ENGP monitoring excludes PA workflows and legacy combined view falls back to PA', function (): void {
@@ -117,7 +131,10 @@ test('ENGP monitoring excludes PA workflows and legacy combined view falls back 
     $this->actingAs($admin)->get(route('dashboard', ['view' => 'engp', 'year' => 2026, 'office' => 'CENRO Mati', 'frequency' => 'monthly', 'period' => '2026-08']))
         ->assertInertia(fn (Assert $page) => $page
             ->where('engp.rows.0.source', 'engp')
-            ->where('engp.summary.expected', 8));
+            ->where('engp.summary.expected', 8)
+            ->where('dashboard.tab', 'development')
+            ->where('dashboard.as_of', CarbonImmutable::now('Asia/Manila')->startOfDay()->toIso8601String())
+            ->missing('dashboard.programs'));
 
     $this->actingAs($admin)->get(route('dashboard', ['view' => 'combined', 'year' => 2026]))
         ->assertRedirect(route('dashboard', ['view' => 'pa']));
@@ -136,9 +153,11 @@ test('PA filters and authorization are applied before PA aggregation', function 
 
     $this->actingAs($cenro)->get(route('dashboard', ['view' => 'pa', 'office' => 'CENRO Mati']))
         ->assertInertia(fn (Assert $page) => $page
-            ->where('summary.tracked_reports', 0)
-            ->where('filterOptions.offices', ['CENRO Baganga'])
-            ->has('rows', 0));
+            ->where('dashboard.trackingTotal', 0)
+            ->where('dashboard.filters.program', 'pa')
+            ->where('dashboard.filters.office', 'CENRO Mati')
+            ->has('dashboard.trackingRows', 0)
+            ->missing('summary'));
 });
 
 test('empty PA dashboard returns compact management empty states', function (): void {
@@ -146,13 +165,143 @@ test('empty PA dashboard returns compact management empty states', function (): 
 
     $this->actingAs($admin)->get(route('dashboard', ['view' => 'pa', 'year' => 2025]))
         ->assertInertia(fn (Assert $page) => $page
-            ->where('summary.tracked_reports', 0)
-            ->where('summary.submitted', 0)
-            ->where('summary.pending', 0)
-            ->where('summary.overdue', 0)
-            ->has('paMatrix', 0)
-            ->has('topOverdueReports', 0)
-            ->where('executiveInterpretation.0.text', 'No tracked PA report records match the selected filters.'));
+            ->where('dashboard.trackingTotal', 0)
+            ->where('dashboard.filters.year', 2025)
+            ->where('dashboard.programs.1.metrics.pending', 0)
+            ->where('dashboard.programs.1.metrics.in_progress', 0)
+            ->where('dashboard.programs.1.metrics.overdue', 0)
+            ->has('dashboard.trackingRows', 0)
+            ->missing('summary')
+            ->missing('actionQueue'));
+});
+
+test('PA dashboard returns its visible projection without duplicate source loads or hidden legacy props', function (): void {
+    $this->user->forceFill([
+        'name' => 'Dashboard Profile Author',
+        'email' => 'dashboard-profile-author@example.test',
+    ])->save();
+    $admin = dashboardGlobalUser();
+    $admin->forceFill([
+        'name' => 'Dashboard Profile Admin',
+        'email' => 'dashboard-profile-admin@example.test',
+    ])->save();
+    conservationReport($this->normalPa, $this->user, ['date_accomplished' => '2026-08-26']);
+    $this->app['env'] = 'local';
+    config(['app.env' => 'local']);
+
+    $capture = true;
+    $queryCount = 0;
+    DB::listen(function (QueryExecuted $query) use (&$capture, &$queryCount): void {
+        if (! $capture) return;
+        $queryCount++;
+    });
+
+    $samples = [];
+    $props = [];
+    $phaseNames = ['controller_action', 'st_source_load', 'st_routing_presentation', 'st_normalize_base', 'st_document_routing', 'inertia_share_eager'];
+    $this->actingAs($admin);
+    for ($sample = 0; $sample < 5; $sample++) {
+        $queryCount = 0;
+        $started = hrtime(true);
+        $response = $this->withServerVariables(['REMOTE_ADDR' => '127.0.0.1', 'HTTP_HOST' => 'cds-system.test'])
+            ->get('http://cds-system.test/dashboard?view=pa&year=2026&__cds_perf=1')
+            ->assertOk();
+        $elapsedMs = (hrtime(true) - $started) / 1_000_000;
+        $counts = (string) $response->headers->get('X-CDS-Perf-Counts');
+        $timing = (string) $response->headers->get('Server-Timing');
+        preg_match('/(?:^|;)source_rows_loaded=([0-9]+)/', $counts, $rowsMatch);
+        preg_match('/(?:^|, )app_pipeline;dur=([0-9.]+)/', $timing, $pipelineMatch);
+        preg_match('/(?:^|, )sql;dur=([0-9.]+);desc="queries ([0-9]+)"/', $timing, $sqlMatch);
+        $phaseMetrics = [];
+        foreach ($phaseNames as $phase) {
+            preg_match('/(?:^|, )'.preg_quote($phase, '/').';dur=([0-9.]+)(?:;desc="queries ([0-9]+)(?:; sql_ms [0-9.]+)?")?/', $timing, $phaseMatch);
+            $phaseMetrics[$phase.'_ms'] = isset($phaseMatch[1]) ? (float) $phaseMatch[1] : null;
+            $phaseMetrics[$phase.'_queries'] = isset($phaseMatch[2]) ? (int) $phaseMatch[2] : null;
+        }
+        $samples[] = [
+            'request_ms' => round($elapsedMs, 2),
+            'app_pipeline_ms' => isset($pipelineMatch[1]) ? (float) $pipelineMatch[1] : null,
+            'sql_ms' => isset($sqlMatch[1]) ? (float) $sqlMatch[1] : null,
+            'sql_queries' => isset($sqlMatch[2]) ? (int) $sqlMatch[2] : null,
+            'query_events' => $queryCount,
+            'source_rows_loaded' => isset($rowsMatch[1]) ? (int) $rowsMatch[1] : null,
+            'response_bytes' => strlen((string) $response->getContent()),
+            ...$phaseMetrics,
+        ];
+        $props = $response->inertiaProps();
+    }
+    $capture = false;
+
+    $medianRange = static function (array $values): array {
+        sort($values);
+        $count = count($values);
+        $middle = intdiv($count, 2);
+        $median = $count % 2 ? $values[$middle] : ($values[$middle - 1] + $values[$middle]) / 2;
+        return ['median' => round($median, 2), 'range' => [round(min($values), 2), round(max($values), 2)]];
+    };
+    $warm = array_slice($samples, 1);
+    $phaseProfile = [];
+    foreach ($phaseNames as $phase) {
+        foreach (['ms', 'queries'] as $metric) {
+            $key = $phase.'_'.$metric;
+            $values = array_filter(array_column($warm, $key), 'is_numeric');
+            if ($values !== []) $phaseProfile[$key] = $medianRange($values);
+        }
+    }
+    $profile = [
+        'first_request' => $samples[0],
+        'warm' => [
+            'request_ms' => $medianRange(array_column($warm, 'request_ms')),
+            'app_pipeline_ms' => $medianRange(array_filter(array_column($warm, 'app_pipeline_ms'), 'is_numeric')),
+            'sql_ms' => $medianRange(array_filter(array_column($warm, 'sql_ms'), 'is_numeric')),
+            'sql_queries' => $medianRange(array_filter(array_column($warm, 'sql_queries'), 'is_numeric')),
+            'query_events' => $medianRange(array_column($warm, 'query_events')),
+            'source_rows_loaded' => $medianRange(array_filter(array_column($warm, 'source_rows_loaded'), 'is_numeric')),
+            'response_bytes' => $medianRange(array_column($warm, 'response_bytes')),
+        ],
+        'warm_phases' => $phaseProfile,
+    ];
+    if (getenv('CDS_DASHBOARD_PROFILE_OUTPUT') === '1') {
+        $label = strtoupper((string) (getenv('CDS_DASHBOARD_PROFILE_LABEL') ?: 'PROFILE'));
+        fwrite(STDERR, 'CDS_DASHBOARD_'.$label.' '.json_encode($profile, JSON_THROW_ON_ERROR).PHP_EOL);
+    }
+
+    expect($profile['first_request']['source_rows_loaded'])->toBe(1)
+        ->and($profile['warm']['source_rows_loaded']['median'])->toBe(1.0)
+        ->and($props['dashboard']['trackingTotal'])->toBe(1)
+        ->and($props['dashboard']['trackingRows'][0]['id'])->toBe('conservation-'.$this->normalPa->getKey())
+        ->and($props['view'])->toBe('pa')
+        ->and($props)->not->toHaveKey('summary')
+        ->and($props)->not->toHaveKey('actionQueue')
+        ->and($props)->not->toHaveKey('protectedAreasCount');
+});
+
+test('dashboard year options match tracking years while skipping unused filter dimensions', function (): void {
+    $admin = dashboardGlobalUser();
+    $this->actingAs($admin);
+    $tracking = app(\App\Services\SubmissionTracking\SubmissionTrackingService::class);
+
+    $queryCount = 0;
+    $capture = true;
+    DB::listen(function (QueryExecuted $query) use (&$capture, &$queryCount): void {
+        if ($capture) $queryCount++;
+    });
+
+    $fullFilterOptions = $tracking->filterOptions();
+    $fullCatalogQueries = $queryCount;
+    $queryCount = 0;
+    $reportingYears = $tracking->reportingYearOptions();
+    $yearOnlyQueries = $queryCount;
+    $capture = false;
+
+    expect($reportingYears)->toBe($fullFilterOptions['years'])
+        ->and($yearOnlyQueries)->toBeLessThan($fullCatalogQueries);
+
+    $this->get(route('dashboard', ['view' => 'pa', 'year' => 2026]))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('dashboard.filterOptions.years', $fullFilterOptions['years'])
+            ->where('dashboard.filters.year', 2026));
 });
 
 test('report submission overview presents the required tab and chart surfaces', function () {

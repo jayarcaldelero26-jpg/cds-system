@@ -2,18 +2,16 @@ import Button from '@/Components/Button';
 import DatePicker from '@/Components/DatePicker';
 import DateRangePicker from '@/Components/DateRangePicker';
 import { FloatingInput, FloatingSelect } from '@/Components/Form';
-import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
 import CrudSection from '@/Components/Crud/CrudSection';
 
-/** Existing Conservation report fields for catalog-backed generic PA workflows. */
+/** Existing Conservation report fields for generic PA workflows. */
 export default function PamoGenericSubmissionFields({ workflow, form, rangeEnabled, periodField, periodOptions, onActivityChange, onPeriodChange, onDateConductedChange, onDateAccomplishedChange, onRangeChange, onAddRange, onRemoveRange, fieldError, draftMode = false }) {
-    const documentOptions = (workflow.activity_documents || {})[form.data.activity_name] || workflow.documents || [];
+    const documentOptions = workflow.documents || [];
     const contentRequired = !draftMode;
+    const activityValue = typeof form.data.activity_name === 'string' ? form.data.activity_name : '';
 
     return <CrudSection title="Report information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {workflow.activities?.length > 1
-            ? <ScopedOptionSelect id="pamo-draft-activity" label="Name of Activity" value={form.data.activity_name || ''} options={workflow.activities.map(activity => ({ id: activity, label: activity }))} onChange={onActivityChange} error={form.errors.activity_name} placeholder="Search activities" required={contentRequired && workflow.activity_required !== false} />
-            : <FloatingInput id="pamo-draft-activity" label="Name of Activity" value={form.data.activity_name || ''} onChange={onActivityChange} error={form.errors.activity_name} required={contentRequired && workflow.activity_required !== false} />}
+        <FloatingInput id="pamo-draft-activity" label="Name of Activity" value={activityValue} onChange={event => onActivityChange(event.target.value)} error={form.errors.activity_name} required={contentRequired && workflow.activity_required !== false} />
         {!workflow.period_represents_document && <FloatingSelect id="pamo-draft-document" label="Type of Document" value={form.data.document_type || ''} onChange={event => form.setData('document_type', event.target.value)} error={form.errors.document_type} required={contentRequired && workflow.document_type_required === true}><option value="">Select Type of Document</option>{documentOptions.map(document => <option key={document} value={document}>{document === 'Reso' ? 'Resolution' : document}</option>)}</FloatingSelect>}
         {!workflow.period_represents_document && <FloatingSelect id="pamo-draft-period" label={workflow.period_label || 'Reporting Period'} value={form.data[periodField] || ''} onChange={onPeriodChange} error={form.errors[periodField]} required={contentRequired && workflow.period_required === true}><option value="">Select {workflow.period_label || 'Reporting Period'}</option>{periodOptions.map(period => <option key={period.value} value={period.value}>{period.label}</option>)}</FloatingSelect>}
         {rangeEnabled

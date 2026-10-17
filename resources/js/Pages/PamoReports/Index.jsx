@@ -2,8 +2,7 @@ import { router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
-import FilterToolbar from '@/Components/Form/FilterToolbar';
-import { FloatingInput } from '@/Components/Form';
+import PamoCompactToolbar from '@/Components/PamoCompactToolbar';
 import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
 import Button from '@/Components/Button';
 import CrudTable from '@/Components/Crud/CrudTable';
@@ -80,11 +79,16 @@ export default function Index({ workflows = [], rows = {}, assignedProtectedArea
 
     return <AuthenticatedLayout title="Reports">
         <PageHeader title="Reports" description={'Private saved drafts for ' + (assignedProtectedArea?.name || 'your assigned Protected Area') + '.'} />
-        <div className="mt-5 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-end">
-            <div className="min-w-0">
-                <FloatingInput id="pamo-reports-search" label="Search drafts" value={search} onChange={event => setSearch(event.target.value)} />
-            </div>
-            <FilterToolbar label="Filters" className="w-full sm:w-auto" triggerClassName="!h-11 !rounded-xl" chips={chips} onClear={clearFilters}>
+        <div className="mt-5">
+            <PamoCompactToolbar
+                searchId="pamo-reports-search"
+                searchLabel="Search drafts"
+                search={search}
+                onSearchChange={event => setSearch(event.target.value)}
+                chips={chips}
+                onClear={clearFilters}
+                action={<Button type="button" size="default" variant="primary" className="h-10 w-full shrink-0 rounded-lg px-4 sm:w-auto" onClick={() => draftWorkspace.current?.startNew()}>＋ New draft</Button>}
+            >
                 <ScopedOptionSelect
                     id="pamo-reports-workflow-filter"
                     label="Report module"
@@ -93,8 +97,7 @@ export default function Index({ workflows = [], rows = {}, assignedProtectedArea
                     onChange={setWorkflowFilter}
                     placeholder="Search report modules"
                 />
-            </FilterToolbar>
-            <Button type="button" size="default" variant="primary" className="h-11 w-full shrink-0 rounded-xl px-5 sm:w-auto" onClick={() => draftWorkspace.current?.startNew()}>＋ New draft</Button>
+            </PamoCompactToolbar>
         </div>
         <div className="mt-4">
             <CrudTable

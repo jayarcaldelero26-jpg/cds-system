@@ -8,7 +8,7 @@ import Tooltip from '../Components/Tooltip';
 import NotificationBell from '../Components/Notifications/NotificationBell';
 import Button from '../Components/Button';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
-import { buildSidebarNavigation } from './navigation.mjs';
+import { buildSidebarNavigation, finalArchivesNavigationItem, matchesNavigationItem } from './navigation.mjs';
 import { settingsNavigationItem } from './settingsNavigation.mjs';
 
 const allNavigation = [
@@ -134,6 +134,7 @@ const allNavigation = [
             { label: 'History', href: '/submission-tracking?view=history', permission: 'canViewSubmissionTracking', exact: true },
         ],
     },
+    finalArchivesNavigationItem,
     { label: 'Alerts', href: '/compliance-alerts', icon: 'alerts', permission: 'canViewComplianceAlerts', section: 'CDS' },
     { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewReports', section: 'BOTH' },
 
@@ -183,23 +184,6 @@ function DisclosureIcon({ expanded, className = 'h-4 w-4' }) {
 
 function MenuIcon({ name, active = false, muted = false }) {
     return <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${active ? 'opacity-95' : muted ? 'opacity-35' : 'opacity-55'}`}><Icon name={name} /></span>;
-}
-
-function matchesNavigationItem(item, url) {
-    if (item.children?.length) return item.children.some((child) => matchesNavigationItem(child, url));
-    const currentPath = url.split('?')[0];
-    if (item.activePrefix && (currentPath === item.activePrefix || currentPath.startsWith(`${item.activePrefix}/`))) return true;
-    if (item.activePrefixes?.some(prefix => currentPath === prefix || currentPath.startsWith(`${prefix}/`))) return true;
-    if (!item.href || item.href === '#') return false;
-    const [targetPath, targetQuery = ''] = item.href.split('?');
-    if (!(item.exact ? currentPath === targetPath : (currentPath === targetPath || currentPath.startsWith(targetPath + '/')))) return false;
-    const currentParams = new URLSearchParams(url.split('?')[1] || '');
-    const targetParams = new URLSearchParams(targetQuery);
-    for (const [key, value] of targetParams.entries()) {
-        if (currentParams.get(key) !== value && !item.activeQueryAny?.some(query => currentParams.get(key) === query[key])) return false;
-    }
-    if (item.activeQueryAny?.length) return item.activeQueryAny.some(query => Object.entries(query).every(([key, value]) => currentParams.get(key) === value));
-    return Object.entries(item.activeQuery || {}).every(([key, value]) => value === null ? !currentParams.has(key) : currentParams.get(key) === value);
 }
 
 function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], pamoNativeModuleNavigation = [] }) {

@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\Pamo\PamoNativeSourceRegistry;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
@@ -21,6 +22,7 @@ final class PamoNativeReportsController extends Controller
     public function __construct(
         private readonly OrganizationalAccessService $organization,
         private readonly PamoNativeSourceRegistry $sources,
+        private readonly PamoOriginSchemaReadiness $pamoOrigins,
         private readonly \App\Services\Pamo\PamoNativeDraftAdapter $nativeDrafts,
         private readonly ProtectedAttachmentService $attachments,
     ) {}
@@ -123,6 +125,7 @@ final class PamoNativeReportsController extends Controller
         $source = $this->sources->find($workflow);
         abort_unless($source && $this->sources->isEligible($workflow), 404);
         $this->sources->assertSchemaReady();
+        $this->pamoOrigins->assertDraftAndOriginSchemaReady();
         abort_unless($actor && $actor->is_active && $actor->is_approved
             && $this->organization->effectiveCategory($actor) === OrganizationalAccessService::PAMO
             && $this->organization->canViewPamoPilotWorkflow($actor), 403);

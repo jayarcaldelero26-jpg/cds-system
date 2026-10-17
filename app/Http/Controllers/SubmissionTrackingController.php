@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\ProtectedArea;
+use App\Services\Archive\FinalDocumentArchiveService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
@@ -25,9 +26,9 @@ use Inertia\Response;
 
 class SubmissionTrackingController extends Controller
 {
-    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly RoutingCorrectionService $corrections, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly RoutingAttachmentService $routingAttachments, private readonly DocumentRoutingTransitionService $documentRouting, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters, private readonly RoutingTransitionLifecycle $transitionLifecycle) {}
+    public function __construct(private readonly SubmissionTrackingService $tracking, private readonly RoutingCorrectionService $corrections, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly RoutingAttachmentService $routingAttachments, private readonly DocumentRoutingTransitionService $documentRouting, private readonly CurrentDocumentReplacementService $documents, private readonly ReportDocumentAdapterResolver $documentAdapters, private readonly RoutingTransitionLifecycle $transitionLifecycle, private readonly FinalDocumentArchiveService $archives) {}
 
-    public function index(Request $request): Response
+    public function index(Request $request): Response|RedirectResponse
     {
         $filters = $request->only(['search', 'module', 'protected_area_id', 'target_office', 'reporting_period', 'reporting_year', 'status']);
         $view = in_array($request->query('view'), ['incoming', 'outgoing', 'history'], true) ? $request->query('view') : 'incoming';
@@ -57,12 +58,57 @@ class SubmissionTrackingController extends Controller
         // The snapshot is intentionally paginated for the tracking table, so
         // using it here can hide an actionable record that is outside page 1.
         $workspaceQueues = LocalNavigationTrace::measure($request, 'st_workspace_queues', fn () => $this->tracking->workspaceQueues($filters, $trackingRecords));
+        $archiveCandidates = collect($workspaceQueues)->flatMap(fn ($rows) => collect($rows))->values();
+        if ($selectedRecord) $archiveCandidates->push($selectedRecord);
+        $verifiedArchiveKeys = $request->user()
+            ? array_fill_keys($this->archives->verifiedFinalArchiveRecordKeys($request->user(), $archiveCandidates), true)
+            : [];
+        if ($view === 'history' && $selectedRecord && isset($verifiedArchiveKeys[$selectedSource.':'.$selectedId])) {
+            return redirect()->route('final-archives.index', ['source' => $selectedSource, 'record' => $selectedId])
+                ->with('info', 'This verified final return is now available in Archives.');
+        }
+        $withArchiveVisibility = static fn (array $row): array => [
+            ...$row,
+            'has_verified_final_archive' => isset($verifiedArchiveKeys[($row['source'] ?? '').':'.($row['source_id'] ?? '')]),
+        ];
+        $workspaceQueues = collect($workspaceQueues)->map(fn ($rows) => collect($rows)->map($withArchiveVisibility))->all();
+        if ($selectedRecord) $selectedRecord = $withArchiveVisibility($selectedRecord);
+        $historyRows = collect($workspaceQueues['history'] ?? [])
+            ->reject(fn (array $row): bool => isset($verifiedArchiveKeys[($row['source'] ?? '').':'.($row['source_id'] ?? '')]))
+            ->values();
+        $historyTotal = $historyRows->count();
+        $workspaceQueues['history'] = $historyRows;
+        if ($view === 'history') {
+            $perPage = max(1, (int) ($pagination['per_page'] ?? 25));
+            $lastPage = max(1, (int) ceil($historyTotal / $perPage));
+            if ($page > $lastPage) {
+                return redirect()->route('submission-tracking.index', array_filter([
+                    'view' => 'history', ...$filters, 'page' => $lastPage,
+                    'source' => $selectedRecord['source'] ?? null,
+                    'source_id' => $selectedRecord['source_id'] ?? null,
+                    'focus_source' => $focusSource,
+                    'focus_id' => $focusId,
+                ], static fn (mixed $value): bool => $value !== null && $value !== ''));
+            }
+            $offset = ($page - 1) * $perPage;
+            $historyPage = $historyRows->slice($offset, $perPage)->values();
+            $pagination = [
+                'current_page' => $page,
+                'per_page' => $perPage,
+                'total' => $historyTotal,
+                'last_page' => $lastPage,
+                'from' => $historyTotal > 0 ? $offset + 1 : null,
+                'to' => $historyTotal > 0 ? min($offset + $historyPage->count(), $historyTotal) : null,
+                'has_more' => $page < $lastPage,
+            ];
+            $workspaceQueues['history'] = $historyPage;
+        }
         LocalNavigationTrace::context($request, [
             'view' => $view,
             'selected' => $selectedRecord !== null,
             'incoming' => $workspaceQueues['incoming']->count(),
             'outgoing' => $workspaceQueues['outgoing']->count(),
-            'history' => $workspaceQueues['history']->count(),
+            'history' => $historyTotal,
         ]);
         if ($selectedRecord && $request->user()?->hasRole(OrganizationalAccessService::ACCOUNT_ROLE_SUPER_ADMIN)) {
             $sourceConfig = $this->tracking->source($selectedSource);

@@ -7,6 +7,8 @@ use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
+use App\Services\Archive\ArchiveCheckpointPolicy;
+use App\Services\Archive\FinalReturnArchiveAvailability;
 use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
@@ -181,14 +183,22 @@ test('real CENRO Chief APL shape uses the displayed PA office fallback for track
 
 test('role-free CENRO Chief reviews CENRO-managed PAMB while PENRO Chief is denied', function () {
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => true,
+    ]);
+    expect(app(FinalReturnArchiveAvailability::class)->schemaReady())->toBeTrue()
+        ->and(app(FinalReturnArchiveAvailability::class)->enabled())->toBeTrue()
+        ->and(app(ArchiveCheckpointPolicy::class)->requiresInitialRemoteArchive())->toBeFalse();
     Storage::fake('local');
-    Storage::disk('local')->put('pamb/review.pdf', "%PDF-1.4\nIsolated role-scope checkpoint fixture");
+    $sourceFile = "%PDF-1.4\nIsolated role-scope access fixture";
+    Storage::disk('local')->put('pamb/review.pdf', $sourceFile);
     $archiveGateway = \Mockery::mock(GoogleDriveArchiveGateway::class);
-    $archiveGateway->shouldReceive('findByIdentityAndHash')->once()->andReturnNull();
-    $archiveGateway->shouldReceive('upload')->once()->andReturn(['file_id' => 'role-scope-test-archive', 'folder_id' => 'role-scope-test-folder']);
-    $archiveGateway->shouldReceive('verify')->once()->with('role-scope-test-archive', \Mockery::type('string'), \Mockery::type('int'))->andReturnTrue();
-    $archiveGateway->shouldReceive('verifyAvailability')->once()->with('role-scope-test-archive', \Mockery::type('string'), \Mockery::type('int'))->andReturn('verified');
+    $archiveGateway->shouldNotReceive('findByIdentityAndHash');
+    $archiveGateway->shouldNotReceive('upload');
+    $archiveGateway->shouldNotReceive('verify');
+    $archiveGateway->shouldNotReceive('verifyAvailability');
     app()->instance(GoogleDriveArchiveGateway::class, $archiveGateway);
 
     $focal = categoryTrackingUser('CENRO_CDS_FOCAL');
@@ -233,6 +243,16 @@ test('role-free CENRO Chief reviews CENRO-managed PAMB while PENRO Chief is deni
     $this->actingAs($records)->post(route('submission-tracking.internal-routing', ['conservation', $report->id, $forward]), [
         'stage' => $forward,
     ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $checkpointEvent = DocumentRoutingEvent::query()
+        ->where('source_type', 'conservation')
+        ->where('source_id', $report->id)
+        ->latest('id')
+        ->firstOrFail();
+    expect(data_get($checkpointEvent->metadata, 'action_key'))->toBe('forward_to_office_penro')
+        ->and($checkpointEvent->from_stage)->toBe('penro_records')
+        ->and($checkpointEvent->to_stage)->toBe('transit_to_office_of_penro')
+        ->and(Storage::disk('local')->get('pamb/review.pdf'))->toBe($sourceFile);
 });
 
 test('legacy role-owned operational categories do not bypass the category assignment model', function (): void {

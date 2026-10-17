@@ -9,7 +9,64 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { inlinePreviewType } from '../../resources/js/Utils/protectedDocumentPreview.mjs';
 
 // Compile the real components in memory. No browser, network, or output files.
-async function component(name) {
+function pageHookRuntime() {
+    const updates = [];
+    let cursor = 0;
+    let values = [];
+    const runtime = Object.create(React);
+    runtime.useState = initial => {
+        const index = cursor++;
+        values[index] = typeof initial === 'function' ? initial() : initial;
+        return [values[index], next => {
+            values[index] = typeof next === 'function' ? next(values[index]) : next;
+            updates.push({ index, value: values[index] });
+        }];
+    };
+    runtime.useRef = initial => {
+        cursor += 1;
+        return { current: initial };
+    };
+    runtime.useEffect = () => {};
+    runtime.useMemo = callback => callback();
+    return {
+        runtime,
+        updates,
+        beginRender() { cursor = 0; values = []; updates.length = 0; },
+    };
+}
+
+function persistentPageHookRuntime() {
+    const updates = [];
+    let cursor = 0;
+    const values = [];
+    const refs = [];
+    const runtime = Object.create(React);
+    runtime.useState = initial => {
+        const index = cursor++;
+        if (!(index in values)) values[index] = typeof initial === 'function' ? initial() : initial;
+        return [values[index], next => {
+            values[index] = typeof next === 'function' ? next(values[index]) : next;
+            updates.push({ index, value: values[index] });
+        }];
+    };
+    runtime.useRef = initial => {
+        const index = cursor++;
+        if (!(index in refs)) refs[index] = { current: initial };
+        return refs[index];
+    };
+    runtime.useEffect = () => {};
+    runtime.useLayoutEffect = () => {};
+    runtime.useMemo = callback => callback();
+    runtime.useCallback = callback => callback;
+    return {
+        runtime,
+        updates,
+        beginRender() { cursor = 0; updates.length = 0; },
+        reset() { cursor = 0; values.length = 0; refs.length = 0; updates.length = 0; },
+    };
+}
+
+async function component(name, { stubAuthenticatedLayout = false, hooks = React } = {}) {
     const componentPath = name.includes('/') ? name : `SubmissionTracking/${name}`;
     const inputPath = componentPath.startsWith('Pages/')
         ? `resources/js/${componentPath}.jsx`
@@ -21,14 +78,20 @@ async function component(name) {
             name: 'isolated-page-test-shims',
             resolveId(source) {
                 if (source === '@inertiajs/react') return '\0inertia-ssr-shim';
+                if (stubAuthenticatedLayout && source === '@/Layouts/AuthenticatedLayout') return '\0authenticated-layout-ssr-shim';
                 if (source === 'pdfjs-dist') return '\0pdfjs-ssr-shim';
                 if (source === 'pdfjs-dist/build/pdf.worker.min.mjs?url') return '\0pdfjs-worker-ssr-shim';
+                if (source.endsWith('.css')) return '\0submission-tracking-css-shim';
             },
             load(id) {
+                if (id === '\0submission-tracking-css-shim') return '';
+                if (id === '\0authenticated-layout-ssr-shim') {
+                    return 'import React from "react"; export default function AuthenticatedLayout({ title, children }) { return React.createElement(React.Fragment, null, React.createElement("title", null, title), children); }';
+                }
                 if (id === '\0pdfjs-ssr-shim') return 'export const GlobalWorkerOptions = {}; export const getDocument = () => { throw new Error("PDF rendering is unavailable in this markup fixture"); };';
                 if (id === '\0pdfjs-worker-ssr-shim') return 'export default "/pdfjs-worker-fixture.mjs";';
                 if (id === '\0inertia-ssr-shim') {
-                    return 'export const Head = () => null; export const Link = () => null; export const router = {}; export const usePage = () => ({ props: {} }); export const useForm = () => ({});';
+                    return 'import React from "react"; export const Head = () => null; export const Link = ({ href, children, ...props }) => React.createElement("a", { ...props, href }, children); export const router = { get(...args) { globalThis.__trackingRouterCalls?.push(args); } }; export const usePage = () => ({ props: {} }); export const useForm = (data = {}) => ({ data, processing: false, errors: {}, setData() {}, reset() {}, clearErrors() {}, post() {} });';
                 }
                 if (/\.(png|jpe?g|svg|webp|gif)$/.test(id)) return 'export default "test-image";';
             },
@@ -36,10 +99,10 @@ async function component(name) {
         resolve: { alias: { '@': resolve('resources/js') } },
         transform: { jsx: { runtime: 'automatic' } },
     });
-    const { output } = await bundle.generate({ format: 'cjs' });
+    const { output } = await bundle.generate({ format: 'cjs', codeSplitting: false });
     await bundle.close();
     const module = { exports: {} };
-    new Function('require', 'module', 'exports', output[0].code)(createRequire(import.meta.url), module, module.exports);
+    new Function('require', 'module', 'exports', output[0].code)(id => id === 'react' ? hooks : createRequire(import.meta.url)(id), module, module.exports);
     return module.exports;
 }
 
@@ -50,8 +113,24 @@ const PambActions = await component('PambMovActions');
 const ReviewHistory = await component('SubmissionReviewHistory');
 const AttachmentDropzone = await component('Attachments/AttachmentDropzone');
 const RoutingTimeline = await component('DocumentRoutingTimeline');
-const SubmissionTrackingPage = await component('Pages/SubmissionTracking/Index');
+const SubmissionTrackingPage = await component('Pages/SubmissionTracking/Index', { stubAuthenticatedLayout: true });
+const trackingHooks = pageHookRuntime();
+const InteractiveSubmissionTrackingPage = await component('Pages/SubmissionTracking/Index', {
+    stubAuthenticatedLayout: true,
+    hooks: trackingHooks.runtime,
+});
+const detailsJourneyHooks = persistentPageHookRuntime();
+const DetailsJourneyPage = await component('Pages/SubmissionTracking/Index', {
+    stubAuthenticatedLayout: true,
+    hooks: detailsJourneyHooks.runtime,
+});
+const FinalArchivesPage = await component('Pages/SubmissionTracking/Archives', { stubAuthenticatedLayout: true });
 const SidebarDetails = SubmissionTrackingPage.SubmissionDetailsPanel;
+const TrackingProgressCard = SubmissionTrackingPage.SubmissionTrackingDetailsProgressCard;
+const OfficialReportFileSection = await component('OfficialReportFileSection');
+const FinalArchiveActions = await component('FinalArchiveRecordActions');
+const FinalArchiveFilterFields = await component('FinalArchivesFilterFields');
+const FinalArchiveStatusTabs = await component('FinalArchiveStatusTabs');
 const Progress = await component('SubmissionTrackingProgress');
 const ReportContext = await component('SubmissionReportContext');
 const NotificationComponents = await component('Notifications/NotificationBell');
@@ -60,9 +139,421 @@ const CrudFormModal = await component('Crud/CrudFormModal');
 const UserManagement = await component('Pages/Admin/Users/Index');
 const appStyles = readFileSync(resolve('resources/css/app.css'), 'utf8');
 const previewDialogSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
+const sharedReaderSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/SubmissionTrackingReaderDialog.jsx'), 'utf8');
 const pdfViewerSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/PdfDocumentViewer.jsx'), 'utf8');
 const submissionTrackingSource = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
 const render = row => renderToStaticMarkup(React.createElement(Preview, { open: true, row }));
+
+function findElement(root, predicate) {
+    if (!React.isValidElement(root)) return null;
+    if (predicate(root)) return root;
+    for (const child of React.Children.toArray(root.props.children)) {
+        const found = findElement(child, predicate);
+        if (found) return found;
+    }
+    return null;
+}
+
+test('selected Submission Tracking details link only to an exact verified final archive', () => {
+    const row = { ...capturedRouteRow(true, true), has_verified_final_archive: true };
+    const markup = renderToStaticMarkup(React.createElement(SidebarDetails, { row, canViewFinalArchives: true }));
+
+    assert.match(markup, /Final returned documents/);
+    assert.match(markup, /href="\/submission-tracking\/archives\?source=bms&amp;record=2"/);
+    assert.match(markup, /Open this report in Archives/);
+    assert.match(markup, />Open Archives</);
+
+    const hidden = renderToStaticMarkup(React.createElement(SidebarDetails, {
+        row: { ...row, has_verified_final_archive: false },
+        canViewFinalArchives: true,
+    }));
+    assert.doesNotMatch(hidden, /Final returned documents|Open Archives/);
+
+    const initialPamoOutgoing = {
+        ...row,
+        source: 'conservation',
+        source_id: 40,
+        workflow_key: 'restoration_plan_5_year',
+        activity_name: 'Restoration Plan Workshop',
+        routing_complete: false,
+        has_verified_final_archive: false,
+        routing: {
+            ...row.routing,
+            current_stage: 'transit_to_cenro_focal',
+            current_status: 'In Transit',
+            in_transit_to: 'CENRO Baganga',
+            processing_percentage: 10,
+        },
+    };
+    const initialPamoMarkup = renderToStaticMarkup(React.createElement(SidebarDetails, {
+        row: initialPamoOutgoing,
+        canViewFinalArchives: true,
+        pamoWorkspace: true,
+        context: { view: 'outgoing' },
+    }));
+    assert.match(initialPamoMarkup, /Restoration Plan Workshop/);
+    assert.match(initialPamoMarkup, /CENRO Baganga/);
+    assert.doesNotMatch(initialPamoMarkup, /Final returned documents|Open Archives/);
+
+    for (const lifecycleFixture of [
+        { routing_complete: true, has_verified_final_archive: false },
+        { receipt: { id: 7 }, has_verified_final_archive: false },
+        { latest_manifest: { status: 'PENDING' }, has_verified_final_archive: false },
+        { latest_manifest: { status: 'FAILED' }, has_verified_final_archive: false },
+        { legacy_dispatch_archive: true, has_verified_final_archive: false },
+        { source: 'unregistered-source', has_verified_final_archive: true },
+    ]) {
+        const premature = renderToStaticMarkup(React.createElement(SidebarDetails, {
+            row: { ...row, ...lifecycleFixture },
+            canViewFinalArchives: true,
+        }));
+        assert.doesNotMatch(premature, /Final returned documents|Open Archives/);
+    }
+
+    const deniedReader = renderToStaticMarkup(React.createElement(SidebarDetails, {
+        row,
+        canViewFinalArchives: false,
+    }));
+    assert.doesNotMatch(deniedReader, /Final returned documents|Open Archives/);
+});
+
+test('global Archives page restores the shared banner and only renders real pagination', () => {
+    const sampleRows = [{
+        id: 'bms:8:1', source: 'bms', source_id: 8, module: 'BMS Final Return',
+        protected_area: 'Mount Hamiguitan Range Wildlife Sanctuary',
+        manifest: { id: 23, status: 'ARCHIVED', finalized_at: '2026-10-16T13:00:00Z', files: [
+            { id: 81, name: 'BMS-8-final-signed.pdf', mime_type: 'application/pdf', status: 'ARCHIVED', preview_url: '/protected/81?preview=1', download_url: '/protected/81?download=1' },
+        ] },
+    }];
+    const actualPages = [{ label: '&laquo; Previous', url: '/archives?page=1' }, { label: '1', url: '/archives?page=1', active: true }, { label: '2', url: '/archives?page=2' }, { label: 'Next &raquo;', url: '/archives?page=2' }];
+    const markup = renderToStaticMarkup(React.createElement(FinalArchivesPage, { archives: { data: sampleRows, links: actualPages, total: 2 } }));
+
+    assert.match(markup, /<title>Archives<\/title>/);
+    assert.match(markup, /<h1[^>]*>Archives<\/h1>/);
+    assert.equal((markup.match(/<h1\b/g) || []).length, 1);
+    assert.match(markup, /Find final signed returns, earlier Dispatch copies, and reports waiting for archive steps\./);
+    assert.match(markup, /data-page-header-variant="default"/);
+    assert.match(markup, /aria-label="Pagination"/);
+    assert.match(markup, /BMS-8-final-signed\.pdf/);
+    assert.doesNotMatch(markup, /Final Archives/);
+
+    const noPages = renderToStaticMarkup(React.createElement(FinalArchivesPage, { archives: { data: sampleRows, links: [], total: 1 } }));
+    assert.doesNotMatch(noPages, /aria-label="Pagination"/);
+    assert.doesNotMatch(noPages, /rounded-xl border border-slate-100 bg-white px-4 py-3/);
+});
+
+test('standard current-document and PAMO official-file actions pass their selected row unchanged to the shared preview state', () => {
+    const standardRow = {
+        source: 'bms', source_id: 8, module: 'BMS Final Return',
+        current_document: { id: 8001, name: 'BMS-8-working.pdf', can_preview: true, preview_url: '/submission-tracking/bms/8/current?preview=1', download_url: '/submission-tracking/bms/8/current?download=1' },
+    };
+    const pamoRow = {
+        source: 'conservation', source_id: 40, module: 'PAMO Five-Year Restoration Plan',
+        current_document: { id: 4001, name: 'PAMO-40-current.pdf', can_preview: true, preview_url: '/submission-tracking/conservation/40/current?preview=1', download_url: '/submission-tracking/conservation/40/current?download=1' },
+    };
+    const opened = [];
+
+    const standardTree = TrackingProgressCard({ details: standardRow, onPreview: value => opened.push(value) });
+    const standardButton = findElement(standardTree, element => element.props.children === 'Preview Current Document');
+    assert.ok(standardButton);
+    standardButton.props.onClick();
+    assert.equal(opened[0], standardRow, 'standard Incoming/Outgoing/History rows retain the exact selected source record');
+
+    const pamoTree = OfficialReportFileSection({ row: pamoRow, onPreview: value => opened.push(value) });
+    const pamoButton = findElement(pamoTree, element => element.props.children === 'Preview file');
+    assert.ok(pamoButton);
+    pamoButton.props.onClick();
+    assert.equal(opened[1], pamoRow, 'PAMO For Action/Sent/Completed retain the exact selected official report row');
+    assert.equal(opened[1].current_document, pamoRow.current_document);
+});
+
+test('selected report View Full Details opens the complete source-bound details while Preview remains separate', () => {
+    const previousRoute = globalThis.route;
+    globalThis.route = name => name;
+
+    const standardWithoutPreview = {
+        source: 'bms', source_id: 8, tracking_number: 'BMS-8',
+        module: 'BMS Final Return', activity_name: 'BMSFR Activity',
+        document_type: 'BMSFR', protected_area: 'Mount Hamiguitan Range Wildlife Sanctuary',
+        reporting_period: '2026', target_office: 'CENRO Baganga',
+        current_document: { id: 'bms-8-doc', name: 'Legacy-8.docx', can_preview: false },
+        routing: { current_stage: 'awaiting_penro_receipt', current_status: 'Awaiting Receipt by PENRO CDS Chief', processing_percentage: 45, actions: [], timeline: [], routing_history: [] },
+        can_transition: false,
+    };
+    const standardWithPreview = {
+        ...standardWithoutPreview, source_id: 9, tracking_number: 'BMS-9',
+        current_document: { id: 'bms-9-doc', name: 'BMS-9-working.pdf', can_preview: true, mime_type: 'application/pdf', preview_url: '/submission-tracking/bms/9/current?preview=1', download_url: '/submission-tracking/bms/9/current?download=1' },
+    };
+    const nativePamo = {
+        ...standardWithoutPreview, source: 'conservation', source_id: 41,
+        tracking_number: 'PAMO-41', module: 'PAMO TWC Meetings',
+        activity_name: 'TWC Meetings', document_type: 'PAMB Minutes',
+        current_document: undefined, pamb_routing_applicable: true,
+        canonical_custody_applicable: false,
+        routing_timeline: [{ key: 'pamb_review', label: 'PAMO Review', status: 'current' }],
+    };
+    const genericPamo = {
+        ...standardWithoutPreview, source: 'conservation', source_id: 40,
+        tracking_number: 'PAMO-40', module: 'Five-Year Restoration Plan',
+        activity_name: 'Restoration Plan Workshop', document_type: 'BMSFR',
+        current_document: undefined, pamb_routing_applicable: false,
+        canonical_custody_applicable: true,
+    };
+
+    const renderPage = (rows, pamoWorkspace = false) => {
+        detailsJourneyHooks.beginRender();
+        return DetailsJourneyPage.default({
+            workspaceQueues: { incoming: rows, outgoing: [], history: [] },
+            filters: {}, filterOptions: {},
+            trackingContext: { view: 'incoming', selected_record: null },
+            pagination: { current_page: 1, per_page: 25, has_more: false },
+            pamoWorkspace,
+        });
+    };
+    const panelFor = tree => findElement(tree, element => element.type?.name === 'SubmissionDetailsPanel');
+    const tableFor = tree => findElement(tree, element => Array.isArray(element.props?.rows) && typeof element.props?.onRowClick === 'function');
+    const detailsModalFor = tree => findElement(tree, element => element.type?.name === 'CrudDetailsModal' && (element.props.title === 'Submission Details' || element.props.title === 'Report Details'));
+    const modalChildrenFor = modal => React.createElement(React.Fragment, null, modal?.props.children);
+    const reportContextFor = modal => findElement(modalChildrenFor(modal), element => element.props?.expanded === true && element.props?.row?.source);
+
+    try {
+        detailsJourneyHooks.reset();
+        let page = renderPage([standardWithoutPreview, standardWithPreview]);
+        tableFor(page).props.onRowClick(standardWithoutPreview);
+        page = renderPage([standardWithoutPreview, standardWithPreview]);
+        assert.deepEqual(tableFor(page).props.selectedKeys, ['bms-8']);
+        let panel = panelFor(page);
+        assert.equal(panel.props.row, standardWithoutPreview, 'the selected row remains bound to the summary');
+        let panelTree = panel.type(panel.props);
+        let panelMarkup = renderToStaticMarkup(React.createElement(panel.type, panel.props));
+        assert.match(panelMarkup, /Preview unavailable for this account/);
+        assert.match(panelMarkup, /View Full Details/);
+        assert.match(panelMarkup, /xl:max-h-\[calc\(100dvh-2rem\)\]/);
+        assert.match(panelMarkup, /overflow-y-auto/);
+        const viewDetails = findElement(panelTree, element => element.props?.children === 'View Full Details');
+        assert.ok(viewDetails, 'the report details action remains available without preview access');
+        viewDetails.props.onClick();
+
+        page = renderPage([standardWithoutPreview, standardWithPreview]);
+        let detailsModal = detailsModalFor(page);
+        assert.equal(detailsModal?.props.open, true, 'View Full Details opens the complete report details modal');
+        assert.equal(detailsModal.props.title, 'Submission Details');
+        let reportContext = reportContextFor(detailsModal);
+        assert.equal(reportContext?.props.row, standardWithoutPreview, 'the exact selected BMS source/record supplies report details');
+        assert.equal(reportContext.props.expanded, true);
+        const standardContext = renderToStaticMarkup(React.createElement(ReportContext, { row: reportContext.props.row, expanded: true }));
+        assert.match(standardContext, /BMS Final Return/);
+        assert.match(standardContext, /BMSFR Activity/);
+        assert.match(standardContext, /Mount Hamiguitan Range Wildlife Sanctuary/);
+        assert.match(standardContext, /2026/);
+        let previewDialog = findElement(page, element => element.type?.name === 'DocumentPreviewDialog');
+        assert.equal(previewDialog.props.open, false, 'View Details does not open or substitute the file reader');
+
+        detailsModal.props.onClose();
+        page = renderPage([standardWithoutPreview, standardWithPreview]);
+        tableFor(page).props.onRowClick(standardWithPreview);
+        page = renderPage([standardWithoutPreview, standardWithPreview]);
+        panel = panelFor(page);
+        panelTree = panel.type(panel.props);
+        const preview = findElement(panelTree, element => element.props?.children === 'Preview');
+        assert.ok(preview);
+        preview.props.onClick();
+        page = renderPage([standardWithoutPreview, standardWithPreview]);
+        previewDialog = findElement(page, element => element.type?.name === 'DocumentPreviewDialog');
+        assert.equal(previewDialog.props.open, true);
+        assert.equal(previewDialog.props.row, standardWithPreview, 'Preview uses the selected working-file descriptor for the exact BMS record');
+        assert.equal(previewDialog.props.presentation, 'document-only', 'standard and PAMO queue file previews omit archive-only Details and History sections');
+        assert.equal(detailsModalFor(page).props.open, false, 'Preview remains a separate action from View Details');
+        previewDialog.props.onClose();
+        page = renderPage([standardWithoutPreview, standardWithPreview]);
+        assert.equal(panelFor(page).props.row, standardWithPreview, 'closing Preview retains queue selection and record context');
+        assert.deepEqual(tableFor(page).props.selectedKeys, ['bms-9']);
+
+        for (const pamoRow of [genericPamo, nativePamo]) {
+            detailsJourneyHooks.reset();
+            page = renderPage([pamoRow], true);
+            tableFor(page).props.onRowClick(pamoRow);
+            page = renderPage([pamoRow], true);
+            panel = panelFor(page);
+            assert.equal(panel.props.row, pamoRow);
+            panel.type(panel.props);
+            const pamoDetailsAction = findElement(panel.type(panel.props), element => element.props?.children === 'View Full Details');
+            assert.ok(pamoDetailsAction, 'PAMO details stay available when there is no current document');
+            pamoDetailsAction.props.onClick();
+            page = renderPage([pamoRow], true);
+            detailsModal = detailsModalFor(page);
+            assert.equal(detailsModal?.props.open, true);
+            assert.equal(detailsModal.props.title, 'Report Details');
+            reportContext = reportContextFor(detailsModal);
+            assert.equal(reportContext?.props.row, pamoRow, 'the PAMO source identity is not replaced by a primary archive descriptor');
+            const pamoContext = renderToStaticMarkup(React.createElement(ReportContext, { row: pamoRow, expanded: true }));
+            assert.match(pamoContext, new RegExp(pamoRow.activity_name));
+            assert.match(pamoContext, new RegExp(pamoRow.reporting_period));
+            if (pamoRow.pamb_routing_applicable) {
+                assert.ok(findElement(modalChildrenFor(detailsModal), element => element.props?.row === pamoRow && Object.hasOwn(element.props, 'hideCurrentProcessing')), 'native PAMO/PAMB details retain their source-specific timeline');
+            } else {
+                assert.ok(findElement(modalChildrenFor(detailsModal), element => element.props?.row === pamoRow && Object.hasOwn(element.props, 'hideRoutingHistory')), 'generic PAMO details retain their routing timeline');
+            }
+            previewDialog = findElement(page, element => element.type?.name === 'DocumentPreviewDialog');
+            assert.equal(previewDialog.props.open, false, 'a report without a previewable attachment remains details-only');
+        }
+    } finally {
+        if (previousRoute === undefined) delete globalThis.route;
+        else globalThis.route = previousRoute;
+        detailsJourneyHooks.reset();
+    }
+});
+
+test('final archive action panel renders eligibility states and dispatches its visible button callbacks', () => {
+    const buttonLabels = markup => [...markup.matchAll(/<button[^>]*>(.*?)<\/button>/g)].map(match => match[1]);
+    const beforeReceipt = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: { can_receive_final: true, can_archive_final: false, latest_manifest: null },
+    }));
+    assert.deepEqual(buttonLabels(beforeReceipt), ['Receive Final MOVs from Regional Office']);
+
+    const readyToArchive = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: { can_receive_final: false, can_archive_final: true, latest_manifest: null },
+    }));
+    assert.deepEqual(buttonLabels(readyToArchive), ['Attach Signed Set and Archive']);
+
+    const denied = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: {
+            can_receive_final: false,
+            can_archive_final: false,
+            latest_manifest: null,
+            final_action_unavailable_reason: 'This report is assigned to PENRO Davao Oriental for final receipt.',
+        },
+    }));
+    assert.deepEqual(buttonLabels(denied), []);
+    assert.match(denied, /This report is assigned to PENRO Davao Oriental for final receipt\./);
+
+    const failed = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: {
+            can_receive_final: false,
+            can_archive_final: true,
+            latest_manifest: { id: 15, status: 'FAILED', retry_available: true },
+            final_action_unavailable_reason: 'The final archive is incomplete. Use Retry Archive to resume the retained file set.',
+        },
+    }));
+    assert.deepEqual(buttonLabels(failed), ['Retry Archive']);
+
+    const processing = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: {
+            can_receive_final: false,
+            can_archive_final: true,
+            latest_manifest: { id: 17, status: 'PROCESSING', processing_claim_active: true, retry_available: false },
+        },
+    }));
+    assert.deepEqual(buttonLabels(processing), []);
+
+    const expired = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: {
+            can_receive_final: false,
+            can_archive_final: true,
+            latest_manifest: { id: 18, status: 'PROCESSING', processing_claim_active: false, retry_available: true },
+        },
+    }));
+    assert.deepEqual(buttonLabels(expired), ['Retry Archive']);
+
+    const archived = renderToStaticMarkup(React.createElement(FinalArchiveActions, {
+        selected: {
+            can_receive_final: false,
+            can_archive_final: false,
+            latest_manifest: { id: 16, status: 'ARCHIVED' },
+            final_action_unavailable_reason: 'This report already has a verified final archive. No additional receipt or upload is available.',
+        },
+    }));
+    assert.deepEqual(buttonLabels(archived), []);
+    assert.match(archived, /verified final archive/);
+
+    const calls = [];
+    const tree = FinalArchiveActions({
+        selected: { can_receive_final: true, can_archive_final: false, latest_manifest: null },
+        onReceive: () => calls.push('receive'),
+        onAddArchive: () => calls.push('archive'),
+        onRetry: () => calls.push('retry'),
+    });
+    const findButtons = node => {
+        if (!node || typeof node !== 'object') return [];
+        const self = node.type === 'button' ? [node] : [];
+        const children = React.Children.toArray(node.props?.children).flatMap(findButtons);
+        return [...self, ...children];
+    };
+    findButtons(tree)[0].props.onClick();
+    assert.deepEqual(calls, ['receive']);
+});
+
+test('Final Archives filter fields render readable labels and values and forward control changes', () => {
+    const changes = {};
+    const props = {
+        module: 'BMS',
+        protectedArea: 'Mount Hamiguitan Range Wildlife Sanctuary',
+        office: 'PENRO Davao Oriental',
+        year: '2026',
+        filterOptions: {
+            modules: ['BMS'],
+            protectedAreas: ['Mount Hamiguitan Range Wildlife Sanctuary'],
+            offices: ['PENRO Davao Oriental'],
+            years: ['2026'],
+        },
+        onModuleChange: event => { changes.module = event.target.value; },
+        onProtectedAreaChange: event => { changes.protectedArea = event.target.value; },
+        onOfficeChange: event => { changes.office = event.target.value; },
+        onYearChange: event => { changes.year = event.target.value; },
+    };
+    const markup = renderToStaticMarkup(React.createElement(FinalArchiveFilterFields, props));
+
+    for (const value of [
+        'Report module', 'Protected Area', 'Originating office', 'Reporting year',
+        'BMS', 'Mount Hamiguitan Range Wildlife Sanctuary', 'PENRO Davao Oriental', '2026',
+    ]) assert.ok(markup.includes(value), `rendered filter panel includes ${value}`);
+    assert.equal((markup.match(/role="combobox"/g) || []).length, 4);
+    assert.doesNotMatch(markup, /Search reports and archives|final-archive-search/);
+
+    const tree = FinalArchiveFilterFields(props);
+    const controls = [];
+    const visit = node => {
+        if (!node || typeof node !== 'object') return;
+        if (node.props?.id) controls.push(node);
+        React.Children.toArray(node.props?.children).forEach(visit);
+    };
+    visit(tree);
+    for (const [id, value] of [
+        ['final-archive-module', 'imea'],
+        ['final-archive-pa', 'pa-8'],
+        ['final-archive-office', 'penro-other'],
+        ['final-archive-year', '2025'],
+    ]) {
+        controls.find(control => control.props.id === id).props.onChange({ target: { value } });
+    }
+    assert.deepEqual(changes, { module: 'imea', protectedArea: 'pa-8', office: 'penro-other', year: '2025' });
+});
+
+test('Final Archives status tabs keep counts, selected semantics, and only render available queues', () => {
+    const changes = [];
+    const props = {
+        value: 'archives', archivesTotal: 0, awaitingArchiveTotal: 3, awaitingReceiptTotal: 2,
+        onChange: value => changes.push(value),
+    };
+    const markup = renderToStaticMarkup(React.createElement(FinalArchiveStatusTabs, props));
+
+    assert.match(markup, /role="tablist" aria-label="Archives status"/);
+    assert.match(markup, /aria-selected="true"[^>]*>[\s\S]*?Archives[\s\S]*?0/);
+    assert.match(markup, /Awaiting Archive[\s\S]*?3/);
+    assert.match(markup, /Awaiting Final Receipt[\s\S]*?2/);
+
+    const tree = FinalArchiveStatusTabs(props);
+    const tabs = React.Children.toArray(tree.props.children);
+    tabs[2].props.onClick();
+    assert.deepEqual(changes, ['receipt']);
+
+    const onlyVerified = renderToStaticMarkup(React.createElement(FinalArchiveStatusTabs, {
+        value: 'archives', archivesTotal: 0, awaitingArchiveTotal: 0, awaitingReceiptTotal: 0,
+    }));
+    assert.equal((onlyVerified.match(/role="tab"/g) || []).length, 1);
+    assert.match(onlyVerified, />Archives</);
+    assert.doesNotMatch(onlyVerified, /Awaiting Archive|Awaiting Final Receipt/);
+});
 
 const skippedPositionStep = (key, label) => ({
     key,
@@ -120,15 +611,18 @@ test('supported protected previews wait for a validated response before embeddin
         assert.equal(markup, '');
         assert.equal(inlinePreviewType(mime_type), mime_type);
     }
-    assert.match(previewDialogSource, /return typeof document !== 'undefined' \? createPortal/);
     assert.match(previewDialogSource, /if \(!open \|\| !url \|\| !inline \|\| !canPreview\)/);
     assert.match(previewDialogSource, /startProtectedPreview\(url,/);
     assert.match(previewDialogSource, /preview\?\.requestKey === requestKey \? preview : null/);
     assert.match(previewDialogSource, /current\?\.status === 'ready'/);
     assert.match(previewDialogSource, /Loading document preview/);
-    assert.match(previewDialogSource, /<PdfDocumentViewer blob=\{current\.blob\}/);
+    assert.match(previewDialogSource, /<PdfDocumentViewer[\s\S]*?blob=\{current\.blob\}/);
     assert.match(previewDialogSource, /<img src=\{current\.url\}/);
-    assert.match(previewDialogSource, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
+    assert.match(previewDialogSource, /downloadUrl=\{canDownload \? downloadUrl : null\}/);
+    assert.match(sharedReaderSource, /if \(!present \|\| typeof document === 'undefined'\) return null;/);
+    assert.match(sharedReaderSource, /return createPortal\(/);
+    assert.match(sharedReaderSource, /useModalMotion\(open/);
+    assert.match(sharedReaderSource, /data-cds-modal-layer/);
     assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
 
@@ -163,9 +657,10 @@ test('unsupported and unverified MIME stay download-only, even with a PDF filena
         assert.equal(markup, '');
         assert.equal(inlinePreviewType(mime_type), null);
     }
-    assert.match(previewDialogSource, /\{mimeType \? "This document type cannot be previewed in the browser\." : "Preview is unavailable because the file type could not be verified\."\}/);
-    assert.match(previewDialogSource, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
-    assert.match(previewDialogSource, /<PdfDocumentViewer blob=\{current\.blob\}/);
+    assert.match(previewDialogSource, /This document type cannot be previewed in the browser\./);
+    assert.match(previewDialogSource, /Preview is unavailable because the file type could not be verified\./);
+    assert.match(previewDialogSource, /canDownload && <a href=\{downloadUrl\}/);
+    assert.match(previewDialogSource, /<PdfDocumentViewer[\s\S]*?blob=\{current\.blob\}/);
     assert.match(previewDialogSource, /<img src=\{current\.url\}/);
     assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
@@ -174,9 +669,8 @@ test('missing current descriptor cannot revive other document URLs', () => {
     assert.equal(typeof document, 'undefined');
     const markup = render({ current_document: { can_preview: true }, mov_url: '/overview', effective_document: { url: '/archive' }, mov_attachment: { url: '/history', mime_type: 'application/pdf' } });
     assert.equal(markup, '');
-    assert.match(previewDialogSource, /const attachment = row\?\.current_document;/);
     assert.match(previewDialogSource, /: !url \? <p[^>]*>No MOV\/report attachment is available for this submission\./);
-    assert.match(previewDialogSource, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
+    assert.match(previewDialogSource, /const attachment = attachmentOverride \|\| row\?\.current_document;/);
     assert.doesNotMatch(previewDialogSource, /row\?\.(?:mov_url|effective_document|mov_attachment)/);
     assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
@@ -337,8 +831,8 @@ test('Full Details hides duplicate inline routing history while Review history k
     assert.match(history, /Second cycle correction\./);
     assert.match(history, /cycle-one\.pdf/);
     assert.match(history, /cycle-two\.pdf/);
-    assert.match(history, /href="\/safe\/cycle-one"/);
-    assert.match(history, /href="\/safe\/cycle-two"/);
+    assert.equal((history.match(/>Preview<\/button>/g) || []).length, 2);
+    assert.equal((history.match(/>Download<\/button>/g) || []).length, 2);
 });
 
 test('attachment dropzone renders its accessible control and dark theme style hook', () => {
@@ -675,6 +1169,129 @@ test('PAMO tracking labels stay distinct while the general tracking labels remai
     assert.match(submissionTrackingSource, /history: "Submission History"/);
     assert.match(submissionTrackingSource, /Recipient's Next Expected Action/);
     assert.match(submissionTrackingSource, /Shown for reference at the destination office/);
+});
+
+function renderTrackingWorkspace({ view = 'incoming', pamoWorkspace = true, filters = {} } = {}) {
+    return renderToStaticMarkup(React.createElement(SubmissionTrackingPage.default, {
+        workspaceQueues: { incoming: [], outgoing: [], history: [] },
+        filters,
+        filterOptions: {
+            modules: ['Conservation'],
+            protectedAreas: [{ id: 4, name: 'Sample Protected Area' }],
+            statuses: ['In Review'],
+        },
+        trackingContext: { view, selected_record: null },
+        pagination: { current_page: 1, per_page: 25, has_more: false },
+        pamoWorkspace,
+    }));
+}
+
+test('PAMO For Action, Sent Reports, and Completed Reports render one shared compact search/filter group', () => {
+    const activeFilters = {
+        search: 'forest',
+        module: 'Conservation',
+        protected_area_id: '4',
+        status: 'In Review',
+    };
+    const expectedViews = [
+        ['incoming', 'For Action'],
+        ['outgoing', 'Sent Reports'],
+        ['history', 'Completed Reports'],
+    ];
+
+    for (const [view, heading] of expectedViews) {
+        const markup = renderTrackingWorkspace({ view, filters: activeFilters });
+        assert.match(markup, new RegExp(`<title>${heading}</title>`));
+        assert.match(markup, new RegExp(`<h1[^>]*>${heading}</h1>`));
+        assert.match(markup, /role="group" aria-label="PAMO search and filters"/);
+        assert.match(markup, /placeholder="Search reports"/);
+        assert.match(markup, /<label[^>]*for="submission-tracking-search"[^>]*>Search reports<\/label>/);
+        assert.match(markup, /value="forest"/);
+        assert.match(markup, /Filters.*4 selected/);
+        assert.match(markup, /Clear all/);
+        assert.doesNotMatch(markup, /New draft/);
+    }
+});
+
+test('PAMO Tracking search, filter changes, clear, view, and selected source context stay connected', () => {
+    const previousRoute = globalThis.route;
+    const previousCalls = globalThis.__trackingRouterCalls;
+    globalThis.route = name => name;
+
+    try {
+        for (const view of ['incoming', 'outgoing', 'history']) {
+            trackingHooks.beginRender();
+            const calls = [];
+            globalThis.__trackingRouterCalls = calls;
+            const filters = {
+                search: 'forest', module: 'Conservation', protected_area_id: '4', status: 'In Review',
+            };
+            const tree = InteractiveSubmissionTrackingPage.default({
+                workspaceQueues: { incoming: [], outgoing: [], history: [] },
+                filters,
+                filterOptions: {
+                    modules: ['Conservation'],
+                    protectedAreas: [{ id: 4, name: 'Sample Protected Area' }],
+                    statuses: ['In Review'],
+                },
+                trackingContext: {
+                    view,
+                    selected_record: { source: 'conservation', source_id: 71 },
+                    selected_source: 'conservation',
+                    selected_id: 71,
+                },
+                pagination: { current_page: 1, per_page: 25, has_more: false },
+                pamoWorkspace: true,
+            });
+            const toolbar = findElement(tree, element => element.props.searchId === 'submission-tracking-search');
+            assert.ok(toolbar);
+            assert.equal(toolbar.props.search, 'forest');
+            toolbar.props.onSearchChange({ target: { value: 'woodland' } });
+            assert.ok(trackingHooks.updates.some(update => update.value === 'woodland'));
+
+            const module = findElement(toolbar.props.children, element => element.props.id === 'submission-tracking-module');
+            const area = findElement(toolbar.props.children, element => element.props.id === 'submission-tracking-area');
+            const status = findElement(toolbar.props.children, element => element.props.id === 'submission-tracking-status');
+            assert.equal(module.props.value, 'Conservation');
+            assert.equal(area.props.value, '4');
+            assert.equal(status.props.value, 'In Review');
+
+            module.props.onChange({ target: { value: 'BMS' } });
+            area.props.onChange({ target: { value: '9' } });
+            status.props.onChange({ target: { value: 'Received' } });
+            toolbar.props.onClear();
+            assert.equal(calls.length, 4);
+
+            for (const [path, query] of calls) {
+                assert.equal(path, 'submission-tracking.index');
+                assert.equal(query.view, view);
+                assert.equal(query.source, 'conservation');
+                assert.equal(query.source_id, 71);
+            }
+            assert.equal(calls[0][1].module, 'BMS');
+            assert.equal(calls[1][1].protected_area_id, '9');
+            assert.equal(calls[2][1].status, 'Received');
+            assert.equal(calls[3][1].search, undefined);
+            assert.equal(calls[3][1].module, undefined);
+            assert.equal(calls[3][1].protected_area_id, undefined);
+            assert.equal(calls[3][1].status, undefined);
+            assert.equal(calls[3][1].page, undefined);
+            assert.deepEqual(calls[3][2], { preserveState: true, preserveScroll: true, replace: true });
+        }
+    } finally {
+        if (previousRoute === undefined) delete globalThis.route;
+        else globalThis.route = previousRoute;
+        if (previousCalls === undefined) delete globalThis.__trackingRouterCalls;
+        else globalThis.__trackingRouterCalls = previousCalls;
+    }
+});
+
+test('standard Submission Tracking retains its separate layout and Clear all control', () => {
+    const markup = renderTrackingWorkspace({ view: 'incoming', pamoWorkspace: false, filters: { search: 'forest' } });
+    assert.match(markup, /<title>Submission Tracking<\/title>/);
+    assert.match(markup, /Search protected area, report, or office/);
+    assert.doesNotMatch(markup, /PAMO search and filters/);
+    assert.match(markup, /Clear all/);
 });
 
 test('user organization details render saved office and protected-area assignments', () => {

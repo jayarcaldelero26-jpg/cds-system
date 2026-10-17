@@ -123,6 +123,33 @@ final class ProtectedAttachmentService
         return $references;
     }
 
+    /** Check current source slots only; audit history is intentionally not a live file reference. */
+    public function hasLivePathReference(string $path): bool
+    {
+        foreach ($this->registry() as $source => $definition) {
+            $model = new $definition['model'];
+            $schema = \Illuminate\Support\Facades\Schema::connection($model->getConnectionName());
+            if ($definition['kind'] === 'scalar') {
+                $column = $definition['path'] ?? null;
+                if (is_string($column) && $schema->hasColumn($model->getTable(), $column)
+                    && $model->newQuery()->where($column, $path)->exists()) return true;
+                continue;
+            }
+
+            $field = $definition['field'] ?? null;
+            if (! is_string($field) || ! $schema->hasColumn($model->getTable(), $field)) continue;
+            // A candidate-only LIKE keeps the scan limited to records whose JSON
+            // descriptor could contain this exact generated relative path.
+            foreach ($model->newQuery()->whereNotNull($field)->where($field, 'like', '%'.$path.'%')->get() as $record) {
+                foreach ($this->migrationReferences($source, $record) as $reference) {
+                    if (($reference['path'] ?? null) === $path) return true;
+                }
+            }
+        }
+
+        return \App\Models\FinalDocumentArchiveFile::query()->where('staged_path', $path)->exists();
+    }
+
     /** @return array{status:string,path:string,private?:array<string,mixed>,public?:array<string,mixed>} */
     public function migrationPathInfo(mixed $path): array
     {

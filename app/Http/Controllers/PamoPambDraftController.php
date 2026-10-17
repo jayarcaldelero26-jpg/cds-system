@@ -13,6 +13,7 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
 use App\Services\Pamo\PamoNativeDraftAdapter;
 use App\Services\Pamo\PamoNativeSourceRegistry;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\RoutingPositionSnapshotService;
@@ -45,6 +46,7 @@ final class PamoPambDraftController extends Controller
         private readonly PambMovProcessingService $pambMov,
         private readonly PamoNativeDraftAdapter $nativeDrafts,
         private readonly PamoNativeSourceRegistry $nativeSources,
+        private readonly PamoOriginSchemaReadiness $pamoOrigins,
     ) {}
 
     public function index(Request $request, string $workflow): array
@@ -205,7 +207,7 @@ final class PamoPambDraftController extends Controller
                 'target_office' => $facts['target_office'],
                 'mov' => $storedFile,
             ];
-            $validator = Validator::make($attributes, $this->reports->pamoPilotReportRules($workflow, $attributes['activity_name'] ?? null, true), $this->attachmentMessages($attributes['document_type'] ?? null));
+            $validator = Validator::make($attributes, $this->reports->pamoPilotReportRules($workflow, true), $this->attachmentMessages($attributes['document_type'] ?? null));
             $validated = $validator->validate();
             $dateRequest = Request::create('/', 'POST', $attributes);
             $this->reports->assertPamoPilotActualDates($validated, $dateRequest, $workflow);
@@ -345,11 +347,11 @@ final class PamoPambDraftController extends Controller
         $this->assertPilotWorkflow($workflow);
         if ($this->nativeSources->find($workflow)) return $this->nativeDrafts->partialPayload($request, $workflow);
         $definition = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->find($workflow) ?? [];
-        $activities = $definition['activities'] ?? [];
         $documents = array_values(array_unique(array_merge(...array_values($definition['activity_documents'] ?? ['default' => ($definition['documents'] ?? [])]))));
         $periods = $definition['periods'] ?? [];
+        // Draft and final submission both preserve the user's activity title.
         $rules = [
-            'activity_name' => ['sometimes', 'nullable', 'string', 'max:255', ...(($definition['allow_custom_activity'] ?? false) ? [] : [Rule::in($activities)])],
+            'activity_name' => ['sometimes', 'nullable', 'string', 'max:255'],
             'document_type' => ['sometimes', 'nullable', 'string', 'max:100', Rule::in($documents)],
             'reporting_period' => ['sometimes', 'nullable', 'string', 'max:100', Rule::in($periods)],
             'date_conducted' => ['sometimes', 'nullable', 'date'],
@@ -383,6 +385,7 @@ final class PamoPambDraftController extends Controller
             && $actor->protected_area_id !== null, 403);
         $facts = $this->organization->pamoAssignmentForProtectedArea((int) $actor->protected_area_id);
         abort_unless($facts && $this->organization->canAccessProtectedArea($actor, $facts['protected_area_id']), 403);
+        $this->pamoOrigins->assertDraftAndOriginSchemaReady();
         return $facts;
     }
 

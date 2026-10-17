@@ -243,6 +243,42 @@ final class SubmissionTrackingService
         ];
     }
 
+    /**
+     * Return only the authorized reporting years for summary pages that do
+     * not consume the full Submission Tracking filter catalog.
+     *
+     * @return list<int>
+     */
+    public function reportingYearOptions(): array
+    {
+        $years = collect([now()->year]);
+
+        foreach ($this->sources() as $key => $source) {
+            $query = $this->sourceQuery($key, $source, [], false);
+            $model = $query->getModel();
+            $schema = Schema::connection($model->getConnectionName());
+
+            if ($this->columnExists($schema, $model->getTable(), 'reporting_year')) {
+                $years = $years->merge(
+                    $query->clone()
+                        ->reorder()
+                        ->whereNotNull('reporting_year')
+                        ->distinct()
+                        ->orderByDesc('reporting_year')
+                        ->pluck('reporting_year'),
+                );
+            }
+        }
+
+        return $years
+            ->map(fn ($year): int => (int) $year)
+            ->filter(fn (int $year): bool => $year >= 2000 && $year <= 2100)
+            ->unique()
+            ->sortDesc()
+            ->values()
+            ->all();
+    }
+
     /** @return array<string, array<string, mixed>> */
     public function queues(array $filters = [], ?Collection $snapshotRecords = null): array
     {
@@ -679,7 +715,7 @@ final class SubmissionTrackingService
         return 'decision';
     }
 
-    private function isCurrentOperationalOwner(array $row, ?\App\Models\User $user): bool
+    private function isCurrentOperationalOwner(array $row, ?\App\Models\User $user, ?\Illuminate\Database\Eloquent\Model $record = null): bool
     {
         if (! $user) return false;
 
@@ -688,6 +724,16 @@ final class SubmissionTrackingService
                 && ! ($row['canonical_custody_applicable'] ?? false)) {
                 return ! ($row['routing_complete'] ?? false)
                     && (bool) data_get($row, 'pamb_action_flags.can_submit');
+            }
+
+            if (($row['source'] ?? null) !== 'conservation') {
+                return $record !== null
+                    && app(DocumentRoutingAccessService::class)->isCurrentPamoNativeOwner(
+                        $user,
+                        $record,
+                        (string) ($row['source'] ?? ''),
+                        $row,
+                    );
             }
 
             // PAMO-origin canonical Conservation records use the shared
@@ -895,6 +941,23 @@ final class SubmissionTrackingService
     public function source(string $key): ?array
     {
         return $this->sources()[$key] ?? null;
+    }
+
+    /** @return array{module:string,title:?string} */
+    public function archiveReportMetadata(string $sourceKey, Model $record, ?array $sourceDefinition = null): array
+    {
+        $sourceDefinition ??= $this->sources()[$sourceKey] ?? null;
+        $module = $sourceDefinition && is_callable($sourceDefinition['module'] ?? null)
+            ? (string) ($sourceDefinition['module'])($record)
+            : 'Report';
+        $title = $record->getAttribute('activity_name')
+            ?: $record->getAttribute('station_name')
+            ?: $record->getAttribute('report_title');
+
+        return [
+            'module' => $module !== '' ? $module : 'Report',
+            'title' => is_string($title) && $title !== '' ? $title : null,
+        ];
     }
 
     /** Reuse the tracking workspace's source and actor scope for archive reads. */
@@ -1352,7 +1415,7 @@ final class SubmissionTrackingService
         }
         // Executable actions are actor-scoped for every source.  Outgoing and
         // observer rows remain viewable, but never expose mutation controls.
-        if (! auth()->user() || $this->organization->isGlobal(auth()->user()) || ! $this->isCurrentOperationalOwner($data, auth()->user()) || ! $data['can_transition']) {
+        if (! auth()->user() || $this->organization->isGlobal(auth()->user()) || ! $this->isCurrentOperationalOwner($data, auth()->user(), $record) || ! $data['can_transition']) {
             $data['routing']['actions'] = [];
         }
         $routingStage = (string) ($data['routing']['current_stage'] ?? $data['stage']);

@@ -196,7 +196,7 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                                         )}
                                     </p>
                                 )}
-                                <RoutingAttachmentLink attachment={event.attachment} />
+                                <RoutingAttachmentLink attachment={event.attachment} row={row} contextLabel={event.label || event.action_label} />
                         {event.recorded_by && (
                                     <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
                                         Recorded by {event.recorded_by}
@@ -240,7 +240,7 @@ export default function DocumentRoutingTimeline({ row, onAction, expandAll, onEx
                                     {event.correction && <p className="mt-1 text-gray-600 dark:text-gray-300">
                                         By: {event.from || "Records office"} · Reason: {event.correction_reason || "Correction required"}{event.correction_detail ? ` · Remarks: ${event.correction_detail}` : ""} · Returned To: {event.to || "Previous accountable sender"}
                                     </p>}
-                                    <RoutingAttachmentLink attachment={event.attachment} />
+                                    <RoutingAttachmentLink attachment={event.attachment} row={row} contextLabel={event.label} />
                                 </li>
                             ))}
                         </ol>

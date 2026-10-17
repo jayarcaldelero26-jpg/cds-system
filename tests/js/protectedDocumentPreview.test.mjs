@@ -1,11 +1,49 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { inlinePreviewType, loadProtectedPreview, PreviewLoadError, startProtectedPreview } from '../../resources/js/Utils/protectedDocumentPreview.mjs';
 
 const baseUrl = 'https://cds.test/submission-tracking';
 const previewUrl = '/attachments/conservation-report/17/mov?preview=1';
+const validPdfFixture = new Uint8Array(readFileSync(new URL('../Fixtures/protected-preview-valid.pdf', import.meta.url)));
 const pdf = () => new Response('%PDF-1.7\nfixture', { headers: { 'content-type': 'application/pdf' } });
 const load = (response, options = {}) => loadProtectedPreview(previewUrl, { baseUrl, fetchImpl: async () => response, ...options });
+
+test('the complete protected archive response passes the shared loader and PDF.js parser', async () => {
+    let request;
+    const result = await loadProtectedPreview('/submission-tracking/final-archives/files/42?preview=1', {
+        baseUrl,
+        fetchImpl: async (url, options) => {
+            request = { url, options };
+            return new Response(validPdfFixture, { status: 200, headers: {
+                'content-type': 'application/pdf',
+                'content-disposition': 'inline; filename="protected-preview-valid.pdf"',
+                'content-length': String(validPdfFixture.byteLength),
+                'cache-control': 'private, no-store',
+            } });
+        },
+    });
+    assert.equal(request.url, 'https://cds.test/submission-tracking/final-archives/files/42?preview=1');
+    assert.equal(request.options.credentials, 'same-origin');
+    assert.equal(request.options.redirect, 'error');
+    assert.equal(request.options.headers.Accept, 'application/pdf, image/jpeg, image/png');
+    assert.equal(request.options.headers['X-Inertia'], undefined);
+    assert.equal(result.type, 'application/pdf');
+    assert.deepEqual(new Uint8Array(await result.blob.arrayBuffer()), validPdfFixture);
+
+    const task = getDocument({ data: new Uint8Array(await result.blob.arrayBuffer()), verbosity: 0, isEvalSupported: false, useSystemFonts: false });
+    const document = await task.promise;
+    assert.equal(document.numPages, 1);
+    await task.destroy();
+});
+
+test('partial successful responses are rejected instead of treated as a complete document', async () => {
+    const partial = new Response('%PDF-', { status: 206, headers: {
+        'content-type': 'application/pdf', 'content-range': 'bytes 0-4/500',
+    } });
+    await assert.rejects(load(partial), error => error instanceof PreviewLoadError && error.code === 'response');
+});
 
 test('fetch uses the same protected source/record URL, session credentials, no cache and no redirect following', async () => {
     const controller = new AbortController();

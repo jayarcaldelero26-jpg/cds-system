@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { withGenericModuleNavigation } from '../../resources/js/Layouts/navigation.mjs';
+import { readFileSync } from 'node:fs';
+import { buildSidebarNavigation, finalArchivesNavigationItem, matchesNavigationItem, withGenericModuleNavigation } from '../../resources/js/Layouts/navigation.mjs';
+
+const authenticatedLayout = readFileSync(new URL('../../resources/js/Layouts/AuthenticatedLayout.jsx', import.meta.url), 'utf8');
 
 const protectedArea = 'protected_area_management_and_development';
 const staticReports = [
@@ -84,4 +87,58 @@ test('new generic modules are appended once when duplicate definitions use relat
     const reports = merged[0].children;
 
     assert.deepEqual(reports.map(item => item.href), ['/conservation-reports/homestay', 'http://cds-smart/conservation-reports/local_module']);
+});
+
+test('Archives is a single permission-filtered global sibling after Submission Tracking and stays active for selected records', () => {
+    const navigation = [
+        { label: 'CDS-SMART MONITORING', heading: true, section: 'BOTH' },
+        { label: 'Reports', href: '/reports', section: 'BOTH' },
+        { label: 'Submission Tracking', children: [{ label: 'Incoming', href: '/submission-tracking?view=incoming', exact: true }] },
+        finalArchivesNavigationItem,
+        { label: 'Alerts', href: '/compliance-alerts', section: 'CDS' },
+    ];
+    const visible = buildSidebarNavigation(navigation, [], { canViewFinalArchives: true });
+    const archiveItems = visible.filter(item => item.href === '/submission-tracking/archives');
+
+    assert.equal(archiveItems.length, 1);
+    assert.equal(archiveItems[0].label, 'Archives');
+    assert.equal(visible.findIndex(item => item.href === '/submission-tracking/archives'), visible.findIndex(item => item.label === 'Submission Tracking') + 1);
+    assert.equal(archiveItems[0].href, '/submission-tracking/archives');
+    assert.equal(matchesNavigationItem(archiveItems[0], '/submission-tracking/archives?source=bms&record=42'), true);
+    assert.equal(matchesNavigationItem(archiveItems[0], '/submission-tracking?view=incoming'), false);
+    assert.equal(buildSidebarNavigation(navigation, [], { canViewFinalArchives: false }).some(item => item.href === '/submission-tracking/archives'), false);
+
+    const tracking = authenticatedLayout.indexOf("label: 'Submission Tracking'");
+    const archives = authenticatedLayout.indexOf('finalArchivesNavigationItem,', tracking);
+    const alerts = authenticatedLayout.indexOf("label: 'Alerts'", archives);
+    assert.ok(tracking >= 0 && archives > tracking && alerts > archives, 'the shared main sidebar places Archives after Submission Tracking and before Alerts');
+});
+
+test('PAMO navigation has one global Archives destination and preserves its report links', () => {
+    const navigation = buildSidebarNavigation([], [], {
+        user: { user_category: 'PAMO' },
+        canViewPamoReports: true,
+        canViewSubmissionTracking: true,
+        canViewFinalArchives: true,
+    });
+    const archives = navigation.filter(item => item.href === '/submission-tracking/archives' || item.href === '/pamo/archives');
+
+    assert.deepEqual(archives.map(item => [item.label, item.href]), [
+        ['Archives', '/submission-tracking/archives'],
+    ]);
+    assert.deepEqual(navigation
+        .filter(item => ['Reports', 'Sent Reports', 'Completed Reports'].includes(item.label))
+        .map(item => [item.label, item.href]), [
+        ['Reports', '/pamo/reports'],
+        ['Sent Reports', '/submission-tracking?view=outgoing'],
+        ['Completed Reports', '/submission-tracking?view=history'],
+    ]);
+
+    const unauthorized = buildSidebarNavigation([], [], {
+        user: { user_category: 'PAMO' },
+        canViewPamoReports: true,
+        canViewSubmissionTracking: true,
+        canViewFinalArchives: false,
+    });
+    assert.equal(unauthorized.some(item => item.href === '/submission-tracking/archives' || item.href === '/pamo/archives'), false);
 });

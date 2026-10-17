@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from '@babel/parser';
+import { pdfjsWasmAssets } from './pdfjs-wasm-assets.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultBuildRoot = path.join(projectRoot, 'public', 'build');
@@ -103,4 +104,13 @@ for (const dependencyPath of relativeImports) {
     }
 }
 
-console.log(`Verified ${parsedFiles.size} ESM assets and ${relativeImports.size} generated relative imports reachable from ${appEntry}.`);
+const pdfjsPackage = JSON.parse(await readFile(path.join(projectRoot, 'node_modules', 'pdfjs-dist', 'package.json'), 'utf8'));
+for (const filename of pdfjsWasmAssets) {
+    const emitted = await readFile(resolvedAssetPath(`pdfjs/wasm/${filename}`));
+    const installed = await readFile(path.join(projectRoot, 'node_modules', 'pdfjs-dist', 'wasm', filename));
+    if (!emitted.equals(installed)) {
+        throw new Error(`The emitted PDF.js ${filename} does not match the installed pdfjs-dist ${pdfjsPackage.version} asset.`);
+    }
+}
+
+console.log(`Verified ${parsedFiles.size} ESM assets, ${relativeImports.size} generated relative imports, and ${pdfjsWasmAssets.length} matching pdfjs-dist ${pdfjsPackage.version} decoder assets from ${appEntry}.`);

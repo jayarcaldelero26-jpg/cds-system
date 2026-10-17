@@ -13,6 +13,7 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Response;
+use Illuminate\Support\Facades\Log;
 
 function mockedDriveGateway(array $responses, array &$history): GoogleDriveDocumentArchiveGateway
 {
@@ -134,9 +135,14 @@ test('OAuth errors are sanitized and never echo client or refresh credentials', 
     $clientSecret = config('services.document_archive.client_secret');
     $refreshToken = config('services.document_archive.refresh_token');
     $accessToken = 'synthetic-access-token-in-error';
+    $loggedContext = null;
     $history = [];
+    Log::spy();
     $gateway = mockedDriveGateway([
-        new Response(400, [], json_encode(['error' => 'invalid_grant', 'diagnostic' => $clientSecret.' '.$refreshToken.' '.$accessToken], JSON_THROW_ON_ERROR)),
+        new Response(400, [], json_encode([
+            'error' => 'invalid_grant', 'error_subtype' => 'invalid_rapt',
+            'error_description' => 'private provider detail '.$clientSecret.' '.$refreshToken.' '.$accessToken,
+        ], JSON_THROW_ON_ERROR)),
     ], $history);
 
     try {
@@ -145,11 +151,22 @@ test('OAuth errors are sanitized and never echo client or refresh credentials', 
     } catch (GoogleDriveArchiveException $exception) {
         expect($exception->getMessage())->toBe('Google Drive OAuth token request failed.')
             ->and($exception->httpStatus)->toBe(400)
+            ->and($exception->oauthErrorCategory)->toBe('invalid_grant')
+            ->and($exception->oauthErrorSubtype)->toBe('invalid_rapt')
             ->and($exception->getMessage())->not->toContain($clientSecret)
             ->and($exception->getMessage())->not->toContain($refreshToken)
             ->and($exception->getMessage())->not->toContain($accessToken);
     }
+    Log::shouldHaveReceived('debug')->once()->with('Google Drive OAuth refresh rejected.', \Mockery::on(function (array $context) use (&$loggedContext): bool {
+        $loggedContext = $context;
+        return true;
+    }));
     expect($history)->toHaveCount(1);
+    expect($loggedContext)->toMatchArray([
+        'http_status' => 400, 'error_category' => 'invalid_grant', 'error_subtype' => 'invalid_rapt',
+    ])->and(json_encode($loggedContext))->not->toContain($clientSecret)
+        ->and(json_encode($loggedContext))->not->toContain($refreshToken)
+        ->and(json_encode($loggedContext))->not->toContain($accessToken);
 });
 
 test('resumable upload resolves unit, office, and module folders and returns a Drive file ID', function (): void {
@@ -219,6 +236,44 @@ test('MIME-aware archive upload preserves AWS spreadsheet content types', functi
         ->and($metadata['mimeType'])->toBe($mime)
         ->and($init->getHeaderLine('X-Upload-Content-Type'))->toBe($mime)
         ->and($put->getHeaderLine('Content-Type'))->toBe($mime);
+});
+
+test('pre-generated binary upload uses the same reserved ID in metadata and create request', function (): void {
+    configureMockDrive(bin2hex(random_bytes(4)));
+    \Illuminate\Support\Facades\Cache::flush();
+    $history = [];
+    $responses = [oauthMockResponse(), new Response(200, [], json_encode(['ids' => ['reserved-final-id']], JSON_THROW_ON_ERROR))];
+    foreach (['Conservation Unit', 'PENRO Davao Oriental', 'BMS'] as $index => $segment) {
+        $responses[] = new Response(200, [], json_encode(['files' => []], JSON_THROW_ON_ERROR));
+        $responses[] = new Response(200, [], json_encode(['id' => 'reserved-folder-'.$index, 'mimeType' => 'application/vnd.google-apps.folder'], JSON_THROW_ON_ERROR));
+    }
+    $responses[] = new Response(200, ['Location' => 'https://www.googleapis.com/upload/drive/v3/files?upload_id=reserved-session']);
+    $responses[] = new Response(200, [], json_encode(['id' => 'reserved-final-id', 'parents' => ['reserved-folder-2']], JSON_THROW_ON_ERROR));
+    $gateway = mockedDriveGateway($responses, $history);
+    $content = "%PDF-1.7\nreserved signed bytes";
+    $path = tempnam(sys_get_temp_dir(), 'cds-drive-reserved-');
+    file_put_contents($path, $content);
+
+    try {
+        $reservedId = $gateway->generatePreGeneratedFileId();
+        $identity = ['source_type' => 'bms', 'source_id' => 42, 'logical_slot' => 'regional-return-final:receipt-8:r1:part-1'];
+        $result = $gateway->uploadUsingPreGeneratedId(
+            $reservedId, $path, 'signed-final.pdf', $identity, hash('sha256', $content), null,
+            ['folder_path' => ['Conservation Unit', 'PENRO Davao Oriental', 'BMS']], 'application/pdf',
+        );
+    } finally {
+        @unlink($path);
+    }
+
+    $init = collect($history)->first(fn (array $entry): bool => str_contains((string) $entry['request']->getUri(), 'uploadType=resumable'))['request'];
+    $metadata = json_decode((string) $init->getBody(), true, flags: JSON_THROW_ON_ERROR);
+    expect($reservedId)->toBe('reserved-final-id')
+        ->and($result)->toBe(['file_id' => 'reserved-final-id', 'folder_id' => 'reserved-folder-2'])
+        ->and($init->getMethod())->toBe('POST')
+        ->and($init->getUri()->getPath())->toBe('/upload/drive/v3/files')
+        ->and($metadata['id'])->toBe($reservedId)
+        ->and($metadata['appProperties']['cds_identity'])->not->toBeEmpty()
+        ->and($metadata['appProperties']['cds_sha256'])->toBe(hash('sha256', $content));
 });
 
 test('archive folder identifiers are cached so subsequent writes skip folder lookups', function (): void {

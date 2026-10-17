@@ -6,6 +6,8 @@ export default function FloatingInput({
     hint,
     size = 'default',
     alwaysFloat = false,
+    placeholderAlwaysVisible = false,
+    labelSrOnly = false,
     focusTone,
     variant = 'calendar',
     className = '',
@@ -19,6 +21,7 @@ export default function FloatingInput({
         : '!border-0 !bg-transparent !shadow-none !outline-none text-gray-800 focus:!border-0 focus:!shadow-none focus:!outline-none focus-visible:!ring-0 focus-visible:!ring-offset-0 dark:text-gray-100';
     return (
         <FloatingField
+            id={props.id}
             label={label}
             value={props.value}
             defaultValue={props.defaultValue}
@@ -26,6 +29,7 @@ export default function FloatingInput({
             hint={hint}
             size={size}
             alwaysFloat={alwaysFloat}
+            labelSrOnly={labelSrOnly}
             focusTone={focusTone || (variant === 'legacy' ? 'blue' : 'green')}
             variant={variant}
             disabled={props.disabled}
@@ -37,7 +41,9 @@ export default function FloatingInput({
         >
             {({ ref, nativeProps, sizeClasses, fieldShapeClass, showPlaceholder }) => {
                 const placeholderClasses = supportsPlaceholder
-                    ? 'placeholder:font-normal placeholder:opacity-0 focus:placeholder:text-gray-400 focus:placeholder:opacity-100 dark:focus:placeholder:text-gray-500 ' + (showPlaceholder ? 'placeholder:text-gray-400 placeholder:opacity-100 dark:placeholder:text-gray-500' : '')
+                    ? (placeholderAlwaysVisible
+                        ? 'placeholder:font-normal placeholder:text-gray-400 placeholder:opacity-100 dark:placeholder:text-gray-500'
+                        : 'placeholder:font-normal placeholder:opacity-0 focus:placeholder:text-gray-400 focus:placeholder:opacity-100 dark:focus:placeholder:text-gray-500 ' + (showPlaceholder ? 'placeholder:text-gray-400 placeholder:opacity-100 dark:placeholder:text-gray-500' : ''))
                     : '';
                 const inputClasses = [
                     'block w-full',

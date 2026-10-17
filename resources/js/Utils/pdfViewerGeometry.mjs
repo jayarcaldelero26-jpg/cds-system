@@ -4,6 +4,11 @@ export function fitPageScale(pageWidth, pageHeight, availableWidth, availableHei
     return Math.min(availableWidth / pageWidth, availableHeight / pageHeight);
 }
 
+export function fitWidthScale(pageWidth, availableWidth) {
+    if (![pageWidth, availableWidth].every(Number.isFinite) || pageWidth <= 0 || availableWidth <= 0) return 1;
+    return availableWidth / pageWidth;
+}
+
 export function nextPage(current, total, direction) {
     if (!Number.isInteger(total) || total < 1) return 1;
     return Math.min(total, Math.max(1, current + direction));

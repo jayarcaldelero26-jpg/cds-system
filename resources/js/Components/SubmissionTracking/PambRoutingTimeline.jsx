@@ -203,7 +203,7 @@ export default function PambRoutingTimeline({
                                 Remarks: {lastAction.remarks}
                             </p>
                         )}
-                        <RoutingAttachmentLink attachment={lastAction.attachment} />
+                        <RoutingAttachmentLink attachment={lastAction.attachment} row={row} contextLabel={lastAction.label || lastAction.action_label} />
                     </div>
                 )}
                     </>
@@ -491,6 +491,8 @@ export default function PambRoutingTimeline({
                                         )}
                                         <RoutingAttachmentLink
                                             attachment={stage.attachment}
+                                            row={row}
+                                            contextLabel={stage.label || stage.stage_label}
                                         />
                                         {stage.remarks && (
                                             <p className="mt-1 whitespace-pre-wrap text-[11px] italic text-gray-500 dark:text-gray-400">

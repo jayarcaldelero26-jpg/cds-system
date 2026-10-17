@@ -6,8 +6,10 @@ use App\Services\AuditLogService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\Modules\ModuleMetadataResolver;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use App\Services\Reports\ReportRequirementRegistry;
 use App\Services\SubmissionTracking\ProtectedAreaRoutingPolicy;
+use App\Services\SubmissionTracking\RoutingPositionSnapshotService;
 
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Gate;
@@ -32,7 +34,10 @@ class AppServiceProvider extends ServiceProvider
         // that lookup request-scoped so repeated presenters share it without
         // retaining actor or record authorization state across requests.
         $this->app->scoped(ProtectedAreaRoutingPolicy::class, fn (): ProtectedAreaRoutingPolicy => new ProtectedAreaRoutingPolicy());
-        $this->app->scoped(\App\Services\SubmissionTracking\RoutingPositionSnapshotService::class, fn (): \App\Services\SubmissionTracking\RoutingPositionSnapshotService => new \App\Services\SubmissionTracking\RoutingPositionSnapshotService());
+        // Both services cache routing/schema work for one request. Let the
+        // container inject the shared readiness service into each consumer.
+        $this->app->scoped(PamoOriginSchemaReadiness::class);
+        $this->app->scoped(RoutingPositionSnapshotService::class);
         $this->app->scoped(ModuleMetadataResolver::class, function ($app): ModuleMetadataResolver {
             return new ModuleMetadataResolver(
                 $app->make(ConservationReportWorkflowRegistry::class),

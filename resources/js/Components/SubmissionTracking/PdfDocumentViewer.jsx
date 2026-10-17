@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { fitPageScale, nearestPageToViewportCenter, nextPage, nextZoom, zoomedScrollOffset } from '@/Utils/pdfViewerGeometry.mjs';
+import { fitPageScale, fitWidthScale, nearestPageToViewportCenter, nextPage, nextZoom, zoomedScrollOffset } from '@/Utils/pdfViewerGeometry.mjs';
 import { createRenderRequestIdentity } from '@/Utils/pdfViewerRequests.mjs';
+import { pdfJsWasmUrl } from '@/Utils/pdfjsWasmAssets.mjs';
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
@@ -110,7 +111,16 @@ function PdfPageCanvas({ pdf, pageNumber, pageCount, active, scale, fallbackSize
     </div>;
 }
 
-export default function PdfDocumentViewer({ blob, title = 'PDF document', className = '' }) {
+export default function PdfDocumentViewer({
+    blob,
+    title = 'PDF document',
+    className = '',
+    archiveReader = false,
+    initialFitMode = 'page',
+    downloadUrl = null,
+    downloadName = null,
+    layoutKey = '',
+}) {
     const stageRef = useRef(null);
     const pageNodesRef = useRef(new Map());
     const zoomRef = useRef(1);
@@ -123,7 +133,9 @@ export default function PdfDocumentViewer({ blob, title = 'PDF document', classN
     const [pageSizes, setPageSizes] = useState({});
     const [pageInput, setPageInput] = useState('1');
     const [zoom, setZoomState] = useState(1);
+    const [fitMode, setFitMode] = useState(initialFitMode === 'width' ? 'width' : 'page');
     const [size, setSize] = useState({ width: 0, height: 0 });
+    const sizeRef = useRef({ width: 0, height: 0 });
     const [status, setStatus] = useState('loading');
     const [panning, setPanning] = useState(false);
 
@@ -159,12 +171,13 @@ export default function PdfDocumentViewer({ blob, title = 'PDF document', classN
         setPageCount(0);
         setPageSizes({});
         setZoom(1);
+        setFitMode(initialFitMode === 'width' ? 'width' : 'page');
         setStatus('loading');
         (async () => {
             try {
                 const data = new Uint8Array(await blob.arrayBuffer());
                 if (disposed) return;
-                loadingTask = getDocument({ data });
+                loadingTask = getDocument({ data, wasmUrl: pdfJsWasmUrl });
                 const document = await loadingTask.promise;
                 if (disposed) return;
                 setPdf(document);
@@ -178,24 +191,49 @@ export default function PdfDocumentViewer({ blob, title = 'PDF document', classN
             disposed = true;
             if (loadingTask) void loadingTask.destroy();
         };
-    }, [blob]);
+    }, [blob, initialFitMode]);
 
     useEffect(() => {
         const stage = stageRef.current;
         if (!stage) return undefined;
         const update = () => {
             const next = { width: stage.clientWidth, height: stage.clientHeight };
+            if (next.width <= 0 || next.height <= 0) return;
+            const previous = sizeRef.current;
+            if (archiveReader && previous.width > 0 && previous.height > 0 && next.width > 0 && next.height > 0
+                && (previous.width !== next.width || previous.height !== next.height)) {
+                anchorRef.current = { x: next.width / 2, y: next.height / 2, scale: scaleRef.current };
+            }
+            sizeRef.current = next;
             setSize(current => current.width === next.width && current.height === next.height ? current : next);
         };
         update();
         const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(update) : null;
         observer?.observe(stage);
         return () => observer?.disconnect();
-    }, []);
+    }, [archiveReader]);
+
+    useEffect(() => {
+        if (!archiveReader) return;
+        const stage = stageRef.current;
+        if (!stage) return;
+        const next = { width: stage.clientWidth, height: stage.clientHeight };
+        if (next.width <= 0 || next.height <= 0) return;
+        const previous = sizeRef.current;
+        if (previous.width > 0 && previous.height > 0 && (previous.width !== next.width || previous.height !== next.height)) {
+            anchorRef.current = { x: next.width / 2, y: next.height / 2, scale: scaleRef.current };
+        }
+        sizeRef.current = next;
+        setSize(current => current.width === next.width && current.height === next.height ? current : next);
+    }, [archiveReader, layoutKey]);
 
     const activeSize = pageSizes[pageNumber] || pageSizes[1] || FALLBACK_PAGE_SIZE;
+    const availableWidth = Math.max(1, size.width - 32);
+    const availableHeight = Math.max(1, size.height - 32);
     const fitScale = size.width && size.height
-        ? fitPageScale(activeSize.width, activeSize.height, Math.max(1, size.width - 32), Math.max(1, size.height - 32))
+        ? fitMode === 'width'
+            ? fitWidthScale(activeSize.width, availableWidth)
+            : fitPageScale(activeSize.width, activeSize.height, availableWidth, availableHeight)
         : 1;
     const scale = fitScale * zoom;
     scaleRef.current = scale;
@@ -213,6 +251,26 @@ export default function PdfDocumentViewer({ blob, title = 'PDF document', classN
         } else {
             setPageInput(pageCount ? String(pageNumber) : '');
         }
+    };
+
+    const changeZoom = direction => {
+        const next = nextZoom(zoomRef.current, direction);
+        if (next === zoomRef.current) return;
+        const stage = stageRef.current;
+        if (archiveReader && stage) anchorRef.current = {
+            x: stage.clientWidth / 2,
+            y: stage.clientHeight / 2,
+            scale: scaleRef.current,
+        };
+        setZoom(next);
+    };
+
+    const fitTo = mode => {
+        anchorRef.current = null;
+        setZoom(1);
+        if (!archiveReader) return;
+        setFitMode(mode);
+        requestAnimationFrame(() => stageRef.current?.scrollTo({ left: 0, top: 0, behavior: 'auto' }));
     };
 
     useEffect(() => {
@@ -323,26 +381,37 @@ export default function PdfDocumentViewer({ blob, title = 'PDF document', classN
     const largestWidth = Math.max(1, ...committedPages.map(number => pageSizes[number]?.width || 1));
     const contentWidth = Math.max(size.width - 32, largestWidth * scale);
     const pages = Array.from({ length: pageCount }, (_, index) => index + 1);
+    const toolbarTheme = archiveReader
+        ? 'border-b border-slate-200 bg-white px-2 py-1.5 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100'
+        : 'border-b border-gray-800 bg-gray-900 px-2.5 py-2 text-gray-100';
+    const stageTheme = archiveReader ? 'bg-gray-100 dark:bg-gray-950' : 'bg-gray-950';
+    const focusTheme = archiveReader ? 'focus-visible:ring-emerald-500' : 'focus-visible:ring-emerald-400';
+    const controlTheme = archiveReader
+        ? 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700'
+        : 'border-gray-700 bg-gray-800 text-gray-100 hover:bg-gray-700';
+
     return <section className={'flex min-h-0 flex-1 flex-col ' + className} aria-label={title + ' viewer'}>
-        <div className="flex flex-none flex-wrap items-center justify-between gap-2 border-b border-gray-800 bg-gray-900 px-2.5 py-2 text-gray-100" aria-label="PDF controls">
+        <div className={`flex flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1.5 ${toolbarTheme}`} aria-label="PDF controls">
             <div className="flex flex-wrap items-center gap-1">
-                <button type="button" aria-label="Zoom out" title="Zoom out" disabled={status !== 'ready'} onClick={() => setZoom(value => nextZoom(value, -1))} className="h-8 w-8 rounded-md border border-gray-700 bg-gray-800 text-sm font-bold text-gray-100 hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50">−</button>
-                <span className="min-w-12 px-1 text-center text-xs tabular-nums text-gray-200" aria-label="Zoom percentage" aria-live="polite">{status === 'ready' ? Math.round(scale * 100) + '%' : '—%'}</span>
-                <button type="button" onClick={() => setZoom(1)} disabled={status !== 'ready'} className="h-8 rounded-md border border-gray-700 bg-gray-800 px-2.5 text-[11px] font-semibold text-gray-100 hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50">Fit Page</button>
-                <button type="button" aria-label="Zoom in" title="Zoom in" disabled={status !== 'ready'} onClick={() => setZoom(value => nextZoom(value, 1))} className="h-8 w-8 rounded-md border border-gray-700 bg-gray-800 text-sm font-bold text-gray-100 hover:bg-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50">+</button>
+                <button type="button" aria-label="Zoom out" title="Zoom out" disabled={status !== 'ready'} onClick={() => changeZoom(-1)} className={`h-8 w-8 rounded-md border text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>−</button>
+                <span className="min-w-12 px-1 text-center text-xs tabular-nums" aria-label="Zoom percentage" aria-live="polite">{status === 'ready' ? Math.round(scale * 100) + '%' : '—%'}</span>
+                <button type="button" onClick={() => fitTo('page')} disabled={status !== 'ready'} className={`h-8 rounded-md border px-2.5 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>{archiveReader ? 'Fit page' : 'Fit Page'}</button>
+                {archiveReader && <button type="button" onClick={() => fitTo('width')} disabled={status !== 'ready'} className={`h-8 rounded-md border px-2.5 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>Fit width</button>}
+                <button type="button" aria-label="Zoom in" title="Zoom in" disabled={status !== 'ready'} onClick={() => changeZoom(1)} className={`h-8 w-8 rounded-md border text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>+</button>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-200">
+            <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 <label htmlFor="pdf-page-number" className="sr-only">Go to page</label>
                 <input id="pdf-page-number" type="number" aria-label="Go to page" min="1" max={pageCount || 1} value={pageInput} disabled={status !== 'ready'} onChange={event => setPageInput(event.target.value)} onKeyDown={event => {
                     if (event.key === 'Enter') {
                         event.preventDefault();
                         commitPageInput();
                     }
-                }} onBlur={commitPageInput} className="h-8 w-16 rounded-md border border-gray-700 bg-gray-800 px-2 text-center text-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50" />
-                <span aria-live="polite">Page {pageCount ? pageNumber : '—'} of {pageCount || '—'}</span>
+                }} onBlur={commitPageInput} className={`h-8 ${archiveReader ? 'w-14' : 'w-16'} rounded-md border px-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`} />
+                <span aria-live="polite">{archiveReader ? `of ${pageCount || '—'}` : `Page ${pageCount ? pageNumber : '—'} of ${pageCount || '—'}`}</span>
+                {archiveReader && downloadUrl && <a href={downloadUrl} download={downloadName || undefined} aria-label={`Download ${downloadName || 'current file'}`} title="Download file" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"><span aria-hidden="true">↓</span><span>Download</span></a>}
             </div>
         </div>
-        <div ref={stageRef} onKeyDown={handleKeyDown} tabIndex={0} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight PageUp PageDown Home End" className={'relative min-h-[260px] min-w-0 flex-1 overflow-auto bg-gray-950 p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400 ' + (panning ? 'cursor-grabbing' : pdf ? 'cursor-grab' : '')} role="region" aria-label="PDF pages" style={{ touchAction: 'pan-x pan-y' }}>
+        <div ref={stageRef} onKeyDown={handleKeyDown} tabIndex={0} aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight PageUp PageDown Home End" className={'relative ' + (archiveReader ? 'min-h-[150px]' : 'min-h-[260px]') + ' min-w-0 flex-1 overflow-auto ' + stageTheme + ' p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset ' + focusTheme + ' ' + (panning ? 'cursor-grabbing' : pdf ? 'cursor-grab' : '')} role="region" aria-label="PDF pages" style={{ touchAction: 'pan-x pan-y' }}>
             <div className="min-h-full min-w-full space-y-5" style={{ width: Math.max(1, contentWidth) + 'px' }}>
                 {status === 'loading' && <p role="status" className="flex min-h-[260px] items-center justify-center text-sm text-gray-300">Preparing PDF preview…</p>}
                 {status === 'error' && <p role="alert" className="flex min-h-[260px] items-center justify-center text-sm text-red-300">This PDF could not be rendered. Download the current copy to inspect it.</p>}

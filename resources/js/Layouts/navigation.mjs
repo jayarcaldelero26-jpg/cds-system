@@ -12,6 +12,31 @@ function navigationHrefKey(href) {
     }
 }
 
+export const finalArchivesNavigationItem = Object.freeze({
+    label: 'Archives',
+    href: '/submission-tracking/archives',
+    icon: 'archive',
+    permission: 'canViewFinalArchives',
+    section: 'BOTH',
+});
+
+export function matchesNavigationItem(item, url) {
+    if (item.children?.length) return item.children.some(child => matchesNavigationItem(child, url));
+    const currentPath = url.split('?')[0];
+    if (item.activePrefix && (currentPath === item.activePrefix || currentPath.startsWith(`${item.activePrefix}/`))) return true;
+    if (item.activePrefixes?.some(prefix => currentPath === prefix || currentPath.startsWith(`${prefix}/`))) return true;
+    if (!item.href || item.href === '#') return false;
+    const [targetPath, targetQuery = ''] = item.href.split('?');
+    if (!(item.exact ? currentPath === targetPath : (currentPath === targetPath || currentPath.startsWith(targetPath + '/')))) return false;
+    const currentParams = new URLSearchParams(url.split('?')[1] || '');
+    const targetParams = new URLSearchParams(targetQuery);
+    for (const [key, value] of targetParams.entries()) {
+        if (currentParams.get(key) !== value && !item.activeQueryAny?.some(query => currentParams.get(key) === query[key])) return false;
+    }
+    if (item.activeQueryAny?.length) return item.activeQueryAny.some(query => Object.entries(query).every(([key, value]) => currentParams.get(key) === value));
+    return Object.entries(item.activeQuery || {}).every(([key, value]) => value === null ? !currentParams.has(key) : currentParams.get(key) === value);
+}
+
 export function withGenericModuleNavigation(navigation, modules = [], auth = {}, nativeModules = []) {
     // The authenticated category is the identity boundary. Inferring PAMO
     // mode from a browse flag made the module catalog fall back to the static
@@ -51,7 +76,16 @@ export function withGenericModuleNavigation(navigation, modules = [], auth = {},
             const catalogChild = key ? byHref.get(key) : null;
             if (catalogChild) {
                 represented.add(`${area}:${key}`);
-                return [catalogChild];
+                // Keep curated in-app links relative to the current origin.
+                // The catalog may provide an APP_URL-based absolute href that
+                // would switch hosts for users who opened the application via
+                // another valid alias. Catalog permission metadata still wins.
+                return [{
+                    ...catalogChild,
+                    ...child,
+                    permissionAny: catalogChild.permissionAny ?? child.permissionAny,
+                    catalogManaged: true,
+                }];
             }
             if (pamoScoped) return [];
             return [child];
@@ -112,8 +146,7 @@ export function buildSidebarNavigation(navigation, modules, auth, nativeModules 
             { label: 'For Action', href: '/submission-tracking?view=incoming', icon: 'clock', permission: 'canViewSubmissionTracking', section: 'BOTH' },
             { label: 'Sent Reports', href: '/submission-tracking?view=outgoing', icon: 'submission-tracking', permission: 'canViewSubmissionTracking', section: 'BOTH' },
             { label: 'Completed Reports', href: '/submission-tracking?view=history', icon: 'check', permission: 'canViewSubmissionTracking', section: 'BOTH' },
-            { label: 'Final Archives', href: '/submission-tracking/archives', icon: 'archive', permission: 'canViewFinalArchives', section: 'BOTH' },
-            { label: 'Archives', href: '/pamo/archives', icon: 'archive', permissionAny: ['canViewPamoReports'], section: 'BOTH' },
+            finalArchivesNavigationItem,
             ...preserved,
         ];
         return filterNavigationByUnit(pamoNavigation, unit, null, auth);

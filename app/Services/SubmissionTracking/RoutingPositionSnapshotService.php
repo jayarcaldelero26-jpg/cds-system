@@ -6,12 +6,14 @@ use App\Models\RoutingPositionSetting;
 use App\Models\RoutingPositionSettingVersion;
 use App\Models\SubmissionRoutingSnapshot;
 use App\Models\User;
+use App\Services\Pamo\PamoOriginSchemaReadiness;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /** Resolves an immutable route version, or a clearly marked preview for a new route. */
 final class RoutingPositionSnapshotService
@@ -32,6 +34,8 @@ final class RoutingPositionSnapshotService
 
     /** @var array<string,array<string,mixed>> */
     private array $primedPositions = [];
+
+    public function __construct(private readonly PamoOriginSchemaReadiness $pamoOrigins) {}
 
     /** Prime list projection with bounded reads. Transition-time calls bypass this cache. */
     public function prime(iterable $items): void
@@ -242,23 +246,34 @@ final class RoutingPositionSnapshotService
         if ($isPamoOrigin && (! is_array($originContext) || empty($originContext['protected_area_id']) || empty($originContext['pamo_office_id']) || empty($originContext['origin_started_at']))) {
             throw new RuntimeException('The PAMO origin context is incomplete; route capture is disabled.');
         }
-        return SubmissionRoutingSnapshot::query()->create([
+        $originSchemaReady = $this->pamoOrigins->isOriginSchemaReady();
+        if ($isPamoOrigin && ! $originSchemaReady) {
+            throw new HttpException(503, 'PAMO route origin schema is not installed; PAMO route capture is disabled.');
+        }
+
+        $attributes = [
             'source_key' => $source,
             'source_id' => $record->getKey(),
             'setting_version_id' => $resolved['setting_version_id'],
             'profile' => $profile,
             'graph_version' => $isPamoOrigin ? self::PAMO_GRAPH_VERSION : self::GRAPH_VERSION,
-            'origin_kind' => $isPamoOrigin ? 'pamo_pamb' : null,
-            'protected_area_id' => $originContext['protected_area_id'] ?? null,
-            'pamo_office_id' => $originContext['pamo_office_id'] ?? null,
-            'pamo_office_name' => $originContext['pamo_office_name'] ?? null,
-            'responsible_cenro_office_id' => $originContext['responsible_cenro_office_id'] ?? null,
-            'responsible_cenro_name' => $originContext['responsible_cenro_name'] ?? null,
-            'originator_user_id' => $originContext['originator_user_id'] ?? null,
-            'origin_started_at' => $originContext['origin_started_at'] ?? null,
             'captured_by' => $actor->getKey(),
             'captured_at' => CarbonImmutable::now(),
-        ]);
+        ];
+        if ($originSchemaReady) {
+            $attributes += [
+                'origin_kind' => $isPamoOrigin ? 'pamo_pamb' : null,
+                'protected_area_id' => $originContext['protected_area_id'] ?? null,
+                'pamo_office_id' => $originContext['pamo_office_id'] ?? null,
+                'pamo_office_name' => $originContext['pamo_office_name'] ?? null,
+                'responsible_cenro_office_id' => $originContext['responsible_cenro_office_id'] ?? null,
+                'responsible_cenro_name' => $originContext['responsible_cenro_name'] ?? null,
+                'originator_user_id' => $originContext['originator_user_id'] ?? null,
+                'origin_started_at' => $originContext['origin_started_at'] ?? null,
+            ];
+        }
+
+        return SubmissionRoutingSnapshot::query()->create($attributes);
     }
 
     /** @return array<string,mixed> */

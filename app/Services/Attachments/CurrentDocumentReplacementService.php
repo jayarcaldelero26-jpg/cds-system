@@ -89,6 +89,7 @@ final class CurrentDocumentReplacementService
                 }
                 $locked->fill($attributes)->saveOrFail();
             });
+            $this->retryPendingSupersededCleanup($record, $sourceType, $historySlot);
             Log::debug('Optional routing document replacement resolved as an identical-file no-op.', ['source_type' => $sourceType, 'logical_slot' => $historySlot, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
             return ['status' => 'duplicate', 'path' => $expectedPath, 'sha256' => $incomingHash];
         }
@@ -137,18 +138,80 @@ final class CurrentDocumentReplacementService
             Log::critical('Committed attachment replacement failed reference verification.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $historySlot]);
             throw new \RuntimeException('The document replacement requires administrator review.');
         }
-        if (is_string($expectedPath) && $expectedPath !== '' && $this->safeRelativePath($expectedPath) && $expectedPath !== $newPath && $old) {
-            $cleanup = static function () use ($old, $expectedPath, $sourceType, $record, $historySlot): void {
-                if (! Storage::disk($old['disk'])->delete($expectedPath)) {
-                    Log::warning('Previous attachment could not be removed after a successful replacement.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $historySlot]);
-                }
-            };
-            if (DB::transactionLevel() > 0) DB::afterCommit($cleanup);
-            else $cleanup();
+        if (is_string($expectedPath) && $expectedPath !== '' && $expectedPath !== $newPath && $old) {
+            $this->scheduleSupersededFileCleanup($expectedPath, $old['disk'], $sourceType, $record, $historySlot);
         }
+        $this->retryPendingSupersededCleanup($record, $sourceType, $historySlot);
 
         Log::debug('Routing document replacement completed.', ['source_type' => $sourceType, 'logical_slot' => $historySlot, 'duration_ms' => (hrtime(true) - $startedAt) / 1_000_000]);
         return ['status' => $expectedPath === null ? 'uploaded' : 'replaced', 'path' => $newPath, 'sha256' => $incomingHash];
+    }
+
+    /** Promote an already staged, verified final file without making a second permanent copy. */
+    public function adoptStoredUsingAdapter(
+        Model $record,
+        string $sourceType,
+        string $logicalSlot,
+        string $path,
+        string $filename,
+        string $expectedSha256,
+        int $expectedSize,
+        DocumentReferenceAdapter $adapter,
+        int $actorId,
+        callable $authorize,
+    ): array {
+        $authorize($record);
+        if (! preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/i', $sourceType)
+            || ! preg_match('/^[a-z0-9][a-z0-9_-]{0,79}$/i', $logicalSlot)
+            || ! $this->safeRelativePath($path) || ! Storage::disk(self::DISK)->exists($path)) {
+            throw ValidationException::withMessages(['attachment' => 'The verified final document is not available for promotion.']);
+        }
+
+        $absolute = Storage::disk(self::DISK)->path($path);
+        $actualHash = hash_file('sha256', $absolute);
+        $actualSize = (int) Storage::disk(self::DISK)->size($path);
+        if (! is_string($actualHash) || ! hash_equals($expectedSha256, $actualHash) || $actualSize !== $expectedSize) {
+            throw ValidationException::withMessages(['attachment' => 'The final document changed before its current-file reference could be updated.']);
+        }
+
+        $expected = $adapter->read($record, $logicalSlot);
+        $oldPath = $expected['path'];
+        if ($oldPath === $path && $expected['filename'] === $filename) {
+            return ['status' => 'unchanged', 'path' => $path, 'sha256' => $actualHash];
+        }
+        $old = $this->existingFile(is_string($oldPath) ? $oldPath : null);
+
+        DB::transaction(function () use ($record, $sourceType, $logicalSlot, $path, $filename, $actualHash, $actualSize, $adapter, $actorId, $authorize, $expected, $oldPath): void {
+            $locked = $record->newQuery()->lockForUpdate()->findOrFail($record->getKey());
+            $authorize($locked);
+            $current = $adapter->read($locked, $logicalSlot);
+            if ($current['token'] !== $expected['token']) {
+                throw ValidationException::withMessages(['attachment' => 'The current document changed during archive verification. Reload and review the report.']);
+            }
+            $previous = $this->existingFile(is_string($oldPath) ? $oldPath : null);
+            $adapter->write($locked, $logicalSlot, $path, $filename);
+            $locked->saveOrFail();
+            DocumentAttachmentHistory::query()->create([
+                'source_type' => $sourceType, 'source_id' => $locked->getKey(), 'logical_slot' => $logicalSlot,
+                'actor_id' => $actorId, 'action' => 'Finalized',
+                'remarks' => 'The verified Regional-return final copy became the current official document.',
+                'old_path' => $oldPath, 'old_filename' => $previous ? ($current['filename'] ?: basename((string) $oldPath)) : null,
+                'old_sha256' => $previous['sha256'] ?? null, 'old_size' => $previous['size'] ?? null,
+                'new_path' => $path, 'new_filename' => $filename, 'new_sha256' => $actualHash, 'new_size' => $actualSize,
+            ]);
+        });
+
+        $fresh = $adapter->read($record->newQuery()->findOrFail($record->getKey()), $logicalSlot);
+        if ($fresh['path'] !== $path || ! Storage::disk(self::DISK)->exists($path)
+            || ! hash_equals($expectedSha256, (string) hash_file('sha256', Storage::disk(self::DISK)->path($path)))) {
+            throw new \RuntimeException('The verified final document reference could not be confirmed.');
+        }
+        if (is_string($oldPath) && $oldPath !== '' && $oldPath !== $path && $old) {
+            $this->scheduleSupersededFileCleanup($oldPath, $old['disk'], $sourceType, $record, $logicalSlot);
+        }
+        $this->retryPendingSupersededCleanup($record, $sourceType, $logicalSlot);
+
+        return ['status' => 'finalized', 'path' => $path, 'sha256' => $actualHash];
     }
 
     /** @param callable(Model):void $authorize */
@@ -179,9 +242,46 @@ final class CurrentDocumentReplacementService
 
         $fresh = $adapter->read($record->newQuery()->findOrFail($record->getKey()), $logicalSlot);
         if ($fresh['path'] !== null) throw new \RuntimeException('The document slot could not be cleared.');
-        if (is_string($oldPath) && $oldPath !== '' && $this->safeRelativePath($oldPath) && $oldFile
-            && ! Storage::disk($oldFile['disk'])->delete($oldPath)) {
-            Log::warning('Removed attachment file could not be deleted after its reference was cleared.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $logicalSlot]);
+        if (is_string($oldPath) && $oldPath !== '' && $oldFile) {
+            $this->scheduleSupersededFileCleanup($oldPath, $oldFile['disk'], $sourceType, $record, $logicalSlot);
+        }
+        $this->retryPendingSupersededCleanup($record, $sourceType, $logicalSlot);
+    }
+
+    /**
+     * Retry a bounded set of superseded bytes recorded in the existing
+     * attachment audit history. This runs only after the caller's transaction
+     * commits and never deletes a path whose current-reference token is live.
+     */
+    public function retryPendingSupersededCleanup(Model $record, string $sourceType, string $slot, int $limit = 25): void
+    {
+        if (DB::transactionLevel() > 0) {
+            DB::afterCommit(fn () => $this->deletePendingSupersededCleanup($record, $sourceType, $slot, $limit));
+            return;
+        }
+
+        $this->deletePendingSupersededCleanup($record, $sourceType, $slot, $limit);
+    }
+
+    private function deletePendingSupersededCleanup(Model $record, string $sourceType, string $slot, int $limit): void
+    {
+        $history = DocumentAttachmentHistory::query()
+            ->where('source_type', $sourceType)->where('source_id', $record->getKey())->where('logical_slot', $slot)
+            ->whereIn('action', ['Replaced', 'Removed', 'Finalized'])
+            ->whereNotNull('old_path')->whereNotNull('old_sha256')
+            ->latest('id')->limit(max(1, min($limit, 100)))
+            ->get(['old_path', 'old_sha256', 'old_size']);
+
+        foreach ($history as $entry) {
+            $path = (string) $entry->old_path;
+            if (! $this->safeRelativePath($path)
+                || app(ProtectedAttachmentService::class)->hasLivePathReference($path)) continue;
+            $file = $this->existingFile($path);
+            if (! $file || ! hash_equals((string) $entry->old_sha256, $file['sha256'])
+                || ($entry->old_size !== null && (int) $entry->old_size !== $file['size'])) continue;
+            if (! Storage::disk($file['disk'])->delete($path)) {
+                Log::warning('Superseded attachment cleanup remains retryable from bounded audit history.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $slot]);
+            }
         }
     }
 
@@ -205,6 +305,22 @@ final class CurrentDocumentReplacementService
             && ! preg_match('/^[A-Za-z]:\//', $normalized)
             && ! in_array('..', explode('/', $normalized), true)
             && ! str_contains($normalized, "\0");
+    }
+
+    private function scheduleSupersededFileCleanup(string $path, string $disk, string $sourceType, Model $record, string $slot): void
+    {
+        if (! $this->safeRelativePath($path)) return;
+        $cleanup = static function () use ($path, $disk, $sourceType, $record, $slot): void {
+            if (app(ProtectedAttachmentService::class)->hasLivePathReference($path)) {
+                Log::debug('Superseded attachment bytes were retained because another live slot references them.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $slot]);
+                return;
+            }
+            if (! Storage::disk($disk)->delete($path)) {
+                Log::warning('Superseded attachment cleanup did not complete; its bounded history reference remains available for retry.', ['source_type' => $sourceType, 'source_id' => $record->getKey(), 'logical_slot' => $slot]);
+            }
+        };
+        if (DB::transactionLevel() > 0) DB::afterCommit($cleanup);
+        else $cleanup();
     }
 
     private function folder(string $sourceType, Model $record, string $slot): string

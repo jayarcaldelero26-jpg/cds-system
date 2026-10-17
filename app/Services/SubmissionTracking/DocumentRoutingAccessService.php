@@ -104,6 +104,75 @@ final class DocumentRoutingAccessService
         return true;
     }
 
+    /**
+     * Confirms the PAMO owner for a registered native report at its captured
+     * origin stage. The action list is already actor-filtered by the presenter;
+     * this check keeps the workspace projection tied to the same source, PA,
+     * office, snapshot, and forwarded draft facts as the transition gate.
+     *
+     * @param array<string,mixed> $row
+     */
+    public function isCurrentPamoNativeOwner(User $user, Model $record, string $sourceKey, array $row): bool
+    {
+        if ($sourceKey === 'conservation'
+            || ! $user->is_active
+            || ! $user->is_approved
+            || $this->organization->effectiveCategory($user) !== OrganizationalAccessService::PAMO
+            || ! $this->organization->canViewPamoPilotWorkflow($user)
+            || ($row['routing_complete'] ?? false)
+            || data_get($row, 'routing.current_stage') !== DocumentRoutingProfileRegistry::PAMO_ORIGIN
+            || $this->organization->normalizeCategory(data_get($row, 'routing.responsible_user_category')) !== OrganizationalAccessService::PAMO) {
+            return false;
+        }
+
+        $registry = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+        $registered = $registry->findBySource($sourceKey);
+        $modelClass = $registered['definition']['model'] ?? null;
+        if (! $registry->isSchemaReady() || ! $registered
+            || ! $registry->isEligible($registered['workflow'])
+            || ! is_string($modelClass)
+            || ! ($record instanceof $modelClass)) {
+            return false;
+        }
+
+        $areaId = (int) $record->getAttribute('protected_area_id');
+        if ($areaId <= 0
+            || (int) $user->protected_area_id !== $areaId
+            || ! $this->organization->canAccessProtectedArea($user, $areaId)) {
+            return false;
+        }
+
+        $facts = $this->organization->pamoAssignmentForProtectedArea($areaId);
+        if (! $facts
+            || (int) $facts['pamo_office_id'] <= 0
+            || ! $this->same($user->office_designated, $facts['pamo_office_name'])
+            || ! $this->same(data_get($row, 'routing.responsible_office'), $facts['pamo_office_name'])
+            || ! $this->same(data_get($row, 'routing.route_position.pamo_office_name'), $facts['pamo_office_name'])) {
+            return false;
+        }
+
+        $position = Schema::hasTable('submission_routing_snapshots')
+            ? SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $record->getKey())->first()
+            : null;
+        if (! $position
+            || (int) data_get($row, 'routing.route_position.snapshot_id') !== (int) $position->getKey()
+            || $position->origin_kind !== 'pamo_pamb'
+            || ! in_array($position->profile, ['pamo_regular', 'pamo_direct'], true)
+            || (int) $position->protected_area_id !== $areaId
+            || (int) $position->pamo_office_id !== (int) $facts['pamo_office_id']
+            || ! $this->isPamoNativeOrigin($user, $record, $sourceKey, $facts)) {
+            return false;
+        }
+
+        $actionKeys = collect(data_get($row, 'routing.actions', []))
+            ->filter(fn (mixed $action): bool => is_array($action))
+            ->pluck('key');
+
+        return $position->profile === 'pamo_regular'
+            ? $actionKeys->contains('receive_correction') || $actionKeys->contains('forward_from_pamo_to_cenro_focal')
+            : $actionKeys->contains('receive_correction') || $actionKeys->contains('forward_from_pamo');
+    }
+
     /** @return array<string,bool> */
     public function capabilities(User $user, Model $record, string $sourceKey, array $actions, ?string $ability = null): array
     {

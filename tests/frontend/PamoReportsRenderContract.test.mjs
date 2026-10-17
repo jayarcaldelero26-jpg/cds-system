@@ -8,7 +8,33 @@ import { rolldown } from 'rolldown';
 
 const require = createRequire(resolve('package.json'));
 
-async function component(name) {
+function pageHookRuntime({ firstRefValue = null } = {}) {
+    const updates = [];
+    let cursor = 0;
+    let values = [];
+    const runtime = Object.create(React);
+    runtime.useState = initial => {
+        const index = cursor++;
+        values[index] = typeof initial === 'function' ? initial() : initial;
+        return [values[index], next => {
+            values[index] = typeof next === 'function' ? next(values[index]) : next;
+            updates.push({ index, value: values[index] });
+        }];
+    };
+    runtime.useRef = initial => {
+        const index = cursor++;
+        return { current: index === 0 && firstRefValue !== null ? firstRefValue : initial };
+    };
+    runtime.useEffect = () => {};
+    runtime.useMemo = callback => callback();
+    return {
+        runtime,
+        updates,
+        beginRender() { cursor = 0; values = []; updates.length = 0; },
+    };
+}
+
+async function component(name, { hooks = React } = {}) {
     const bundle = await rolldown({
         input: resolve(`resources/js/Pages/PamoReports/${name}.jsx`),
         external: id => id === 'react' || id.startsWith('react/'),
@@ -25,7 +51,7 @@ async function component(name) {
                 if (id === '\0pamo-css-shim') return '';
                 if (id === '\0pamo-inertia-shim') return `
                     import React from 'react';
-                    export const router = { get() {}, visit() {} };
+                    export const router = { get(...args) { globalThis.__pamoReportsRouterCalls?.push(args); }, visit() {} };
                     export const Link = ({ href, children, preserveState, preserveScroll, ...props }) => React.createElement('a', { href, ...props }, children);
                     export function useForm(initial = {}) {
                         return { data: { ...initial }, errors: {}, processing: false, progress: null,
@@ -50,12 +76,25 @@ async function component(name) {
     const { output } = await bundle.generate({ format: 'cjs' });
     await bundle.close();
     const module = { exports: {} };
-    new Function('require', 'module', 'exports', output[0].code)(require, module, module.exports);
+    new Function('require', 'module', 'exports', output[0].code)(id => id === 'react' ? hooks : require(id), module, module.exports);
     return module.exports.default || module.exports;
 }
 
 const Reports = await component('Index');
 const Archives = await component('Archives');
+let startedNewDraft = 0;
+const reportsHooks = pageHookRuntime({ firstRefValue: { startNew: () => { startedNewDraft += 1; } } });
+const InteractiveReports = await component('Index', { hooks: reportsHooks.runtime });
+
+function findElement(root, predicate) {
+    if (!React.isValidElement(root)) return null;
+    if (predicate(root)) return root;
+    for (const child of React.Children.toArray(root.props.children)) {
+        const found = findElement(child, predicate);
+        if (found) return found;
+    }
+    return null;
+}
 
 function paginator({ data = [], total = data.length, currentPage = 1, lastPage = 1, query = '' } = {}) {
     const path = '/pamo/reports';
@@ -135,6 +174,9 @@ test('PAMO Reports empty draft paginator renders an empty state and numeric zero
     assert.ok(markup.includes('0 private drafts'));
     assert.match(markup, /New draft/);
     assert.match(markup, /Search drafts/);
+    assert.match(markup, /role="group" aria-label="PAMO search and filters"/);
+    assert.match(markup, /<label[^>]*for="pamo-reports-search"[^>]*>Search drafts<\/label>/);
+    assert.match(markup, /placeholder="Search drafts"/);
     assert.match(markup, />Filters</);
     assert.doesNotMatch(markup, /Submitted Reports|role="tab"/);
 });
@@ -159,6 +201,36 @@ test('PAMO Reports later page keeps visible records, paginator total, and search
     assert.match(markup, />27 private drafts</);
     assert.match(markup, /href="\/pamo\/reports\?search=homestay&amp;workflow=homestay&amp;page=1"/);
     assert.match(markup, /href="\/pamo\/reports\?search=homestay&amp;workflow=homestay&amp;page=2"/);
+    assert.match(markup, /placeholder="Search drafts"[^>]*value="homestay"/);
+    assert.match(markup, /Remove Search filter/);
+    assert.match(markup, /Clear all/);
+});
+
+test('PAMO Reports search, workflow, reset, and New draft callbacks remain connected', () => {
+    reportsHooks.beginRender();
+    const tree = InteractiveReports({
+        workflows,
+        rows: paginator({ data: [], total: 0 }),
+        assignedProtectedArea: area,
+        pamoContext,
+        filters: { search: 'forest', workflow: 'homestay' },
+        pamoWorkspace: true,
+    });
+    const toolbar = findElement(tree, element => element.props.searchId === 'pamo-reports-search');
+    assert.ok(toolbar);
+    assert.equal(toolbar.props.search, 'forest');
+    toolbar.props.onSearchChange({ target: { value: 'wildlife' } });
+    const workflow = findElement(toolbar.props.children, element => element.props.id === 'pamo-reports-workflow-filter');
+    assert.ok(workflow);
+    assert.equal(workflow.props.value, 'homestay');
+    workflow.props.onChange('conservation');
+    assert.deepEqual(reportsHooks.updates.map(update => update.value), ['wildlife', 'conservation']);
+
+    toolbar.props.onClear();
+    assert.deepEqual(reportsHooks.updates.slice(-2).map(update => update.value), ['', '']);
+    assert.equal(toolbar.props.action.props.children, '＋ New draft');
+    toolbar.props.action.props.onClick();
+    assert.equal(startedNewDraft, 1);
 });
 
 test('PAMO Archives paginator renders its archive record and numeric total', () => {

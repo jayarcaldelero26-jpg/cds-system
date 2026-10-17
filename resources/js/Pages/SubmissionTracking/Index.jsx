@@ -8,6 +8,7 @@ import {
     FloatingTextarea,
 } from "@/Components/Form";
 import FilterToolbar from '@/Components/Form/FilterToolbar';
+import PamoCompactToolbar from '@/Components/PamoCompactToolbar';
 import CrudFormModal from "@/Components/Crud/CrudFormModal";
 import CrudDetailsModal from "@/Components/Crud/CrudDetailsModal";
 import CrudSection from "@/Components/Crud/CrudSection";
@@ -19,7 +20,9 @@ import PambRoutingTimeline from "@/Components/SubmissionTracking/PambRoutingTime
 import PambMovProgress from "@/Components/SubmissionTracking/PambMovProgress";
 import PambMovActions from "@/Components/SubmissionTracking/PambMovActions";
 import PambMovCorrectionNotice from "@/Components/SubmissionTracking/PambMovCorrectionNotice";
+import FinalArchiveRecordLink from "@/Components/SubmissionTracking/FinalArchiveRecordLink";
 import CorrectionReferenceAttachment from "@/Components/SubmissionTracking/CorrectionReferenceAttachment";
+import PamoReportPendingAnimation from "@/Components/PamoReportPendingAnimation";
 import { archiveCheckpointPendingNotice } from "@/Utils/archiveCheckpointNotice";
 import { custodyContext, movPrerequisiteFor, nextSubmissionAction, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
@@ -281,7 +284,7 @@ const formatActionDate = (value) =>
         : String(value).length <= 10
           ? plainDate(value)
           : formatReportDateTime(value, FALLBACK);
-export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPreview, context, onSubmitMov, onReviewMov, pamoWorkspace = false }) => {
+export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPreview, context, onSubmitMov, onReviewMov, canViewFinalArchives = false, pamoWorkspace = false }) => {
     if (!row)
         return (
             <aside className="rounded-xl border border-dashed border-gray-300 bg-white p-5 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
@@ -306,7 +309,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
     const custodyActions = routing.actions || [];
     const showCustodyActions = Boolean(row.can_transition && custodyActions.length > 0);
     return (
-        <aside className="cds-card-surface flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
+        <aside className="cds-card-surface flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0 xl:max-h-[calc(100dvh-2rem)]">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <p className="text-sm font-extrabold text-gray-900 dark:text-white">
                     {pamoWorkspace ? 'Report Details' : 'Submission Details'}
@@ -315,7 +318,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                     {pamoWorkspace ? 'Current report information and routing status' : 'Current record context and routing state'}
                 </p>
             </div>
-            <div className="space-y-4 p-4 text-xs">
+            <div className="custom-table-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4 text-xs">
                 <div className="rounded-lg border border-green-200 bg-green-50/60 p-3 dark:border-green-900 dark:bg-green-950/20">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-green-800 dark:text-green-300">Current Status</p>
@@ -342,6 +345,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                     <p className="font-semibold text-gray-900 dark:text-white">{custody.office}</p>
                 </div>}
                 <SubmissionReportContext row={row} />
+                <FinalArchiveRecordLink row={row} canViewFinalArchives={canViewFinalArchives} />
                 {(showCustodyActions || hasMovActions) && (
                     <div className="rounded-lg border border-gray-200 bg-gray-50/70 p-3 dark:border-gray-700 dark:bg-gray-900/50">
                         <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -447,7 +451,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                     </div>
                 </div>
             </div>
-            <div className="mt-auto border-t border-gray-200 p-4 dark:border-gray-800">
+            <div className="mt-auto shrink-0 border-t border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
                 <Button
                     size="compact"
                     type="button"
@@ -504,6 +508,8 @@ export default function Index({
     const [reviewHistoryRecord, setReviewHistoryRecord] = useState(null);
     const lastLinkedKey = useRef(submissionKey(trackingContext.selected_record));
     const dispatchSubmitInFlight = useRef(false);
+    const movSubmissionInFlight = useRef(false);
+    const [movSubmissionBusy, setMovSubmissionBusy] = useState(false);
     const [showFullDetails, setShowFullDetails] = useState(false);
     const [expandFullTimeline, setExpandFullTimeline] = useState(false);
     useEffect(() => {
@@ -541,10 +547,24 @@ export default function Index({
     const [overrideProcessing, setOverrideProcessing] = useState(false);
     const [overrideError, setOverrideError] = useState("");
     const [reviewing, setReviewing] = useState(null);
-    const submitMovForReview = (row, options = {}) => router.post(
-        route("submission-tracking.mov.submit-review", [row.source, row.source_id]),
-        {}, { preserveScroll: true, ...options },
-    );
+    const submitMovForReview = (row, options = {}) => {
+        if (movSubmissionInFlight.current) return false;
+        movSubmissionInFlight.current = true;
+        setMovSubmissionBusy(true);
+        const originalFinish = options.onFinish;
+        return router.post(
+            route("submission-tracking.mov.submit-review", [row.source, row.source_id]),
+            {}, {
+                preserveScroll: true,
+                ...options,
+                onFinish: visit => {
+                    movSubmissionInFlight.current = false;
+                    setMovSubmissionBusy(false);
+                    originalFinish?.(visit);
+                },
+            },
+        );
+    };
     const reviewMov = (row, decision) => {
         reviewForm.setData({ decision, remarks: "", attachment: null });
         reviewForm.clearErrors();
@@ -1070,6 +1090,10 @@ export default function Index({
             {
                 ...filters,
                 view: tab,
+                ...(pamoWorkspace ? {
+                    source: trackingContext.selected_source || details?.source || undefined,
+                    source_id: trackingContext.selected_id || details?.source_id || undefined,
+                } : {}),
                 search: search || undefined,
                 module: module || undefined,
                 protected_area_id: protectedAreaId || undefined,
@@ -1372,6 +1396,61 @@ export default function Index({
         </div>
     );
 
+    const trackingFilterFields = (
+        <div className="grid gap-3 sm:grid-cols-3">
+            <div className="w-full">
+                <FloatingSelect
+                    id="submission-tracking-module"
+                    label="Module"
+                    value={module}
+                    onChange={(event) => {
+                        const value = event.target.value;
+                        setModule(value);
+                        navigateFilters({ module: value || undefined });
+                    }}
+                    size="sm"
+                >
+                    <option value="">All modules</option>
+                    {(filterOptions.modules || []).map((value) => <option key={value}>{value}</option>)}
+                </FloatingSelect>
+            </div>
+            <div className="w-full">
+                <FloatingSelect
+                    id="submission-tracking-area"
+                    label="Protected Area"
+                    value={protectedAreaId}
+                    onChange={(event) => {
+                        const value = event.target.value;
+                        setProtectedAreaId(value);
+                        navigateFilters({ protected_area_id: value || undefined });
+                    }}
+                    size="sm"
+                >
+                    <option value="">All protected areas</option>
+                    {(filterOptions.protectedAreas || []).map((area) => (
+                        <option key={area.id} value={area.id}>{area.name}</option>
+                    ))}
+                </FloatingSelect>
+            </div>
+            <div className="w-full">
+                <FloatingSelect
+                    id="submission-tracking-status"
+                    label="Status"
+                    value={status}
+                    onChange={(event) => {
+                        const value = event.target.value;
+                        setStatus(value);
+                        navigateFilters({ status: value || undefined });
+                    }}
+                    size="sm"
+                >
+                    <option value="">All statuses</option>
+                    {(filterOptions.statuses || []).map((value) => <option key={value}>{value}</option>)}
+                </FloatingSelect>
+            </div>
+        </div>
+    );
+
     return (
         <AuthenticatedLayout title={pamoWorkspace ? tabLabel : "Submission Tracking"}>
             <div className="submission-tracking-page">
@@ -1383,92 +1462,41 @@ export default function Index({
                         selected={incomingActionTab}
                         onChange={setIncomingActionTab}
                     />}
-                    <div className="submission-tracking-filterbar cds-card-surface flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:flex-row lg:items-center">
-                        <div className="min-w-0 flex-1">
-                            <FloatingInput
-                                id="submission-tracking-search"
-                                label="Search protected area, report, or office"
-                                value={search}
-                                onChange={(event) =>
-                                    setSearch(event.target.value)
-                                }
-                                size="sm"
-                            />
-                        </div>
-                        <div className="min-w-0 flex-1"><FilterToolbar chips={appliedFilterChips}><div className="grid gap-3 sm:grid-cols-3">
-                        <div className="w-full">
-                            <FloatingSelect
-                                id="submission-tracking-module"
-                                label="Module"
-                                value={module}
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    setModule(value);
-                                    navigateFilters({
-                                        module: value || undefined,
-                                    });
-                                }}
-                                size="sm"
+                    {pamoWorkspace ? (
+                        <PamoCompactToolbar
+                            searchId="submission-tracking-search"
+                            searchLabel="Search reports"
+                            search={search}
+                            onSearchChange={(event) => setSearch(event.target.value)}
+                            chips={appliedFilterChips}
+                            onClear={resetFilters}
+                        >
+                            {trackingFilterFields}
+                        </PamoCompactToolbar>
+                    ) : (
+                        <div className="submission-tracking-filterbar cds-card-surface flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900 lg:flex-row lg:items-center">
+                            <div className="min-w-0 flex-1">
+                                <FloatingInput
+                                    id="submission-tracking-search"
+                                    label="Search protected area, report, or office"
+                                    value={search}
+                                    onChange={(event) => setSearch(event.target.value)}
+                                    size="sm"
+                                />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                                <FilterToolbar chips={appliedFilterChips}>{trackingFilterFields}</FilterToolbar>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={resetFilters}
+                                disabled={!filtersActive}
+                                className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 transition hover:border-green-300 hover:bg-green-50 hover:text-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-45 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
                             >
-                                <option value="">All modules</option>
-                                {(filterOptions.modules || []).map((value) => (
-                                    <option key={value}>{value}</option>
-                                ))}
-                            </FloatingSelect>
+                                Clear all
+                            </button>
                         </div>
-                        <div className="w-full">
-                            <FloatingSelect
-                                id="submission-tracking-area"
-                                label="Protected Area"
-                                value={protectedAreaId}
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    setProtectedAreaId(value);
-                                    navigateFilters({
-                                        protected_area_id: value || undefined,
-                                    });
-                                }}
-                                size="sm"
-                            >
-                                <option value="">All protected areas</option>
-                                {(filterOptions.protectedAreas || []).map(
-                                    (area) => (
-                                        <option key={area.id} value={area.id}>
-                                            {area.name}
-                                        </option>
-                                    ),
-                                )}
-                            </FloatingSelect>
-                        </div>
-                        <div className="w-full">
-                            <FloatingSelect
-                                id="submission-tracking-status"
-                                label="Status"
-                                value={status}
-                                onChange={(event) => {
-                                    const value = event.target.value;
-                                    setStatus(value);
-                                    navigateFilters({
-                                        status: value || undefined,
-                                    });
-                                }}
-                                size="sm"
-                            >
-                                <option value="">All statuses</option>
-                                {(filterOptions.statuses || []).map((value) => (
-                                    <option key={value}>{value}</option>
-                                ))}
-                            </FloatingSelect>
-                        </div>
-                        </div></FilterToolbar></div>
-                        <button
-                            type="button"
-                            onClick={resetFilters}
-                            disabled={!filtersActive}
-                            className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-gray-200 px-3 text-xs font-bold text-gray-600 transition hover:border-green-300 hover:bg-green-50 hover:text-green-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-45 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">
-                            Clear all
-                        </button>
-                    </div>
+                    )}
                     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_400px]">
                         <div className="min-w-0">
                             <CrudTable
@@ -1532,6 +1560,7 @@ export default function Index({
                                 onSubmitMov={submitMovForReview}
                                 onReviewMov={reviewMov}
                                 onPreview={setPreviewRow}
+                                canViewFinalArchives={Boolean(pageProps.auth?.canViewFinalArchives)}
                                 onAction={(nextAction) => {
                                     form.setData({
                                         date: "",
@@ -1562,6 +1591,8 @@ export default function Index({
                 onClose={() => setShowFullDetails(false)}
                 attachments={pamoWorkspace && details ? <OfficialReportFileSection row={details} onPreview={setPreviewRow} /> : null}
                 closeOnEscape={!reviewHistoryRecord}
+                busyOverlay={movSubmissionBusy ? <PamoReportPendingAnimation intent="review" /> : null}
+                busyOverlayPresentation="success-sized"
                 footerActions={<>
                     {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="warning" onClick={() => openCorrection(details)} className="rounded-xl px-3 py-2 text-xs">Correct routing</Button>}
                     <Button type="button" size="compact" variant="cancel" onClick={() => setReviewHistoryRecord(details)} className="rounded-xl px-3 py-2 text-xs">Review history</Button>
@@ -1756,6 +1787,8 @@ export default function Index({
                 onClose={closeSelectedAction}
                 onSubmit={submit}
                 processing={form.processing}
+                busyOverlay={form.processing ? <PamoReportPendingAnimation intent={typeof File !== "undefined" && form.data.official_document instanceof File ? "update" : "send"} /> : null}
+                busyOverlayPresentation="success-sized"
                 errors={Object.fromEntries(Object.entries(form.errors).filter(([key]) => key !== "archive"))}
                 systemNotice={archiveCheckpointPending || archiveCheckpointNotice}
                 saveLabel={selectedActionLabel}
@@ -1933,6 +1966,8 @@ export default function Index({
                 }
                 onSubmit={submitInternal}
                 processing={internalForm.processing}
+                busyOverlay={internalForm.processing ? <PamoReportPendingAnimation intent={typeof File !== "undefined" && internalForm.data.official_document instanceof File ? "update" : "send"} /> : null}
+                busyOverlayPresentation="success-sized"
                 errors={internalForm.errors}
                 saveLabel={standardActionLabel(
                     routingStage?.action_label ||
@@ -2020,6 +2055,8 @@ export default function Index({
                 onClose={() => !reviewForm.processing && setReviewing(null)}
                 onSubmit={submitReview}
                 processing={reviewForm.processing}
+                busyOverlay={reviewForm.processing ? <PamoReportPendingAnimation intent="review" /> : null}
+                busyOverlayPresentation="success-sized"
                 errors={reviewForm.errors}
                 saveLabel={
                     reviewForm.data.decision === "needs_correction"
@@ -2265,6 +2302,7 @@ export default function Index({
                 open={Boolean(previewRow)}
                 row={previewRow}
                 accountKey={pageProps.auth?.user?.id}
+                presentation="document-only"
                 onClose={() => setPreviewRow(null)}
             />
         </AuthenticatedLayout>

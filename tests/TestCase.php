@@ -5,12 +5,33 @@ namespace Tests;
 use App\Models\User;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Filesystem\Filesystem;
+use Illuminate\Support\Facades\DB;
 
 abstract class TestCase extends BaseTestCase
 {
     public User $user;
 
     private ?string $isolatedStorageRoot = null;
+
+    /**
+     * Prove the opened Laravel connection is isolated before a database trait
+     * can migrate, transact, or otherwise touch its configured database.
+     */
+    protected function setUpTraits()
+    {
+        $connection = DB::connection();
+        $this->assertSame('sqlite', $connection->getDriverName());
+        $this->assertSame(':memory:', $connection->getConfig('database'));
+
+        $pdo = $connection->getPdo();
+        $this->assertSame('sqlite', $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME));
+        $main = collect($pdo->query('PRAGMA database_list')->fetchAll(\PDO::FETCH_ASSOC))
+            ->first(fn (array $entry): bool => ($entry['name'] ?? null) === 'main');
+        $this->assertIsArray($main);
+        $this->assertSame('', (string) ($main['file'] ?? ''));
+
+        return parent::setUpTraits();
+    }
 
     protected function setUp(): void
     {

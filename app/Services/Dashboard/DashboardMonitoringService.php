@@ -313,7 +313,7 @@ final class DashboardMonitoringService
             ? $developmentOffices
             : $rows->pluck('office_or_pa')->filter()->unique()->sort()->values()->all();
         $frequencies = $rows->pluck('frequency')->filter(fn (string $value): bool => $value !== 'Unclassified')->unique()->sort()->values()->all();
-        $years = $this->tracking->filterOptions()['years'] ?? [$year];
+        $years = $this->tracking->reportingYearOptions();
 
         return [
             'as_of' => $today->toIso8601String(),

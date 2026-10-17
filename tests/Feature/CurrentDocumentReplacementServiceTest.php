@@ -115,6 +115,45 @@ test('current document replacement verifies content, deduplicates identical uplo
         ->and(DocumentAttachmentHistory::query()->where('source_id', $record->id)->count())->toBe(2);
 });
 
+test('superseded cleanup retries exact audited bytes and preserves any shared live document path', function (): void {
+    Storage::fake('local');
+    [$owner, $record] = replacementTestRecord();
+    [$otherOwner, $otherRecord] = replacementTestRecord();
+    $oldPath = 'current-documents/bms/shared-cleanup-fixture.pdf';
+    $oldBytes = "%PDF-1.4\nprevious official copy";
+    Storage::disk('local')->put($oldPath, $oldBytes);
+    $record->update(['mov_file_path' => 'current-documents/bms/'.$record->id.'/mov/current.pdf', 'mov_file_name' => 'Current.pdf']);
+    Storage::disk('local')->put($record->mov_file_path, "%PDF-1.4\ncurrent official copy");
+    $otherRecord->update(['mov_file_path' => $oldPath, 'mov_file_name' => 'Shared.pdf']);
+    DocumentAttachmentHistory::query()->create([
+        'source_type' => 'bms', 'source_id' => $record->getKey(), 'logical_slot' => 'mov',
+        'actor_id' => $owner->getKey(), 'action' => 'Replaced', 'old_path' => $oldPath,
+        'old_filename' => 'Previous.pdf', 'old_sha256' => hash('sha256', $oldBytes), 'old_size' => strlen($oldBytes),
+        'new_path' => $record->mov_file_path, 'new_filename' => 'Current.pdf',
+        'new_sha256' => hash_file('sha256', Storage::disk('local')->path($record->mov_file_path)),
+        'new_size' => Storage::disk('local')->size($record->mov_file_path),
+    ]);
+    $service = app(CurrentDocumentReplacementService::class);
+
+    $service->retryPendingSupersededCleanup($record, 'bms', 'mov');
+    Storage::disk('local')->assertExists($oldPath);
+
+    $service->clearUsingAdapter(
+        $otherRecord, 'bms', 'mov', new \App\Services\Attachments\ScalarDocumentReferenceAdapter('mov_file_path', 'mov_file_name'),
+        $otherOwner->getKey(), static fn (): null => null,
+    );
+    Storage::disk('local')->assertMissing($oldPath);
+
+    // Simulate exact old bytes left behind after a prior post-commit delete failure.
+    Storage::disk('local')->put($oldPath, $oldBytes);
+    $service->retryPendingSupersededCleanup($record, 'bms', 'mov');
+    Storage::disk('local')->assertMissing($oldPath);
+
+    Storage::disk('local')->put($oldPath, "%PDF-1.4\nnot the audited copy");
+    $service->retryPendingSupersededCleanup($record, 'bms', 'mov');
+    Storage::disk('local')->assertExists($oldPath);
+});
+
 function structuredReplacementTestRecord(): array
 {
     $user = User::factory()->create();
@@ -374,15 +413,15 @@ test('previously archived checkpoints only refresh availability and remain froze
     $uploadCount = $fake->uploadCount;
 
     foreach ([
-        ['verified', 'verified', null],
-        ['unavailable', 'unavailable', 'NOT_FOUND'],
-        ['unknown', 'unknown', 'PROVIDER_ERROR'],
-        ['content_mismatch', 'unknown', 'CONTENT_MISMATCH'],
-    ] as [$providerResult, $expectedAvailability, $expectedError]) {
+        ['verified', 'verified', null, 'archived'],
+        ['unavailable', 'unavailable', 'NOT_FOUND', 'failed'],
+        ['unknown', 'unknown', 'PROVIDER_ERROR', 'failed'],
+        ['content_mismatch', 'unknown', 'CONTENT_MISMATCH', 'failed'],
+    ] as [$providerResult, $expectedAvailability, $expectedError, $expectedResult]) {
         $fake->forcedAvailability = $providerResult;
         $result = $archiver->archiveFinalDocument($record->fresh(), 'bms', 'mov', 'mov_file_path', 'mov_file_name', $user->id, $authorized, 'shared-folder', archiveTestModule(), 'Conservation Unit', 'CENRO Mati');
         $archive->refresh();
-        expect($result['status'])->toBe('archived')
+        expect($result['status'])->toBe($expectedResult)
             ->and($archive->archive_status)->toBe('ARCHIVED')
             ->and($archive->remote_availability)->toBe($expectedAvailability)
             ->and($archive->last_verification_error_class)->toBe($expectedError)
