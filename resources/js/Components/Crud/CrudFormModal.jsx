@@ -13,6 +13,7 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
     const processingRef = useRef(processing);
     const overlayRef = useRef(null);
     const busyOverlayRef = useRef(null);
+    const errorSummaryRef = useRef(null);
     const restoreFocusRef = useRef(null);
     const resolvedInitialFocusSelector = resolveCrudFormInitialFocusSelector(initialFocusSelector);
     processingRef.current = processing;
@@ -28,11 +29,24 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
         motion,
     });
     const busy = Boolean(busyOverlay);
+    const displayedErrors = summaryErrors ?? errors;
+    const errorSignature = JSON.stringify(displayedErrors || {});
+    const hasDisplayedErrors = Object.keys(displayedErrors || {}).length > 0;
     useEffect(() => {
         if (busy) {
             const active = document.activeElement;
             if (panelRef.current?.contains(active)) restoreFocusRef.current = active;
             const frame = window.requestAnimationFrame(() => busyOverlayRef.current?.querySelector('[data-cds-busy-status]')?.focus());
+            return () => window.cancelAnimationFrame(frame);
+        }
+        if (open && hasDisplayedErrors && !processing) {
+            restoreFocusRef.current = null;
+            const frame = window.requestAnimationFrame(() => {
+                const summary = errorSummaryRef.current;
+                if (!summary) return;
+                summary.scrollIntoView?.({ block: 'nearest' });
+                summary.focus?.({ preventScroll: true });
+            });
             return () => window.cancelAnimationFrame(frame);
         }
         if (open && restoreFocusRef.current?.isConnected) {
@@ -42,9 +56,8 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
         }
         restoreFocusRef.current = null;
         return undefined;
-    }, [busy, open]);
+    }, [busy, errorSignature, hasDisplayedErrors, open, processing]);
     if (!present) return null;
-    const displayedErrors = summaryErrors ?? errors;
     const resolvedSaveLabel = saveLabel || (mode === 'edit' ? 'Save Changes' : 'Save Record');
     const displayPreview = Boolean(preview);
     return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${motion === 'soft' ? '' : 'bg-gray-950/60 backdrop-blur-xs'}`} onClick={event => {
@@ -57,7 +70,7 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
             <CrudModalHeader icon={icon} title={title} subtitle={subtitle} onClose={processing ? undefined : onClose} showClose={showHeaderClose} />
             <CrudModalCardContext.Provider value><div inert={busy} aria-hidden={busy || undefined} className="custom-table-scrollbar min-h-0 flex-1 overflow-y-auto p-6">
                 <SaveProgressIndicator processing={processing} progress={progress} />
-                {Object.keys(displayedErrors || {}).length > 0 && <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert"><p className="font-bold">Please correct the following:</p><ul className="mt-1 list-disc pl-5">{Object.values(displayedErrors).map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
+                {hasDisplayedErrors && <div ref={errorSummaryRef} tabIndex={-1} className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300" role="alert"><p className="font-bold">Please correct the following:</p><ul className="mt-1 list-disc pl-5">{Object.values(displayedErrors).map((error, index) => <li key={index}>{error}</li>)}</ul></div>}
                 {systemNotice && <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100" role="alert"><p className="font-bold">{systemNotice.title}</p><p className="mt-1">{systemNotice.message}</p></div>}
                 <div className={displayPreview ? 'grid grid-cols-1 gap-6 lg:grid-cols-12' : ''}><div className={displayPreview ? 'space-y-5 lg:col-span-6' : 'space-y-5'}>{children}</div>{displayPreview && <div className="lg:col-span-6"><div className="sticky top-4">{preview}</div></div>}</div>
             </div></CrudModalCardContext.Provider>

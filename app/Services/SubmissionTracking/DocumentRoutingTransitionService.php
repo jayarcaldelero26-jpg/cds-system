@@ -69,6 +69,11 @@ final class DocumentRoutingTransitionService
         $lastCorrection = $last?->event_key === 'returned_for_correction';
         $correctionReceived = $last?->event_key === 'correction_received';
         $lastCorrectionEvent = $events->reverse()->first(fn (DocumentRoutingEvent $event): bool => $event->event_key === 'returned_for_correction');
+        $directPamoCorrectionAtFocal = $correctionReceived
+            && ($position['profile'] ?? null) === 'pamo_direct'
+            && ($position['origin_kind'] ?? null) === 'pamo_pamb'
+            && $last?->to_stage === DocumentRoutingProfileRegistry::CDS_FOCAL
+            && $lastCorrectionEvent?->to_stage === DocumentRoutingProfileRegistry::CDS_FOCAL;
         // Internal transition identities remain in the state graph for the
         // historical timeline and atomic service operation. Presentation
         // removes them from executable actions below.
@@ -93,6 +98,12 @@ final class DocumentRoutingTransitionService
                 'correction_reference_allowed' => false,
             ]];
         } elseif ($correctionReceived) {
+            if ($directPamoCorrectionAtFocal) {
+                // The captured direct PAMO route has an intermediate PENRO
+                // Focal custodian. After receipt, expose only the handback to
+                // the exact PAMO origin; normal PENRO forwarding is not next.
+                $actions = array_values(array_filter($actions, fn (array $action): bool => $action['key'] === 'return_to_pamo_for_correction_from_penro_focal'));
+            }
             $actions = array_map(function (array $action) use ($last): array {
                 if ($action['key'] === 'forward_from_pamo'
                     && $last?->to_stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN) {
@@ -107,6 +118,9 @@ final class DocumentRoutingTransitionService
                 }
                 return $action;
             }, $actions);
+        }
+        if (! $directPamoCorrectionAtFocal) {
+            $actions = array_values(array_filter($actions, fn (array $action): bool => $action['key'] !== 'return_to_pamo_for_correction_from_penro_focal'));
         }
         if ($direct
             && $stage === DocumentRoutingProfileRegistry::PENRO_RECORDS

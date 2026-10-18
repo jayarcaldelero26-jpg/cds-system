@@ -8,8 +8,8 @@ use RuntimeException;
 /** Resolves Drive path segments from canonical Submission Tracking module metadata. */
 final class ArchivePathBuilder
 {
-    /** @return array{unit:string,office:string,module:string,segments:list<string>,filename:string} */
-    public function build(ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $filenameBase, string $extension = 'pdf', bool $allowPenroOffice = false): array
+    /** @return array{unit:string,office:string,group:string,module:string,segments:list<string>,filename:string} */
+    public function build(ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $filenameBase, string $extension = 'pdf', bool $allowPenroOffice = false, ?string $folderGroup = null): array
     {
         if (! $module->is_active || $module->isRetired() || ! filled($module->name)) {
             throw new RuntimeException('The active submission module is unmapped for archive storage.');
@@ -23,6 +23,7 @@ final class ArchivePathBuilder
             throw new RuntimeException('The active submission source has no defensible CENRO archive office.');
         }
         $moduleName = $this->safeSegment((string) $module->name);
+        $groupName = $this->safeSegment($folderGroup ?? $officeName);
         $filename = strtolower($extension) === 'pdf'
             ? $this->safePdfFilename($filenameBase)
             : $this->safeFilenameWithExtension($filenameBase, $extension);
@@ -30,8 +31,9 @@ final class ArchivePathBuilder
         return [
             'unit' => $archiveUnit,
             'office' => $officeName,
+            'group' => $groupName,
             'module' => $moduleName,
-            'segments' => [$archiveUnit, $officeName, $moduleName],
+            'segments' => [$archiveUnit, $groupName, $moduleName],
             'filename' => $filename,
         ];
     }

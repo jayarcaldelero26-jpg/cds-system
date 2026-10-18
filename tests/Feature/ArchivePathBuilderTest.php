@@ -22,6 +22,26 @@ test('archive path uses the canonical unit, actual module name, and tracking fil
         ->toBe(['Development Unit', 'CENRO Baganga', 'Management Plans']);
 });
 
+test('a verified PA folder group does not replace the receiving office identity', function (): void {
+    $module = new ModuleDefinition(['name' => 'Conservation Reports', 'is_active' => true]);
+    $path = app(ArchivePathBuilder::class)->build(
+        $module,
+        'Conservation Unit',
+        'PENRO Davao Oriental',
+        'MHRWS regional final',
+        'pdf',
+        true,
+        'MHRWS',
+    );
+
+    expect($path)->toMatchArray([
+        'office' => 'PENRO Davao Oriental',
+        'group' => 'MHRWS',
+        'segments' => ['Conservation Unit', 'MHRWS', 'Conservation Reports'],
+        'filename' => 'MHRWS regional final.pdf',
+    ]);
+});
+
 test('archive filenames preserve readable activity names, sanitize path characters, and add one PDF extension', function (): void {
     $module = new ModuleDefinition(['name' => 'Activity Reports', 'is_active' => true]);
     $builder = app(ArchivePathBuilder::class);

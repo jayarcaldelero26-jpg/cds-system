@@ -4,8 +4,13 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { viteReactInterop } from './helpers/viteReactInterop.mjs';
+
+const reactRequire = createRequire(resolve('package.json'));
+const reactPassthroughExports = Object.keys(reactRequire('react'))
+    .filter(name => name !== 'default' && !['useState', 'useRef', 'useEffect', 'useImperativeHandle'].includes(name) && /^[A-Za-z_$][\w$]*$/.test(name));
 
 function workspaceTestShims() {
     const workspacePath = '/Components/PamoPambDraftWorkspace.jsx';
@@ -17,17 +22,23 @@ function workspaceTestShims() {
             const normalizedImporter = importer.replaceAll('\\', '/');
             const isWorkspace = normalizedImporter.includes(workspacePath);
             const isCrudModal = normalizedImporter.includes(crudModalPath);
-            if (!isWorkspace && !isCrudModal) return null;
+            // Vite's SSR runner may externalize or canonicalize React importers
+            // before this plugin sees their source path. Keep React hooks in
+            // this test-owned module graph on one isolated harness instance.
             if (source === 'react') return '\0pamo-activity-test-hooks';
-            if (isWorkspace && source === '@inertiajs/react') return '\0pamo-activity-test-inertia';
+            if (source === '@inertiajs/react') return '\0pamo-activity-test-inertia';
+            if (!isWorkspace && !isCrudModal) return null;
             if (isCrudModal && source.includes('Attachments/useModalFileDrop')) return '\0pamo-activity-test-file-drop';
             if (isCrudModal && source.includes('ModalMotion/useModalMotion')) return '\0pamo-activity-test-modal-motion';
             return null;
         },
         load(id) {
             if (id === '\0pamo-activity-test-hooks') return `
-                import React from 'react';
-                export const forwardRef = React.forwardRef;
+                import { createRequire } from 'node:module';
+                const require = createRequire(${JSON.stringify(resolve('package.json'))});
+                const React = require('react');
+                export default React;
+                ${reactPassthroughExports.map(name => `export const ${name} = React[${JSON.stringify(name)}];`).join('\n')}
                 export const useState = (...args) => globalThis.__pamoActivityHarness.useState(...args);
                 export const useRef = (...args) => globalThis.__pamoActivityHarness.useRef(...args);
                 export const useEffect = (...args) => globalThis.__pamoActivityHarness.useEffect(...args);
@@ -162,6 +173,18 @@ function elementTypes(root, types = []) {
     return types;
 }
 
+function renderWorkspace(Workspace, props, ref, harness) {
+    harness.beginRender();
+    let tree = null;
+    function WorkspaceProbe() {
+        tree = Workspace.render(props, ref);
+        return null;
+    }
+    renderToStaticMarkup(React.createElement(WorkspaceProbe));
+    harness.finishRender();
+    return tree;
+}
+
 test('the actual New draft modal keeps free-text activity scalar through edits, resets, hydration, and draft save', async () => {
     const harness = makeHarness();
     const priorHarness = globalThis.__pamoActivityHarness;
@@ -173,7 +196,8 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
         configFile: false,
         plugins: [workspaceTestShims(), viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
-        server: { middlewareMode: true, hmr: false },
+        server: { middlewareMode: true, hmr: false, port: 0, strictPort: true },
+        ssr: { noExternal: ['react', '@inertiajs/react'] },
         appType: 'custom',
         logLevel: 'error',
     });
@@ -198,12 +222,7 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
             assignedProtectedArea: { id: 7, name: 'Baganga Mangrove Swamp Forest Reserve' },
             pamoContext: { first_recipient: 'CENRO Baganga CDS Focal Person' },
         };
-        const renderWorkspace = () => {
-            harness.beginRender();
-            const tree = Workspace.render(props, ref);
-            harness.finishRender();
-            return tree;
-        };
+        const renderWorkspaceTree = () => renderWorkspace(Workspace, props, ref, harness);
         const modalFrom = tree => findElement(tree, element => element.props.title === 'New draft report' && typeof element.props.onSubmit === 'function');
         const activityInputFrom = tree => {
             const modal = modalFrom(tree);
@@ -214,9 +233,9 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
             return findElement(fieldTree, element => element.props.id === 'pamo-draft-activity');
         };
 
-        let tree = renderWorkspace();
+        let tree = renderWorkspaceTree();
         ref.current.startNew();
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         let activityInput = activityInputFrom(tree);
         assert.ok(activityInput);
         assert.equal(activityInput.props.value, '', 'a fresh draft starts with a blank editable activity');
@@ -228,16 +247,16 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
         activityInput.props.onChange({ target: { value: 'Baganga Mangrove Swamp Forest Reserve patrol' } });
         assert.equal(form.data.activity_name, 'Baganga Mangrove Swamp Forest Reserve patrol');
 
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         activityInput = activityInputFrom(tree);
         assert.equal(activityInput.props.value, 'Baganga Mangrove Swamp Forest Reserve patrol');
         activityInput.props.onChange({ target: { value: '' } });
         assert.equal(form.data.activity_name, '', 'clearing the text stores an empty string');
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         assert.equal(activityInputFrom(tree).props.value, '', 'rerendering does not restore the cleared value');
 
         activityInputFrom(tree).props.onChange({ target: { value: 'Replaced mangrove site monitoring' } });
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         const saveModal = modalFrom(tree);
         saveModal.props.onSubmit({ preventDefault() {} });
         const textSave = harness.requests.at(-1);
@@ -252,11 +271,11 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
         assert.equal(typeof textSave.payload.activity_name, 'string');
         assert.equal(typeof textSave.payload.start_idempotency_key, 'string');
         assert.equal(form.processing, true, 'the submit remains pending until an Inertia response is delivered');
-        modalFrom(renderWorkspace()).props.onSubmit({ preventDefault() {} });
+        modalFrom(renderWorkspaceTree()).props.onSubmit({ preventDefault() {} });
         assert.equal(harness.requests.length, 1, 'a second submit is blocked while the first request is pending');
 
         returnError(textSave, { date_accomplished: 'Date Accomplished cannot be in the future.' });
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         const failedModal = modalFrom(tree);
         assert.equal(failedModal.props.open, true, 'a validation response leaves the draft modal open');
         assert.equal(failedModal.props.processing, false);
@@ -309,11 +328,11 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
         assert.equal(retry.payload.remarks, form.data.remarks);
         assert.equal(retry.payload.mov, selectedFile);
         returnSuccess(retry);
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         assert.equal(modalFrom(tree).props.open, false, 'a successful retry closes the modal');
 
         ref.current.startNew();
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         assert.equal(activityInputFrom(tree).props.value, '', 'opening another fresh draft resets its activity to empty');
 
         ref.current.openDraft({
@@ -325,10 +344,10 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
             },
             mov_url: '/protected/saved-copy.pdf', mov_file_name: 'saved-copy.pdf',
         });
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         assert.equal(activityInputFrom(tree).props.value, 'Preserved saved Homestay activity');
         activityInputFrom(tree).props.onChange({ target: { value: '' } });
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         modalFrom(tree).props.onSubmit({ preventDefault() {} });
         const emptySave = harness.requests.at(-1);
         assert.equal(emptySave.payload.activity_name, '', 'a partially prepared existing draft can save a cleared activity');
@@ -357,7 +376,8 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
         configFile: false,
         plugins: [workspaceTestShims(), viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
-        server: { middlewareMode: true, hmr: false },
+        server: { middlewareMode: true, hmr: false, port: 0, strictPort: true },
+        ssr: { noExternal: ['react', '@inertiajs/react'] },
         appType: 'custom',
         logLevel: 'error',
     });
@@ -393,12 +413,7 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
             assignedProtectedArea: { id: 7, name: 'Baganga Mangrove Swamp Forest Reserve' },
             pamoContext: { first_recipient: 'CENRO Baganga CDS Focal Person' },
         };
-        const renderWorkspace = () => {
-            harness.beginRender();
-            const tree = Workspace.render(props, ref);
-            harness.finishRender();
-            return tree;
-        };
+        const renderWorkspaceTree = () => renderWorkspace(Workspace, props, ref, harness);
         const modalFrom = tree => findElement(tree, element => element.props.title === 'Submit report' && typeof element.props.onSubmit === 'function');
         const activityFieldFrom = tree => {
             const modal = modalFrom(tree);
@@ -408,9 +423,9 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
             return findElement(GenericFields(genericFields.props), element => element.props.id === 'pamo-draft-activity');
         };
 
-        let tree = renderWorkspace();
+        let tree = renderWorkspaceTree();
         ref.current.submitDraft(savedDraft);
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         const staleActivityField = activityFieldFrom(tree);
         assert.equal(staleActivityField.type.name, 'FloatingInput', 'the activity title stays an editable text input for submission');
         assert.equal(staleActivityField.props.value, 'Restoration Plan Workshop', 'opening submit preserves the saved value in the form');
@@ -428,14 +443,14 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
         assert.equal(harness.forms[0].data.date_conducted, '2026-09-14');
         assert.equal(harness.forms[0].data.date_accomplished, '2026-09-14');
         assert.equal(harness.forms[0].data.remarks, 'Keep this saved note.');
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         assert.equal(activityFieldFrom(tree).props.value, '', 'clearing the text does not render an object value');
         const freeTitle = 'Restoration Plan Workshop – Davao Oriental';
         activityFieldFrom(tree).props.onChange({ target: { value: freeTitle } });
         assert.equal(harness.forms[0].data.activity_name, freeTitle, 'typing writes the exact user string, including Unicode');
         assert.equal(harness.forms[0].data.document_type, 'Progress Report', 'editing a title never clears the document selection');
 
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         const submitModal = modalFrom(tree);
         submitModal.props.onSubmit({ preventDefault() {} });
         const rejected = harness.requests.at(-1);
@@ -449,7 +464,7 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
         assert.equal(rejected.payload.remarks, 'Keep this saved note.');
         assert.equal(rejected.payload.mov, null, 'the saved attachment is not replaced by an empty upload');
         returnError(rejected, { activity_name: 'The activity title could not be submitted.' });
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         let failedModal = modalFrom(tree);
         assert.equal(failedModal.props.open, true, 'a server validation error leaves the modal open');
         assert.equal(harness.forms[0].data.activity_name, freeTitle, 'the server error preserves the title');
@@ -464,7 +479,7 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
 
         activityFieldFrom(tree).props.onChange({ target: { value: 'Restoration Plan Workshop' } });
         assert.equal(harness.forms[0].data.document_type, 'Progress Report', 'replacing the title still preserves the selected document');
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         failedModal = modalFrom(tree);
         failedModal.props.onSubmit({ preventDefault() {} });
         const retry = harness.requests.at(-1);
@@ -475,7 +490,7 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
         assert.equal(retry.payload.date_accomplished, '2026-09-14');
         assert.equal(retry.payload.remarks, 'Keep this saved note.');
         returnSuccess(retry, { props: { flash: { success: 'Report forwarded successfully.' } } });
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         assert.equal(modalFrom(tree), null, 'a successful mocked promotion closes the modal');
     } finally {
         await server.close();
@@ -497,7 +512,8 @@ test('the actual native PAMO report modal keeps its Name of Activity field scala
         configFile: false,
         plugins: [workspaceTestShims(), viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
-        server: { middlewareMode: true, hmr: false },
+        server: { middlewareMode: true, hmr: false, port: 0, strictPort: true },
+        ssr: { noExternal: ['react', '@inertiajs/react'] },
         appType: 'custom',
         logLevel: 'error',
     });
@@ -518,18 +534,13 @@ test('the actual native PAMO report modal keeps its Name of Activity field scala
         };
         const ref = { current: null };
         const props = { workflow, workflows: [workflow], drafts: [savedDraft], assignedProtectedArea: { id: 7, name: 'Baganga Mangrove Swamp Forest Reserve' } };
-        const renderWorkspace = () => {
-            harness.beginRender();
-            const tree = Workspace.render(props, ref);
-            harness.finishRender();
-            return tree;
-        };
+        const renderWorkspaceTree = () => renderWorkspace(Workspace, props, ref, harness);
         const modalFrom = tree => findElement(tree, element => element.type?.name === 'CrudFormModal');
         const activityFieldFrom = tree => findElement(modalFrom(tree).props.children, element => element.props.id === 'pamo-native-activity');
 
-        renderWorkspace();
+        renderWorkspaceTree();
         ref.current.submitDraft(savedDraft);
-        let tree = renderWorkspace();
+        let tree = renderWorkspaceTree();
         const activityField = activityFieldFrom(tree);
         assert.equal(activityField.type.name, 'FloatingInput');
         assert.equal(activityField.props.label, 'Name of Activity');
@@ -538,7 +549,7 @@ test('the actual native PAMO report modal keeps its Name of Activity field scala
         activityField.props.onChange({ target: { value: 'PAMB Information Workshop' } });
         assert.equal(harness.forms[0].data.activity_name, 'PAMB Information Workshop');
         assert.equal(typeof harness.forms[0].data.activity_name, 'string');
-        tree = renderWorkspace();
+        tree = renderWorkspaceTree();
         const modal = modalFrom(tree);
         modal.props.onSubmit({ preventDefault() {} });
         assert.equal(harness.requests.at(-1).payload.activity_name, 'PAMB Information Workshop');

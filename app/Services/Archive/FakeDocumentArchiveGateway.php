@@ -137,6 +137,20 @@ final class FakeDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArchi
         return ['status' => 'verified', 'file_id' => $fileId, 'folder_id' => $object['folder_id']];
     }
 
+    public function verifyPreGeneratedObjectAtBoundLocation(string $fileId, array $identity, string $sha256, int $size): array
+    {
+        $this->preGeneratedVerificationChecks++;
+        $object = $this->objects[$fileId] ?? null;
+        if ($object === null) return ['status' => 'unavailable', 'file_id' => null, 'folder_id' => null];
+        if ($object['identity'] !== $identity
+            || strlen($object['bytes']) !== $size
+            || ! hash_equals($object['sha256'], $sha256)
+            || ! hash_equals($sha256, hash('sha256', $object['bytes']))) {
+            return ['status' => 'content_mismatch', 'file_id' => null, 'folder_id' => $object['folder_id']];
+        }
+        return ['status' => 'verified', 'file_id' => $fileId, 'folder_id' => $object['folder_id']];
+    }
+
     public function upload(string $localPath, string $filename, array $identity, string $sha256, ?string $folderId, array $archiveContext = []): array
     {
         return $this->uploadWithMime($localPath, $filename, $identity, $sha256, $folderId, $archiveContext, 'application/pdf');

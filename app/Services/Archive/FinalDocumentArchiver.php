@@ -19,7 +19,11 @@ use Throwable;
 /** Idempotent archive coordinator for an authorized records checkpoint. */
 final class FinalDocumentArchiver
 {
-    public function __construct(private readonly GoogleDriveArchiveGateway $drive, private readonly ArchivePathBuilder $paths) {}
+    public function __construct(
+        private readonly GoogleDriveArchiveGateway $drive,
+        private readonly ArchivePathBuilder $paths,
+        private readonly PamoArchiveFolderGroupingResolver $folderGrouping,
+    ) {}
 
     /**
      * @return array{status:string,file_id?:string}
@@ -150,9 +154,10 @@ final class FinalDocumentArchiver
             $fileExtension = $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE
                 ? pathinfo((string) $filename, PATHINFO_EXTENSION)
                 : 'pdf';
+            $folderGroup = $this->folderGrouping->forFinalReturn($sourceType, $record, $archivePhase);
             $archiveContext = $this->archiveContext(
                 $record, $sourceType, $module, $archiveUnit, $archiveOffice, $fileExtension,
-                $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE,
+                $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE, $folderGroup,
             );
             $archiveFilename = $archiveContext['filename'];
             $this->logPhase('archive_path_resolution', $phaseStartedAt);
@@ -164,6 +169,7 @@ final class FinalDocumentArchiver
                 && $this->drive instanceof PreGeneratedIdGoogleDriveArchiveGateway;
 
             if ($preGeneratedDrive) {
+                $hadReservedId = filled($archive->google_drive_file_id);
                 if (! filled($archive->google_drive_file_id)) {
                     // The manifest/file intent and this DocumentArchive row are
                     // durable before Drive allocates an ID or receives bytes.
@@ -180,17 +186,25 @@ final class FinalDocumentArchiver
                 }
 
                 $preGeneratedId = (string) $archive->google_drive_file_id;
-                $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                if (filled($archive->google_drive_folder_id)) {
+                    $archiveContext['bound_folder_id'] = (string) $archive->google_drive_folder_id;
+                }
+                $reconciled = $hadReservedId && ! filled($archive->google_drive_folder_id)
+                    ? $this->drive->verifyPreGeneratedObjectAtBoundLocation($preGeneratedId, $identity, $sha256, $size)
+                    : $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                $alreadyAtBoundLocation = ($reconciled['status'] ?? null) === 'verified'
+                    && $hadReservedId && ! filled($archive->google_drive_folder_id);
                 if (($reconciled['status'] ?? null) === 'verified') {
                     $remote = ['file_id' => $preGeneratedId, 'folder_id' => $reconciled['folder_id'] ?? null];
                 } elseif (($reconciled['status'] ?? null) === 'unavailable') {
                     try {
                         $remote = $this->drive->uploadUsingPreGeneratedId($preGeneratedId, $absolute, $archiveFilename, $identity, $sha256, $folderId, $archiveContext, $mime);
                     } catch (Throwable $uploadException) {
-                        // A timeout, lost response, or 409 is ambiguous. Only
-                        // the exact reserved ID and exact app identity/hash/
-                        // destination may reconcile as this operation.
-                        $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                        // The exact reserved ID is reconciled at its persisted destination, or at its actual
+                        // provider parent when a prior process completed the upload before saving that parent.
+                        $reconciled = filled($archive->google_drive_folder_id)
+                            ? $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext)
+                            : $this->drive->verifyPreGeneratedObjectAtBoundLocation($preGeneratedId, $identity, $sha256, $size);
                         if (($reconciled['status'] ?? null) !== 'verified') throw $uploadException;
                         $remote = ['file_id' => $preGeneratedId, 'folder_id' => $reconciled['folder_id'] ?? null];
                     }
@@ -201,11 +215,13 @@ final class FinalDocumentArchiver
                 if (($remote['file_id'] ?? null) !== $preGeneratedId) {
                     throw new \RuntimeException('Google Drive returned a different identity for the reserved final file.');
                 }
-                $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
-                if (($reconciled['status'] ?? null) !== 'verified') {
-                    throw new \RuntimeException('The reserved archive object did not pass exact identity and content verification.');
+                if (! $alreadyAtBoundLocation) {
+                    $reconciled = $this->drive->verifyPreGeneratedObject($preGeneratedId, $identity, $sha256, $size, $folderId, $archiveContext);
+                    if (($reconciled['status'] ?? null) !== 'verified') {
+                        throw new \RuntimeException('The reserved archive object did not pass exact identity and content verification.');
+                    }
+                    $remote['folder_id'] = $reconciled['folder_id'] ?? $remote['folder_id'] ?? null;
                 }
-                $remote['folder_id'] = $reconciled['folder_id'] ?? $remote['folder_id'] ?? null;
             } else {
                 $existing = $this->drive->findByIdentityAndHash($identity, $sha256);
                 if ($existing) {
@@ -350,8 +366,8 @@ final class FinalDocumentArchiver
             && ! str_contains($normalized, "\0");
     }
 
-    /** @return array{year:string,protected_area:string,archive_unit:string,archive_office:string,module_name:string,folder_path:list<string>,filename:string} */
-    private function archiveContext(Model $record, string $sourceType, ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $extension = 'pdf', bool $allowPenroOffice = false): array
+    /** @return array{year:string,protected_area:string,archive_unit:string,archive_office:string,archive_folder_group:string,module_name:string,folder_path:list<string>,filename:string} */
+    private function archiveContext(Model $record, string $sourceType, ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $extension = 'pdf', bool $allowPenroOffice = false, ?string $folderGroup = null): array
     {
         $tracking = ReportTrackingReference::query()
             ->where('source_type', $sourceType)
@@ -384,13 +400,14 @@ final class FinalDocumentArchiver
             ? $activityName
             : (string) ($trackingNumber ?: 'Report-'.$record->getKey());
 
-        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase, $extension, $allowPenroOffice);
+        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase, $extension, $allowPenroOffice, $folderGroup);
 
         return [
             'year' => (string) ($year ?: now()->format('Y')),
             'protected_area' => (string) ($protectedArea ?: 'Unassigned Protected Area'),
             'archive_unit' => $path['unit'],
             'archive_office' => $path['office'],
+            'archive_folder_group' => $path['group'],
             'module_name' => $path['module'],
             'folder_path' => $path['segments'],
             'filename' => $path['filename'],

@@ -24,6 +24,7 @@ final class EffectiveRoutingGraphResolver
             if ($action['key'] === 'forward_from_pamo') {
                 return ($position['graph_version'] ?? null) === RoutingPositionSnapshotService::GRAPH_VERSION || ($pamoOrigin && $direct);
             }
+            if ($action['key'] === 'return_to_pamo_for_correction_from_penro_focal') return $pamoOrigin && $direct;
             if (in_array($action['key'], ['forward_from_pamo_to_cenro_focal', 'receive_at_cenro_focal', 'return_to_pamo_for_correction'], true)) return $pamoOrigin && ! $direct;
             return true;
         }));
@@ -41,6 +42,7 @@ final class EffectiveRoutingGraphResolver
                     return [...$action, 'from_office' => $pamoName, 'to_office' => (string) ($position['responsible_cenro_name'] ?? 'CENRO').' CDS Focal Person'];
                 }
                 if ($action['key'] === 'return_to_pamo_for_correction') return [...$action, 'to_office' => $pamoName];
+                if ($action['key'] === 'return_to_pamo_for_correction_from_penro_focal') return [...$action, 'to_office' => $pamoName];
                 return $action;
             }, $actions);
         }

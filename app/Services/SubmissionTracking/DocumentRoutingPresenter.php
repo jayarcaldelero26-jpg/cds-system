@@ -201,11 +201,16 @@ final class DocumentRoutingPresenter
             $event = $latestReturnIndex !== null && $currentPosition !== false && $position > $currentPosition
                 ? $activeEventsByStage->get($stage)
                 : $eventByStage->get($stage);
-            if ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN
-                && ($state['correction_event'] ?? null) instanceof \App\Models\DocumentRoutingEvent) {
-                $event = $state['correction_event'];
+            $correctionEvent = $state['correction_event'] ?? null;
+            if ($correctionEvent instanceof \App\Models\DocumentRoutingEvent
+                && $stage === $correctionEvent->to_stage
+                && (! $event || (int) $event->getKey() === (int) $correctionEvent->getKey())) {
+                $event = $correctionEvent;
             }
             $action = $routeActions->firstWhere('to', $stage);
+            $eventAction = $event?->event_key === 'returned_for_correction'
+                ? $routeActions->firstWhere('key', data_get($event->metadata, 'action_key'))
+                : null;
             $isCurrent = $stage === $currentStage;
             $syntheticPamoOrigin = $pamoOrigin
                 && $stage === $start
@@ -216,9 +221,9 @@ final class DocumentRoutingPresenter
                 'key' => $stage,
                 'label' => $syntheticPamoOrigin
                     ? 'Report prepared by PAMO'
-                    : ($stage === DocumentRoutingProfileRegistry::PAMO_ORIGIN && $event?->event_key === 'returned_for_correction'
-                        ? 'Returned to PAMO for Correction'
-                        : $this->stageLabel($stage, $action, $start)),
+                    : ($eventAction['label'] ?? ($event?->event_key === 'correction_received'
+                        ? 'Correction received by '.($event->to_office ?: $this->stageLabel($stage, $action, $start))
+                        : $this->stageLabel($stage, $action, $start))),
                 // A start/current stage can have an incoming correction action
                 // in the profile even when no such event occurred. Only real
                 // events may classify a stage as a correction.

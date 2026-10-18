@@ -276,6 +276,33 @@ test('pre-generated binary upload uses the same reserved ID in metadata and crea
         ->and($metadata['appProperties']['cds_sha256'])->toBe(hash('sha256', $content));
 });
 
+test('an interrupted reserved ID is read at its actual parent without resolving or creating folders', function (): void {
+    configureMockDrive(bin2hex(random_bytes(4)));
+    $history = [];
+    $content = "%PDF-1.7\nreserved object already uploaded to its original parent";
+    $identity = ['source_type' => 'conservation', 'source_id' => 44, 'logical_slot' => 'regional-return-final:receipt-9:r1:primary'];
+    $sortedIdentity = $identity;
+    ksort($sortedIdentity);
+    $identityHash = hash('sha256', json_encode($sortedIdentity, JSON_THROW_ON_ERROR));
+    $sha256 = hash('sha256', $content);
+    $gateway = mockedDriveGateway([
+        oauthMockResponse(),
+        new Response(200, [], json_encode([
+            'id' => 'bound-reserved-file', 'size' => strlen($content), 'trashed' => false,
+            'parents' => ['legacy-module-folder'],
+            'appProperties' => ['cds_identity' => $identityHash, 'cds_sha256' => $sha256],
+        ], JSON_THROW_ON_ERROR)),
+        new Response(200, [], $content),
+    ], $history);
+
+    expect($gateway->verifyPreGeneratedObjectAtBoundLocation('bound-reserved-file', $identity, $sha256, strlen($content)))
+        ->toBe(['status' => 'verified', 'file_id' => 'bound-reserved-file', 'folder_id' => 'legacy-module-folder'])
+        ->and($history)->toHaveCount(3)
+        ->and(collect($history)->skip(1)->every(fn (array $entry): bool => $entry['request']->getMethod() === 'GET'))->toBeTrue()
+        ->and(collect($history)->skip(1)->map(fn (array $entry): string => (string) $entry['request']->getUri())
+            ->contains(fn (string $uri): bool => str_contains($uri, 'alt=media')))->toBeTrue();
+});
+
 test('archive folder identifiers are cached so subsequent writes skip folder lookups', function (): void {
     configureMockDrive(bin2hex(random_bytes(4)));
     \Illuminate\Support\Facades\Cache::flush();

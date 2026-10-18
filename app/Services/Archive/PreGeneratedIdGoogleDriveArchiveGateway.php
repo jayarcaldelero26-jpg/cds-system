@@ -28,4 +28,10 @@ interface PreGeneratedIdGoogleDriveArchiveGateway extends MimeAwareGoogleDriveAr
         ?string $folderId,
         array $archiveContext,
     ): array;
+
+    /** Verify an existing reserved ID at its actual Drive parent without resolving or creating a destination folder.
+     *  @param array<string,string|int> $identity
+     *  @return array{status:'verified'|'unavailable'|'content_mismatch'|'unknown',file_id:?string,folder_id:?string}
+     */
+    public function verifyPreGeneratedObjectAtBoundLocation(string $fileId, array $identity, string $sha256, int $size): array;
 }

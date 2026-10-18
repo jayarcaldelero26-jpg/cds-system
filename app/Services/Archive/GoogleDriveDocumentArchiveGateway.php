@@ -63,6 +63,10 @@ class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArch
     /** Validates the configured root without creating or changing anything. */
     public function validateRootFolder(): array
     {
+        if (! config('services.google_drive_archive.enabled')) {
+            throw new GoogleDriveArchiveException('Google Drive archive integration is disabled.');
+        }
+
         $folderId = $this->requiredConfig('folder_id');
         $response = $this->driveRequest('GET', self::API.'/files/'.rawurlencode($folderId), [
             'query' => ['fields' => 'id,mimeType,trashed'],
@@ -135,6 +139,39 @@ class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArch
             return ['status' => $exception->httpStatus === 404 ? 'unavailable' : 'unknown', 'file_id' => null, 'folder_id' => $expectedParent];
         } catch (Throwable) {
             return ['status' => 'unknown', 'file_id' => null, 'folder_id' => $expectedParent];
+        } finally {
+            if (is_resource($stream)) fclose($stream);
+        }
+    }
+
+    public function verifyPreGeneratedObjectAtBoundLocation(string $fileId, array $identity, string $sha256, int $size): array
+    {
+        $stream = null;
+        $parent = null;
+        try {
+            $metadata = $this->json($this->driveRequest('GET', self::API.'/files/'.rawurlencode($fileId), [
+                'query' => ['fields' => 'id,size,trashed,parents,appProperties'],
+            ]));
+            $parents = $metadata['parents'] ?? [];
+            $parent = is_array($parents) && is_string($parents[0] ?? null) ? $parents[0] : null;
+            $metadataMatches = ($metadata['id'] ?? null) === $fileId
+                && ! ($metadata['trashed'] ?? false)
+                && $parent !== null
+                && (int) ($metadata['size'] ?? -1) === $size
+                && ($metadata['appProperties']['cds_identity'] ?? null) === $this->identityHash($identity)
+                && ($metadata['appProperties']['cds_sha256'] ?? null) === $sha256;
+            if (! $metadataMatches) return ['status' => 'content_mismatch', 'file_id' => null, 'folder_id' => $parent];
+
+            $stream = $this->retrieve($fileId);
+            if (! is_resource($stream)) return ['status' => 'unknown', 'file_id' => null, 'folder_id' => $parent];
+            $context = hash_init('sha256');
+            $bytes = hash_update_stream($context, $stream);
+            $status = $bytes === $size && hash_equals($sha256, hash_final($context)) ? 'verified' : 'content_mismatch';
+            return ['status' => $status, 'file_id' => $status === 'verified' ? $fileId : null, 'folder_id' => $parent];
+        } catch (GoogleDriveArchiveException $exception) {
+            return ['status' => $exception->httpStatus === 404 ? 'unavailable' : 'unknown', 'file_id' => null, 'folder_id' => $parent];
+        } catch (Throwable) {
+            return ['status' => 'unknown', 'file_id' => null, 'folder_id' => $parent];
         } finally {
             if (is_resource($stream)) fclose($stream);
         }
@@ -484,6 +521,12 @@ class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArch
 
     private function folderForIdentity(?string $folderId, array $archiveContext, bool $bypassCache = false): string
     {
+        if (filled($archiveContext['bound_folder_id'] ?? null)) {
+            $boundFolderId = (string) $archiveContext['bound_folder_id'];
+            $this->assertFolder($boundFolderId);
+            return $boundFolderId;
+        }
+
         $root = $folderId ?: $this->requiredConfig('folder_id');
         if ($folderId && $folderId !== $this->requiredConfig('folder_id')) {
             $this->assertFolder($folderId);

@@ -99,11 +99,15 @@ final class EdatsInAppNotificationService
             return;
         }
 
-        $category = $this->categoryForLabel($action['to_office'] ?? $event->to_office);
+        $category = $event->to_stage === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PAMO_ORIGIN
+            ? OrganizationalAccessService::PAMO
+            : $this->categoryForLabel($action['to_office'] ?? $event->to_office);
         if (! $category) return;
-        $targetOffice = in_array($category, [OrganizationalAccessService::CENRO_RECORDS, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_FOCAL], true)
-            ? ($record->getAttribute('target_office') ?: $record->getAttribute('office') ?: $event->to_office)
-            : null;
+        $targetOffice = $category === OrganizationalAccessService::PAMO
+            ? $event->to_office
+            : (in_array($category, [OrganizationalAccessService::CENRO_RECORDS, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_FOCAL], true)
+                ? ($record->getAttribute('target_office') ?: $record->getAttribute('office') ?: $event->to_office)
+                : null);
         $title = $eventKey === 'returned_for_correction' ? 'Correction Required' : ($eventKey === 'approved' ? 'Submission Approved' : ($eventKey === 'recommended' ? 'Submission Recommended' : ($eventKey === 'released' ? 'Submission Released' : ($eventKey === 'forwarded' || $eventKey === 'endorsed' ? 'Submission Forwarded' : 'Incoming Submission'))));
         $this->deliverTo($this->workflowRecipients($category, $targetOffice, $record->getAttribute('protected_area_id')), array_merge($base, ['title' => $title, 'message' => $eventKey === 'returned_for_correction' ? 'The '.$label.' was returned for correction by '.$event->from_office.'.' : 'A '.$label.' submission from '.$event->from_office.' is awaiting your action.', 'dedup_key' => 'workflow:'.$source.':'.$sourceId.':'.$event->getKey().':'.$category]));
     }
@@ -176,7 +180,10 @@ final class EdatsInAppNotificationService
         return User::query()->where('is_active', true)->get()->filter(function (User $user) use ($category, $canonicalOffice, $protectedAreaId, $organization): bool {
             if ($organization->effectiveCategory($user) !== $category) return false;
             if (in_array($category, [OrganizationalAccessService::CENRO_RECORDS, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_FOCAL], true)) return $organization->normalizeOffice($user->office_designated) === $canonicalOffice;
-            if ($category === OrganizationalAccessService::PAMO) return (int) $user->protected_area_id === (int) $protectedAreaId;
+            if ($category === OrganizationalAccessService::PAMO) {
+                return (int) $user->protected_area_id === (int) $protectedAreaId
+                    && ($canonicalOffice === null || $organization->normalizeOffice($user->office_designated) === $canonicalOffice);
+            }
             if (in_array($category, [OrganizationalAccessService::PENRO_RECORDS, OrganizationalAccessService::OFFICE_PENRO, OrganizationalAccessService::PENRO_TSD_CHIEF, OrganizationalAccessService::PENRO_FOCAL, OrganizationalAccessService::PENRO_CHIEF], true)) return true;
             return $canonicalOffice === null || $organization->normalizeOffice($user->office_designated) === $canonicalOffice;
         })->values();

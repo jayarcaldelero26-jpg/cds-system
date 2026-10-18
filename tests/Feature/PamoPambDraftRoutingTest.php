@@ -1339,8 +1339,9 @@ test('partial PAMO drafts remain private until exact-once APL promotion and CENR
         $activeCorrectionRoute = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)
             ->present($submission->fresh(), 'conservation', null, app(DocumentRoutingTransitionService::class)->events($submission->fresh(), 'conservation'));
         $activeCorrectionOrigin = collect($activeCorrectionRoute['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::PAMO_ORIGIN);
-        expect($activeCorrectionOrigin['label'])->toBe('Returned to PAMO for Correction')
-            ->and($activeCorrectionOrigin['from'])->toBe('CENRO CDS Focal Person')
+        expect($activeCorrectionOrigin['label'])->toBe('Correction received by '.$office->name)
+            ->and($activeCorrectionOrigin['event_type'])->toBe('correction_received')
+            ->and($activeCorrectionOrigin['from'])->toBe($office->name)
             ->and($activeCorrectionOrigin['to'])->toBe($office->name);
 
         $this->actingAs($pamo)->get(route('conservation-reports.index', 'regular_pamb'))
@@ -1425,6 +1426,186 @@ test('MHRWS PAMO uses its assigned PENRO without a CENRO node and PENRO Records 
     $received = app(DocumentRoutingTransitionService::class)->state($submission->fresh(), 'conservation');
     expect($received['stage'])->toBe(DocumentRoutingProfileRegistry::PENRO_RECORDS)
         ->and($received['events']->last()->event_key)->toBe('received');
+});
+
+test('direct MHRWS correction returns through PENRO Focal to the exact captured PAMO', function (): void {
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => true,
+    ]);
+    app()->instance(GoogleDriveArchiveGateway::class, new FakeDocumentArchiveGateway());
+
+    Storage::fake('local');
+    Notification::fake();
+
+    $owner = User::factory()->create();
+    [$area, $office] = pamoPilotArea($owner, 'MHRWS', 'PAMO Direct Correction MHRWS', 'penro_davao_oriental');
+    $pamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
+    $pamo->assignRole(Role::findOrCreate('no_role', 'web'));
+    $wrongOfficePamo = pamoPilotActor(OrganizationalAccessService::PAMO, 'PAMO MHRWS Alternate', (int) $area->getKey());
+    $wrongOfficePamo->assignRole(Role::findOrCreate('no_role', 'web'));
+
+    [$foreignArea, $foreignOffice] = pamoPilotArea($owner, 'BPL', 'PAMO Direct Correction BPL', 'penro_davao_oriental');
+    $foreignPamo = pamoPilotActor(OrganizationalAccessService::PAMO, $foreignOffice->name, (int) $foreignArea->getKey());
+    $foreignPamo->assignRole(Role::findOrCreate('no_role', 'web'));
+
+    $settingsAdmin = User::factory()->create(['section' => 'CDS', 'office_designated' => 'PENRO Davao Oriental']);
+    $settingsAdmin->givePermissionTo(Permission::findOrCreate('submission-tracking.routing-settings.update', 'web'));
+    $settings = app(\App\Services\SubmissionTracking\RoutingPositionSettingsService::class);
+    $currentSettings = $settings->current();
+    $settings->save($currentSettings['version'], false, false, 'Isolated direct PAMO correction fixture', $settingsAdmin);
+
+    $workflow = 'restoration_plan_5_year';
+    $token = (string) Str::uuid();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
+        'start_idempotency_key' => $token,
+        'activity_name' => 'QA ONLY — MHRWS direct correction handoff',
+        'document_type' => 'Progress Report',
+        'reporting_period' => 'Quarter 4',
+        'date_accomplished' => '2026-10-18',
+        'mov' => pamoPilotUpload(),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $draft = PamoPambDraft::query()->where('start_idempotency_key', $token)->firstOrFail();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), [
+        'lock_version' => $draft->lock_version,
+        'activity_name' => 'QA ONLY — MHRWS direct correction handoff',
+        'document_type' => 'Progress Report',
+        'reporting_period' => 'Quarter 4',
+        'date_accomplished' => '2026-10-18',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $record = ConservationReportSubmission::query()->findOrFail($draft->fresh()->conservation_report_submission_id);
+    $snapshot = SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')->where('source_id', $record->getKey())->firstOrFail();
+    $settingVersion = \App\Models\RoutingPositionSettingVersion::query()->findOrFail($snapshot->setting_version_id);
+    expect($snapshot->profile)->toBe('pamo_direct')
+        ->and($snapshot->origin_kind)->toBe('pamo_pamb')
+        ->and((int) $snapshot->pamo_office_id)->toBe((int) $office->getKey())
+        ->and((int) $snapshot->originator_user_id)->toBe((int) $pamo->getKey())
+        ->and((bool) $settingVersion->office_penro_enabled)->toBeFalse()
+        ->and((bool) $settingVersion->penro_tsd_chief_enabled)->toBeFalse();
+
+    $routing = app(DocumentRoutingTransitionService::class);
+    $records = pamoPilotActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $focal = pamoPilotActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $chief = pamoPilotActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental');
+    foreach ([
+        [$records, 'receive_at_penro_records'],
+        [$records, 'dispatch_penro_records_to_cds_focal'],
+    ] as [$actor, $action]) {
+        $routing->transition($record->fresh(), 'conservation', $action, (int) $actor->getKey(), 'QA route transition.');
+    }
+    $routing->transition($record->fresh(), 'conservation', 'receive_at_cds_focal', (int) $focal->getKey(), 'QA route transition.');
+    $normalFocalState = $routing->state($record->fresh(), 'conservation');
+    $handbackKey = 'return_to_pamo_for_correction_from_penro_focal';
+    expect($normalFocalState['stage'])->toBe(DocumentRoutingProfileRegistry::CDS_FOCAL)
+        ->and(collect($normalFocalState['actions'])->pluck('key'))->toContain('forward_to_cds_chief')
+        ->and(collect($normalFocalState['actions'])->pluck('key'))->not->toContain($handbackKey);
+
+    foreach ([
+        [$focal, 'forward_to_cds_chief'],
+        [$chief, 'receive_at_cds_chief'],
+        [$chief, 'return_to_penro_cds_focal'],
+    ] as [$actor, $action]) {
+        $routing->transition($record->fresh(), 'conservation', $action, (int) $actor->getKey(), 'QA route transition.');
+    }
+
+    $pendingCorrection = $routing->state($record->fresh(), 'conservation');
+    expect($pendingCorrection['stage'])->toBe(DocumentRoutingProfileRegistry::CDS_FOCAL)
+        ->and(collect($pendingCorrection['actions'])->pluck('key')->all())->toBe(['receive_correction']);
+    $returnedRoute = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)
+        ->present($record->fresh(), 'conservation', null, $pendingCorrection['events']);
+    $returnedFocal = collect($returnedRoute['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::CDS_FOCAL);
+    $originBeforeHandoff = collect($returnedRoute['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::PAMO_ORIGIN);
+    expect($returnedFocal)->toMatchArray([
+        'label' => 'Returned to PENRO CDS Focal Person for Correction',
+        'event_type' => 'returned_for_correction',
+        'from' => 'PENRO CDS Chief',
+        'to' => 'PENRO CDS Focal Person',
+        'office' => 'PENRO Davao Oriental',
+    ])->and($originBeforeHandoff['label'])->toBe('Report prepared by PAMO')
+        ->and($originBeforeHandoff['event_type'])->toBe('origin');
+
+    $routing->transition($record->fresh(), 'conservation', 'receive_correction', (int) $focal->getKey());
+    $receivedState = $routing->state($record->fresh(), 'conservation');
+    expect($receivedState['stage'])->toBe(DocumentRoutingProfileRegistry::CDS_FOCAL)
+        ->and(collect($receivedState['actions'])->pluck('key')->all())->toBe([$handbackKey]);
+
+    $beforeHandbackSnapshot = $snapshot->fresh()->getAttributes();
+    $eventsBeforeHandback = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $record->getKey())->count();
+    $settingsBeforeHandback = \App\Models\RoutingPositionSettingVersion::query()->count();
+    $archivesBeforeHandback = DocumentArchive::query()->count();
+
+    // A -> B -> A: the MHRWS origin is not actionable before the captured return,
+    // another PA cannot see it, then the exact captured MHRWS PAMO can receive it.
+    $pamoBefore = $this->actingAs($pamo)->get(route('submission-tracking.index', ['view' => 'incoming']))->assertOk()->inertiaPage();
+    expect(collect(data_get($pamoBefore, 'props.workspaceQueues.incoming'))->firstWhere('source_id', $record->getKey()))->toBeNull();
+    $foreignBefore = $this->actingAs($foreignPamo)->get(route('submission-tracking.index', ['view' => 'incoming']))->assertOk()->inertiaPage();
+    expect(collect(data_get($foreignBefore, 'props.workspaceQueues.incoming'))->firstWhere('source_id', $record->getKey()))->toBeNull();
+
+    $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $record->getKey(), $handbackKey]), [
+        'stage' => $handbackKey,
+        'remarks' => 'Returning the received correction to the captured MHRWS PAMO origin.',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $handback = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $record->getKey())->latest('id')->firstOrFail();
+    expect($handback)->toMatchArray([
+        'event_key' => 'returned_for_correction',
+        'from_stage' => DocumentRoutingProfileRegistry::CDS_FOCAL,
+        'to_stage' => DocumentRoutingProfileRegistry::PAMO_ORIGIN,
+        'from_office' => 'PENRO CDS Focal Person',
+        'to_office' => $office->name,
+        'recorded_by' => $focal->getKey(),
+    ])->and(data_get($handback->metadata, 'action_key'))->toBe($handbackKey)
+        ->and(SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')->where('source_id', $record->getKey())->count())->toBe(1)
+        ->and($snapshot->fresh()->getAttributes())->toBe($beforeHandbackSnapshot)
+        ->and(\App\Models\RoutingPositionSettingVersion::query()->count())->toBe($settingsBeforeHandback)
+        ->and(DocumentArchive::query()->count())->toBe($archivesBeforeHandback)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $record->getKey())->count())->toBe($eventsBeforeHandback + 1);
+
+    $duplicate = $this->actingAs($focal)->post(route('submission-tracking.transition', ['conservation', $record->getKey(), $handbackKey]), [
+        'stage' => $handbackKey,
+        'remarks' => 'Duplicate request must not add another transition.',
+    ])->assertRedirect()->assertSessionHasErrors('stage');
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $record->getKey())->count())->toBe($eventsBeforeHandback + 1);
+
+    $wrongOffice = $this->actingAs($wrongOfficePamo)
+        ->post(route('submission-tracking.transition', ['conservation', $record->getKey(), 'receive_correction']), ['stage' => 'receive_correction'])
+        ->assertForbidden();
+    $pamoAfter = $this->actingAs($pamo)->get(route('submission-tracking.index', ['view' => 'incoming']))->assertOk()->inertiaPage();
+    $pamoRow = collect(data_get($pamoAfter, 'props.workspaceQueues.incoming'))->firstWhere('source_id', $record->getKey());
+    $foreignAfter = $this->actingAs($foreignPamo)->get(route('submission-tracking.index', ['view' => 'incoming']))->assertOk()->inertiaPage();
+    expect($pamoRow)->not->toBeNull()
+        ->and(data_get($pamoRow, 'routing.responsible_office'))->toBe($office->name)
+        ->and(collect(data_get($pamoRow, 'routing.actions'))->pluck('key')->all())->toBe(['receive_correction'])
+        ->and(collect(data_get($foreignAfter, 'props.workspaceQueues.incoming'))->firstWhere('source_id', $record->getKey()))->toBeNull();
+
+    $returnedToPamo = app(\App\Services\SubmissionTracking\DocumentRoutingPresenter::class)
+        ->present($record->fresh(), 'conservation', null, $routing->events($record->fresh(), 'conservation'));
+    $returnedOrigin = collect($returnedToPamo['timeline'])->firstWhere('key', DocumentRoutingProfileRegistry::PAMO_ORIGIN);
+    expect($returnedOrigin)->toMatchArray([
+        'label' => 'Returned to PAMO for Correction',
+        'event_type' => 'returned_for_correction',
+        'from' => 'PENRO CDS Focal Person',
+        'to' => $office->name,
+        'office' => $office->name,
+    ]);
+
+    Notification::assertSentTo($pamo, \App\Notifications\EdatsInAppNotification::class, fn ($notification): bool =>
+        (int) data_get($notification->toArray($pamo), 'source_id') === (int) $record->getKey()
+        && data_get($notification->toArray($pamo), 'title') === 'Correction Required');
+    Notification::assertNotSentTo($foreignPamo, \App\Notifications\EdatsInAppNotification::class, fn ($notification): bool =>
+        (int) data_get($notification->toArray($foreignPamo), 'source_id') === (int) $record->getKey());
+    Notification::assertNotSentTo($wrongOfficePamo, \App\Notifications\EdatsInAppNotification::class, fn ($notification): bool =>
+        (int) data_get($notification->toArray($wrongOfficePamo), 'source_id') === (int) $record->getKey());
+
+    $this->actingAs($pamo)->post(route('submission-tracking.transition', ['conservation', $record->getKey(), 'receive_correction']), ['stage' => 'receive_correction'])
+        ->assertRedirect()->assertSessionHasNoErrors();
+    $pamoResubmission = $routing->state($record->fresh(), 'conservation');
+    expect($pamoResubmission['stage'])->toBe(DocumentRoutingProfileRegistry::PAMO_ORIGIN)
+        ->and(collect($pamoResubmission['actions'])->firstWhere('key', 'forward_from_pamo')['action_label'])->toBe('Resubmit Corrected Copy')
+        ->and(SubmissionRoutingSnapshot::query()->where('source_key', 'conservation')->where('source_id', $record->getKey())->count())->toBe(1)
+        ->and($snapshot->fresh()->getAttributes())->toBe($beforeHandbackSnapshot);
 });
 
 test('PAMO preparation averages only accepted start-to-handoff and correction segments, separately from received TAT', function (): void {
