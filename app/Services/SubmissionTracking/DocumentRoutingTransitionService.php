@@ -547,7 +547,18 @@ final class DocumentRoutingTransitionService
             return true;
         })->values() : collect();
         $allowed = $allowed->map(fn (array $action): array => [...$action, 'can_replace_document' => in_array($action['document_operation'] ?? null, ['forward', 'correction_resubmission'], true)])->values();
-        return [...$state, 'allowed_actions' => $allowed->all(), 'capabilities' => $actor ? $this->access->capabilities($actor, $record, $sourceKey, $allowed->all(), $this->ability($sourceKey)) : []];
+        $allowedActions = $allowed->all();
+        return [...$state, 'allowed_actions' => $allowedActions, 'capabilities' => $actor ? $this->access->capabilities(
+            $actor,
+            $record,
+            $sourceKey,
+            $allowedActions,
+            $this->ability($sourceKey),
+            array_map(static fn (array $action): array => [
+                'key' => $action['key'] ?? null,
+                'categories' => $action['categories'] ?? [],
+            ], $allowedActions),
+        ) : []];
     }
 
     private function pambMovAllowsAction(\App\Models\ConservationReportSubmission $record, string $actionKey, ?string $routeProfile = null): bool

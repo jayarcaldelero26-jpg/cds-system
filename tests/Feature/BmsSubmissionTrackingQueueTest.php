@@ -65,6 +65,20 @@ function bmsQueueTestReport(User $creator): BmsReportSubmission
 function bmsQueueAssertIncoming(User $actor, BmsReportSubmission $report, string $action): void
 {
     test()->actingAs($actor);
+    $routing = app(DocumentRoutingTransitionService::class);
+    $events = $routing->events($report, 'bms');
+    $state = $routing->state($report, 'bms', $events, $actor);
+    $access = app(\App\Services\SubmissionTracking\DocumentRoutingAccessService::class);
+    $legacyActions = collect($state['actions'])->filter(fn (array $candidate): bool => ! ($candidate['internal_only'] ?? false)
+        && $candidate['from'] === (string) $state['stage']
+        && $access->canPerform($actor, $report, 'bms', $candidate, 'bms.update'))
+        ->map(fn (array $candidate): array => [...$candidate, 'can_replace_document' => in_array($candidate['document_operation'] ?? null, ['forward', 'correction_resubmission'], true)])
+        ->values()->all();
+    $actualPresentation = $routing->presentation($report, 'bms', $events, $actor, $state);
+    $legacyCapabilities = $access->capabilities($actor, $report, 'bms', $legacyActions, 'bms.update');
+    expect($actualPresentation['allowed_actions'])->toBe($legacyActions)
+        ->and($actualPresentation['capabilities'])->toBe($legacyCapabilities);
+
     $row = app(SubmissionTrackingService::class)->workspaceQueues()['incoming']
         ->firstWhere(fn (array $candidate): bool => $candidate['source'] === 'bms' && (int) $candidate['source_id'] === $report->id);
 
@@ -72,8 +86,58 @@ function bmsQueueAssertIncoming(User $actor, BmsReportSubmission $report, string
         ->and($row['source'])->toBe('bms')
         ->and((int) $row['source_id'])->toBe($report->id)
         ->and($row['routing']['actions'])->not->toBeEmpty()
+        ->and(collect($row['routing']['actions'])->pluck('key')->all())->toBe(collect($legacyActions)->pluck('key')->all())
         ->and($row['incoming_action_category'])->toBe($action);
 }
+
+test('canonical authorization reuse preserves old action, capability, and queue results across roles and Protected Area boundaries', function (): void {
+    expect(config('database.default'))->toBe('sqlite')
+        ->and(config('database.connections.sqlite.database'))->toBe(':memory:')
+        ->and((string) config('database.connections.sqlite.url'))->toBe('')
+        ->and((string) env('DB_URL', ''))->toBe('');
+
+    $focal = bmsQueueTestActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = bmsQueueTestActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $cenroRecords = bmsQueueTestActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Mati');
+    $wrongOffice = bmsQueueTestActor(OrganizationalAccessService::CENRO_RECORDS, 'CENRO Lupon');
+    $penroRecords = bmsQueueTestActor(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $report = bmsQueueTestReport($focal);
+
+    bmsQueueAssertIncoming($focal, $report, 'forward');
+    $luponOfficeId = OrganizationalOffice::query()->where('code', 'cenro_lupon')->value('id');
+    expect($luponOfficeId)->not->toBeNull();
+    ProtectedAreaOfficeAssignment::query()->where('protected_area_id', $report->protected_area_id)
+        ->where('assignment_type', 'supervising')->update(['organizational_office_id' => $luponOfficeId]);
+    $routing = app(DocumentRoutingTransitionService::class);
+    $paDeniedEvents = collect();
+    $paDeniedState = $routing->state($report, 'bms', $paDeniedEvents, $focal);
+    $paDeniedPresentation = $routing->presentation($report, 'bms', $paDeniedEvents, $focal, $paDeniedState);
+    expect(app(\App\Services\Authorization\OrganizationalAccessService::class)->canAccessProtectedArea($focal, $report->protected_area_id))->toBeFalse()
+        ->and($paDeniedPresentation['allowed_actions'])->toBeEmpty()
+        ->and($paDeniedPresentation['capabilities']['canView'])->toBeFalse()
+        ->and(app(SubmissionTrackingService::class)->workspaceQueues()['incoming']->pluck('source_id')->all())->not->toContain($report->id);
+    ProtectedAreaOfficeAssignment::query()->where('protected_area_id', $report->protected_area_id)
+        ->where('assignment_type', 'supervising')->update([
+            'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        ]);
+
+    test()->actingAs($wrongOffice);
+    $wrongOfficeRouting = app(SubmissionTrackingService::class)->workspaceQueues()['incoming'];
+    expect($wrongOfficeRouting->pluck('source_id')->all())->not->toContain($report->id);
+    $wrongOfficeState = app(DocumentRoutingTransitionService::class)->state($report, 'bms', collect(), $wrongOffice);
+    $wrongOfficePresentation = app(DocumentRoutingTransitionService::class)->presentation($report, 'bms', collect(), $wrongOffice, $wrongOfficeState);
+    expect($wrongOfficePresentation['allowed_actions'])->toBeEmpty();
+
+    $routing = app(DocumentRoutingTransitionService::class);
+    $routing->transition($report, 'bms', 'forward_to_cenro_chief', $focal->id);
+    bmsQueueAssertIncoming($chief, $report, 'receive');
+    $routing->transition($report, 'bms', 'receive_at_cenro_chief', $chief->id);
+    $routing->transition($report, 'bms', 'forward_to_cenro_records', $chief->id);
+    bmsQueueAssertIncoming($cenroRecords, $report, 'receive');
+    $routing->transition($report, 'bms', 'receive_at_cenro_records', $cenroRecords->id);
+    $routing->transition($report, 'bms', 'forward_to_penro_records', $cenroRecords->id);
+    bmsQueueAssertIncoming($penroRecords, $report, 'receive');
+});
 
 test('BMS actionable records remain discoverable in the normal Incoming queue across custody stages', function (): void {
     $focal = bmsQueueTestActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');

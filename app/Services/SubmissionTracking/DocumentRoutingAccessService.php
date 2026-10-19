@@ -69,10 +69,16 @@ final class DocumentRoutingAccessService
         return true;
     }
 
-    /** @return array<string,bool> */
-    public function capabilities(User $user, Model $record, string $sourceKey, array $actions, ?string $ability = null): array
+    /** @param list<array{key:mixed,categories:array}> $alreadyAuthorizedActions From this same actor/record/source/ability presentation call only.
+     *  @return array<string,bool>
+     */
+    public function capabilities(User $user, Model $record, string $sourceKey, array $actions, ?string $ability = null, array $alreadyAuthorizedActions = []): array
     {
-        $allowed = array_filter($actions, fn (array $action): bool => $this->canPerform($user, $record, $sourceKey, $action, $ability));
+        $allowed = array_filter($actions, fn (array $action): bool => in_array([
+            'key' => $action['key'] ?? null,
+            'categories' => $action['categories'] ?? [],
+        ], $alreadyAuthorizedActions, true)
+            || $this->canPerform($user, $record, $sourceKey, $action, $ability));
         $types = collect($allowed)->pluck('event_key');
         return [
             'canView' => $this->canView($user, $record, $sourceKey, $ability),
