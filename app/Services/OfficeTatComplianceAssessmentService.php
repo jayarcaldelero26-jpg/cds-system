@@ -29,6 +29,7 @@ final class OfficeTatComplianceAssessmentService
 {
     private const EXPECTED_PA_ROSTER = 6;
     private const EXPECTED_CENRO_ROSTER = 4;
+    private const ENGP_CBEP_ALLOWED_CALENDAR_DAYS = 'engp_cbep_allowed_calendar_days';
     public const POLICY_EFFECTIVE_DATE = '2026-10-11';
     /** @var array<int,bool> */
     private array $evidenceValidity = [];
@@ -413,7 +414,7 @@ final class OfficeTatComplianceAssessmentService
                     $technical = $classifications['engp'][(string) $workflow]['is_highly_technical'] ?? null;
                     $key = implode('|', ['cenro:'.$officeId, $workflow, $year, $sourcePeriod['key']]);
                     $obligation = $this->makeObligation($key, $expectedStart, $expectedDeadline, $received, $storedDeadline, $technical, (int) $record->getKey(), false,
-                        'engp', $this->engpDayMode($definition), null, $classifications['engp'][(string) $workflow]['id'] ?? null,
+                        'engp', $this->engpDayMode((string) $workflow, $definition), null, $classifications['engp'][(string) $workflow]['id'] ?? null,
                         (string) $definition['label'].' · '.$sourcePeriod['label']);
                     $obligation['source_rows_matched'] = $liveMatches->count();
                     $obligation['source_identity'] = [
@@ -847,7 +848,7 @@ final class OfficeTatComplianceAssessmentService
                     $historicalReceipt = $matches->filter(fn (EngpReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'))
                         ->map(fn (EngpReportSubmission $row) => data_get($engpOrigins->get($row->id)?->original_milestones, 'milestones.date_received_penro'))
                         ->filter(fn ($date) => $date && $date <= $cutoff->toDateString())->sort()->first();
-                    $obligation = $this->makeObligation($obligationKey, $startValue, $deadlineValue, $record?->date_received_penro?->toDateString(), $record?->deadline_submission?->toDateString(), $technical, $record?->id, false, 'engp', $this->engpDayMode($workflow), null, $classifications['engp'][$workflowKey]['id'] ?? null,
+                    $obligation = $this->makeObligation($obligationKey, $startValue, $deadlineValue, $record?->date_received_penro?->toDateString(), $record?->deadline_submission?->toDateString(), $technical, $record?->id, false, 'engp', $this->engpDayMode((string) $workflowKey, $workflow), null, $classifications['engp'][$workflowKey]['id'] ?? null,
                         (string) $workflow['label'].' · '.$sourcePeriod['label']);
                     $obligation['source_identity'] = [
                         'participant_key' => $participant['participant_key'], 'workflow_key' => $workflowKey,
@@ -1236,6 +1237,7 @@ final class OfficeTatComplianceAssessmentService
             'allowed_days' => $allowedDays > 0 ? $allowedDays : null, 'days_used' => $daysUsed,
             'day_convention' => match ($obligation['day_mode']) {
                 'calendar_days' => 'Calendar days',
+                self::ENGP_CBEP_ALLOWED_CALENDAR_DAYS => 'CBEP allowed calendar days (period start through deadline, inclusive)',
                 'engp_standard_working_days' => 'Standard working days (shared holiday calendar)',
                 \App\Models\ModuleDefinition::DEADLINE_PAMB_WORKING_DAYS => 'PAMB working days (Monday–Thursday shared calendar)',
                 \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => 'Conservation working days (Monday–Thursday shared calendar)',
@@ -1414,6 +1416,9 @@ final class OfficeTatComplianceAssessmentService
 
     private function durationDays(CarbonImmutable $start, CarbonImmutable $end, array $obligation): int
     {
+        if ($obligation['day_mode'] === self::ENGP_CBEP_ALLOWED_CALENDAR_DAYS) {
+            return (int) $start->diffInDays($end, false) + 1;
+        }
         if ($obligation['day_mode'] === 'calendar_days') return (int) $start->diffInDays($end, false);
         $weekdays = match ($obligation['day_mode']) {
             'engp_standard_working_days' => BusinessCalendarService::STANDARD_WORKING_WEEKDAYS,
@@ -1451,6 +1456,9 @@ final class OfficeTatComplianceAssessmentService
                     \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => 'Conservation working days: Monday–Thursday with the shared calendar',
                     default => 'Workflow rule or stored deadline; requires source evidence',
                 };
+                if ($domain === 'engp' && $key === 'cbep') {
+                    $dayConvention = 'CBEP allowed calendar days, counting the period start as day 1 through the deadline';
+                }
                 $items[] = ['domain' => $domain, 'workflow_key' => $key, 'label' => (string) $definition['label'],
                     'is_highly_technical' => $classification['is_highly_technical'] ?? null, 'version' => $classification['version'] ?? null,
                     'stored_version' => Schema::hasTable('office_tat_technical_classification_versions')
@@ -1462,15 +1470,17 @@ final class OfficeTatComplianceAssessmentService
                     'effective_to' => $classification['effective_to'] ?? null,
                     'evidence_reference' => isset($classification['evidence_id']) ? \App\Models\OfficeTatApprovalEvidence::query()->find($classification['evidence_id'])?->public_id : null,
                     'start_basis' => $startBasis, 'deadline_basis' => $deadlineBasis, 'day_convention' => $dayConvention,
-                    'submission_endpoint' => 'date_received_penro', 'allowed_days' => $definition['default_deadline_days'] ?? null,
+                    'submission_endpoint' => 'date_received_penro',
+                    'allowed_days' => $domain === 'engp' && $key === 'cbep' ? 20 : ($definition['default_deadline_days'] ?? null),
                     'frequency' => $definition['reporting_frequency'] ?? $definition['period'] ?? null];
             }
         }
         return $items;
     }
 
-    private function engpDayMode(array $workflow): string
+    private function engpDayMode(string $workflowKey, array $workflow): string
     {
+        if ($workflowKey === 'cbep') return self::ENGP_CBEP_ALLOWED_CALENDAR_DAYS;
         return ($workflow['deadline_mode'] ?? null) === \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS
             ? 'engp_standard_working_days'
             : 'calendar_days';

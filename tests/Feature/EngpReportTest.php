@@ -121,6 +121,123 @@ test('ENGP MOV replacement removes the superseded physical file after persistenc
         ->and(Storage::disk('local')->exists($currentPath))->toBeTrue();
 });
 
+test('every ENGP workflow keeps direct origin, correction receipt, MOV replacement and the next queue on one record', function (string $workflowKey): void {
+    $focal = $this->user;
+    $workflow = app(EngpReportWorkflowRegistry::class)->defaultFind($workflowKey);
+    $period = match ($workflow['period']) {
+        'monthly' => ['key' => '2026-01', 'label' => 'January 2026', 'deadline' => $workflowKey === 'rims' ? '2026-01-29' : '2026-01-20'],
+        'quarterly' => ['key' => 'Q1', 'label' => 'Quarter 1', 'deadline' => '2026-03-10'],
+        'weekly' => ['key' => 'W01', 'label' => 'January Week 1 (Jan 5-Jan 8)', 'deadline' => '2026-01-20'],
+    };
+    $chief = User::factory()->create([
+        'section' => OrganizationalAccessService::CENRO_CHIEF,
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    foreach (['reports.view', 'technical-reports.view', 'technical-reports.update'] as $ability) {
+        $chief->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+
+    $this->actingAs($focal)->post(route('engp-reports.store', $workflowKey), [
+        'office' => 'CENRO Baganga', 'section_name' => 'NGP',
+        'reporting_year' => 2026, 'period_key' => $period['key'],
+        'mov' => UploadedFile::fake()->createWithContent('original-'.$workflowKey.'.pdf', "%PDF-1.4\noriginal {$workflowKey} working MOV"),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $report = EngpReportSubmission::query()->where('workflow_key', $workflowKey)
+        ->where('office', 'CENRO Baganga')->where('reporting_year', 2026)->where('period_key', $period['key'])->firstOrFail();
+    $oldPath = $report->mov_file_path;
+    expect($report->created_by)->toBe($focal->id)
+        ->and($report->activity_name)->toBe($workflow['activity'])
+        ->and($report->document_type)->toBe($workflow['document'])
+        ->and($report->deadline_submission?->toDateString())->toBe($period['deadline'])
+        ->and(Storage::disk('local')->exists($oldPath))->toBeTrue();
+    $transition = function (User $actor, string $action) use ($report): void {
+        test()->actingAs($actor)
+            ->post(route('submission-tracking.transition', [
+                'source' => 'engp', 'record' => $report->id, 'stage' => $action,
+            ]), ['stage' => $action, 'remarks' => $action === 'return_to_cenro_focal' ? 'Attach the corrected signed MOV.' : null])
+            ->assertRedirect()->assertSessionHasNoErrors();
+    };
+
+    $transition($focal, 'forward_to_cenro_chief');
+    $transition($chief, 'receive_at_cenro_chief');
+    $transition($chief, 'return_to_cenro_focal');
+
+    $returned = DocumentRoutingEvent::query()->where('source_type', 'engp')->where('source_id', $report->id)->latest('id')->firstOrFail();
+    expect($returned->event_key)->toBe('returned_for_correction')
+        ->and($returned->to_stage)->toBe(DocumentRoutingProfileRegistry::PREPARATION)
+        ->and($returned->to_office)->toBe('CENRO CDS Focal Person');
+
+    $incomingResponse = $this->actingAs($focal)->get(route('submission-tracking.index', [
+        'source' => 'engp', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk();
+    $incomingProps = $incomingResponse->inertiaProps();
+    expect(data_get($incomingProps, 'trackingContext.selected_record.routing.actions'))->toHaveCount(1)
+        ->and(data_get($incomingProps, 'trackingContext.selected_record.routing.actions.0.key'))->toBe('receive_correction')
+        ->and(collect(data_get($incomingProps, 'workspaceQueues.incoming', []))->contains(
+            fn (array $row): bool => ($row['source'] ?? null) === 'engp'
+                && (int) ($row['source_id'] ?? 0) === (int) $report->id
+                && ($row['incoming_action_category'] ?? null) === 'correction',
+        ))->toBeTrue();
+
+    $notificationsBeforeRejectedReplacement = $focal->notifications()->count();
+    $this->actingAs($focal)->put(route('engp-reports.update', [$workflowKey, $report->id]), [
+        'office' => 'CENRO Baganga', 'section_name' => 'NGP', 'reporting_year' => 2026,
+        'period_key' => $period['key'],
+        'mov' => UploadedFile::fake()->createWithContent('too-early-replacement.pdf', "%PDF-1.4\nreplacement before Receive Correction"),
+    ])->assertRedirect()->assertSessionHasErrors('routing');
+    expect($report->fresh()->mov_file_path)->toBe($oldPath)
+        ->and(Storage::disk('local')->exists($oldPath))->toBeTrue()
+        ->and($focal->fresh()->notifications()->count())->toBe($notificationsBeforeRejectedReplacement);
+
+    $this->actingAs($focal)->post(route('submission-tracking.transition', [
+        'source' => 'engp', 'record' => $report->id, 'stage' => 'receive_correction',
+    ]), ['stage' => 'receive_correction'])->assertRedirect()->assertSessionHasNoErrors();
+
+    $this->actingAs($focal)->put(route('engp-reports.update', [$workflowKey, $report->id]), [
+        'office' => 'CENRO Baganga',
+        'section_name' => 'NGP',
+        'reporting_year' => 2026,
+        'period_key' => $period['key'],
+        'deadline_submission' => $period['deadline'],
+        'mov' => UploadedFile::fake()->createWithContent('corrected-mov.pdf', "%PDF-1.4\ncorrected signed MOV"),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+
+    $correctedPath = $report->fresh()->mov_file_path;
+    expect($correctedPath)->not->toBe($oldPath)
+        ->and(Storage::disk('local')->exists($oldPath))->toBeFalse()
+        ->and(Storage::disk('local')->get($correctedPath))->toContain('corrected signed MOV')
+        ->and($report->fresh()->workflow_key)->toBe($workflowKey)
+        ->and($report->fresh()->deadline_submission?->toDateString())->toBe($period['deadline'])
+        ->and($report->fresh()->date_received_penro)->toBeNull();
+
+    $transition($focal, 'forward_to_cenro_chief');
+    $events = DocumentRoutingEvent::query()->where('source_type', 'engp')->where('source_id', $report->id)->orderBy('id')->get();
+    expect($events->pluck('event_key')->all())->toBe([
+        'forwarded', 'received', 'returned_for_correction', 'correction_received', 'forwarded',
+    ])
+        ->and($events->last()->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)
+        ->and(EngpReportSubmission::query()->whereKey($report->id)->count())->toBe(1);
+
+    $nextQueueResponse = $this->actingAs($chief)->get(route('submission-tracking.index', [
+        'source' => 'engp', 'source_id' => $report->id, 'view' => 'incoming',
+    ]))->assertOk();
+    $nextProps = $nextQueueResponse->inertiaProps();
+    expect(collect(data_get($nextProps, 'trackingContext.selected_record.routing.actions', []))
+        ->contains(fn (array $action): bool => $action['key'] === 'receive_at_cenro_chief'))
+        ->toBeTrue()
+        ->and(collect(data_get($nextQueueResponse->inertiaProps(), 'workspaceQueues.incoming', []))->contains(
+            fn (array $row): bool => ($row['source'] ?? null) === 'engp'
+                && (int) ($row['source_id'] ?? 0) === (int) $report->id,
+        ))->toBeTrue();
+})->with([
+    'cbep' => ['cbep'], 'elcac' => ['elcac'], 'ngp staff monthly accomplishment' => ['ngp_staff_accomplishment'],
+    'forest disturbance' => ['forest_disturbance'], 'monthly PMD and FMB' => ['monthly_accomplishment_pmd_fmb'],
+    'CENRO nursery seedling' => ['cenro_nursery_seedling'], 'tree replacement monthly' => ['tree_replacement'],
+    'RIMS January deadline rule' => ['rims'], 'NGP Produce quarterly' => ['ngp_produce'],
+    'nursery maintenance quarterly' => ['nursery_maintenance'], 'site visit quarterly' => ['site_visit'],
+    'weekly accomplishment' => ['weekly_accomplishment'],
+]);
+
 test('ENGP tracking transports submission deadlines as date-only values', function () {
     $report = EngpReportSubmission::create(engpPayload([
         'workflow_key' => 'rims',
@@ -164,6 +281,7 @@ test('ENGP tracking uses the canonical CENRO-to-PENRO route instead of release c
 });
 
 test('ENGP routing remains active after PENRO receipt and completes only after final regional release', function () {
+    config(['services.document_archive.final_return_archive_enabled' => true]);
     $chief = User::factory()->create(['section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Baganga']);
     $records = User::factory()->create(['section' => OrganizationalAccessService::CENRO_RECORDS, 'office_designated' => 'CENRO Baganga']);
     $penro = User::factory()->create(['section' => OrganizationalAccessService::PENRO_RECORDS, 'office_designated' => 'PENRO Davao Oriental']);
@@ -253,7 +371,8 @@ test('ENGP routing remains active after PENRO receipt and completes only after f
         $tracking->transition('engp', $report->id, $action, null, $actor->id);
     }
     $report->refresh();
-    expect($report->submission_status)->toBe('Completed')
+    expect(DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe(0)
+        ->and($report->submission_status)->toBe('Completed')
         ->and($tracking->records()->firstWhere('source_id', $report->id)['routing_complete'])->toBeTrue()
         ->and($tracking->records()->firstWhere('source_id', $report->id)['stage'])->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL);
 

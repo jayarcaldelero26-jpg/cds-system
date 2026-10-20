@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Modules\ProgramArea;
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\BmsReportSubmission;
@@ -9,6 +10,7 @@ use App\Models\ImeaReportSubmission;
 use App\Models\Aws;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
+use App\Models\ModuleDefinition;
 use App\Models\ManagementPlan;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
@@ -18,8 +20,10 @@ use App\Notifications\EdatsInAppNotification;
 use App\Services\Notifications\EdatsInAppNotificationService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
+use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
@@ -192,6 +196,40 @@ test('workflow notification URLs select the exact supported source record safely
         ->and($fallback)->not->toContain('attacker.invalid');
 });
 
+test('recent workflow notifications preserve the intended Tracking tab and selected source record', function (): void {
+    foreach ([
+        ['view' => 'incoming', 'source' => 'engp', 'source_id' => 71],
+        ['view' => 'outgoing', 'source' => 'conservation', 'source_id' => 72],
+    ] as $index => $target) {
+        $this->user->notify(new EdatsInAppNotification([
+            'type' => EdatsInAppNotificationService::WORKFLOW,
+            'dedup_key' => 'workflow-tab-'.$index,
+            'title' => 'Workflow notice',
+            'message' => 'Routing update.',
+            'severity' => 'info',
+            'category' => 'submission_updates',
+            'source_type' => $target['source'],
+            'source_id' => $target['source_id'],
+            'url' => route('submission-tracking.index', $target),
+        ]));
+    }
+
+    $response = $this->actingAs($this->user)->get(route('notifications.recent'))->assertOk();
+    $links = collect($response->json('notifications'))->keyBy('id');
+
+    foreach ($this->user->notifications()->get() as $notification) {
+        $link = $links->get($notification->id)['url'];
+        parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
+
+        expect(parse_url($link, PHP_URL_HOST))->toBe(parse_url(route('submission-tracking.index'), PHP_URL_HOST))
+            ->and($query)->toMatchArray([
+                'view' => $notification->data['source_id'] === 72 ? 'outgoing' : 'incoming',
+                'source' => $notification->data['source_type'],
+                'source_id' => (string) $notification->data['source_id'],
+            ]);
+    }
+});
+
 test('unauthenticated users cannot mark notifications as read', function () {
     $this->user->notify(new EdatsInAppNotification(notificationPayload('guest-read')));
     $notification = $this->user->notifications()->first();
@@ -346,6 +384,25 @@ test('ENGP overdue reports use the same live Alerts source and active IMEA Maint
         ->and($engp->date_received_penro)->toBeNull();
 });
 
+test('deadline-day ENGP receipt with zero Days Complied and Unsatisfactory rating is not alerted as late', function (): void {
+    $today = CarbonImmutable::parse('2026-08-29', 'Asia/Manila');
+    $report = notificationEngpReport($this->user, [
+        'deadline_submission' => '2026-08-29',
+        'date_received_penro' => '2026-08-29',
+    ]);
+
+    expect($report->days_complied)->toBe(0)
+        ->and($report->timeliness_rating)->toBe('Unsatisfactory');
+
+    app(EdatsInAppNotificationService::class)->syncDeadlineNotifications($today);
+    $alerts = app(OverdueReportService::class);
+
+    expect($this->user->notifications()->count())->toBe(0)
+        ->and($alerts->dueSoonReports(3, $today)->pluck('sourceId'))->not->toContain($report->id)
+        ->and($alerts->dueTodayReports($today)->pluck('sourceId'))->not->toContain($report->id)
+        ->and($alerts->overdueReports($today)->pluck('sourceId'))->not->toContain($report->id);
+});
+
 test('workflow handoffs notify only the next accountable office and receipt returns information to the sender', function (): void {
     $focal = User::factory()->create(['section' => 'CENRO_CDS_FOCAL', 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
     $chief = User::factory()->create(['section' => 'CENRO_CDS_CHIEF', 'office_designated' => 'CENRO Mati', 'unit_assignment' => null]);
@@ -408,18 +465,73 @@ test('PA deadline notifications respect CENRO jurisdiction and assigned PAMO sco
     $pamo = notificationScopedUser(OrganizationalAccessService::PAMO, 'CENRO Mati', protectedAreaId: $area->id);
     $otherArea = notificationProtectedArea('Other scoped notification PA', $this->user);
     $otherPamo = notificationScopedUser(OrganizationalAccessService::PAMO, 'CENRO Mati', protectedAreaId: $otherArea->id);
+    $workflowKey = 'maintenance_pamo_ecotourism';
+    ModuleDefinition::query()->create([
+        'name' => 'Active PAMO Notification Workflow',
+        'code' => $workflowKey,
+        'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
+        'requirement_domain' => 'pa',
+        'requirement_key' => $workflowKey,
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
+        'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'monthly',
+        'deadline_mode' => ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS,
+        'default_deadline_days' => 7,
+        'is_active' => true,
+    ]);
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'test_pamo_notification_scope',
+        'name' => 'PAMO Notification Scope',
+        'office_type' => 'pamo',
+        'is_active' => true,
+    ]);
+    $otherPamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'test_pamo_notification_other_scope',
+        'name' => 'PAMO Notification Other Scope',
+        'office_type' => 'pamo',
+        'is_active' => true,
+    ]);
     ProtectedAreaOfficeAssignment::create([
         'protected_area_id' => $area->id,
         'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
         'assignment_type' => 'supervising',
         'assigned_by' => $this->user->id,
     ]);
-    notificationConservationReport($area, $this->user, [
-        'workflow_key' => 'homestay',
-        'activity_name' => 'Homestay',
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => $pamoOffice->id,
+        'assignment_type' => 'pamo',
+        'assigned_by' => $this->user->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $otherArea->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_baganga')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $this->user->id,
+    ]);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $otherArea->id,
+        'organizational_office_id' => $otherPamoOffice->id,
+        'assignment_type' => 'pamo',
+        'assigned_by' => $this->user->id,
+    ]);
+    $area->update(['pamo' => $pamoOffice->name]);
+    $otherArea->update(['pamo' => $otherPamoOffice->name]);
+    $pamo->update(['office_designated' => $pamoOffice->name]);
+    $otherPamo->update(['office_designated' => $otherPamoOffice->name]);
+    expect(app(ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflowKey))->toBeTrue()
+        ->and(app(OrganizationalAccessService::class)->canViewPamoPilotWorkflow($pamo))->toBeTrue();
+    $report = notificationConservationReport($area, $this->user, [
+        'workflow_key' => $workflowKey,
+        'activity_name' => 'Maintenance of PAMO',
+        'document_type' => 'Report',
         'target_office' => 'CENRO Mati',
         'date_accomplished' => '2026-08-01',
     ]);
+    expect(app(OrganizationalAccessService::class)->canAccessUnit($pamo, OrganizationalAccessService::CONSERVATION))->toBeTrue()
+        ->and(app(PambSubmissionAccessService::class)->canView($pamo, $report))->toBeTrue()
+        ->and($pamo->can('reports.view'))->toBeTrue()
+        ->and($pamo->hasRole('no_role'))->toBeFalse();
 
     app(EdatsInAppNotificationService::class)->syncDeadlineNotifications(CarbonImmutable::parse('2026-08-29', 'Asia/Manila'));
 

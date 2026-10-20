@@ -41,6 +41,12 @@ test('CENRO office scope is jurisdiction-wide while PAMO remains exact PA', func
     $mpl = cenroScopeFixture('MPL', 'Mati Protected Landscape', 'CENRO Mati', $owner);
     $pbpls = cenroScopeFixture('PBPLS', 'Pujada Bay Protected Landscape and Seascape', 'CENRO Mati', $owner);
     $mhrws = cenroScopeFixture('MHRWS', 'Mt. Hamiguitan Range Wildlife Sanctuary', 'PENRO Davao Oriental', $owner);
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'test_pamo_apl_cenro_scope', 'name' => 'PAMO APL Scope', 'office_type' => 'pamo', 'is_active' => true,
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $apl->id, 'organizational_office_id' => $pamoOffice->id, 'assignment_type' => 'pamo',
+    ]);
 
     $baganga = User::factory()->create([
         'unit_assignment' => 'conservation', 'section' => 'CENRO_CDS_FOCAL',
@@ -52,7 +58,7 @@ test('CENRO office scope is jurisdiction-wide while PAMO remains exact PA', func
     ]);
     $pamo = User::factory()->create([
         'unit_assignment' => 'conservation', 'section' => 'PAMO',
-        'office_designated' => 'PENRO Davao Oriental', 'protected_area_id' => $apl->id,
+        'office_designated' => $pamoOffice->name, 'protected_area_id' => $apl->id,
     ]);
 
     $organization = app(OrganizationalAccessService::class);
@@ -62,9 +68,10 @@ test('CENRO office scope is jurisdiction-wide while PAMO remains exact PA', func
         ->toBe(['MPL', 'PBPLS'])
         ->and($organization->scopeProtectedAreaQuery(ProtectedArea::query(), $pamo, 'id')->pluck('short_name')->all())
         ->toBe(['APL'])
+        ->and($organization->canViewPamoPilotWorkflow($pamo))->toBeTrue()
         ->and($organization->effectiveCategory($pamo))->toBe(OrganizationalAccessService::PAMO)
         ->and($organization->canAccessProtectedArea($pamo, $apl->id))->toBeTrue()
-        ->and($organization->canViewSubmissionTracking($pamo))->toBeFalse()
+        ->and($organization->canViewSubmissionTracking($pamo))->toBeTrue()
         ->and($organization->canAccessProtectedArea($pamo, $mhrws->id))->toBeFalse()
         ->and($organization->isGlobal($pamo))->toBeFalse()
         ->and($organization->canAccessProtectedArea($baganga, $mhrws->id))->toBeFalse()

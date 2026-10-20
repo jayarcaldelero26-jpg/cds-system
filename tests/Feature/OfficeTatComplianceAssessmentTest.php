@@ -500,9 +500,108 @@ test('source day conventions count Manila business dates through the shared cale
     $method = new ReflectionMethod($service, 'durationDays');
     $start = CarbonImmutable::parse('2027-06-07', 'Asia/Manila');
     $end = CarbonImmutable::parse('2027-06-11', 'Asia/Manila');
+    $calendar = ['day_mode' => 'calendar_days'];
+    $cbep = ['day_mode' => 'engp_cbep_allowed_calendar_days'];
     $standard = ['day_mode' => 'engp_standard_working_days', 'office' => 'CENRO Baganga'];
     $conservation = ['day_mode' => \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, 'office' => 'CENRO Baganga'];
 
-    expect($method->invoke($service, $start, $end, $standard))->toBe(4)
+    expect($method->invoke($service, $start, $end, $calendar))->toBe(4)
+        ->and($method->invoke($service, $start, $end, $cbep))->toBe(5)
+        ->and($method->invoke($service, $start, $end, $standard))->toBe(4)
         ->and($method->invoke($service, $start, $end, $conservation))->toBe(3);
+});
+
+test('CBEP October submission scoring counts the first through twentieth calendar days inclusively', function (): void {
+    $requirements = app(App\Services\Reports\ReportRequirementRegistry::class);
+    $registry = app(EngpReportWorkflowRegistry::class);
+    expect($requirements->periodStartDate('engp', 'cbep', 2026, '2026-10'))->toBe('2026-10-01')
+        ->and($registry->deadline('cbep', 2026, '2026-10'))->toBe('2026-10-20');
+
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $engpDayMode = new ReflectionMethod($service, 'engpDayMode');
+    expect($engpDayMode->invoke($service, 'cbep', ['deadline_mode' => \App\Models\ModuleDefinition::DEADLINE_CUSTOM]))
+        ->toBe('engp_cbep_allowed_calendar_days')
+        ->and($engpDayMode->invoke($service, 'elcac', ['deadline_mode' => \App\Models\ModuleDefinition::DEADLINE_CUSTOM]))
+        ->toBe('calendar_days')
+        ->and($engpDayMode->invoke($service, 'weekly_accomplishment', ['deadline_mode' => \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS]))
+        ->toBe('engp_standard_working_days');
+
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreParticipant');
+    $cutoff = CarbonImmutable::parse('2026-10-31', 'Asia/Manila')->endOfDay();
+    $cases = [
+        ['2026-10-01', 1, 1, 95.0],
+        ['2026-10-05', 5, 1, 75.0],
+        ['2026-10-19', 19, 1, 5.0],
+        ['2026-10-20', 20, 1, 0.0],
+        ['2026-10-21', 21, 0, 0.0],
+    ];
+
+    foreach ($cases as [$received, $expectedDaysUsed, $expectedOnTime, $expectedSe]) {
+        $obligation = $makeObligation->invoke(
+            $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', $received, '2026-10-20',
+            false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+        );
+        $scored = $scoreParticipant->invoke($service, [$obligation], $cutoff);
+        $detail = $scored['obligation_details'][0];
+
+        expect($detail['allowed_days'])->toBe(20)
+            ->and($detail['days_used'])->toBe($expectedDaysUsed)
+            ->and($detail['day_convention'])->toContain('inclusive')
+            ->and($scored['on_time_count'])->toBe($expectedOnTime)
+            ->and($scored['se_percent'])->toBe($expectedSe)
+            ->and($scored['score_status'])->toBe('Scored');
+    }
+
+    $deadlineObligation = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-10-20', '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $oldElapsedObligation = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-10-20', '2026-10-20',
+        false, 2, false, 'engp', 'calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $newDeadlineScore = $scoreParticipant->invoke($service, [$deadlineObligation], $cutoff);
+    $oldElapsedScore = $scoreParticipant->invoke($service, [$oldElapsedObligation], $cutoff);
+    expect($newDeadlineScore['obligation_details'][0]['allowed_days'])->toBe(20)
+        ->and($newDeadlineScore['obligation_details'][0]['days_used'])->toBe(20)
+        ->and($oldElapsedScore['obligation_details'][0]['allowed_days'])->toBe(19)
+        ->and($oldElapsedScore['obligation_details'][0]['days_used'])->toBe(19)
+        ->and($newDeadlineScore['evidence_fingerprint'])->not->toBe($oldElapsedScore['evidence_fingerprint']);
+
+    $beforeWindow = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-09-30', '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $beforeWindowScore = $scoreParticipant->invoke($service, [$beforeWindow], $cutoff);
+    expect($beforeWindowScore['score_status'])->toBe('Coverage incomplete')
+        ->and($beforeWindowScore['obligation_details'][0]['issue'])->toContain('precedes the approved workflow start');
+
+    $futureReceipt = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-11-01', '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $futureReceiptScore = $scoreParticipant->invoke($service, [$futureReceipt], $cutoff);
+    expect($futureReceiptScore['submitted_count'])->toBe(0)
+        ->and($futureReceiptScore['obligation_details'][0]['days_used'])->toBeNull();
+
+    $missingReceipt = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', null, '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $missingReceiptScore = $scoreParticipant->invoke($service, [$missingReceipt], $cutoff);
+    expect($missingReceiptScore['obligation_details'][0]['days_used'])->toBeNull();
+
+    $source = new EngpReportSubmission(['deadline_submission' => '2026-10-20', 'date_received_penro' => '2026-10-20']);
+    expect($source->days_complied)->toBe(0)
+        ->and($source->timeliness_rating)->toBe('Unsatisfactory');
+
+    $assessment = $service->assessments('2026-H2', '2026-10-31');
+    $cataloguedCbep = collect($assessment['classification_catalogue'])->firstWhere('workflow_key', 'cbep');
+    expect($cataloguedCbep['allowed_days'])->toBe(20)
+        ->and($cataloguedCbep['day_convention'])->toContain('period start as day 1')
+        ->and($assessment['development']['coverage_complete'])->toBeFalse()
+        ->and($assessment['development']['tc_percent'])->toBeNull()
+        ->and($assessment['development']['se_percent'])->toBeNull()
+        ->and($assessment['development']['otps'])->toBeNull();
 });

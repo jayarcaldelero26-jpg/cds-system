@@ -8,6 +8,9 @@ const actionPanel = await readFile(new URL('../../resources/js/Components/Submis
 const statusTabs = await readFile(new URL('../../resources/js/Components/SubmissionTracking/FinalArchiveStatusTabs.jsx', import.meta.url), 'utf8');
 const reader = await readFile(new URL('../../resources/js/Components/SubmissionTracking/FinalArchiveReader.jsx', import.meta.url), 'utf8');
 const readerDialog = await readFile(new URL('../../resources/js/Components/SubmissionTracking/SubmissionTrackingReaderDialog.jsx', import.meta.url), 'utf8');
+const trackingPage = await readFile(new URL('../../resources/js/Pages/SubmissionTracking/Index.jsx', import.meta.url), 'utf8');
+const trackingPreview = await readFile(new URL('../../resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx', import.meta.url), 'utf8');
+const routingAttachment = await readFile(new URL('../../resources/js/Components/SubmissionTracking/RoutingAttachmentField.jsx', import.meta.url), 'utf8');
 const card = await readFile(new URL('../../resources/js/Components/SubmissionTracking/FinalArchiveCard.jsx', import.meta.url), 'utf8');
 const results = await readFile(new URL('../../resources/js/Components/SubmissionTracking/FinalArchiveResults.jsx', import.meta.url), 'utf8');
 const toggle = await readFile(new URL('../../resources/js/Components/SubmissionTracking/FinalArchiveDisplayToggle.jsx', import.meta.url), 'utf8');
@@ -73,6 +76,16 @@ test('earlier Dispatch copies retain a distinct label and remain outside final r
     assert.match(reader, /Earlier Dispatch copy/);
     assert.match(page, /row\.earlier_dispatch_copy \? 'Earlier Dispatch copy' : 'Final signed Regional return'/);
     assert.match(page, /Earlier Dispatch copies are labeled separately and do not prove a Regional receipt/);
+});
+
+test('only the archive reader reserves the fixed toolbar space; Tracking preview remains separate from full details', () => {
+    assert.match(reader, /avoidBottomDebugbar\s*\/>/);
+    assert.match(readerDialog, /avoidBottomDebugbar = false/);
+    assert.doesNotMatch(trackingPreview, /avoidBottomDebugbar/);
+    assert.doesNotMatch(routingAttachment, /avoidBottomDebugbar/);
+    assert.match(trackingPage, /presentation="document-only"/);
+    assert.match(trackingPage, /onPreview=\{setPreviewRow\}/);
+    assert.match(trackingPage, /View Full Details/);
 });
 
 test('signature confirmation follows the complete multi-file selection and its private preview', () => {

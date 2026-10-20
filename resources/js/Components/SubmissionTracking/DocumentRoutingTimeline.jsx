@@ -9,7 +9,7 @@ import {
 } from "@/Utils/submissionTrackingPresentation";
 import Button from "@/Components/Button";
 
-const FALLBACK = "\u2014";
+const FALLBACK = "Not recorded";
 
 function eventDate(value) {
     if (!value) return FALLBACK;

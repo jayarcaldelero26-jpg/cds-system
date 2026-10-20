@@ -5,7 +5,7 @@ import RoutingAttachmentLink from "@/Components/SubmissionTracking/RoutingAttach
 import { timelinePresentation } from "@/Utils/submissionTrackingPresentation";
 import Button from "@/Components/Button";
 
-const FALLBACK = "\u2014";
+const FALLBACK = "Not recorded";
 
 function eventDate(value) {
     if (!value) return FALLBACK;
@@ -57,11 +57,9 @@ function Marker({ status }) {
     if (status === "not_applicable")
         return (
             <span
-                className="mt-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-gray-100 text-[10px] text-gray-500 dark:bg-gray-700 dark:text-gray-300"
+                className="mt-1 h-3 w-3 shrink-0 rounded-full border border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-700"
                 aria-hidden="true"
-            >
-                —
-            </span>
+            />
         );
     return (
         <span
@@ -114,9 +112,9 @@ export default function PambRoutingTimeline({
     const metric = (key) => {
         const item = metrics[key];
         if (!item) return FALLBACK;
-        if (item.status === "not_applicable") return item.value || "N/A";
+        if (item.status === "not_applicable") return "Not applicable";
         return item.value === null || item.value === undefined
-            ? "Pending"
+            ? "Not calculated: required dates are missing"
             : `${item.value} working days`;
     };
 
@@ -294,7 +292,7 @@ export default function PambRoutingTimeline({
                 </div>
                 {row.cenro_release_applicable === false && (
                     <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                        CENRO Release: N/A — PENRO-managed protected area. The
+                        CENRO Release: Not applicable — PENRO-managed protected area. The
                         timeline begins at the first legitimate PENRO stage.
                     </p>
                 )}

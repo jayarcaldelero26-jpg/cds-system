@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+    cenroReleaseFallbackForRow,
+    finalArchiveStatusNoticeForTrackingRow,
+    protectedAreaLabelForTrackingRow,
     progressMeasureForSubmission,
+    submissionReferenceLabelForTrackingRow,
     timelinePresentation,
 } from "../../resources/js/Utils/submissionTrackingPresentation.js";
 
@@ -68,6 +72,119 @@ test("processing at 100 percent remains separate from terminal custody completio
         label: "Processing Progress",
         value: 100,
     });
+});
+
+test("Development history labels hide inapplicable protected areas and avoid technical source keys", () => {
+    const development = {
+        source: "engp",
+        source_id: 2,
+        tracking_number: null,
+        protected_area: null,
+    };
+
+    assert.equal(
+        submissionReferenceLabelForTrackingRow(development),
+        "Development report #2",
+    );
+    assert.equal(protectedAreaLabelForTrackingRow(development), null);
+    assert.equal(
+        protectedAreaLabelForTrackingRow({
+            source: "engp",
+            protected_area: "Unexpected existing area label",
+        }),
+        "Unexpected existing area label",
+    );
+    assert.equal(
+        submissionReferenceLabelForTrackingRow({
+            source: "engp",
+            source_id: 2,
+            tracking_number: "CBEP-2026-02",
+        }),
+        "CBEP-2026-02",
+    );
+
+    assert.equal(
+        submissionReferenceLabelForTrackingRow({
+            source: "conservation",
+            source_id: 4,
+        }),
+        "conservation #4",
+    );
+    assert.equal(
+        protectedAreaLabelForTrackingRow({
+            source: "conservation",
+            protected_area: "Mt. Hamiguitan Range Wildlife Sanctuary",
+        }),
+        "Mt. Hamiguitan Range Wildlife Sanctuary",
+    );
+    assert.equal(
+        protectedAreaLabelForTrackingRow({ source: "conservation" }),
+        "Not recorded",
+    );
+});
+
+test("CENRO release fallback follows only captured route state", () => {
+    assert.equal(cenroReleaseFallbackForRow({ cenro_release_state: "awaiting_cenro_release" }), "Awaiting CENRO release");
+    assert.equal(cenroReleaseFallbackForRow({ cenro_release_state: "not_recorded" }), "Not recorded");
+    assert.equal(cenroReleaseFallbackForRow({ cenro_release_applicable: false }), "Not applicable");
+});
+
+test("regional release remains distinct from final archive verification in Development history", () => {
+    const releasedButUnverified = {
+        source: "engp",
+        routing_complete: true,
+        has_verified_final_archive: false,
+        routing: { current_location: "Regional Office" },
+    };
+
+    assert.equal(
+        finalArchiveStatusNoticeForTrackingRow(releasedButUnverified),
+        "Released to Regional · Final archive not verified",
+    );
+    assert.equal(
+        finalArchiveStatusNoticeForTrackingRow({
+            ...releasedButUnverified,
+            has_verified_final_archive: true,
+        }),
+        null,
+    );
+    assert.equal(
+        finalArchiveStatusNoticeForTrackingRow({
+            ...releasedButUnverified,
+            routing_complete: false,
+        }),
+        null,
+    );
+    assert.equal(
+        finalArchiveStatusNoticeForTrackingRow({
+            ...releasedButUnverified,
+            source: "conservation",
+        }),
+        null,
+    );
+    assert.equal(
+        finalArchiveStatusNoticeForTrackingRow({
+            ...releasedButUnverified,
+            routing: { current_location: "PENRO Records Unit" },
+        }),
+        null,
+    );
+});
+
+test("tracking rows and selected details render the contextual Development labels", async () => {
+    const page = await readFile(
+        new URL("../../resources/js/Pages/SubmissionTracking/Index.jsx", import.meta.url),
+        "utf8",
+    );
+
+    assert.equal(
+        (page.match(/submissionReferenceLabelForTrackingRow\(row\)/g) || []).length,
+        3,
+    );
+    assert.equal((page.match(/<OfficeAreaCell row=\{row\} \/>/g) || []).length, 3);
+    assert.match(page, /finalArchiveStatusNoticeForTrackingRow\(row\)/);
+    assert.match(page, /finalArchiveStatusNoticeForTrackingRow\(details\)/);
+    assert.match(page, /archiveStatusNotice &&/);
 });
 
 test("timeline exposes the next step and dynamically counts the remaining hidden steps", () => {

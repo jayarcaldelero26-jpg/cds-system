@@ -109,7 +109,16 @@ test('recorded ENGP scoring uses only matched source identities and excludes fut
     $service = app(OfficeTatComplianceAssessmentService::class);
     $recorded = $service->recordedAssessments($actor, 'development', '2026-H2', '2026-10-31');
     $baganga = collect($recorded['rows'])->firstWhere('name', 'CENRO Baganga');
+    $octoberCbep = collect($baganga['obligation_details'])->first(fn (array $detail): bool =>
+        ($detail['source_identity']['workflow_key'] ?? null) === 'cbep'
+        && ($detail['source_identity']['period_key'] ?? null) === '2026-10'
+    );
     $official = $service->assessments('2026-H2', '2026-10-31')['development'];
+    $officialBaganga = collect($official['rows'])->firstWhere('name', 'CENRO Baganga');
+    $officialOctoberCbep = collect($officialBaganga['obligation_details'])->first(fn (array $detail): bool =>
+        ($detail['source_identity']['workflow_key'] ?? null) === 'cbep'
+        && ($detail['source_identity']['period_key'] ?? null) === '2026-10'
+    );
 
     expect($recorded['basis'])->toBe('recorded_live_source')
         ->and($recorded['activity_count'])->toBe(3)
@@ -120,9 +129,17 @@ test('recorded ENGP scoring uses only matched source identities and excludes fut
         ->and($recorded['tc_percent'])->toBe(50)
         ->and($baganga['activity_count'])->toBe(3)
         ->and($baganga['due_count'])->toBe(2)
+        ->and($octoberCbep['allowed_days'])->toBe(20)
+        ->and($octoberCbep['days_used'])->toBe(20)
+        ->and($octoberCbep['status'])->toBe('Submitted on deadline')
+        ->and($octoberCbep['day_convention'])->toContain('inclusive')
         ->and(collect($baganga['obligation_details'])->pluck('source_identity.period_key')->all())->not->toContain('2026-09')
         ->and($official['coverage_complete'])->toBeFalse()
-        ->and($official['due_count'])->toBeNull();
+        ->and($official['due_count'])->toBeNull()
+        ->and($officialOctoberCbep['allowed_days'])->toBe(20)
+        ->and($officialOctoberCbep['days_used'])->toBe(20)
+        ->and($officialOctoberCbep['status'])->toBe('Submitted on deadline')
+        ->and($officialOctoberCbep['day_convention'])->toContain('inclusive');
 });
 
 test('recorded Conservation deduplicates PAMB source identities and separates incomplete and historical-conflict evidence', function (): void {

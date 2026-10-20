@@ -12,6 +12,7 @@ use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\HistoricalReports\EngpHistoricalEvidenceProjection;
 use App\Services\SubmissionTracking\SubmissionFormScopeService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\SubmissionTracking\EngpRoutingMilestonePresenter;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -49,7 +50,7 @@ class EngpReportController extends Controller
                 $search = trim((string) $request->input('search'));
                 $q->where(fn ($inner) => $inner->where('office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('section_name', 'like', "%{$search}%"));
             });
-        $rows = $query->with('releaseEvents')->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString()->through(fn (EngpReportSubmission $row) => $this->data($row));
+        $rows = $query->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString()->through(fn (EngpReportSubmission $row) => $this->data($row));
         $existingYears = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())
             ->select('reporting_year')->distinct()->pluck('reporting_year')->all();
         $years = $this->workflows->availableYears($existingYears, $year);
@@ -74,7 +75,7 @@ class EngpReportController extends Controller
             'targetOffices' => collect(app(SubmissionFormScopeService::class)->officeOptions($request->user()))->filter(fn (array $office): bool => in_array($office['name'], $offices, true))->values()->all(),
             'filters' => [...$request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']), 'year' => $year],
             'summary' => $workflow ? null : $this->summary($year, $request->user()),
-            'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with('releaseEvents')->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
+            'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
         ]);
     }
 
@@ -238,6 +239,8 @@ class EngpReportController extends Controller
             ? null
             : $this->monitoringStatuses->resolve($record->deadline_submission?->toDateString(), $record->date_received_penro?->toDateString());
         $releaseEvents = $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values();
+        $routeRelease = EngpRoutingMilestonePresenter::cenroRelease($record->documentRoutingEvents);
+        $recordedReleaseDate = $releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last() ?? $routeRelease['date'];
         $mov = $record->mov_file_path
             ? $this->attachments->descriptor('engp-report', $record, 'mov')
             : ($externalUrl ? ['name' => 'External MOV reference', 'mime_type' => null, 'type' => null, 'size' => null, 'url' => $externalUrl, 'external' => true] : null);
@@ -249,7 +252,9 @@ class EngpReportController extends Controller
             'submission_matched' => true,
             'date_released_cenro' => $historical
                 ? ($historical['milestones']['date_report_released_cenro'] ?? null)
-                : $releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last(),
+                : $recordedReleaseDate,
+            'cenro_release_applicable' => $historical ? null : $routeRelease['applicable'],
+            'cenro_release_state' => $historical ? 'not_recorded' : ($recordedReleaseDate !== null ? 'recorded' : $routeRelease['state']),
             'date_received_penro' => $historical
                 ? ($historical['milestones']['date_received_penro'] ?? null)
                 : $record->date_received_penro?->toDateString(),

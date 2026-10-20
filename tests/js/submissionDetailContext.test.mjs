@@ -17,7 +17,8 @@ for (const source of sourceKeys) {
         assert.equal(fields.get('Report / Document Type'), 'Progress Report');
         assert.equal(fields.get('Workflow / Module'), 'Workflow');
         const missing = new Map(reportContextFields({ module: 'Workflow', activity_name: 'Field visit', document_type: '' }));
-        assert.equal(missing.has('Report / Document Type'), false);
+        assert.equal(missing.has('Report / Document Type'), true);
+        assert.equal(missing.get('Report / Document Type'), null);
         assert.equal(missing.get('Activity'), 'Field visit');
     });
 }
@@ -60,12 +61,13 @@ test('PAMO route context keeps captured origin, protected area, and receiving/cu
     assert.equal(receivedFields.get('Current Office'), 'CENRO Baganga');
 });
 
-test('duplicate activity is omitted and ENGP absent PA/receipt are not invented', () => {
-    const fields = new Map(reportContextFields({ module: 'Regular PAMB', activity_name: 'Regular PAMB', document_type: 'Minutes' }, true));
+test('duplicate activity and inapplicable ENGP area are hidden while missing dates remain explicit', () => {
+    const fields = new Map(reportContextFields({ source: 'engp', module: 'Regular PAMB', activity_name: 'Regular PAMB', document_type: 'Minutes' }, true));
     assert.equal(fields.has('Activity'), false);
     assert.equal(fields.get('Report / Document Type'), 'Minutes');
     assert.equal(fields.has('Protected Area'), false);
-    assert.equal(fields.has('PENRO Receipt'), false);
+    assert.equal(fields.has('PENRO Receipt'), true);
+    assert.equal(fields.get('PENRO Receipt'), null);
 });
 
 test('a fresh selected record wins over an older linked row and refreshes actions/document metadata', () => {
