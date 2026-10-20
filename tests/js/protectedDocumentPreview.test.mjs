@@ -60,11 +60,20 @@ test('fetch uses the same protected source/record URL, session credentials, no c
     assert.match(await result.blob.text(), /^%PDF-1\.7/);
 });
 
-for (const [status, code] of [[401, 'session'], [419, 'session'], [403, 'forbidden'], [404, 'missing'], [500, 'response']]) {
+for (const [status, code] of [[401, 'session'], [419, 'session'], [403, 'forbidden'], [404, 'missing'], [500, 'server'], [503, 'server']]) {
     test(`HTTP ${status} is an honest ${code} state and cannot become a preview`, async () => {
         await assert.rejects(load(new Response('<html>Access Restricted</html>', { status, headers: { 'content-type': 'text/html' } })), error => error instanceof PreviewLoadError && error.code === code);
     });
 }
+
+test('HTTP 500 explains a server failure instead of calling it an unsupported document', async () => {
+    await assert.rejects(load(new Response('<html>Internal Server Error</html>', { status: 500, headers: { 'content-type': 'text/html' } })), error => {
+        assert.equal(error.code, 'server');
+        assert.match(error.message, /server could not load/i);
+        assert.doesNotMatch(error.message, /supported document/i);
+        return true;
+    });
+});
 
 for (const type of ['text/html', 'application/json', 'application/octet-stream', '']) {
     test(`HTTP 200 with ${type || 'missing MIME'} is rejected before embedding`, async () => {
