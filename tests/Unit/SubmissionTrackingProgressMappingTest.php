@@ -9,6 +9,7 @@ use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Pamo\PamoNativeSourceRegistry;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
 use ReflectionMethod;
@@ -136,20 +137,12 @@ final class SubmissionTrackingProgressMappingTest extends TestCase
         foreach ($engpKeys as $key) {
             $modules['engp_'.$key] = ['source' => 'engp', 'profile' => 'canonical'];
         }
-        foreach ([
-            'bms' => 'bms',
-            'bams' => 'bams',
-            'imea' => 'imea',
-            'imea_facility_maintenance' => 'imea-maintenance',
-            'automated_weather_station' => 'aws',
-            'ipaf_management' => 'ipaf-management',
-            'revenue_collection' => 'revenue',
-            'management_plans' => 'management-plans',
-        ] as $module => $source) {
-            $modules[$module] = ['source' => $source, 'profile' => 'canonical'];
+        foreach ((new PamoNativeSourceRegistry)->all() as $module => $adapter) {
+            $modules[$module] = ['source' => $adapter['source'], 'profile' => 'canonical'];
         }
 
-        self::assertCount(42, $modules, 'The active module definition inventory must resolve all 42 module keys.');
+        self::assertCount(41, $modules, 'The current active workflow and native adapter inventory resolves all 41 report modules; legacy Management Plans remains Tracking-only.');
+        self::assertArrayNotHasKey('management-plans', $modules);
         self::assertSame(22, count((new ConservationReportWorkflowRegistry)->defaultKeys()));
         self::assertSame(12, count((new EngpReportWorkflowRegistry)->defaultKeys()));
         self::assertSame(3, count(array_filter($modules, fn (array $item): bool => $item['profile'] === 'pamb_detailed')));
@@ -157,8 +150,9 @@ final class SubmissionTrackingProgressMappingTest extends TestCase
         $service = (new ReflectionClass(SubmissionTrackingService::class))->newInstanceWithoutConstructor();
         $sourceMethod = new ReflectionMethod(SubmissionTrackingService::class, 'sources');
         $sources = $sourceMethod->invoke($service);
-        self::assertCount(10, $sources, 'All ten active Submission Tracking source families are registered.');
-        self::assertCount(10, array_unique(array_column($modules, 'source')));
+        self::assertCount(10, $sources, 'All ten Submission Tracking source families remain registered, including legacy tracking-only sources.');
+        self::assertArrayHasKey('management-plans', $sources, 'Legacy Management Plans routing and archive data remain supported by Tracking.');
+        self::assertCount(9, array_unique(array_column($modules, 'source')), 'Current TAT modules use the two generic and seven native source families.');
         foreach ($modules as $module => $resolution) {
             self::assertArrayHasKey($resolution['source'], $sources, $module.' resolves to a registered source family');
             self::assertContains($resolution['profile'], ['canonical', 'pamb_detailed'], $module.' resolves to a supported shared profile');

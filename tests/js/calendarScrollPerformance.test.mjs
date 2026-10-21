@@ -27,6 +27,7 @@ function fixtureEvents(count) {
         const day = String(index % 28 + 1).padStart(2, '0');
         return {
             source_key: `fixture:${index}`,
+            event_date: `2026-08-${day}`,
             submission_date: `2026-08-${day}`,
             module: 'BMS',
             source_name: 'Fixture Office',
@@ -45,7 +46,7 @@ function fixtureMetrics(markup, eventCount) {
         dayCardBackdropFilters: dayCards.filter(([, classes]) => classes.includes('backdrop-blur-sm')).length,
         dayCardHoverTransforms: dayCards.filter(([, classes]) => classes.includes('hover:-translate-y-px')).length,
         allCalendarBackdropFilters: (markup.match(/\bbackdrop-blur-sm\b/g) || []).length,
-        renderedMovChips: (markup.match(/title="BMS • Fixture Office — Fixture event /g) || []).length,
+        renderedMovChips: (markup.match(/title="BMS · Fixture Office — Fixture event /g) || []).length,
         moreButtons: (markup.match(/>\+\d+ more<\/button>/g) || []).length,
         markupBytes: Buffer.byteLength(markup),
     };
@@ -79,6 +80,36 @@ test('real Calendar month markup keeps sparse and populated event membership whi
     assert.equal(populated.dayCardBackdropFilters, 0, 'populated months should not add repeated day-card backdrop filters');
     assert.equal(sparse.allCalendarBackdropFilters, 4, 'the existing shared calendar surfaces and legend retain their backdrop treatment');
     assert.equal(populated.allCalendarBackdropFilters, 4, 'event volume does not add backdrop filters to the shared calendar surfaces');
+});
+
+test('real Calendar month places historical evidence by event date while retaining its separate receipt date', async () => {
+    const { default: BusinessCalendarMonth } = await load('Components/BusinessCalendarMonth.jsx');
+    const historicalEvent = Object.freeze({
+        ...fixtureEvents(1)[0],
+        source_key: 'historical:bms:1',
+        is_historical: true,
+        title: 'Historical date-basis fixture',
+        event_date: '2026-08-05',
+        date_accomplished: '2026-08-05',
+        submission_date: '2026-09-20',
+        calendar_basis: 'Date Accomplished',
+    });
+    const commonProps = {
+        view: 'month', year: 2026, filters: {}, modules: [], protectedAreas: [],
+        yearSummary: null, nonWorkingDays: [], canManage: false,
+        movEvents: Object.freeze([historicalEvent]),
+        onAdd() {}, onSelectMov() {}, onSelectHoliday() {},
+    };
+    const renderMonth = month => renderToStaticMarkup(React.createElement(BusinessCalendarMonth, { ...commonProps, month }));
+    const activityMonth = renderMonth('2026-08');
+    const receiptMonth = renderMonth('2026-09');
+    const eventChip = /title="Historical · BMS · Fixture Office — Historical date-basis fixture · Date Accomplished"/g;
+
+    assert.equal([...activityMonth.matchAll(eventChip)].length, 1, 'historical evidence appears once in its recorded activity month');
+    assert.equal([...receiptMonth.matchAll(eventChip)].length, 0, 'the original receipt month does not replace the supplied event date');
+    assert.match(activityMonth, /aria-label="Historical report: Historical date-basis fixture; Date Accomplished August 5, 2026"/);
+    assert.equal(historicalEvent.event_date, '2026-08-05');
+    assert.equal(historicalEvent.submission_date, '2026-09-20', 'rendering preserves the separate receipt date');
 });
 
 test('real Calendar year markup keeps twelve stable month surfaces and restrained selectors', async () => {

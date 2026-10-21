@@ -71,7 +71,9 @@ final class OfficeTatAnalyticsService
         $rows = collect($offices)->mapWithKeys(fn (string $office): array => [$office => $this->emptyRow($category, $office)])->all();
         $sourceEvidenceRows = 0;
         $this->primePamoOfficeCache();
-        $includeLive = in_array(($filters['evidence_type'] ?? 'all'), ['live', 'all'], true);
+        $evidenceType = $filters['evidence_type'] ?? 'all';
+        $liveOnly = $evidenceType === 'live';
+        $includeLive = in_array($evidenceType, ['live', 'all'], true);
 
         if ($includeLive && $cohortEndExclusive->greaterThan($periodStart)) {
             $sourceEvidenceRows = $this->aggregateLiveEvidence($user, $category, $periodStart, $cohortEndExclusive, $asOf, $filters, $rows);
@@ -101,17 +103,19 @@ final class OfficeTatAnalyticsService
                 ? $row['tat_elapsed_seconds_total'] / $row['tat_completed_documents']
                 : null;
             $row['event_derived_tat_completed_documents'] = $row['tat_completed_documents'];
-            $row['manual_historical_tat_average_elapsed_days'] = $row['manual_historical_tat_completed_documents'] > 0
-                ? round($row['manual_historical_tat_elapsed_days_total'] / $row['manual_historical_tat_completed_documents'], 2)
-                : null;
-            $row['manual_historical_tat_average_elapsed_seconds'] = $row['manual_historical_tat_completed_documents'] > 0
-                ? $row['manual_historical_tat_elapsed_seconds_total'] / $row['manual_historical_tat_completed_documents']
-                : null;
-            foreach ([HistoricalDateGapProjector::PREPARATION, HistoricalDateGapProjector::PROCESSING, HistoricalDateGapProjector::HANDOFF] as $basis) {
-                $samples = $row["manual_historical_{$basis}_completed_documents"];
-                $row["manual_historical_{$basis}_average_elapsed_calendar_days"] = $samples > 0
-                    ? (float) ($row["manual_historical_{$basis}_elapsed_calendar_days_total"] / $samples)
+            if (! $liveOnly) {
+                $row['manual_historical_tat_average_elapsed_days'] = $row['manual_historical_tat_completed_documents'] > 0
+                    ? round($row['manual_historical_tat_elapsed_days_total'] / $row['manual_historical_tat_completed_documents'], 2)
                     : null;
+                $row['manual_historical_tat_average_elapsed_seconds'] = $row['manual_historical_tat_completed_documents'] > 0
+                    ? $row['manual_historical_tat_elapsed_seconds_total'] / $row['manual_historical_tat_completed_documents']
+                    : null;
+                foreach ([HistoricalDateGapProjector::PREPARATION, HistoricalDateGapProjector::PROCESSING, HistoricalDateGapProjector::HANDOFF] as $basis) {
+                    $samples = $row["manual_historical_{$basis}_completed_documents"];
+                    $row["manual_historical_{$basis}_average_elapsed_calendar_days"] = $samples > 0
+                        ? (float) ($row["manual_historical_{$basis}_elapsed_calendar_days_total"] / $samples)
+                        : null;
+                }
             }
             $available = $row['timeliness_percent'] !== null
                 && $row['tat_compliance_percent'] !== null
@@ -131,7 +135,7 @@ final class OfficeTatAnalyticsService
 
         $orderedRows = collect($rows)->sortByDesc(fn (array $row): int => (int) ($row['score'] !== null))->sortByDesc(fn (array $row): float => (float) ($row['score'] ?? -1))->values()->all();
 
-        return [
+        $result = [
             'category' => $category,
             'processing_period' => $periodKey,
             'processing_period_label' => $this->periodLabel($periodKey),
@@ -170,6 +174,18 @@ final class OfficeTatAnalyticsService
             ],
             'source_evidence_rows' => $sourceEvidenceRows,
         ];
+
+        if ($liveOnly) {
+            foreach ($result['rows'] as &$row) {
+                foreach (array_keys($row) as $key) {
+                    if ($key === 'historical_report_count' || str_starts_with($key, 'manual_historical_')) unset($row[$key]);
+                }
+            }
+            unset($row);
+            unset($result['definitions']['historical']);
+        }
+
+        return $result;
     }
 
     /** @return OfficeTatConfigurationVersion */
@@ -442,7 +458,7 @@ final class OfficeTatAnalyticsService
     private function aggregateLiveEvidence(User $user, string $category, CarbonImmutable $periodStart, CarbonImmutable $cohortEndExclusive, CarbonImmutable $asOf, array $filters, array &$rows): int
     {
         $sourceEvidenceRows = 0;
-        foreach (array_keys($this->tracking->reportSourceModels()) as $source) {
+        foreach (app(\App\Services\OfficeTat\LiveReportSourceRegistry::class)->all() as $source) {
             if (! $this->canViewSource($user, $source)) continue;
 
             $this->receiptDocumentIdsQuery($source, $periodStart, $cohortEndExclusive, $filters)
@@ -487,9 +503,20 @@ final class OfficeTatAnalyticsService
         $modelClass = $this->sourceModelClass($source);
         if (! $modelClass) return [];
 
-        $query = $modelClass::query()->whereIn('id', $ids)->where(function (Builder $query): void {
-            $query->whereNull('is_historical')->orWhere('is_historical', false);
-        });
+        $model = new $modelClass;
+        $table = $model->getTable();
+        $schema = Schema::connection($model->getConnectionName());
+        $query = $modelClass::query()->whereIn($table.'.id', $ids);
+        if ($schema->hasColumn($table, 'is_historical')) {
+            $query->where(fn (Builder $historical) => $historical->whereNull($table.'.is_historical')->orWhere($table.'.is_historical', false));
+        }
+        if (Schema::hasTable('historical_report_origins')) {
+            $query->whereNotExists(function (QueryBuilder $origins) use ($source, $table): void {
+                $origins->selectRaw('1')->from('historical_report_origins')
+                    ->where('historical_report_origins.source', $source)
+                    ->whereColumn('historical_report_origins.source_record_id', $table.'.id');
+            });
+        }
         if ($source !== 'engp') $query->with('protectedArea.supervisingOfficeAssignment.office');
         $query = $source === 'engp'
             ? $this->organization->scopeDevelopmentQuery($query, $user)
@@ -857,7 +884,7 @@ final class OfficeTatAnalyticsService
             if (in_array($event->event_key, ['received', 'correction_received'], true) && $toCategory === $category && $toOffice && isset($rows[$toOffice])) {
                 $key = $documentKey.':'.$toOffice;
                 if (! isset($cohortKeys[$key])) return;
-                $states[$key] ??= ['office' => $toOffice, 'active' => null, 'segments' => 0.0, 'completed' => false, 'invalid' => false, 'started' => false];
+                $states[$key] ??= ['office' => $toOffice, 'active' => null, 'segments' => 0.0, 'completed' => false, 'invalid' => false, 'started' => false, 'intervals' => [], 'source_id' => $recordId];
                 if ($states[$key]['active'] === null) {
                     $states[$key]['active'] = CarbonImmutable::parse($event->occurred_at, BusinessCalendarService::TIMEZONE);
                 }
@@ -873,7 +900,7 @@ final class OfficeTatAnalyticsService
                 $key = $documentKey.':'.$fromOffice;
                 if (! isset($states[$key])) {
                     if (isset($cohortKeys[$key]) && ! isset($correctionReceiptCohortKeys[$key])) {
-                        $states[$key] = ['office' => $fromOffice, 'active' => null, 'segments' => 0.0, 'completed' => false, 'invalid' => true, 'started' => false];
+                        $states[$key] = ['office' => $fromOffice, 'active' => null, 'segments' => 0.0, 'completed' => false, 'invalid' => true, 'started' => false, 'intervals' => [], 'source_id' => $recordId];
                     }
                     return;
                 }
@@ -889,7 +916,13 @@ final class OfficeTatAnalyticsService
                     $states[$key]['completed'] = false;
                     return;
                 }
-                $states[$key]['segments'] += $states[$key]['active']->diffInSeconds($end);
+                $elapsedSeconds = $states[$key]['active']->diffInSeconds($end);
+                $states[$key]['segments'] += $elapsedSeconds;
+                $states[$key]['intervals'][] = [
+                    'accepted_receipt_at' => $states[$key]['active']->toIso8601String(),
+                    'accepted_handoff_at' => $end->toIso8601String(),
+                    'elapsed_seconds' => $elapsedSeconds,
+                ];
                 $states[$key]['active'] = null;
                 $states[$key]['completed'] = true;
             }
@@ -913,6 +946,7 @@ final class OfficeTatAnalyticsService
 
         foreach ($states as $state) {
             $office = $state['office'];
+            $sourceRecord = $records[(int) $state['source_id']] ?? null;
             if (! isset($rows[$office])) continue;
             if ($state['invalid']) $rows[$office]['tat_missing_evidence']++;
             if ($state['active'] instanceof CarbonImmutable) {
@@ -925,8 +959,37 @@ final class OfficeTatAnalyticsService
                 $rows[$office]['tat_completed_documents']++;
                 $rows[$office]['tat_elapsed_days_total'] += $state['segments'] / 86400;
                 $rows[$office]['tat_elapsed_seconds_total'] += $state['segments'];
+                $workflowKey = (string) ($sourceRecord?->getAttribute('workflow_key') ?? '');
+                if ($workflowKey === '') {
+                    $workflowKey = match ($source) {
+                        'bms' => 'bms', 'bams' => 'bams', 'imea' => 'imea',
+                        'imea-maintenance' => 'imea_facility_maintenance',
+                        'aws' => 'automated_weather_station', 'ipaf-management' => 'ipaf_management',
+                        'revenue' => 'revenue_collection',
+                        default => $source,
+                    };
+                }
+                $rows[$office]['tat_interval_details'][] = [
+                    'source_reference' => $this->tatSourceReference($source, (int) $state['source_id']),
+                    'source_key' => $source,
+                    'source_id' => (int) $state['source_id'],
+                    'workflow_key' => $workflowKey,
+                    'elapsed_seconds' => $state['segments'],
+                    'intervals' => $state['intervals'],
+                ];
             }
         }
+    }
+    private function tatSourceReference(string $source, int $sourceId): string
+    {
+        $label = match ($source) {
+            'engp' => 'ENGP report',
+            'conservation' => 'Conservation report',
+            'bms' => 'BMS report',
+            default => ucwords(str_replace('_', ' ', $source)).' report',
+        };
+
+        return $label.' #'.$sourceId;
     }
 
     /** Stream an event query in occurrence order with a unique id tie-breaker. */
@@ -1010,6 +1073,7 @@ final class OfficeTatAnalyticsService
             'tat_elapsed_seconds_total' => 0.0,
             'tat_pending_elapsed_days_total' => 0.0,
             'tat_missing_evidence' => 0,
+            'tat_interval_details' => [],
             'manual_historical_tat_completed_documents' => 0,
             'manual_historical_tat_elapsed_days_total' => 0.0,
             'manual_historical_tat_elapsed_seconds_total' => 0.0,
@@ -1134,8 +1198,11 @@ final class OfficeTatAnalyticsService
         if ($this->canViewSource($user, 'engp')) {
             foreach ($this->engp->all() as $workflow) $options[] = ['value' => 'engp:'.$workflow['key'], 'label' => $workflow['label']];
         }
-        foreach ($this->tracking->reportSourceModels() as $source => $modelClass) {
-            if (in_array($source, ['conservation', 'engp'], true) || ! $this->canViewSource($user, $source)) continue;
+        $sourceModels = $this->tracking->reportSourceModels();
+        foreach (app(\App\Services\OfficeTat\LiveReportSourceRegistry::class)->native() as $source) {
+            if (! $this->canViewSource($user, $source)) continue;
+            $modelClass = $sourceModels[$source] ?? null;
+            if (! is_string($modelClass)) continue;
             $definition = $this->tracking->source($source);
             if (! $definition) continue;
             $record = new $modelClass;

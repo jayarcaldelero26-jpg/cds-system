@@ -9,12 +9,14 @@ use App\Models\User;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\OfficeTatAnalyticsService;
-use App\Services\Pamo\PamoNativeSourceRegistry;
+use App\Services\OfficeTat\LiveReportSourceRegistry;
+use App\Services\OfficeTatComplianceAssessmentService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Database\Seeders\ModuleDefinitionSeeder;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -61,6 +63,16 @@ function officeTatCoverageEnsureOffice(string $name): void
         'CENRO Mati' => 'office_tat_coverage_mati',
         default => 'office_tat_coverage_'.Str::slug($name, '_'),
     };
+    $existing = OrganizationalOffice::query()
+        ->whereRaw('LOWER(TRIM(name)) = ?', [mb_strtolower(trim($name))])
+        ->whereRaw('LOWER(TRIM(office_type)) = ?', ['cenro'])
+        ->orderBy('id')
+        ->first();
+    if ($existing) {
+        $existing->forceFill(['is_active' => true])->save();
+        return;
+    }
+
     OrganizationalOffice::query()->updateOrCreate(
         ['code' => $code],
         ['name' => $name, 'office_type' => 'CENRO', 'is_active' => true],
@@ -163,16 +175,71 @@ function officeTatCoverageMeasureQueries(callable $callback): array
     }
 }
 
+test('recorded Report Performance covers current native sources and excludes legacy Management Plans', function (): void {
+    $actor = officeTatCoverageActor();
+    $area = officeTatCoverageArea($actor);
+    officeTatCoverageEnsureOffice('CENRO Baganga');
+    $this->seed(ModuleDefinitionSeeder::class);
+
+    $tracking = app(SubmissionTrackingService::class);
+    $nativeSources = app(LiveReportSourceRegistry::class)->native();
+    $expectedConservationSources = [];
+    $sequence = 0;
+    foreach ($nativeSources as $source) {
+        $definition = $tracking->source($source);
+        $modelClass = $tracking->reportSourceModels()[$source];
+        $id = 24000 + ++$sequence;
+        officeTatCoverageInsertSource($actor, (int) $area->getKey(), $source, $source, $id, $sequence);
+        $table = (new $modelClass)->getTable();
+        if (Schema::hasColumn($table, 'date_received_penro')) {
+            DB::table($table)->where('id', $id)->update(['date_received_penro' => '2026-01-14']);
+        }
+        if (($definition['archive_unit'] ?? null) === 'Conservation Unit') $expectedConservationSources[] = $source;
+    }
+
+    $legacyPlanId = 24999;
+    officeTatCoverageInsertSource($actor, (int) $area->getKey(), 'management-plans', 'management_plans', $legacyPlanId, 99);
+    officeTatCoverageEvent($actor, 'management-plans', $legacyPlanId, 'management_plans', 'received', 'PENRO Davao Oriental', 'CENRO Baganga', '2026-01-14 09:00:00');
+
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $conservation = $service->recordedAssessments($actor, 'conservation', '2026-H1', '2026-06-30');
+    $paRow = collect($conservation['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
+    $conservationCoverage = collect($conservation['module_coverage'])->keyBy('source_key');
+    $development = $service->recordedAssessments($actor, 'development', '2026-H1', '2026-06-30');
+    $cenroRow = collect($development['rows'])->firstWhere('name', 'CENRO Baganga');
+    $developmentCoverage = collect($development['module_coverage'])->keyBy('source_key');
+
+    expect($nativeSources)->toHaveCount(7)
+        ->and($nativeSources)->not->toContain('management-plans')
+        ->and($expectedConservationSources)->toHaveCount(7)
+        ->and($conservation['activity_count'])->toBe(7)
+        ->and($conservation['received_activity_count'])->toBe(7)
+        ->and($paRow['due_count'])->toBe(7)
+        ->and($development['activity_count'])->toBe(0)
+        ->and($development['received_activity_count'])->toBe(0)
+        ->and($cenroRow['due_count'])->toBe(0)
+        ->and($developmentCoverage->has('management-plans'))->toBeFalse();
+
+    foreach ($expectedConservationSources as $source) {
+        $item = $conservationCoverage->get($source);
+        expect($item)->not->toBeNull()
+            ->and($item['live_record_count'])->toBe(1)
+            ->and($item['eligible_recorded_count'])->toBe(1)
+            ->and($item['received_count'])->toBe(1)
+            ->and($item['due_count'])->toBe(1);
+    }
+});
 test('Office TAT covers every source family and generic workflow registered for the viewer', function (): void {
     $actor = officeTatCoverageActor();
     $area = officeTatCoverageArea($actor);
     officeTatCoverageEnsureOffice('CENRO Baganga');
+    $this->seed(ModuleDefinitionSeeder::class);
 
     $tracking = app(SubmissionTrackingService::class);
     $sourceModels = $tracking->reportSourceModels();
     $conservationWorkflows = app(ConservationReportWorkflowRegistry::class)->all();
     $engpWorkflows = app(EngpReportWorkflowRegistry::class)->all();
-    $nativeSourceKeys = collect(app(PamoNativeSourceRegistry::class)->all())->pluck('source')->unique()->values()->all();
+    $nativeSourceKeys = app(LiveReportSourceRegistry::class)->native();
 
     expect(array_keys($sourceModels))->toBe($tracking->archiveSourceKeys())
         ->and(array_diff($nativeSourceKeys, array_keys($sourceModels)))->toBe([])
@@ -180,8 +247,8 @@ test('Office TAT covers every source family and generic workflow registered for 
 
     $fixtures = [];
     $sequence = 1;
-    foreach ($sourceModels as $source => $_modelClass) {
-        if (in_array($source, ['conservation', 'engp'], true)) continue;
+    foreach ($nativeSourceKeys as $source) {
+        $_modelClass = $sourceModels[$source];
         $id = 8000 + $sequence;
         officeTatCoverageInsertSource($actor, (int) $area->getKey(), $source, $source, $id, $sequence);
         officeTatCoverageAddCompletedVisit($actor, $source, $id, $source, 'CENRO Baganga', '2026-01-05 09:00:00', '2026-01-06 09:00:00');
@@ -205,12 +272,19 @@ test('Office TAT covers every source family and generic workflow registered for 
         $sequence++;
     }
 
+    $legacyPlanId = 18999;
+    officeTatCoverageInsertSource($actor, (int) $area->getKey(), 'management-plans', 'management_plans', $legacyPlanId, 99);
+    officeTatCoverageAddCompletedVisit($actor, 'management-plans', $legacyPlanId, 'management_plans', 'CENRO Baganga', '2026-01-05 09:00:00', '2026-01-06 09:00:00');
+
     $data = officeTatCoverageAnalytics($actor);
     $row = collect($data['rows'])->firstWhere('office', 'CENRO Baganga');
     $expectedSamples = count($fixtures);
     $options = collect($data['options']['workflows'])->keyBy('value');
 
-    expect($row['documents_received'])->toBe($expectedSamples)
+    expect($nativeSourceKeys)->toHaveCount(7)
+        ->and($nativeSourceKeys)->not->toContain('management-plans')
+        ->and($options->has('management-plans:management-plans'))->toBeFalse()
+        ->and($row['documents_received'])->toBe($expectedSamples)
         ->and($row['event_derived_received'])->toBe($expectedSamples)
         ->and($row['tat_completed_documents'])->toBe($expectedSamples)
         ->and($row['tat_elapsed_seconds_total'])->toBe($expectedSamples * 86400.0)

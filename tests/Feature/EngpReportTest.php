@@ -820,6 +820,32 @@ test('ENGP summary excludes the weekly accomplishment workflow', function () {
     $this->actingAs($this->user)->get(route('engp-reports.summary'))->assertOk()->assertInertia(fn ($page) => $page->component('Engp/Index')->where('workflow', null)->has('summary', 11));
 });
 
+test('ENGP routing relation isolates source and report identity and orders timeline events', function (): void {
+    $report = EngpReportSubmission::create(engpPayload());
+    $otherReport = EngpReportSubmission::create(engpPayload(['office' => 'CENRO Mati']));
+    $event = [
+        'source_type' => 'engp',
+        'source_id' => $report->id,
+        'workflow_key' => 'cbep',
+        'event_key' => 'received',
+        'from_stage' => DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS,
+        'to_stage' => DocumentRoutingProfileRegistry::PENRO_RECORDS,
+        'from_office' => 'CENRO Baganga',
+        'to_office' => 'PENRO Davao Oriental',
+        'occurred_at' => '2026-01-18 10:00:00',
+    ];
+    $later = DocumentRoutingEvent::create($event);
+    $earlier = DocumentRoutingEvent::create([...$event, 'occurred_at' => '2026-01-17 10:00:00']);
+    $sameTime = DocumentRoutingEvent::create($event);
+    DocumentRoutingEvent::create([...$event, 'source_type' => 'bms']);
+    DocumentRoutingEvent::create([...$event, 'source_id' => $otherReport->id]);
+    $expectedIds = [$earlier->id, $later->id, $sameTime->id];
+
+    expect($report->documentRoutingEvents->modelKeys())->toBe($expectedIds);
+    $eager = EngpReportSubmission::query()->with('documentRoutingEvents')->findOrFail($report->id);
+    expect($eager->documentRoutingEvents->modelKeys())->toBe($expectedIds);
+});
+
 test('ENGP summary counts remain within the authenticated development office scope', function (): void {
     $scopedUser = User::factory()->create([
         'unit_assignment' => 'development',
@@ -827,16 +853,42 @@ test('ENGP summary counts remain within the authenticated development office sco
         'office_designated' => 'CENRO Baganga',
     ]);
     $scopedUser->givePermissionTo(Permission::findOrCreate('technical-reports.view', 'web'));
-    EngpReportSubmission::create(engpPayload(['office' => 'CENRO Baganga', 'date_received_penro' => '2026-01-18']));
-    EngpReportSubmission::create(engpPayload(['office' => 'CENRO Mati']));
+    $report = EngpReportSubmission::create(engpPayload(['office' => 'CENRO Baganga', 'date_received_penro' => '2026-01-18']));
+    $foreignReport = EngpReportSubmission::create(engpPayload(['office' => 'CENRO Mati']));
+    $release = [
+        'source_type' => 'engp',
+        'source_id' => $report->id,
+        'workflow_key' => 'cbep',
+        'event_key' => 'forwarded',
+        'from_stage' => DocumentRoutingProfileRegistry::CENRO_RECORDS,
+        'to_stage' => DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS,
+        'from_office' => 'CENRO Baganga',
+        'to_office' => 'PENRO Davao Oriental',
+        'occurred_at' => '2026-01-17 10:00:00',
+    ];
+    DocumentRoutingEvent::create($release);
+    DocumentRoutingEvent::create([...$release, 'source_type' => 'conservation', 'occurred_at' => '2026-01-19 10:00:00']);
+    DocumentRoutingEvent::create([...$release, 'source_id' => $foreignReport->id, 'from_office' => 'CENRO Mati', 'occurred_at' => '2026-01-20 10:00:00']);
 
-    $this->actingAs($scopedUser)->get(route('engp-reports.summary'))
+    $this->actingAs($scopedUser)->get(route('engp-reports.summary', ['year' => 2026]))
+        ->assertOk()
         ->assertInertia(fn ($page) => $page
             ->where('summary.0.workflow_key', 'cbep')
             ->where('summary.0.records', 1)
             ->has('summaryRows', 1)
             ->where('summaryRows.0.office', 'CENRO Baganga')
-            ->where('summaryRows.0.monitoring_status', 'Report Submitted'));
+            ->where('summaryRows.0.monitoring_status', 'Report Submitted')
+            ->where('summaryRows.0.date_released_cenro', '2026-01-17')
+            ->where('summaryRows.0.cenro_release_state', 'recorded'));
+
+    $this->get(route('engp-reports.index', ['workflow' => 'cbep', 'year' => 2026]))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->has('submissions.data', 1)
+            ->where('submissions.data.0.id', $report->id)
+            ->where('submissions.data.0.office', 'CENRO Baganga')
+            ->where('submissions.data.0.date_released_cenro', '2026-01-17')
+            ->where('submissions.data.0.cenro_release_state', 'recorded'));
 });
 
 test('scoped ENGP users receive only their authorized office choices', function (): void {

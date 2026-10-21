@@ -20,7 +20,7 @@ final class OfficeTatController extends Controller
     {
         $filters = $request->only([
             'category', 'processing_period', 'as_of_date', 'reporting_period', 'reporting_year',
-            'workflow', 'protected_area_id', 'evidence_type', 'view', 'unit',
+            'workflow', 'protected_area_id', 'view', 'unit',
         ]);
         $periodKey = $analytics->canonicalPeriodKey($filters['processing_period'] ?? null);
         $legacyAssessmentState = $request->hasAny(['assessment_type', 'assessment_year', 'semester']);
@@ -31,6 +31,7 @@ final class OfficeTatController extends Controller
             return Redirect::route('office-tat.index', $filters);
         }
         $filters['processing_period'] = $periodKey;
+        $filters['evidence_type'] = 'live';
         $data = $analytics->analytics($request->user(), $filters);
 
         $organization = app(OrganizationalAccessService::class);
@@ -42,21 +43,29 @@ final class OfficeTatController extends Controller
         $filters['unit'] = $selectedUnit;
         $filters['view'] = in_array(($filters['view'] ?? null), ['report-performance', 'average-tat'], true)
             ? $filters['view'] : 'report-performance';
-        $globalAssessmentAccess = $organization->isGlobal($request->user());
-        $officialAssessments = $globalAssessmentAccess ? $assessments->assessments($periodKey, $data['as_of_date']) : null;
+
+        $recordedAssessment = $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $data['as_of_date']);
+        $tatSamplesBySource = collect($data['rows'] ?? [])->flatMap(fn (array $row): array => $row['tat_interval_details'] ?? [])
+            ->filter(fn (array $sample): bool => filled($sample['source_key'] ?? null))
+            ->countBy(fn (array $sample): string => $sample['source_key'].':'.($sample['workflow_key'] ?? $sample['source_key']));
+        if (isset($recordedAssessment['module_coverage']) && is_array($recordedAssessment['module_coverage'])) {
+            foreach ($recordedAssessment['module_coverage'] as &$moduleCoverage) {
+                $sampleKey = $moduleCoverage['source_key'].':'.($moduleCoverage['workflow_key'] ?? $moduleCoverage['source_key']);
+                $moduleCoverage['live_tat_samples'] = (int) ($tatSamplesBySource[$sampleKey] ?? 0);
+            }
+            unset($moduleCoverage);
+        }
         return Inertia::render('Admin/OfficeTat/Index', [
             'analytics' => $data,
-            'complianceAssessments' => $officialAssessments,
-            'recordedAssessment' => $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $data['as_of_date']),
+
+            'recordedAssessment' => $recordedAssessment,
             'selectedUnit' => $selectedUnit,
             'authorizedUnits' => $authorizedUnits,
             'selectedView' => $filters['view'],
             'filters' => $filters,
             'canConfigure' => $request->user()?->can('office-tat.configure') ?? false,
             'configurationSaved' => $request->session()->get('office_tat_configuration_saved'),
-            'assessmentSaved' => $request->session()->get('office_tat_assessment_saved'),
-            'globalAssessmentAccess' => $globalAssessmentAccess,
-            'obligationSetupCatalogue' => $globalAssessmentAccess ? app(OfficeTatObligationEvidenceSetupService::class)->catalogue() : [],
+
         ]);
     }
 

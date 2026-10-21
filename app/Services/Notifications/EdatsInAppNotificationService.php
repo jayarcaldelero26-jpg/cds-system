@@ -12,6 +12,8 @@ use App\Services\Compliance\OverdueReport;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
+use App\Services\SubmissionTracking\DocumentRoutingAccessService;
+use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Database\Eloquent\Model;
@@ -37,7 +39,8 @@ final class EdatsInAppNotificationService
      */
     public static function actionUrl(array $data, User $user): string
     {
-        if (! $user->can('reports.view')) {
+        $organization = app(OrganizationalAccessService::class);
+        if (! $user->is_active || ! $user->is_approved || ! $organization->canViewSubmissionTracking($user)) {
             return route('dashboard');
         }
 
@@ -54,15 +57,50 @@ final class EdatsInAppNotificationService
             ? $view
             : null;
 
-        return $source !== null && $sourceId !== false
-            ? route('submission-tracking.index', array_filter([
-                'view' => $view,
-                'source' => $source,
-                'source_id' => $sourceId,
-            ], static fn (mixed $value): bool => $value !== null))
-            : route('submission-tracking.index');
-    }
+        if ($source === null || $sourceId === false) {
+            return route('submission-tracking.index', array_filter(
+                ['view' => $view],
+                static fn (mixed $value): bool => $value !== null,
+            ));
+        }
 
+        $definition = app(SubmissionTrackingService::class)->source($source);
+        $modelClass = $definition['model'] ?? null;
+        if (! is_string($modelClass) || ! class_exists($modelClass)) {
+            return route('submission-tracking.index', array_filter(
+                ['view' => $view],
+                static fn (mixed $value): bool => $value !== null,
+            ));
+        }
+
+        $record = $modelClass::query()->find($sourceId);
+        if (! $record) {
+            // Keep legacy generic-report links stable, while withholding unknown
+            // record identifiers from role-free, scope-based Tracking users.
+            if (! $user->can('reports.view')) {
+                return route('submission-tracking.index', array_filter(
+                    ['view' => $view],
+                    static fn (mixed $value): bool => $value !== null,
+                ));
+            }
+        } elseif (! app(DocumentRoutingAccessService::class)->canView(
+            $user,
+            $record,
+            $source,
+            $definition['ability'] ?? null,
+        )) {
+            return route('submission-tracking.index', array_filter(
+                ['view' => $view],
+                static fn (mixed $value): bool => $value !== null,
+            ));
+        }
+
+        return route('submission-tracking.index', array_filter([
+            'view' => $view,
+            'source' => $source,
+            'source_id' => $sourceId,
+        ], static fn (mixed $value): bool => $value !== null));
+    }
     public function syncDeadlineNotifications(?CarbonImmutable $today = null): void
     {
        $today ??= CarbonImmutable::now('Asia/Manila')->startOfDay();

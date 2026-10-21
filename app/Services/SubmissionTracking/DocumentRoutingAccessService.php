@@ -208,7 +208,7 @@ final class DocumentRoutingAccessService
         $areaId = (int) $record->getAttribute('protected_area_id');
         $facts = $this->organization->pamoAssignmentForProtectedArea($areaId);
         if (! $facts || (int) $user->protected_area_id !== $areaId) return false;
-        return true;
+        return $this->isPamoNativeOrigin($user, $record, $sourceKey, $facts);
     }
 
     /** Native PAMO routing actions are limited to reports promoted from this actor's linked draft. */

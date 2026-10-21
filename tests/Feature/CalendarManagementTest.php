@@ -147,6 +147,8 @@ test('calendar projects submitted reports by actual submission month and combine
             ->where('filters.module', 'bms')
             ->where('filters.protected_area_id', $area->id)
             ->has('movEvents', 1)
+            ->where('movEvents.0.event_date', '2026-08-20')
+            ->where('movEvents.0.calendar_basis', 'PENRO receipt date')
             ->where('movEvents.0.submission_date', '2026-08-20')
             ->where('movEvents.0.date_accomplished', '2026-07-30')
             ->where('movEvents.0.protected_area_name', $area->name));

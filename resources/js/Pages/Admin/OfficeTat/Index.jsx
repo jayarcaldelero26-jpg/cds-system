@@ -3,6 +3,7 @@ import { Icon } from '@iconify/react';
 import { useEffect, useMemo, useState } from 'react';
 import Button from '@/Components/Button';
 import ComplianceTabList from '@/Components/Compliance/ComplianceTabList';
+import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudTable from '@/Components/Crud/CrudTable';
 import DatePicker from '@/Components/DatePicker';
@@ -20,17 +21,10 @@ const categories = [
 ];
 
 const defaultWeights = { timeliness: 0.5, tat_compliance: 0.35, volume: 0.15 };
-const historicalGapBases = {
-    preparation: 'Date Conducted → Date Accomplished',
-    processing: 'Accomplished date → Original CENRO Release',
-    handoff: 'Original CENRO Release → Original PENRO Receipt',
-};
-
-export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfigure = false, configurationSaved = null, assessmentSaved = null, complianceAssessments = null, recordedAssessment = null, selectedUnit = 'conservation', authorizedUnits = [], selectedView = 'report-performance', globalAssessmentAccess = false }) {
+export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfigure = false, configurationSaved = null, recordedAssessment = null, selectedUnit = 'conservation', authorizedUnits = [], selectedView = 'report-performance' }) {
     const [search, setSearch] = useState('');
     const [showConfig, setShowConfig] = useState(null);
     const [secondaryOpen, setSecondaryOpen] = useState(false);
-    const [requestedHistoricalBasis, setRequestedHistoricalBasis] = useState('processing');
     const [activeView, setActiveView] = useState(selectedView || filters.view || 'report-performance');
     const displayedReportUnit = officeTatDisplayUnit(recordedAssessment, selectedUnit);
     const [assessment, setAssessment] = useState(() => analytics.assessment_period || parseAssessmentPeriodKey(analytics.processing_period));
@@ -41,7 +35,6 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
         reporting_period: filters.reporting_period || '',
         workflow: filters.workflow || 'all',
         protected_area_id: filters.protected_area_id || '',
-        evidence_type: filters.evidence_type || 'all',
     });
     useEffect(() => {
         const nextAssessment = analytics.assessment_period || parseAssessmentPeriodKey(analytics.processing_period);
@@ -51,32 +44,21 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
     useEffect(() => setActiveView(selectedView || 'report-performance'), [selectedView]);
     const form = useForm({ office_category: '', office: '', period_key: '', volume_target: '', weights: defaultWeights });
     const selectedCategory = categories.find(([value]) => value === analytics.category);
-    const evidenceType = analytics.evidence_type || filters.evidence_type || 'all';
-    const includeLive = evidenceType === 'all' || evidenceType === 'live';
-    const includeHistorical = evidenceType === 'all' || evidenceType === 'historical';
-    const historicalBasis = analytics.category === 'CENRO' ? 'handoff' : requestedHistoricalBasis;
-    const historicalGapLabel = historicalGapBases[historicalBasis] || historicalGapBases.processing;
     const periodLabel = analytics.processing_period_label || assessment?.label || analytics.processing_period || 'Selected assessment period';
 
     const visibleRows = useMemo(() => (analytics.rows || []).filter(row =>
         String(row.office || '').toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
     ), [analytics.rows, search]);
     const liveRanking = useMemo(() => rankTatRows(visibleRows, 'live'), [visibleRows]);
-    const historicalRanking = useMemo(() => rankTatRows(visibleRows, 'historical', historicalBasis), [visibleRows, historicalBasis]);
     const pamoPreparation = analytics.pamo_preparation || null;
     const visiblePreparationRows = useMemo(() => (pamoPreparation?.rows || []).filter(row =>
         String(row.office || '').toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
     ), [pamoPreparation?.rows, search]);
     const pamoPreparationRanking = useMemo(() => rankTatRows(visiblePreparationRows, 'pamo_preparation'), [visiblePreparationRows]);
     const liveAverage = weightedAverageSeconds(liveRanking);
-    const historicalAverage = weightedAverageSeconds(historicalRanking);
     const liveCompleted = sum(liveRanking, row => row.completedDocuments);
     const livePending = sum(liveRanking, row => row.pendingDocuments);
     const liveMissing = sum(liveRanking, row => row.missingDocuments);
-    const historicalCompleted = sum(historicalRanking, row => row.completedDocuments);
-    const historicalMissing = sum(historicalRanking, row => row.missingDocuments + row.invalidDocuments);
-    const historicalUnavailable = sum(historicalRanking, row => row.unsupportedDocuments + row.notApplicableDocuments);
-    const historicalReportCount = sum(historicalRanking, row => row.historicalReports);
     const pamoPreparationAverage = weightedAverageSeconds(pamoPreparationRanking);
     const pamoPreparationCompleted = sum(pamoPreparationRanking, row => row.completedDocuments);
     const pamoPreparationPending = sum(pamoPreparationRanking, row => row.pendingDocuments);
@@ -88,6 +70,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
         delete query.assessment_year;
         delete query.semester;
         query.processing_period = values.processing_period || assessmentPeriodKey(assessment);
+        query.evidence_type = 'live';
         router.get('/admin/office-tat', query, { preserveScroll: true, preserveState: true, replace: true });
     };
 
@@ -104,7 +87,6 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
             reporting_period: '',
             workflow: 'all',
             protected_area_id: '',
-            evidence_type: 'all',
         };
         setDraftFilters(next);
         applyValues(next);
@@ -164,7 +146,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
                         <Icon icon="lucide:chart-no-axes-combined" width="24" height="24" className="text-green-700 dark:text-green-300" aria-hidden="true" />
                         Office Turnaround Time
                     </h1>
-                    <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600 dark:text-gray-300">Review the separate compliance-first unit ratings and the existing receipt-to-handoff Average TAT measures. Historical date gaps remain separate from live evidence.</p>
+                    <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600 dark:text-gray-300">Report Performance and Average Office Processing Time use eligible live reports and accepted routing events.</p>
                 </div>
                 <div className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-right dark:border-gray-800 dark:bg-gray-900">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">Results as of</p>
@@ -173,12 +155,12 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
             </header>
 
             <section className="mt-5 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900" aria-label="Office TAT view">
-                <ComplianceTabList tabs={[["report-performance", "Report Performance"], ["average-tat", "Average TAT"]]} value={activeView} onChange={switchView} label="Office TAT view" />
+                <ComplianceTabList tabs={[["report-performance", "Report Performance"], ["average-tat", "Average Office Processing Time"]]} value={activeView} onChange={switchView} label="Office TAT view" />
             </section>
 
-            {activeView === "average-tat" && <section className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900" aria-label="Average TAT office category">
-                <ComplianceTabList tabs={categories} value={analytics.category || "PAMO"} onChange={switchCategory} label="Average TAT office category" />
-                <p className="mt-2 px-1 text-xs text-gray-500 dark:text-gray-400">{selectedCategory?.[1] || "Authorized offices"} · PA custody and ENGP office receipt-to-handoff intervals remain separate.</p>
+            {activeView === "average-tat" && <section className="mt-4 rounded-2xl border border-gray-200 bg-white p-3 shadow-sm dark:border-gray-800 dark:bg-gray-900" aria-label="Average Office Processing Time office category">
+                <ComplianceTabList tabs={categories} value={analytics.category || "PAMO"} onChange={switchCategory} label="Average Office Processing Time office category" />
+                <p className="mt-2 px-1 text-xs text-gray-500 dark:text-gray-400">{selectedCategory?.[1] || "Authorized offices"} · live office receipt-to-handoff intervals.</p>
             </section>}
 
             <section className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -205,14 +187,6 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
                             <option value="">All authorized areas</option>
                             {(analytics.options?.protectedAreas || []).map(area => <option key={area.id} value={area.id}>{area.name}</option>)}
                         </FloatingSelect>
-                        <FloatingSelect label="Evidence basis" size="sm" value={draftFilters.evidence_type} onChange={event => setDraftFilters(current => ({ ...current, evidence_type: event.target.value }))}>
-                            <option value="all">Live and historical, shown separately</option>
-                            <option value="live">Live routing events</option>
-                            <option value="historical">Manual historical dates</option>
-                        </FloatingSelect>
-                        {includeHistorical && analytics.category === 'PAMO' && <FloatingSelect label="Historical date gap" size="sm" value={historicalBasis} onChange={event => setRequestedHistoricalBasis(event.target.value)}>
-                            {Object.entries(historicalGapBases).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                        </FloatingSelect>}
                         </>}
                         <div className="flex items-end sm:col-span-2 sm:justify-end">
                             <Button type="submit" size="compact" className="rounded-lg px-4 py-2 text-xs">
@@ -229,15 +203,11 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
 
             {activeView === 'report-performance' && <ComplianceFirstAssessments
                 data={recordedAssessment}
-                complianceAssessments={globalAssessmentAccess ? complianceAssessments : null}
-                canConfigure={canConfigure}
                 periodLabel={periodLabel}
-                periodKey={analytics.processing_period}
                 asOfDate={analytics.as_of_date}
                 selectedUnit={displayedReportUnit}
                 authorizedUnits={authorizedUnits}
                 onUnitChange={switchReportUnit}
-                saved={assessmentSaved}
             />}
 
             {activeView === 'average-tat' && <>
@@ -245,54 +215,35 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
                 Version {configurationSaved.version} saved for {configurationSaved.office} · {periodLabel}.
             </div>}
 
-            <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Average turnaround time summary">
-                {includeLive && <>
-                    <SummaryCard icon="lucide:clock-3" label="Overall live average TAT" value={liveAverage == null ? 'N/A' : formatDuration(liveAverage)} detail={`${periodLabel} · ${liveCompleted} completed documents · weighted by document count`} />
-                    <SummaryCard icon="lucide:files" label="Live completed documents" value={liveCompleted} detail={`${periodLabel} · one sample per source document and office`} />
-                    <SummaryCard icon="lucide:hourglass" label="Live pending / missing" value={`${livePending} / ${liveMissing}`} detail={`${periodLabel} · incomplete and invalid interval evidence stays outside the average`} />
-                </>}
-                {includeHistorical && <>
-                <SummaryCard
-                    icon="lucide:archive"
-                    label={`Historical gap · ${historicalBasis === 'preparation' ? 'preparation' : historicalBasis === 'processing' ? 'processing' : 'handoff'}`}
-                    value={historicalAverage == null ? 'N/A' : formatDuration(historicalAverage)}
-                    detail={`${periodLabel} · ${historicalCompleted} eligible documents · ${historicalGapLabel} · Asia/Manila calendar days`}
-                />
-                <SummaryCard icon="lucide:archive" label="Eligible historical reports" value={historicalReportCount} detail={`${periodLabel} · authorized reports with an original receipt anchor in this cohort`} />
-                <SummaryCard icon="lucide:clock-3" label="Missing / invalid · unsupported / N/A" value={`${historicalMissing} · ${historicalUnavailable}`} detail="Incomplete intervals are excluded from their date-gap averages; unsupported source endpoints are reported separately." />
-                </>}
-                {includeLive && analytics.category === 'PAMO' && pamoPreparation?.available && <>
-                    <SummaryCard icon="lucide:hourglass" label="PAMO preparation average" value={pamoPreparationAverage == null ? 'N/A' : formatDuration(pamoPreparationAverage)} detail={`${periodLabel} · first saved draft to accepted PAMO handoff · document weighted`} />
-                    <SummaryCard icon="lucide:files" label="PAMO preparation documents" value={`${pamoPreparationCompleted} / ${pamoPreparation.overall?.documents_started || 0}`} detail="Completed samples / drafts started in the selected start-date cohort" />
-                    <SummaryCard icon="lucide:clock-3" label="PAMO pending / missing evidence" value={`${pamoPreparationPending} / ${pamoPreparationMissing}`} detail="Open drafts and correction episodes remain pending; missing clocks stay outside the average." />
+            <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Average Office Processing Time summary">
+                <SummaryCard icon="lucide:clock-3" label="Average processing time" value={liveAverage == null ? 'No completed intervals' : formatDuration(liveAverage)} detail={periodLabel + ' · ' + liveCompleted + ' completed live reports · weighted by report count'} />
+                <SummaryCard icon="lucide:files" label="Eligible completed reports" value={liveCompleted} detail="One completed interval sample per source report and office." />
+                <SummaryCard icon="lucide:hourglass" label="Pending / incomplete intervals" value={livePending + ' / ' + liveMissing} detail="Pending and incomplete intervals are excluded from the average." />
+                {analytics.category === 'PAMO' && pamoPreparation?.available && <>
+                    <SummaryCard icon="lucide:hourglass" label="PAMO preparation average" value={pamoPreparationAverage == null ? 'No completed intervals' : formatDuration(pamoPreparationAverage)} detail={periodLabel + ' · first saved draft to accepted PAMO handoff · weighted by report count'} />
+                    <SummaryCard icon="lucide:files" label="PAMO preparation reports" value={pamoPreparationCompleted + ' / ' + (pamoPreparation.overall?.documents_started || 0)} detail="Completed samples / drafts started in the selected start-date cohort." />
+                    <SummaryCard icon="lucide:clock-3" label="PAMO pending / incomplete" value={pamoPreparationPending + ' / ' + pamoPreparationMissing} detail="Open drafts and incomplete intervals are excluded from the average." />
                 </>}
             </section>
 
             <section className="mt-5" aria-labelledby="tat-ranking-heading">
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
                     <div>
-                        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-green-800 dark:text-green-300">{periodLabel} · {evidenceLabel(evidenceType)}</p>
-                        <h2 id="tat-ranking-heading" className="mt-1 text-lg font-extrabold text-gray-950 dark:text-white">Turnaround Time and Historical Date Gap Ranking</h2>
-                        <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300">Live time runs from an office’s accepted receipt to its next accepted handoff. Historical date gaps use separate original source dates and never represent live custody time.</p>
+                        <p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-green-800 dark:text-green-300">{periodLabel}</p>
+                        <h2 id="tat-ranking-heading" className="mt-1 text-lg font-extrabold text-gray-950 dark:text-white">Average Office Processing Time</h2>
+                        <p className="mt-1 text-xs leading-5 text-gray-600 dark:text-gray-300">Elapsed calendar time from an office’s accepted receipt to its next accepted handoff; time in transit and source reporting time are excluded.</p>
                     </div>
-                    <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1.5 text-[11px] font-bold text-green-900 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">Shortest duration ranks first</span>
+                    <span className="rounded-full border border-green-200 bg-green-50 px-3 py-1.5 text-[11px] font-bold text-green-900 dark:border-green-900 dark:bg-green-950/30 dark:text-green-200">Shortest time ranks first</span>
                 </div>
 
-                {includeLive && <RankingSection title="Live routing event average" description={`${periodLabel} · accepted receipt-to-handoff event durations · calendar time · one completed sample per office and source record.`} rows={liveRanking} evidence="live" />}
-                {includeHistorical && <RankingSection
-                    title={`Historical date gap · ${historicalGapLabel}`}
-                    description={`${periodLabel} · ${historicalAttributionDescription(analytics.category, historicalBasis)}`}
-                    rows={historicalRanking}
-                    evidence="historical"
-                    basis={historicalBasis}
-                />}
-                {includeLive && analytics.category === 'PAMO' && pamoPreparation?.available && <RankingSection
+                <RankingSection title="Live office processing time" description={periodLabel + ' · accepted office receipt to next accepted handoff · elapsed calendar time.'} rows={liveRanking} evidence="live" />
+                {analytics.category === 'PAMO' && pamoPreparation?.available && <RankingSection
                     title="PAMO preparation time"
-                    description={`${periodLabel} · first persisted draft start → successful PAMO outbound handoff · supported correction intervals are included once per document · cohort by start date`}
+                    description={periodLabel + ' · first persisted draft to accepted PAMO handoff · correction intervals are summed once per report.'}
                     rows={pamoPreparationRanking}
                     evidence="pamo_preparation"
                 />}
-                {includeLive && analytics.category === 'PAMO' && pamoPreparation && !pamoPreparation.available && <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">PAMO preparation ranking is unavailable: {pamoPreparation.unavailable_reason || 'pilot evidence is not available for this period.'}</div>}
+                {analytics.category === 'PAMO' && pamoPreparation && !pamoPreparation.available && <div role="status" className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">PAMO preparation ranking is unavailable: {pamoPreparation.unavailable_reason || 'No preparation interval evidence is available for this period.'}</div>}
             </section>
 
             <details open={secondaryOpen} onToggle={event => setSecondaryOpen(event.currentTarget.open)} className="mt-5 rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
@@ -311,7 +262,7 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
                         rowKey={row => `${row.office_category}:${row.office}`}
                         emptyTitle="No office rows match"
                         emptyDescription="Clear the office search or select another category."
-                        columns={secondaryColumns(canConfigure, startConfig, evidenceType)}
+                        columns={secondaryColumns(canConfigure, startConfig)}
                     />
                 </div>
             </details>
@@ -333,12 +284,12 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
         >
             {showConfig && <div className="space-y-4">
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                    Average TAT remains available without an SLA or volume target. The weighted performance score is a different measure from compliance-first OTPS; these settings affect only secondary targets and legacy scores.
+                    Average Office Processing Time remains available without an SLA or volume target. The legacy weighted performance score is separate from Overall Score; these settings affect only secondary targets and legacy scores.
                 </p>
                 <FloatingInput id="office-tat-volume-target" label="Positive volume target" type="number" min="1" max="1000000" required value={form.data.volume_target} onChange={event => form.setData('volume_target', event.target.value)} error={form.errors.volume_target} placeholder="Enter an approved target" />
                 <section>
                     <h3 className="text-xs font-bold text-gray-800 dark:text-gray-100">Draft performance score weights</h3>
-                    <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">These saved weights remain separate from fastest-to-slowest average TAT rank.</p>
+                    <p className="mt-1 text-[11px] leading-4 text-gray-500 dark:text-gray-400">These saved weights remain separate from fastest-to-slowest processing time rank.</p>
                     <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
                         {Object.entries({ timeliness: 'Timeliness', tat_compliance: 'Within processing limit', volume: 'Volume' }).map(([key, label]) => <FloatingInput
                             key={key}
@@ -358,66 +309,88 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
     </main>;
 }
 
-function RankingSection({ title, description, rows, evidence, basis = 'handoff' }) {
+function RankingSection({ title, description, rows, evidence = 'live' }) {
+    const [selectedRow, setSelectedRow] = useState(null);
     const measured = rows.filter(row => row.averageSeconds != null);
     const columns = [
-        { key: 'rank', label: 'Rank', headerClassName: 'w-16', render: row => row.rank == null ? <span className="text-gray-400">N/A</span> : <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-gradient-to-r from-emerald-600 to-green-700 px-2 text-xs font-extrabold text-white">{row.rank}</span> },
-        { key: 'office', label: evidence === 'historical' ? 'Reports attributed to' : 'Office', render: row => <span className="font-semibold text-gray-900 dark:text-white">{row.office}</span> },
-        { key: 'average', label: evidence === 'historical' ? 'Average gap · calendar days' : (evidence === 'pamo_preparation' ? 'Average preparation' : 'Average TAT'), headerClassName: 'min-w-48', render: row => <span className={`font-extrabold ${row.averageSeconds == null ? 'text-gray-500 dark:text-gray-400' : 'text-green-900 dark:text-green-200'}`}>{row.averageSeconds == null ? 'N/A' : formatDuration(row.averageSeconds)}</span> },
-        { key: 'duration', label: 'Duration comparison', headerClassName: 'min-w-36', render: row => <DurationBar row={row} maximum={measured.length ? Math.max(...measured.map(item => item.averageSeconds)) : 0} /> },
-        ...(evidence === 'historical' ? [{ key: 'historical-reports', label: 'Historical reports', headerClassName: 'min-w-28', render: row => <span className="font-bold text-gray-900 dark:text-white">{row.historicalReports}</span> }] : []),
-        { key: 'completed', label: evidence === 'historical' ? 'Eligible gap samples' : 'Completed documents', headerClassName: 'min-w-32', render: row => <span className="font-bold text-gray-900 dark:text-white">{row.completedDocuments}</span> },
-        { key: 'evidence', label: 'Evidence / incomplete', headerClassName: 'min-w-52', render: row => <EvidenceDetails row={row} evidence={evidence} basis={basis} /> },
+        { key: 'rank', label: 'Rank', headerClassName: 'w-16', render: row => row.rank == null ? 'Not ranked' : <span className="inline-flex h-8 min-w-8 items-center justify-center rounded-full bg-gradient-to-r from-emerald-600 to-green-700 px-2 text-xs font-extrabold text-white">{row.rank}</span> },
+        { key: 'office', label: 'Office', render: row => <span className="font-semibold text-gray-900 dark:text-white">{row.office}</span> },
+        { key: 'average', label: evidence === 'live' ? 'Average processing time' : 'Average preparation time', headerClassName: 'min-w-48', render: row => <span className={'font-extrabold ' + (row.averageSeconds == null ? 'text-gray-500 dark:text-gray-400' : 'text-green-900 dark:text-green-200')}>{row.averageSeconds == null ? 'No completed interval' : formatDuration(row.averageSeconds)}</span> },
+        { key: 'interval', label: 'Processing interval', headerClassName: 'min-w-36', render: row => <DurationBar row={row} maximum={measured.length ? Math.max(...measured.map(item => item.averageSeconds)) : 0} /> },
+        { key: 'completed', label: 'Completed reports', headerClassName: 'min-w-32', render: row => <span className="font-bold text-gray-900 dark:text-white">{row.completedDocuments}</span> },
+        { key: 'evidence', label: 'Interval evidence', headerClassName: 'min-w-52', render: row => <EvidenceDetails row={row} evidence={evidence} /> },
     ];
-    const titleId = `tat-${evidence}-ranking`;
+    const titleId = 'tat-' + evidence + '-ranking';
 
-    return <section className="mb-4" aria-labelledby={titleId}>
-        <h3 id={titleId} className="sr-only">{title}</h3>
-        {measured.length === 0 && <div role="status" className="mb-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">No valid {evidence === 'live' ? 'live event' : evidence === 'pamo_preparation' ? 'PAMO preparation' : `${historicalGapBases[basis] || 'historical date'} gap`} averages for this period and filter. {evidence === 'historical' && `${rows.reduce((total, row) => total + row.historicalReports, 0)} eligible historical reports remain visible under the original receipt cohort. `}Offices with no valid samples have no numeric rank.</div>}
-        <CrudTable
+    return <>
+        <section className="mb-4" aria-labelledby={titleId}>
+            <h3 id={titleId} className="sr-only">{title}</h3>
+            {measured.length === 0 && <div role="status" className="mb-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 text-xs text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300">
+                No completed {evidence === 'live' ? 'accepted receipt-to-handoff' : 'PAMO preparation'} intervals are available for this period and filter. Pending and incomplete intervals have no numeric rank.
+            </div>}
+            <CrudTable
+                compact
+                title={title}
+                subtitle={description}
+                helperText="Average = total completed interval time ÷ completed reports. Lower time is faster."
+                rows={rows}
+                columns={columns}
+                rowKey={row => String(row.office_category) + ':' + row.office}
+                caption={title + ': shortest valid average ranks first'}
+                emptyTitle="No authorized offices to rank"
+                emptyDescription="No offices are available for this category and access scope."
+                rowFocusVisibleOnly={evidence === 'live'}
+                onRowClick={evidence === 'live' ? setSelectedRow : undefined}
+                className="mb-3"
+            />
+        </section>
+        {evidence === 'live' && <CrudDetailsModal
+            open={Boolean(selectedRow)}
+            title="Processing time details"
+            subtitle={selectedRow ? selectedRow.office + ' · ' + title : ''}
+            onClose={() => setSelectedRow(null)}
             compact
-            title={title}
-            subtitle={description}
-            helperText="Average = total eligible document duration Ã· completed documents. Lower time is faster."
-            rows={rows}
-            columns={columns}
-            rowKey={row => `${row.office_category}:${row.office}`}
-            caption={`${title}: shortest valid average duration ranks first`}
-            emptyTitle="No authorized offices to rank"
-            emptyDescription="No offices are available for this category and access scope."
-            className="mb-3"
-        />
-    </section>;
+            maxWidth="max-w-4xl"
+        >
+            {selectedRow && <div className="space-y-3">
+                <p className="text-xs leading-5 text-gray-700 dark:text-gray-200">Elapsed calendar time from each accepted office receipt to the next accepted handoff. Each report contributes the sum of its completed correction intervals once.</p>
+                {(selectedRow.tatIntervalDetails || []).map(sample => <article key={sample.source_reference} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                    <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{sample.source_reference}</h3>
+                    <p className="mt-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">Total report processing time: {formatDuration(sample.elapsed_seconds)}</p>
+                    {(sample.intervals || []).map((interval, index) => <dl key={sample.source_reference + '-' + index} className="mt-2 grid gap-2 text-[11px] sm:grid-cols-3">
+                        <DataPoint label="Accepted receipt timestamp" value={interval.accepted_receipt_at} />
+                        <DataPoint label="Next accepted handoff timestamp" value={interval.accepted_handoff_at} />
+                        <DataPoint label="Elapsed calendar time" value={formatDuration(interval.elapsed_seconds)} />
+                    </dl>)}
+                </article>)}
+                {(selectedRow.tatIntervalDetails || []).length === 0 && <p className="text-xs text-gray-600 dark:text-gray-300">No completed accepted receipt-to-handoff interval is available; pending or incomplete evidence is excluded from the average.</p>}
+            </div>}
+        </CrudDetailsModal>}
+    </>;
 }
 
 function DurationBar({ row, maximum }) {
-    if (row.averageSeconds == null) return <span className="text-xs text-gray-400">No measurement</span>;
+    if (row.averageSeconds == null) return <span className="text-xs text-gray-400">No completed interval</span>;
     const width = maximum > 0 ? Math.max(2, (row.averageSeconds / maximum) * 100) : 2;
-    return <div className="min-w-28" aria-label={`${formatDuration(row.averageSeconds)}; shorter duration is faster`}>
+    return <div className="min-w-28" aria-label={formatDuration(row.averageSeconds) + '; shorter time is faster'}>
         <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800" aria-hidden="true">
-            <div className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-green-700" style={{ width: `${width}%` }} />
+            <div className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-green-700" style={{ width: width + '%' }} />
         </div>
     </div>;
 }
 
-function EvidenceDetails({ row, evidence, basis }) {
-    const historical = evidence === 'historical';
+function EvidenceDetails({ row, evidence }) {
     const pending = row.pendingDocuments;
     const missing = row.missingDocuments;
     return <div className="space-y-1 text-xs leading-4 text-gray-600 dark:text-gray-300">
-        <p>{historical
-            ? `${historicalGapBases[basis] || historicalGapBases.handoff} · ${row.office_category === 'PAMO' ? 'grouped by assigned PAMO; this reconstructed interval is not PAMO custody time' : 'original ENGP date evidence'}`
-            : evidence === 'pamo_preparation' ? 'First saved draft → accepted PAMO handoff; completed correction periods are included once per document.' : 'Accepted office receipt → next accepted handoff'}</p>
-        {historical && <p>{row.completedDocuments} eligible document sample{row.completedDocuments === 1 ? '' : 's'}</p>}
-        {(pending > 0 || missing > 0 || row.invalidDocuments > 0 || row.unsupportedDocuments > 0 || row.notApplicableDocuments > 0) && <p className="text-amber-800 dark:text-amber-300">{!historical && `${pending} pending`}{!historical && missing > 0 ? ' · ' : ''}{missing > 0 && `${missing} missing`}{row.invalidDocuments > 0 && `${missing > 0 ? ' · ' : ''}${row.invalidDocuments} invalid`}{row.unsupportedDocuments > 0 && ` · ${row.unsupportedDocuments} unsupported`}{row.notApplicableDocuments > 0 && ` · ${row.notApplicableDocuments} not applicable`}</p>}
-        {!historical && pending === 0 && missing === 0 && <p className="text-gray-500 dark:text-gray-400">{row.completedDocuments} valid completed sample{row.completedDocuments === 1 ? '' : 's'}</p>}
+        <p>{evidence === 'live' ? 'Accepted office receipt → next accepted handoff' : 'First saved draft → accepted PAMO handoff'}</p>
+        {(pending > 0 || missing > 0) && <p className="text-amber-800 dark:text-amber-300">{pending} pending · {missing} incomplete intervals</p>}
+        {pending === 0 && missing === 0 && <p className="text-gray-500 dark:text-gray-400">{row.completedDocuments} completed report samples</p>}
     </div>;
 }
 
-function historicalAttributionDescription(category, basis) {
-    return category === 'PAMO'
-        ? `PA records use the Protected Area’s assigned PAMO. The ${historicalGapBases[basis] || historicalGapBases.processing} gap reconstructs original document dates and is not measured PAMO custody time.`
-        : 'ENGP records are grouped by their assigned CENRO. ENGP has no parent conducted or accomplished date in its source contract, so only original CENRO release → PENRO receipt is supported.';
+function DataPoint({ label, value }) {
+    return <div><dt className="font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</dt><dd className="mt-0.5 font-semibold text-gray-900 dark:text-gray-100">{value}</dd></div>;
 }
 
 function SummaryCard({ icon, label, value, detail }) {
@@ -428,24 +401,15 @@ function SummaryCard({ icon, label, value, detail }) {
     </article>;
 }
 
-function secondaryColumns(canConfigure, onConfigure, evidenceType) {
-    const volumeLabel = evidenceType === 'historical'
-        ? 'Historical reports / target'
-        : evidenceType === 'live'
-            ? 'Live documents / target'
-            : 'Live / historical / target';
+function secondaryColumns(canConfigure, onConfigure) {
     return [
         { key: 'office', label: 'Office', render: row => <span className="font-bold text-gray-900 dark:text-white">{row.office}</span> },
-        { key: 'timeliness', label: 'Timeliness', render: row => row.timeliness_percent == null ? 'N/A' : `${Math.round(row.timeliness_percent)}%` },
-        { key: 'volume', label: volumeLabel, render: row => evidenceType === 'historical'
-            ? `${row.historical_report_count || 0} / ${row.volume_target || 'No target'}`
-            : evidenceType === 'live'
-                ? `${row.event_derived_received || 0} / ${row.volume_target || 'No target'}`
-                : `${row.event_derived_received || 0} live + ${row.historical_report_count || 0} historical / ${row.volume_target || 'No target'}` },
-        { key: 'limit', label: 'Within processing limit', render: row => <span title="No office-specific processing limit is configured">N/A</span> },
-        { key: 'score', label: 'Legacy draft score', render: row => <span title="Legacy configurable 50/35/15 measure; excluded from official OTPS">{row.score == null ? 'N/A' : row.score}</span> },
+        { key: 'timeliness', label: 'Timeliness', render: row => row.timeliness_percent == null ? 'No eligible reports' : String(Math.round(row.timeliness_percent)) + '%' },
+        { key: 'volume', label: 'Live reports / target', render: row => String(row.event_derived_received || 0) + ' / ' + (row.volume_target || 'No target set') },
+        { key: 'limit', label: 'Processing limit', render: () => <span title="No office-specific processing limit is configured">No limit set</span> },
+        { key: 'score', label: 'Legacy score', render: row => <span title="Legacy configurable measure; excluded from Overall Score">{row.score == null ? 'No target or limit set' : row.score}</span> },
         { key: 'configuration', label: 'Configuration', headerClassName: 'text-right', cellClassName: 'text-right', render: row => canConfigure
-            ? <UtilityIconButton compact aria-label={`Configure ${row.office}`} title={`Configure ${row.office}`} onClick={() => onConfigure(row)}><Icon icon="lucide:settings-2" width="15" height="15" aria-hidden="true" /></UtilityIconButton>
+            ? <UtilityIconButton compact aria-label={'Configure ' + row.office} title={'Configure ' + row.office} onClick={() => onConfigure(row)}><Icon icon="lucide:settings-2" width="15" height="15" aria-hidden="true" /></UtilityIconButton>
             : <span className="text-xs text-gray-400">Admin only</span> },
     ];
 }
@@ -462,12 +426,7 @@ function makeFilterChips(filters, options, remove) {
         const area = (options.protectedAreas || []).find(item => String(item.id) === String(filters.protected_area_id));
         chips.push({ key: 'protected_area_id', label: 'Protected Area', value: area?.name || filters.protected_area_id, onRemove: () => remove('protected_area_id', '') });
     }
-    if (filters.evidence_type && filters.evidence_type !== 'all') chips.push({ key: 'evidence_type', label: 'Evidence', value: filters.evidence_type === 'live' ? 'Live routing events' : 'Manual historical dates', onRemove: () => remove('evidence_type', 'all') });
     return chips;
-}
-
-function evidenceLabel(value) {
-    return value === 'live' ? 'Live routing events' : value === 'historical' ? 'Manual historical dates' : 'Live and historical, ranked separately';
 }
 
 function sum(rows, getValue) {

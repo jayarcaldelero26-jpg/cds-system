@@ -637,6 +637,45 @@ test('PAMO no_role readers retain only their assigned PA Conservation visibility
         ->toThrow(HttpException::class);
 });
 
+test('PAMO no_role readers cannot view unlinked native report rows', function (): void {
+    ModuleDefinition::query()->firstOrCreate(['code' => 'bms'], [
+        'name' => 'BMS', 'program_area' => 'protected_area_management_and_development',
+        'implementation_type' => 'specialized', 'module_type' => 'regular_target',
+        'deadline_mode' => 'standard_working_days', 'requirement_domain' => 'pa',
+        'requirement_key' => 'bms', 'is_active' => true,
+    ]);
+    $creator = User::factory()->create();
+    $area = finalArchiveArea($creator, 'CENRO Mati', 'PAMO native archive reader PA');
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'pamo_unlinked_native_archive_reader', 'name' => 'PAMO Unlinked Native Reader',
+        'office_type' => 'pamo', 'is_active' => true,
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->getKey(), 'organizational_office_id' => $pamoOffice->getKey(),
+        'assignment_type' => 'pamo',
+    ]);
+    $area->forceFill(['status' => 'Active', 'pamo' => $pamoOffice->name])->save();
+    $record = BmsReportSubmission::query()->create([
+        'protected_area_id' => $area->getKey(), 'target_office' => 'CENRO Mati',
+        'activity_name' => 'Unlinked native archive reader check', 'document_type' => 'Report',
+        'semester' => '1st Semester', 'date_accomplished' => '2026-10-01',
+    ]);
+    $reader = User::factory()->create([
+        'section' => OrganizationalAccessService::PAMO, 'unit_assignment' => null,
+        'protected_area_id' => $area->getKey(), 'office_designated' => $pamoOffice->name,
+        'is_active' => true, 'is_approved' => true,
+    ]);
+    $reader->assignRole(\Spatie\Permission\Models\Role::findOrCreate('no_role', 'web'));
+
+    $routing = app(DocumentRoutingAccessService::class);
+    $archives = app(FinalDocumentArchiveService::class);
+    expect($routing->canView($reader, $record, 'bms'))->toBeFalse()
+        ->and(fn () => $archives->context($reader, 'bms', (int) $record->getKey()))
+        ->toThrow(HttpException::class);
+    $this->actingAs($reader)
+        ->get(route('final-archives.index', ['source' => 'bms', 'record' => $record->getKey()]))
+        ->assertNotFound();
+});
 test('final-return archive folders resolve a direct MHRWS report under its authoritative PENRO office', function (): void {
     $creator = User::factory()->create();
     $penro = OrganizationalOffice::query()->where('office_type', 'penro')->where('is_active', true)->firstOrFail();

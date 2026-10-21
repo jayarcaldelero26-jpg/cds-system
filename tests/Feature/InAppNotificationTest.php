@@ -230,6 +230,72 @@ test('recent workflow notifications preserve the intended Tracking tab and selec
     }
 });
 
+test('role-free scoped Tracking notifications retain owned record links and hide foreign record identifiers', function () {
+    $actor = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga', permission: false);
+    $actor->assignRole(Role::findOrCreate('no_role', 'web'));
+
+    $area = notificationProtectedArea('Baganga notification scope', $this->user);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_baganga')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $this->user->id,
+    ]);
+    $owned = BmsReportSubmission::create([
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Scoped notification record',
+        'document_type' => 'Report',
+        'semester' => '1st Semester',
+        'date_accomplished' => '2026-08-03',
+        'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]);
+
+    $foreignArea = notificationProtectedArea('Mati notification scope', $this->user);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $foreignArea->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_mati')->value('id'),
+        'assignment_type' => 'supervising',
+        'assigned_by' => $this->user->id,
+    ]);
+    $foreign = BmsReportSubmission::create([
+        'protected_area_id' => $foreignArea->id,
+        'target_office' => 'CENRO Mati',
+        'activity_name' => 'Foreign notification record',
+        'document_type' => 'Report',
+        'semester' => '1st Semester',
+        'date_accomplished' => '2026-08-03',
+        'created_by' => $this->user->id,
+        'updated_by' => $this->user->id,
+    ]);
+
+    expect(app(OrganizationalAccessService::class)->canViewSubmissionTracking($actor))->toBeTrue()
+        ->and($actor->can('reports.view'))->toBeFalse();
+
+    $ownedUrl = EdatsInAppNotificationService::actionUrl([
+        'source_type' => 'bms',
+        'source_id' => $owned->id,
+        'url' => route('submission-tracking.index', ['view' => 'incoming', 'source' => 'bms', 'source_id' => $owned->id]),
+    ], $actor);
+    expect($ownedUrl)->toContain('view=incoming')
+        ->and($ownedUrl)->toContain('source=bms')
+        ->and($ownedUrl)->toContain('source_id='.$owned->id);
+
+    $foreignUrl = EdatsInAppNotificationService::actionUrl([
+        'source_type' => 'bms',
+        'source_id' => $foreign->id,
+        'url' => route('submission-tracking.index', ['view' => 'incoming', 'source' => 'bms', 'source_id' => $foreign->id]),
+    ], $actor);
+    expect($foreignUrl)->toBe(route('submission-tracking.index', ['view' => 'incoming']))
+        ->and($foreignUrl)->not->toContain('source_id='.$foreign->id);
+
+    $this->actingAs($actor)->get($ownedUrl)->assertOk()->assertInertia(fn ($page) => $page
+        ->where('trackingContext.selected_source', 'bms')
+        ->where('trackingContext.selected_id', $owned->id)
+        ->where('trackingContext.selected_record.source_id', $owned->id));
+});
+
 test('unauthenticated users cannot mark notifications as read', function () {
     $this->user->notify(new EdatsInAppNotification(notificationPayload('guest-read')));
     $notification = $this->user->notifications()->first();

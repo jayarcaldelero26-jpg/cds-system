@@ -77,26 +77,26 @@ test('admin creation and edit pages share operational groups', function (): void
 
     $this->actingAs($admin)->get(route('admin.users.create'))->assertInertia(fn (Assert $page) => $page
         ->component('Admin/Users/Create')
-        ->has('operationalGroups', 2));
+        ->has('operationalGroups', 3));
 
     $this->get(route('admin.users.edit', $managed))->assertInertia(fn (Assert $page) => $page
         ->component('Admin/Users/Edit')
         ->where('user.operational_group', 'cenro')
-        ->has('operationalGroups', 2));
+        ->has('operationalGroups', 3));
 });
 
-test('admin creation rejects unsupported PAMO accounts', function (): void {
+test('admin creation rejects PAMO accounts without a protected area assignment', function (): void {
     $admin = accessAdmin();
     $this->actingAs($admin)->post(route('admin.users.store'), [
         'name' => 'MHRWS PAMO', 'email' => 'mhrws-staff@example.com',
         'account_role' => 'User', 'operational_group' => 'pamo', 'section' => 'PAMO',
         'password' => 'Password123!', 'password_confirmation' => 'Password123!', 'is_active' => false,
-    ])->assertSessionHasErrors(['operational_group', 'section']);
+    ])->assertSessionHasErrors('protected_area_id');
 
     expect(User::where('email', 'mhrws-staff@example.com')->exists())->toBeFalse();
 });
 
-test('legacy PAMO accounts remain viewable but are not supported as new account options', function (): void {
+test('legacy PAMO accounts remain viewable with the current operational group options', function (): void {
     $admin = accessAdmin();
     $legacy = User::factory()->create([
         'section' => 'PAMO',
@@ -108,7 +108,7 @@ test('legacy PAMO accounts remain viewable but are not supported as new account 
     $this->actingAs($admin)->get(route('admin.users.edit', $legacy))
         ->assertInertia(fn (Assert $page) => $page
             ->where('user.section', 'PAMO')
-            ->where('operationalGroups', fn ($groups) => collect($groups)->pluck('value')->all() === ['cenro', 'penro']));
+            ->where('operationalGroups', fn ($groups) => collect($groups)->pluck('value')->all() === ['cenro', 'penro', 'pamo']));
 });
 
 test('fully configured CENRO and PENRO accounts activate without a legacy Technical Staff role', function (): void {
@@ -187,7 +187,7 @@ test('an administrator can approve and immediately activate a pending user witho
         'is_active' => false,
         'office_designated' => 'CENRO Baganga',
         'section' => 'CENRO_CDS_FOCAL',
-        'unit_assignment' => 'development',
+        'unit_assignment' => null,
     ]);
     $managed->assignRole('no_role');
     $before = $managed->only(['name', 'email', 'password', 'is_active', 'office_designated', 'section', 'unit_assignment', 'protected_area_id']);

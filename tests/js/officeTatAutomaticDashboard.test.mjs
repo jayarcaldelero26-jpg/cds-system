@@ -4,37 +4,40 @@ import test from 'node:test';
 
 const page = readFileSync(new URL('../../resources/js/Pages/Admin/OfficeTat/Index.jsx', import.meta.url), 'utf8');
 const performance = readFileSync(new URL('../../resources/js/Pages/Admin/OfficeTat/ComplianceFirstAssessments.jsx', import.meta.url), 'utf8');
-const settings = readFileSync(new URL('../../resources/js/Pages/Admin/OfficeTat/OfficeTatAssessmentSettings.jsx', import.meta.url), 'utf8');
 const controller = readFileSync(new URL('../../app/Http/Controllers/OfficeTatController.php', import.meta.url), 'utf8');
 const assessment = readFileSync(new URL('../../app/Services/OfficeTatComplianceAssessmentService.php', import.meta.url), 'utf8');
 
-test('Office TAT defaults to the two shared views and keeps assessment period controls simple', () => {
-    assert.match(page, /tabs=\{\[\["report-performance", "Report Performance"\], \["average-tat", "Average TAT"\]\]\}/);
+test('Office TAT exposes only Report Performance and live Average Office Processing Time', () => {
+    assert.match(page, /tabs=\{\[\["report-performance", "Report Performance"\], \["average-tat", "Average Office Processing Time"\]\]\}/);
+    assert.match(page, /query\.evidence_type = 'live'/);
+    assert.match(controller, /\$filters\['evidence_type'\] = 'live'/);
+    assert.match(page, /Average Office Processing Time/);
+    assert.doesNotMatch(page, /Historical date gap|Historical Date Gap|historicalCompleted|includeHistorical|evidenceType/);
+    assert.doesNotMatch(page, /Advanced Assessment Settings|Assessment settings|Official complete-period assessment/);
     assert.match(page, /label="Assessment type"/);
     assert.match(page, /label="Assessment year"/);
-    assert.match(page, /assessment\?\.type === 'semestral' && <FloatingSelect label="Semester"/);
-    assert.match(page, /query\.processing_period = values\.processing_period \|\| assessmentPeriodKey\(assessment\)/);
-    assert.doesNotMatch(page, /Monthly assessment|Quarterly assessment|assessment_period.*quarter/i);
 });
 
-test('Report Performance renders one authorized unit and separates live records from official coverage', () => {
+test('Report Performance sends the recorded live projection and explains its actual denominators', () => {
     assert.match(page, /data=\{recordedAssessment\}/);
-    assert.match(page, /authorizedUnits=\{authorizedUnits\}/);
     assert.match(controller, /recordedAssessments\(\$request->user\(\), \$selectedUnit/);
-    assert.match(controller, /effectiveUnits\(\$request->user\(\)\)/);
-    assert.match(performance, /Only unique live source identities with supported dates are scored/);
-    assert.match(performance, /Official complete-period assessment/);
-    assert.match(performance, /rowFocusVisibleOnly/);
-    assert.match(performance, /selectedUnit, periodKey, asOfDate/);
+    const indexAction = controller.slice(controller.indexOf('public function index('), controller.indexOf('public function storeApprovalEvidence'));
+    assert.doesNotMatch(indexAction, /->assessments\(/);
+    assert.match(performance, /Eligible live reports only/);
+    assert.match(performance, /Eligible reports/);
+    assert.match(performance, /Received by selected date/);
+    assert.match(performance, /Due reports assessed/);
+    assert.match(performance, /80% Timeliness Compliance \+ 20% Submission Efficiency/);
+    assert.match(performance, /Time allowed/);
+    assert.match(performance, /Time used/);
+    assert.match(performance, /source start ' \+ item\.start_date/);
+    assert.match(performance, /accepted PENRO receipt ' \+ item\.received/);
+    assert.match(performance, /not a days-late value/);
+    assert.doesNotMatch(performance, /Official complete-period assessment|Assessment settings|<OfficeTatAssessmentSettings/);
 });
 
-test('settings stay behind one optional configure-gated Assessment settings action', () => {
-    assert.match(performance, /<Button[^>]*>[\s\S]*?Assessment settings<\/Button>/);
-    assert.match(performance, /title="Assessment settings"/);
-    assert.match(performance, /canConfigure && complianceAssessments/);
-    assert.match(performance, /<OfficeTatAssessmentSettings/);
-    assert.match(settings, /Edit one selected PA workflow/);
-    assert.match(settings, /TechnicalClassificationEditor/);
+test('stored assessment policy, tie handling and source classification remain available', () => {
     assert.match(assessment, /recorded-live-source-v1/);
     assert.match(assessment, /saveTieDecision/);
+    assert.match(assessment, /technical_on_time_count/);
 });

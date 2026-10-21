@@ -120,10 +120,28 @@ test('final PA grouping is canonical and independent across direct and regular P
 });
 
 test('registered native PAMO source uses the linked draft and captured PA identity', function (): void {
+    $this->seed(ModuleDefinitionSeeder::class);
     $fixture = pamoArchiveGroupingFixture('MHRWS', 'pamo_direct', 'bms');
+    $penro = OrganizationalOffice::query()->where('office_type', 'penro')->where('is_active', true)->firstOrFail();
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $fixture['area']->getKey(),
+        'organizational_office_id' => $penro->getKey(),
+        'assignment_type' => 'supervising',
+    ]);
+    $reader = User::factory()->create([
+        'section' => \App\Services\Authorization\OrganizationalAccessService::PAMO,
+        'unit_assignment' => null,
+        'protected_area_id' => $fixture['area']->getKey(),
+        'office_designated' => $fixture['pamo']->name,
+        'is_active' => true,
+        'is_approved' => true,
+    ]);
+    $reader->assignRole(\Spatie\Permission\Models\Role::findOrCreate('no_role', 'web'));
 
-    expect(app(PamoArchiveFolderGroupingResolver::class)
-        ->forFinalReturn('bms', $fixture['record'], \App\Models\FinalDocumentArchiveManifest::PHASE))
+    expect(app(\App\Services\SubmissionTracking\DocumentRoutingAccessService::class)
+        ->canView($reader, $fixture['record'], 'bms'))->toBeTrue()
+        ->and(app(PamoArchiveFolderGroupingResolver::class)
+            ->forFinalReturn('bms', $fixture['record'], \App\Models\FinalDocumentArchiveManifest::PHASE))
         ->toBe('MHRWS');
 });
 

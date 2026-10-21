@@ -1,79 +1,53 @@
 import { Icon } from '@iconify/react';
-import { useEffect, useState } from 'react';
-import Button from '@/Components/Button';
+import { useState } from 'react';
 import ComplianceTabList from '@/Components/Compliance/ComplianceTabList';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudTable from '@/Components/Crud/CrudTable';
-import Modal from '@/Components/Modal';
-import OfficeTatAssessmentSettings from './OfficeTatAssessmentSettings';
-import { recordedResultPresentation } from './recordedResultPresentation.mjs';
 import { officeTatDisplayUnit } from './unitPresentation.mjs';
 
 const unitTabs = [['conservation', 'Conservation'], ['development', 'Development']];
 
 export default function ComplianceFirstAssessments({
-    data = null, complianceAssessments = null, canConfigure = false, periodLabel = '',
-    periodKey = '', asOfDate = '', selectedUnit = 'conservation', authorizedUnits = [],
-    onUnitChange = () => {}, saved = null,
+    data = null, periodLabel = '', asOfDate = '', selectedUnit = 'conservation',
+    authorizedUnits = [], onUnitChange = () => {},
 }) {
-    const [showOfficial, setShowOfficial] = useState(false);
     const [detailRow, setDetailRow] = useState(null);
-    const [settingsOpen, setSettingsOpen] = useState(false);
     const assessmentUnit = officeTatDisplayUnit(data, selectedUnit);
-    const official = complianceAssessments?.[assessmentUnit] || null;
-    const officialAvailable = Boolean(official?.coverage_complete);
-    const activeOfficial = showOfficial && officialAvailable;
-    const active = activeOfficial ? official : data;
-    const rows = active?.rows || [];
-
-    useEffect(() => {
-        setShowOfficial(false);
-        setDetailRow(null);
-    }, [assessmentUnit, periodKey, asOfDate]);
-
-    const tableRows = rows.map(row => ({
-        ...row,
-        dueValue: row.due_count ?? (row.score_status === 'No due reports' ? 0 : null),
-        activityValue: activeOfficial ? (row.submitted_count || 0) : (row.activity_count || 0),
-        receivedValue: activeOfficial ? (row.submitted_count || 0) : (row.received_activity_count || 0),
-    }));
-    const dueCount = activeOfficial ? (official.due_count ?? (official.unit_score_status === 'No due reports' ? 0 : null)) : data?.due_count;
-    const onTimeCount = activeOfficial ? official.on_time_count : data?.on_time_count;
-    const activityCount = activeOfficial ? (official.submitted_count || 0) : (data?.activity_count || 0);
-    const receivedCount = activeOfficial ? (official.submitted_count || 0) : (data?.received_activity_count || 0);
-    const tc = activeOfficial ? official.tc_percent : data?.tc_percent;
-    const se = activeOfficial ? official.se_percent : data?.se_percent;
-    const otps = activeOfficial ? official.otps : data?.otps;
-    const notYetDue = activeOfficial ? null : data?.not_yet_due_count;
-    const incompleteDates = activeOfficial ? null : data?.incomplete_date_count;
-    const basis = activeOfficial
-        ? 'Official complete-period assessment · all required obligations'
-        : 'Based on recorded reports · full-period coverage incomplete';
-    const detailResult = detailRow && !activeOfficial
-        ? recordedResultPresentation(detailRow, asOfDate)
-        : null;
+    const rows = data?.rows || [];
+    const moduleCoverage = data?.module_coverage || [];
+    const tableRows = rows.map(row => ({ ...row, dueValue: Number(row.due_count || 0) }));
+    const unavailableReason = scoreUnavailableReason(data);
 
     const columns = [
         { key: 'rank', label: 'Rank', render: row => row.rank || rankStatus(row) },
-        { key: 'participant', label: assessmentUnit === 'conservation' ? 'Protected Area' : 'CENRO', headerClassName: 'min-w-52', render: row => <div><p className="font-bold text-gray-950 dark:text-white">{row.name}</p>{assessmentUnit === 'conservation' && <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">Directory status: {row.legal_status || 'Unknown'}{row.office_binding ? ' · PAMO ' + row.office_binding : ''}</p>}</div> },
-        { key: 'activity', label: activeOfficial ? 'Submitted' : 'Recorded activities', render: row => displayCount(row.activityValue) },
-        { key: 'received', label: 'Received by cutoff', render: row => displayCount(row.receivedValue) },
-        { key: 'due', label: 'Assessable due (N)', render: row => row.dueValue == null ? '—' : displayCount(row.dueValue) },
-        { key: 'on_time', label: 'On time / N', render: row => row.dueValue ? displayCount(row.on_time_count) + ' / ' + displayCount(row.dueValue) : '—' },
-        { key: 'tc', label: 'Timeliness Compliance', headerClassName: 'min-w-40', render: row => formatPercent(row.tc_percent) },
-        { key: 'se', label: 'Submission Efficiency', headerClassName: 'min-w-40', render: row => formatPercent(row.se_percent) },
-        { key: 'otps', label: 'Overall Score (OTPS)', render: row => row.otps == null ? '—' : Number(row.otps).toFixed(2) },
+        {
+            key: 'participant',
+            label: assessmentUnit === 'conservation' ? 'Protected Area' : 'CENRO',
+            headerClassName: 'min-w-52',
+            render: row => <div>
+                <p className="font-bold text-gray-950 dark:text-white">{row.name}</p>
+                {assessmentUnit === 'conservation' && <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-300">
+                    Directory status: {row.legal_status || 'Unknown'}{row.office_binding ? ' · PAMO ' + row.office_binding : ''}
+                </p>}
+            </div>,
+        },
+        { key: 'eligible', label: 'Eligible reports', render: row => displayCount(row.activity_count) },
+        { key: 'received', label: 'Received by selected date', headerClassName: 'min-w-40', render: row => displayCount(row.received_activity_count) },
+        { key: 'due', label: 'Due reports assessed', headerClassName: 'min-w-36', render: row => displayCount(row.dueValue) },
+        {
+            key: 'on_time', label: 'On time / due reports', headerClassName: 'min-w-36',
+            render: row => row.dueValue > 0 ? displayCount(row.on_time_count) + ' / ' + displayCount(row.dueValue) : scoreUnavailableReason(row),
+        },
+        { key: 'tc', label: 'Timeliness Compliance', headerClassName: 'min-w-40', render: row => formatPercent(row.tc_percent, scoreUnavailableReason(row)) },
+        { key: 'se', label: 'Submission Efficiency', headerClassName: 'min-w-40', render: row => formatPercent(row.se_percent, scoreUnavailableReason(row)) },
+        { key: 'otps', label: 'Overall Score', render: row => row.otps == null ? scoreUnavailableReason(row) : Number(row.otps).toFixed(2) },
     ];
 
     return <section className="mt-4 space-y-4" aria-labelledby="report-performance-heading">
-        <header className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">{periodLabel} · As of {asOfDate}</p>
-                <h2 id="report-performance-heading" className="mt-1 text-xl font-extrabold text-gray-950 dark:text-white">Report Performance</h2>
-                <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600 dark:text-gray-300">Conservation uses the six Protected Area roster. Development uses the four CENRO ENGP roster. PA reporting remains attributed to its Protected Area, regardless of custody.</p>
-                {assessmentUnit === 'conservation' && <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">Proposed directory status is shown as stored. Registration eligibility is handled separately.</p>}
-            </div>
-            {canConfigure && complianceAssessments && <Button type="button" size="compact" variant="cancel" onClick={() => setSettingsOpen(true)} className="rounded-lg px-4 py-2.5 text-xs"><Icon icon="lucide:settings-2" width="15" height="15" className="mr-2" aria-hidden="true" />Assessment settings</Button>}
+        <header>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-emerald-800 dark:text-emerald-300">{periodLabel} · As of {asOfDate}</p>
+            <h2 id="report-performance-heading" className="mt-1 text-xl font-extrabold text-gray-950 dark:text-white">Report Performance</h2>
+            <p className="mt-1 max-w-3xl text-sm leading-5 text-gray-600 dark:text-gray-300">Shows whether each eligible live report reached PENRO by its source deadline.</p>
         </header>
 
         <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
@@ -81,93 +55,201 @@ export default function ComplianceFirstAssessments({
         </div>
 
         <div role="status" className="rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-xs leading-5 text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
-            <p className="font-extrabold">{basis}</p>
-            <p>{activeOfficial ? 'The official result uses the supported full required-obligation inventory.' : 'Only unique live source identities with supported dates are scored. Records available does not prove that every required report or event is represented.'}</p>
-            {!activeOfficial && <p className="mt-1">{displayCount(notYetDue)} recorded activities are not yet due · {displayCount(incompleteDates)} have incomplete dates · {displayCount(data?.incomplete_evidence_count)} have unsupported or conflicting evidence.</p>}
+            <p className="font-extrabold">Eligible live reports only</p>
+            <p>Each supported source identity is counted once; missing obligations are not inferred from records available.</p>
+            {assessmentUnit === 'conservation' && <p className="mt-1">Protected Area reports stay attributed to their Protected Area, regardless of office custody.</p>}
         </div>
-
-        {official && <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-            <p className="font-extrabold">Official complete-period assessment: {official.coverage_complete ? 'Coverage complete' : 'Coverage incomplete'}.</p>
-            {!official.coverage_complete && <p>Records are available. Full-period coverage is not yet established.</p>}
-            {official.coverage_complete && <button type="button" onClick={() => setShowOfficial(value => !value)} className="mt-1 font-bold underline">{activeOfficial ? 'Return to recorded reports' : 'View official complete-period results'}</button>}
-            {!official.coverage_complete && (official.coverage_reasons || []).length > 0 && <details className="mt-1"><summary className="cursor-pointer font-semibold underline">Coverage details</summary><p className="mt-1">Some required duties, applicability periods, source dates, event inventories or historical evidence still need an authoritative basis. Missing rows are not treated as exemptions or verified misses.</p></details>}
-        </div>}
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Summary label={activeOfficial ? 'Submitted' : 'Recorded activities'} value={displayCount(activityCount)} detail="Unique source identities in this view" />
-            <Summary label="Received by cutoff" value={displayCount(receivedCount)} detail="Accepted PENRO receipts, counted once" />
-            <Summary label="Assessable due (N)" value={dueCount == null ? '—' : displayCount(dueCount)} detail={dueCount === 0 ? 'No due obligations; score is N/A' : 'Only due, assessable obligations enter the denominator'} />
-            <Summary label="Overall Score (OTPS)" value={otps == null ? 'N/A' : Number(otps).toFixed(2)} detail="80% TC + 20% SE" />
+            <Summary label="Eligible reports" value={displayCount(data?.activity_count)} detail="Supported live report identities in the selected period." />
+            <Summary label="Received by selected date" value={displayCount(data?.received_activity_count)} detail={'Accepted PENRO receipts recorded by ' + asOfDate + '.'} />
+            <Summary label="Due reports assessed" value={displayCount(data?.due_count)} detail={Number(data?.due_count || 0) > 0 ? 'Due, assessable reports in the performance denominator.' : unavailableReason} />
+            <Summary label="Overall Score" value={data?.otps == null ? 'Not scored' : Number(data.otps).toFixed(2)} detail={data?.otps == null ? unavailableReason : '80% Timeliness Compliance + 20% Submission Efficiency.'} />
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3">
-            <Summary label="Timeliness Compliance" value={formatPercent(tc)} detail={dueCount > 0 ? displayCount(onTimeCount) + ' on time / ' + displayCount(dueCount) + ' due' : 'N/A · no assessable due obligations'} />
-            <Summary label="Submission Efficiency" value={formatPercent(se)} detail="Mean efficiency across the same due N" />
-            <Summary label="Not yet due / incomplete" value={activeOfficial ? '—' : displayCount(notYetDue) + ' / ' + displayCount(incompleteDates)} detail="Future deadlines are excluded from N; missing dates are not scored." />
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Summary label="Timeliness Compliance" value={formatPercent(data?.tc_percent, unavailableReason)} detail={Number(data?.due_count || 0) > 0 ? displayCount(data?.on_time_count) + ' on time / ' + displayCount(data?.due_count) + ' due reports assessed.' : unavailableReason} />
+            <Summary label="Submission Efficiency" value={formatPercent(data?.se_percent, unavailableReason)} detail={Number(data?.due_count || 0) > 0 ? 'Mean efficiency across the same due reports.' : unavailableReason} />
+            <Summary label="Not yet due" value={displayCount(data?.not_yet_due_count)} detail="Future source deadlines are excluded from due reports assessed." />
+            <Summary label="Missing dates / unsupported identities" value={displayCount(data?.incomplete_date_count) + ' / ' + displayCount(data?.incomplete_evidence_count)} detail="Open participant details for the reason and source reference." />
         </div>
+
+        <section className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900" aria-labelledby="module-coverage-heading">
+            <header className="px-4 py-3">
+                <h3 id="module-coverage-heading" className="text-sm font-extrabold text-gray-950 dark:text-white">Module coverage</h3>
+                <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">Source records, accepted receipts and archive completions are counted once per source identity. Live TAT samples follow the current office filters.</p>
+            </header>
+            <div className="overflow-x-auto">
+                <table className="min-w-[1120px] w-full border-collapse text-left text-[11px]">
+                    <caption className="sr-only">Live report module coverage for the selected period and authorized participant scope</caption>
+                    <thead className="bg-gray-50 text-[10px] font-extrabold uppercase tracking-wide text-gray-600 dark:bg-gray-950 dark:text-gray-300">
+                        <tr>
+                            <th scope="col" className="px-3 py-2">Module / source</th>
+                            <th scope="col" className="px-3 py-2">Participant scope</th>
+                            <th scope="col" className="px-3 py-2">Live records</th>
+                            <th scope="col" className="px-3 py-2">Archived</th>
+                            <th scope="col" className="px-3 py-2">Eligible recorded</th>
+                            <th scope="col" className="px-3 py-2">Received</th>
+                            <th scope="col" className="px-3 py-2">Due assessed</th>
+                            <th scope="col" className="px-3 py-2">Live TAT samples</th>
+                            <th scope="col" className="px-3 py-2">Excluded / reason</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100 text-gray-800 dark:divide-gray-800 dark:text-gray-100">
+                        {moduleCoverage.map(item => {
+                            const reasons = Object.entries(item.exclusion_reasons || {});
+                            return <tr key={item.source_key + ':' + (item.workflow_key || item.module_code || '')}>
+                                <th scope="row" className="px-3 py-2 align-top font-bold">
+                                    {item.module || item.source_key}
+                                    <span className="mt-0.5 block font-mono text-[10px] font-medium text-gray-500 dark:text-gray-400">{item.source_key}{item.workflow_key ? ':' + item.workflow_key : ''}</span>
+                                </th>
+                                <td className="px-3 py-2 align-top">{item.participant_scope || 'Authorized scope'}</td>
+                                <td className="px-3 py-2 align-top tabular-nums">{displayCount(item.live_record_count)}</td>
+                                <td className="px-3 py-2 align-top tabular-nums">{displayCount(item.completed_archived_count)}</td>
+                                <td className="px-3 py-2 align-top tabular-nums">{displayCount(item.eligible_recorded_count)}</td>
+                                <td className="px-3 py-2 align-top tabular-nums">{displayCount(item.received_count)}</td>
+                                <td className="px-3 py-2 align-top tabular-nums">{displayCount(item.due_count)}</td>
+                                <td className="px-3 py-2 align-top tabular-nums">{displayCount(item.live_tat_samples)}</td>
+                                <td className="max-w-[300px] px-3 py-2 align-top">
+                                    {Number(item.excluded_count || 0) === 0 ? '' : <span>
+                                        <strong className="tabular-nums">{displayCount(item.excluded_count)} </strong>
+                                        {reasons.map(([reason, count]) => <span key={reason} className="block text-gray-600 dark:text-gray-300">{displayCount(count)} � {reason}</span>)}
+                                    </span>}
+                                </td>
+                            </tr>;
+                        })}
+                        {moduleCoverage.length === 0 && <tr><td colSpan={9} className="px-3 py-4 text-center text-gray-600 dark:text-gray-300">No active report source is available in this participant scope.</td></tr>}
+                    </tbody>
+                </table>
+            </div>
+        </section>
 
         <details className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-            <summary className="cursor-pointer px-4 py-3 text-xs font-bold text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700 dark:text-gray-100">How these measures work</summary>
-            <div className="border-t border-gray-100 px-4 py-3 text-xs leading-5 text-gray-700 dark:border-gray-800 dark:text-gray-200">
-                <p><strong>Timeliness Compliance (TC)</strong> is on-time obligations divided by due N. <strong>Submission Efficiency (SE)</strong> averages the existing duration formula across the same due N; verified misses contribute zero, while unknown evidence is excluded from the assessable population.</p>
-                <p className="mt-1"><strong>Overall Score (OTPS)</strong> is 80% TC plus 20% SE. Ranks sort by TC, SE, early percentage, unique received volume, then supported highly technical on-time count. Technical classification limits ranking only when that tie-break is needed.</p>
-            </div>
+            <summary className="cursor-pointer px-4 py-3 text-xs font-bold text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700 dark:text-gray-100">How scores are calculated</summary>
+            <p className="border-t border-gray-100 px-4 py-3 text-xs leading-5 text-gray-700 dark:border-gray-800 dark:text-gray-200">
+                Timeliness Compliance is on-time due reports divided by due reports assessed; Submission Efficiency uses source dates under each workflow’s day convention; Overall Score is 80% Timeliness Compliance plus 20% Submission Efficiency.
+            </p>
         </details>
 
-        <CrudTable compact title={(active?.label || 'Unit') + ' ranking'} subtitle={basis + ' · ' + periodLabel} helperText="Open a participant row for source dates, receipt status and evidence notes." rows={tableRows} rowKey={row => row.participant_key} onRowClick={setDetailRow} rowFocusVisibleOnly caption={basis + ', ' + periodLabel + ', participant ranking'} emptyTitle="No recorded source reports" emptyDescription="No eligible live source identity is available for this unit and period. The full-period assessment remains separate." columns={columns} />
+        <CrudTable
+            compact
+            title={(data?.label || 'Unit') + ' report performance'}
+            subtitle={periodLabel}
+            helperText="Open a participant for source dates, receipt status and excluded report details."
+            rows={tableRows}
+            rowKey={row => row.participant_key}
+            onRowClick={setDetailRow}
+            rowFocusVisibleOnly
+            caption={'Live report performance for ' + (data?.label || 'unit') + ', ' + periodLabel}
+            emptyTitle="No eligible live reports"
+            emptyDescription="No supported live source identity is available for this unit and period."
+            columns={columns}
+        />
 
-        <CrudDetailsModal open={Boolean(detailRow)} title="Participant performance details" subtitle={detailRow ? detailRow.name + ' · ' + (activeOfficial ? 'official complete-period assessment' : 'recorded reports') + ' · ' + periodLabel : ''} icon={<Icon icon="lucide:clipboard-check" width="18" height="18" aria-hidden="true" />} onClose={() => setDetailRow(null)} compact maxWidth="max-w-4xl" summary={detailRow && <div className="space-y-2"><div className="grid gap-2 sm:grid-cols-4"><Metric label="Due denominator N" value={detailRow.dueValue == null ? 'N/A' : detailRow.dueValue} /><Metric label="Recorded activities" value={detailRow.activityValue} /><Metric label="Received by cutoff" value={detailRow.receivedValue} /><Metric label="Result" value={detailResult?.label || detailRow.score_status || 'Not assessed'} /></div>{detailResult?.nextDeadline && <p role="status" className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">Received — not yet due · Next deadline: <time dateTime={detailResult.nextDeadline}>{detailResult.nextDeadline}</time></p>}</div>}>
+        <CrudDetailsModal
+            open={Boolean(detailRow)}
+            title="Participant performance details"
+            subtitle={detailRow ? detailRow.name + ' · ' + periodLabel : ''}
+            icon={<Icon icon="lucide:clipboard-check" width="18" height="18" aria-hidden="true" />}
+            onClose={() => setDetailRow(null)}
+            compact
+            maxWidth="max-w-4xl"
+            summary={detailRow && <div className="grid gap-2 sm:grid-cols-4">
+                <Metric label="Due reports assessed" value={displayCount(detailRow.dueValue)} />
+                <Metric label="Eligible reports" value={displayCount(detailRow.activity_count)} />
+                <Metric label="Received by selected date" value={displayCount(detailRow.received_activity_count)} />
+                <Metric label="Result" value={detailRow.score_status || 'Not scored'} />
+            </div>}
+        >
             {detailRow && <div className="space-y-3">
-                <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 dark:bg-gray-950 dark:text-gray-200">{activeOfficial ? 'This result covers the full official unit assessment and its all-required-obligations denominator.' : 'This result covers supported live report identities only. It does not assert that missing obligations or events did not occur.'}{assessmentUnit === 'conservation' ? ' Proposed status is a directory fact; registration eligibility is separate.' : ''}</p>
+                <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 dark:bg-gray-950 dark:text-gray-200">
+                    Live source identities are scored when their required source dates and report identity are supported.
+                    {assessmentUnit === 'conservation' ? ' Reports are attributed to the Protected Area.' : ''}
+                </p>
                 {(detailRow.obligation_details || []).map((item, index) => <article key={detailRow.participant_key + '-' + index} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                    <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{item.label || 'Source activity'}</h3>
+                    <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{item.label || 'Source report'}</h3>
                     <p className="mt-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">{item.status || 'Source detail'}</p>
-                    <dl className="mt-3 grid gap-2 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
-                        <DataPoint label="Source start" value={item.start_date || 'Incomplete'} />
-                        <DataPoint label="Source deadline" value={item.deadline || 'Incomplete'} />
-                        <DataPoint label="Accepted PENRO receipt" value={item.received || 'No accepted receipt by cutoff'} />
-                        <DataPoint label="Allowed / elapsed" value={(item.allowed_days == null ? 'Unavailable' : item.allowed_days + ' days') + ' / ' + (item.days_used == null ? 'Unavailable' : item.days_used + ' days')} />
+                    <dl className="mt-3 grid gap-2 text-[11px] sm:grid-cols-2 lg:grid-cols-3">
+                        <DataPoint label="Source start date" value={item.start_date || 'Missing required source date'} />
+                        <DataPoint label="Source deadline" value={item.deadline || 'Missing required source date'} />
+                        <DataPoint label="Accepted PENRO receipt" value={item.received || ('Not recorded by selected date ' + asOfDate)} />
+                        {item.day_convention && <DataPoint label="Day convention" value={item.day_convention} />}
+                        <DataPoint label="Time allowed" value={timeAllowed(item)} />
+                        <DataPoint label="Time used" value={timeUsed(item, asOfDate)} />
+                        {item.source_reference && <DataPoint label="Source reference" value={item.source_reference} />}
                     </dl>
-                    {item.source_rows_matched > 1 && <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-300">{item.source_rows_matched} source rows matched this identity. The earliest accepted receipt is counted once.</p>}
+                    {item.source_rows_matched > 1 && <p className="mt-2 text-[11px] text-gray-600 dark:text-gray-300">{item.source_rows_matched} live source rows match this identity. The earliest accepted receipt is counted once.</p>}
                     {item.issue && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100">{item.issue}</p>}
                 </article>)}
-                {(detailRow.obligation_details || []).length === 0 && <p className="text-xs text-gray-600 dark:text-gray-300">No due obligation detail is available. Activity and future-deadline counts remain visible in the summary.</p>}
+                {(detailRow.obligation_details || []).length === 0 && <p className="text-xs text-gray-600 dark:text-gray-300">{scoreUnavailableReason(detailRow)}. No due report detail is available.</p>}
+                <p className="text-[11px] leading-4 text-gray-500 dark:text-gray-400">Time used ends at accepted PENRO receipt; it is not a days-late value.</p>
             </div>}
         </CrudDetailsModal>
-
-        {canConfigure && complianceAssessments && <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Assessment settings" size="lg" footer={<Button type="button" variant="cancel" onClick={() => setSettingsOpen(false)} className="rounded-lg px-4 py-2">Close settings</Button>}>
-            <div className="max-h-[70vh] overflow-y-auto">
-            <OfficeTatAssessmentSettings data={complianceAssessments} recordedAssessment={data} selectedUnit={assessmentUnit} canConfigure={canConfigure} periodLabel={periodLabel} periodKey={periodKey} asOfDate={asOfDate} saved={saved} />
-            </div>
-        </Modal>}
     </section>;
 }
 
+function timeAllowed(item) {
+    if (item.status === 'Unsupported report identity') return 'Not calculated · unsupported report identity';
+    if (!item.start_date || !item.deadline) return 'Unavailable · missing required source dates';
+    if (item.allowed_days == null) return 'Unavailable · source day convention did not produce a duration';
+    return item.allowed_days + ' ' + (item.day_convention || 'days') + ' · source start ' + item.start_date + ' → source deadline ' + item.deadline;
+}
+
+function timeUsed(item, asOfDate) {
+    if (item.status === 'Unsupported report identity') return 'Not calculated · unsupported report identity';
+    if (!item.start_date) return 'Unavailable · source start date is missing';
+    if (!item.received) {
+        const futureDeadline = item.deadline && item.deadline > asOfDate;
+        return futureDeadline
+            ? 'Not recorded · deadline ' + item.deadline + ' is after selected date ' + asOfDate
+            : 'Not recorded · no accepted PENRO receipt by selected date ' + asOfDate;
+    }
+    if (item.received > asOfDate) return 'Not counted · accepted PENRO receipt ' + item.received + ' is after selected date ' + asOfDate;
+    if (item.days_used == null) return 'Unavailable · source day convention did not produce a duration';
+    return item.days_used + ' ' + (item.day_convention || 'days') + ' · source start ' + item.start_date + ' → accepted PENRO receipt ' + item.received;
+}
+
+function scoreUnavailableReason(row) {
+    if (Number(row?.incomplete_date_count || 0) > 0) return 'Missing required source dates';
+    if (Number(row?.incomplete_evidence_count || 0) > 0) return 'Unsupported report identity';
+    return 'No eligible due reports';
+}
+
 function Summary({ label, value, detail }) {
-    return <article className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900"><p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p><p className="mt-1 text-2xl font-extrabold text-gray-950 dark:text-white">{value}</p><p className="mt-1 text-[10px] leading-4 text-gray-600 dark:text-gray-300">{detail}</p></article>;
+    return <article className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+        <p className="text-[10px] font-extrabold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+        <p className="mt-1 text-2xl font-extrabold text-gray-950 dark:text-white">{value}</p>
+        <p className="mt-1 text-[10px] leading-4 text-gray-600 dark:text-gray-300">{detail}</p>
+    </article>;
 }
 
 function Metric({ label, value }) {
-    return <article className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-950"><p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p><p className="mt-1 text-sm font-extrabold text-gray-900 dark:text-white">{value}</p></article>;
+    return <article className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 dark:border-gray-700 dark:bg-gray-950">
+        <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
+        <p className="mt-1 text-sm font-extrabold text-gray-900 dark:text-white">{value}</p>
+    </article>;
 }
 
 function DataPoint({ label, value }) {
-    return <div><dt className="font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</dt><dd className="mt-0.5 font-semibold text-gray-900 dark:text-gray-100">{value}</dd></div>;
+    return <div>
+        <dt className="font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</dt>
+        <dd className="mt-0.5 font-semibold text-gray-900 dark:text-gray-100">{value}</dd>
+    </div>;
 }
 
 function displayCount(value) {
     return value == null ? '0' : Number(value).toLocaleString();
 }
 
-function formatPercent(value) {
-    return value == null ? 'N/A' : Number(value).toFixed(2) + '%';
+function formatPercent(value, reason) {
+    return value == null ? reason : Number(value).toFixed(2) + '%';
 }
 
 function rankStatus(row) {
     if (row.rank_status === 'Awaiting technical classification') return 'Tie needs classification';
     if (row.rank_status === 'Awaiting tie resolution') return 'Tie needs review';
     if (row.rank_status === 'Comparison limited by organizational access') return 'No unit rank';
-    if (row.score_status === 'No due reports' || row.score_status === 'No assessable due reports') return 'N/A · no score';
-    if (row.score_status === 'Coverage incomplete') return 'Coverage incomplete';
+    if (row.score_status === 'No due reports' || row.score_status === 'No assessable due reports') return scoreUnavailableReason(row);
+    if (row.score_status === 'Coverage incomplete') return scoreUnavailableReason(row);
     return 'Not ranked';
 }

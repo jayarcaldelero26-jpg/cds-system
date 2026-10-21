@@ -289,7 +289,7 @@ test('tie approval requires configure permission and rechecks its live fingerpri
     }
 });
 
-test('a configure-capable local viewer cannot read cross-unit assessments without global Office TAT access', function (): void {
+test('Office TAT view follows authorized unit selection for a local CENRO focal viewer', function (): void {
     $view = Permission::findOrCreate('office-tat.view', 'web');
     $configure = Permission::findOrCreate('office-tat.configure', 'web');
     $viewer = User::factory()->create([
@@ -298,21 +298,18 @@ test('a configure-capable local viewer cannot read cross-unit assessments withou
     ]);
     $viewer->givePermissionTo([$view, $configure]);
 
-    $this->actingAs($viewer)->get('/admin/office-tat?category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
-        ->component('Admin/OfficeTat/Index')
-        ->where('globalAssessmentAccess', false)
-        ->where('complianceAssessments', null));
-
-    $global = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
-    $global->assignRole(Role::findOrCreate('CDS Admin', 'web'));
-    $global->givePermissionTo([$view, $configure]);
-    $this->actingAs($global)->get('/admin/office-tat?category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
-        ->component('Admin/OfficeTat/Index')
-        ->where('globalAssessmentAccess', true)
-        ->has('complianceAssessments.conservation')
-        ->has('complianceAssessments.development'));
+    $this->actingAs($viewer)->get('/admin/office-tat?unit=development&category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->component('Admin/OfficeTat/Index')
+            ->where('selectedUnit', 'development')
+            ->where('authorizedUnits', ['conservation', 'development'])
+            ->where('recordedAssessment.unit', 'development'));
+    $this->actingAs($viewer)->get('/admin/office-tat?unit=conservation&category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->component('Admin/OfficeTat/Index')
+            ->where('selectedUnit', 'conservation')
+            ->where('recordedAssessment.unit', 'conservation'));
 });
-
 test('Office TAT route returns a roster whose selected unit and participant identities agree', function (): void {
     $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
     $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));

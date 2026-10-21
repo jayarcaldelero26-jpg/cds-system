@@ -186,6 +186,10 @@ test('historical gap reads leave live event averages and persisted routing evide
     $live = officeTatEngpRecord($this->actor, '2026-01');
     officeTatEvent($this->actor, $live, 'received', '2026-01-03 09:00:00', 'PENRO Davao Oriental', 'CENRO Baganga');
     officeTatEvent($this->actor, $live, 'forwarded', '2026-01-05 09:00:00', 'CENRO Baganga', 'PENRO Davao Oriental');
+    $liveFilters = ['category' => 'CENRO', 'processing_period' => '2026-H1', 'as_of_date' => '2026-03-31', 'workflow' => 'engp:cbep'];
+    $service = app(OfficeTatAnalyticsService::class);
+    $liveBefore = $service->analytics($this->actor, [...$liveFilters, 'evidence_type' => 'live']);
+    $liveBeforeRow = collect($liveBefore['rows'])->firstWhere('office', 'CENRO Baganga');
 
     $historical = officeTatEngpRecord($this->actor, '2026-02');
     $historical->forceFill(['is_historical' => true])->save();
@@ -201,11 +205,41 @@ test('historical gap reads leave live event averages and persisted routing evide
 
     $sideEffectTables = ['document_routing_events', 'pamb_routing_events', 'submission_routing_snapshots', 'notifications', 'jobs', 'engp_report_release_events', 'document_archives'];
     $beforeCounts = collect($sideEffectTables)->mapWithKeys(fn (string $table): array => [$table => DB::table($table)->count()])->all();
-    $liveFilters = ['category' => 'CENRO', 'processing_period' => '2026-H1', 'as_of_date' => '2026-03-31', 'workflow' => 'engp:cbep'];
-    $liveOnly = app(OfficeTatAnalyticsService::class)->analytics($this->actor, [...$liveFilters, 'evidence_type' => 'live']);
+    $liveOnly = $service->analytics($this->actor, [...$liveFilters, 'evidence_type' => 'live']);
     $withHistorical = app(OfficeTatAnalyticsService::class)->analytics($this->actor, [...$liveFilters, 'evidence_type' => 'all']);
     $liveRow = collect($liveOnly['rows'])->firstWhere('office', 'CENRO Baganga');
     $combinedRow = collect($withHistorical['rows'])->firstWhere('office', 'CENRO Baganga');
+
+    expect([
+        'has_historical_report_count' => array_key_exists('historical_report_count', $liveRow),
+        'has_historical_gap_payload' => array_key_exists('manual_historical_processing_average_elapsed_calendar_days', $liveRow),
+        'has_historical_metric_definition' => array_key_exists('historical', $liveOnly['definitions']),
+    ])->toBe([
+        'has_historical_report_count' => false,
+        'has_historical_gap_payload' => false,
+        'has_historical_metric_definition' => false,
+    ])
+        ->and([
+        'average_seconds' => $liveRow['tat_average_elapsed_seconds'],
+        'average_days' => $liveRow['tat_average_elapsed_days'],
+        'duration_total' => $liveRow['tat_elapsed_seconds_total'],
+        'completed_documents' => $liveRow['tat_completed_documents'],
+        'pending' => $liveRow['pending'],
+        'missing' => $liveRow['tat_missing_evidence'],
+        'interval_details' => $liveRow['tat_interval_details'],
+    ])->toBe([
+        'average_seconds' => $liveBeforeRow['tat_average_elapsed_seconds'],
+        'average_days' => $liveBeforeRow['tat_average_elapsed_days'],
+        'duration_total' => $liveBeforeRow['tat_elapsed_seconds_total'],
+        'completed_documents' => $liveBeforeRow['tat_completed_documents'],
+        'pending' => $liveBeforeRow['pending'],
+        'missing' => $liveBeforeRow['tat_missing_evidence'],
+        'interval_details' => $liveBeforeRow['tat_interval_details'],
+    ])
+        ->and($liveRow['tat_interval_details'][0]['source_reference'])->toBe('ENGP report #'.$live->id)
+        ->and($liveRow['tat_interval_details'][0]['intervals'][0]['accepted_receipt_at'])->toContain('2026-01-03T09:00:00')
+        ->and($liveRow['tat_interval_details'][0]['intervals'][0]['accepted_handoff_at'])->toContain('2026-01-05T09:00:00')
+        ->and($liveRow['tat_interval_details'][0]['intervals'][0]['elapsed_seconds'])->toBe(2 * 86400.0);
 
     expect([
         'average_seconds' => $combinedRow['tat_average_elapsed_seconds'],
