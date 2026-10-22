@@ -45,6 +45,11 @@ class User extends Authenticatable implements PasskeyUser
         ];
     }
 
+    public function mobileApiTokens(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(MobileApiToken::class);
+    }
+
     public function protectedArea(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(ProtectedArea::class);
