@@ -602,3 +602,23 @@ test('CBEP October submission scoring counts the first through twentieth calenda
         ->and($assessment['development']['se_percent'])->toBeNull()
         ->and($assessment['development']['otps'])->toBeNull();
 });
+
+test('accepted early Conservation receipt enters the assessed denominator before its future deadline', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreParticipant');
+    $obligation = $makeObligation->invoke(
+        $service, 'pa:18|regular_pamb|2026|quarter_4', '2026-10-19', '2026-10-29', '2026-10-19', '2026-10-29',
+        false, 4, false, 'conservation', 'pamb_working_days', 'PAMO-MHRWS', null, 'Regular PAMB · Quarter 4',
+    );
+    $cutoff = \Carbon\CarbonImmutable::parse('2026-10-20', 'Asia/Manila')->endOfDay();
+    $scored = $scoreParticipant->invoke($service, [$obligation], $cutoff);
+    $detail = $scored['obligation_details'][0];
+    expect($scored['due_count'])->toBe(1)
+        ->and($scored['submitted_count'])->toBe(1)
+        ->and($scored['on_time_count'])->toBe(1)
+        ->and($scored['tc_percent'])->toEqual(100.0)
+        ->and($scored['se_percent'])->toEqual(100.0)
+        ->and($scored['otps'])->toEqual(100.0)
+        ->and($detail['status'])->toBe('Submitted early');
+});

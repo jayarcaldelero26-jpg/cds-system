@@ -24,7 +24,7 @@ import FinalArchiveRecordLink from "@/Components/SubmissionTracking/FinalArchive
 import CorrectionReferenceAttachment from "@/Components/SubmissionTracking/CorrectionReferenceAttachment";
 import PamoReportPendingAnimation from "@/Components/PamoReportPendingAnimation";
 import { archiveCheckpointPendingNotice } from "@/Utils/archiveCheckpointNotice";
-import { custodyContext, movPrerequisiteFor, nextSubmissionAction, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
+import { custodyContext, movPrerequisiteFor, nextSubmissionAction, presentCurrentRoutingStatus, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
 import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
 import {
@@ -196,7 +196,7 @@ const routingStatusFor = (row) => {
         !/awaiting receipt|received/i.test(String(routing.current_status || ""))
     )
         return "Awaiting Receipt by " + routing.in_transit_to;
-    return (
+    return presentCurrentRoutingStatus(row,
         routing.current_status ||
         row?.current_processing_status ||
         row?.submission_status ||
@@ -1615,7 +1615,7 @@ export default function Index({
                             <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100">Current Status &amp; Processing</h2>
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Routing Status</span>
-                                <Badge value={details.routing?.current_status || details.routing_summary?.current_status || details.submission_status || "Unknown"} />
+                                <Badge value={routingStatusFor(details) || "Unknown"} />
                             </div>
                         </div>
                         {finalArchiveStatusNoticeForTrackingRow(details) && (

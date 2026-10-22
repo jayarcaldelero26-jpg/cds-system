@@ -266,7 +266,9 @@ final class OfficeTatComplianceAssessmentService
                     $obligation['source_rows_matched'] = $liveMatches->count();
                     $obligation['source_identity'] = [
                         'participant_key' => $participant['participant_key'], 'workflow_key' => $workflow,
-                        'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
+                        'workflow_label' => $pair['workflow_label'],
+                        'activity_name' => $pair['activity_name'], 'registered_activity_name' => $pair['activity_name'],
+                        'submitted_activity_name' => (string) ($record?->activity_name ?? $pair['activity_name']),
                         'document_type' => $pair['document_type'], 'reporting_year' => $year,
                         'period_key' => $sourcePeriod['key'], 'occurrence_key' => null,
                         'source_ids' => $liveMatches->pluck('id')->map(fn ($id): int => (int) $id)->unique()->values()->all(),
@@ -323,9 +325,6 @@ final class OfficeTatComplianceAssessmentService
                         $issue = $registeredActivity !== null
                             ? 'Source activity “'.$activity.'” does not match registered activity “'.$registeredActivity.'”; this report is excluded from live scoring.'
                             : 'The source workflow, activity or document is not in the active reporting registry; this report is excluded from live scoring.';
-                        if ($deadline !== null && $deadline > $cutoff->toDateString()) {
-                            $issue .= ' Its source deadline '.$deadline.' is after selected date '.$cutoff->toDateString().', so it is not due or scored yet.';
-                        }
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
                             $activity !== '' ? $activity : 'Unsupported Conservation report',
                             'Unsupported report identity', $start, $deadline, $received, $issue,
@@ -501,12 +500,13 @@ final class OfficeTatComplianceAssessmentService
                 $incompleteEvidence++;
                 $deadline = $source->deadline_submission?->toDateString();
                 $received = $source->date_received_penro?->toDateString();
-                $issue = 'The source workflow is not in the active ENGP registry; this report is excluded from live scoring.';
-                if ($deadline !== null && $deadline > $cutoff->toDateString()) {
-                    $issue .= ' Its source deadline '.$deadline.' is after selected date '.$cutoff->toDateString().', so it is not due or scored yet.';
-                }
+                                $registeredWorkflow = $this->engp->defaultFind((string) $source->workflow_key);
+                $status = $registeredWorkflow === null ? 'Unsupported source identity' : 'Missing or inactive workflow definition';
+                $issue = $registeredWorkflow === null
+                    ? 'The source workflow key is not registered in the ENGP workflow registry; this report is excluded from live scoring.'
+                    : 'This ENGP workflow is recognized, but its canonical module definition is missing or inactive; the source is excluded from live scoring.';
                 $incompleteDetails[] = $this->recordedIncompleteDetail(
-                    (string) ($source->activity_name ?: 'Unsupported ENGP report'), 'Unsupported report identity', null, $deadline, $received, $issue,
+                    (string) ($source->activity_name ?: 'Unsupported ENGP report'), $status, null, $deadline, $received, $issue,
                     $this->recordedSourceReference('engp', (int) $source->getKey()),
                     [
                         'workflow_key' => (string) $source->workflow_key,
@@ -551,6 +551,17 @@ final class OfficeTatComplianceAssessmentService
             return $item;
         }, $score['obligation_details']);
         $score['obligation_details'] = [...$score['obligation_details'], ...($counts['incomplete_details'] ?? [])];
+        $score['obligation_details'] = array_map(function (array $item) use ($cutoff): array {
+            $item['due_as_of_date'] = $cutoff->toDateString();
+            $validDeadline = is_string($item['deadline'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $item['deadline']);
+            $receivedByCutoff = is_string($item['received'] ?? null) && $item['received'] <= $item['due_as_of_date'];
+            $receivedAssessedBeforeDeadline = ($item['issue'] ?? null) === null && $receivedByCutoff && $validDeadline && $item['deadline'] > $item['due_as_of_date'];
+            $item['due_status'] = $receivedAssessedBeforeDeadline
+                ? 'received_before_deadline'
+                : ($validDeadline ? ($item['deadline'] <= $item['due_as_of_date'] ? 'due' : 'not_yet_due') : 'unavailable');
+
+            return $item;
+        }, $score['obligation_details']);
         return [
             ...$participant, ...$score,
             'activity_count' => (int) ($counts['activity_count'] ?? 0),
@@ -774,7 +785,9 @@ final class OfficeTatComplianceAssessmentService
                         );
                         $obligation['source_identity'] = [
                             'participant_key' => $participant['participant_key'], 'workflow_key' => $workflow,
-                            'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
+                            'workflow_label' => $pair['workflow_label'],
+                        'activity_name' => $pair['activity_name'], 'registered_activity_name' => $pair['activity_name'],
+                        'submitted_activity_name' => (string) ($record?->activity_name ?? $pair['activity_name']),
                             'document_type' => $pair['document_type'], 'reporting_year' => $year,
                             'period_key' => $sourcePeriod['key'], 'occurrence_key' => (string) ($occurrence['occurrence_key'] ?? ''),
                         ];
@@ -1274,7 +1287,7 @@ final class OfficeTatComplianceAssessmentService
             $start = CarbonImmutable::parse($obligation['start'], BusinessCalendarService::TIMEZONE)->startOfDay();
             $deadline = CarbonImmutable::parse($obligation['deadline'], BusinessCalendarService::TIMEZONE)->startOfDay();
             $allowedDays = $this->durationDays($start, $deadline, $obligation);
-            if ($deadline->greaterThan($cutoff)) {
+            if ($deadline->greaterThan($cutoff) && (! $obligation['received'] || CarbonImmutable::parse($obligation['received'], BusinessCalendarService::TIMEZONE)->startOfDay()->greaterThan($cutoff))) {
                 $receivedBeforeCutoff = $obligation['received'] ? CarbonImmutable::parse($obligation['received'], BusinessCalendarService::TIMEZONE)->startOfDay() : null;
                 $issue = null;
                 $usedDays = null;
@@ -1712,6 +1725,16 @@ final class OfficeTatComplianceAssessmentService
 
     private function paRecordKey(ConservationReportSubmission $record): string
     {
-        return $this->paPeriodRecordKey((int) $record->protected_area_id, (string) $record->workflow_key, (string) $record->reporting_period, (string) $record->activity_name, (string) $record->document_type);
+        $sourceDate = $this->conservationRecordStart($record)
+            ?: ($record->deadline_submission ?: $record->created_at?->timezone(BusinessCalendarService::TIMEZONE)->toDateString());
+        $year = $sourceDate ? CarbonImmutable::parse($sourceDate, BusinessCalendarService::TIMEZONE)->year : 0;
+        $registeredActivity = $year > 0
+            ? $this->registeredPaActivityFor($record, $this->obligationEvidence->catalogue(), $year)
+            : null;
+
+        return $this->paPeriodRecordKey(
+            (int) $record->protected_area_id, (string) $record->workflow_key, (string) $record->reporting_period,
+            $registeredActivity ?? (string) $record->activity_name, (string) $record->document_type,
+        );
     }
 }

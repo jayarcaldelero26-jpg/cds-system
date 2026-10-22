@@ -207,6 +207,9 @@ test('the Reports workspace exposes the active PA catalog and only the actor PA 
             ->where('rows.data.0.workflow_label', 'Regular PAMB Meetings')
             ->where('workflows', fn ($workflows) => collect($workflows)->contains(fn (array $workflow) => $workflow['key'] === 'regular_pamb')
                 && collect($workflows)->contains(fn (array $workflow) => $workflow['key'] === 'automated_weather_station')
+                && collect($workflows)->contains(fn (array $workflow) => $workflow['key'] === 'additional_bms_site'
+                    && ($workflow['date_conducted_ranges_enabled'] ?? false) === true
+                    && ($workflow['date_conducted_required'] ?? false) === true)
                 && collect($workflows)->doesntContain(fn (array $workflow) => $workflow['key'] === 'engp')));
 
     $this->actingAs($pamo)->get(route('pamo-reports.index', ['tab' => 'submitted', 'search' => 'Quarter 1']))

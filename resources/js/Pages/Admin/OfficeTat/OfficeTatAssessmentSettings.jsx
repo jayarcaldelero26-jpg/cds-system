@@ -149,7 +149,7 @@ function Field({ label, children }) { return <label className="block text-xs fon
 function UnitPanel({ unit, rows, canConfigure, periodKey, asOfDate, periodLabel, onConfigureScope }) {
     const [detailRow, setDetailRow] = useState(null);
     const columns = [
-        { key: 'rank', label: 'Rank', headerClassName: 'min-w-40', render: row => row.rank ? <span className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-full bg-gradient-to-r from-emerald-600 to-green-700 px-2 text-xs font-extrabold text-white">{row.rank}</span> : <div><span className={`text-xs font-bold ${row.rank_status?.startsWith('Awaiting') ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}>{row.rank_status || 'N/A'}</span>{row.reserved_rank_start && <span className="mt-0.5 block text-[10px] font-semibold text-gray-500 dark:text-gray-400">Reserving places {row.reserved_rank_start}–{row.reserved_rank_end}</span>}</div> },
+        { key: 'rank', label: 'Rank', headerClassName: 'min-w-40', render: row => row.rank ? <span className="inline-flex min-h-8 min-w-8 items-center justify-center rounded-full bg-gradient-to-r from-emerald-600 to-green-700 px-2 text-xs font-extrabold text-white">{row.rank}</span> : <div><span className={`text-xs font-bold ${row.rank_status?.startsWith('Awaiting') ? 'text-amber-700 dark:text-amber-300' : 'text-gray-500 dark:text-gray-400'}`}>{row.rank_status || 'Not ranked'}</span>{row.reserved_rank_start && <span className="mt-0.5 block text-[10px] font-semibold text-gray-500 dark:text-gray-400">Reserving places {row.reserved_rank_start}–{row.reserved_rank_end}</span>}</div> },
         { key: 'participant', label: unit?.unit === 'conservation' ? 'Protected Area / PAMO' : 'CENRO', headerClassName: 'min-w-52', render: row => <div><p className="font-bold text-gray-900 dark:text-white">{row.name}</p>{unit?.unit === 'conservation' && <p className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">PAMO binding: {row.office_binding || 'Not assigned'} · PA status: {row.legal_status || 'Unknown'}</p>}</div> },
         { key: 'due', label: 'Due', render: row => metricCount(row.due_count) },
         { key: 'submitted', label: 'Submitted', render: row => metricCount(row.submitted_count) },
@@ -160,16 +160,16 @@ function UnitPanel({ unit, rows, canConfigure, periodKey, asOfDate, periodLabel,
         { key: 'technical', label: 'Highly technical on time', headerClassName: 'min-w-36', render: row => metricCount(row.technical_on_time_count) },
         { key: 'tc', label: 'TC', render: row => metricPercent(row.tc_percent) },
         { key: 'se', label: 'SE', render: row => metricPercent(row.se_percent) },
-        { key: 'otps', label: 'OTPS', render: row => row.otps == null ? 'N/A' : <span className="font-extrabold text-emerald-900 dark:text-emerald-200">{Number(row.otps).toFixed(2)}</span> },
+        { key: 'otps', label: 'OTPS', render: row => row.otps == null ? row.score_status === 'No due reports' ? 'Not applicable' : 'Coverage incomplete' : <span className="font-extrabold text-emerald-900 dark:text-emerald-200">{Number(row.otps).toFixed(2)}</span> },
         { key: 'evidence', label: 'Details', render: row => <Button type="button" size="compact" variant="primary" onClick={() => setDetailRow(row)} aria-label={`View obligation evidence for ${row.name}`} className="rounded-lg px-3 py-1.5 text-[11px]">View</Button> },
         ...(unit?.unit === 'conservation' && canConfigure ? [{ key: 'scope', label: 'Applicability', render: row => <button type="button" onClick={() => onConfigureScope(row)} className="rounded-lg bg-gradient-to-r from-emerald-700 to-teal-700 px-3 py-2 text-[11px] font-bold text-white shadow-sm transition hover:brightness-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500">{row.scope_version_id ? `Edit v${row.scope_version_id}` : 'Review workflows'}</button> }] : []),
     ];
     const summary = [
         ['Roster / coverage', `${unit?.roster_count ?? 0} / ${unit?.expected_roster_count ?? 0}`, unit?.coverage_complete ? 'Complete' : 'Incomplete'],
-        ['Assessed due', unit?.coverage_complete && unit?.unit_score_status === 'No due reports' ? '0' : metricCount(unit?.due_count), `${metricCount(unit?.submitted_count)} submitted`],
+        ['Assessed reports (N)', unit?.coverage_complete && unit?.unit_score_status === 'No due reports' ? '0' : metricCount(unit?.due_count), `${metricCount(unit?.submitted_count)} submitted`],
         ['Verified volume', metricCount(unit?.volume_count), 'Unique valid submissions by cutoff'],
         ['On time / early', `${metricCount(unit?.on_time_count)} / ${metricCount(unit?.early_count)}`, 'Counts across verified obligations'],
-        ['TC · SE · OTPS', `${metricPercent(unit?.tc_percent)} · ${metricPercent(unit?.se_percent)} · ${unit?.otps == null ? 'N/A' : Number(unit.otps).toFixed(2)}`, 'Pooled by obligation count'],
+        ['TC · SE · OTPS', `${metricPercent(unit?.tc_percent)} · ${metricPercent(unit?.se_percent)} · ${unit?.otps == null ? unit?.unit_score_status === 'No due reports' ? 'Not applicable' : 'Coverage incomplete' : Number(unit.otps).toFixed(2)}`, 'Pooled by obligation count'],
     ];
 
     return <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
@@ -189,7 +189,7 @@ function UnitPanel({ unit, rows, canConfigure, periodKey, asOfDate, periodLabel,
             <CrudTable compact title={`${unit?.label || 'Unit'} participant standings`} subtitle={`${unit?.roster_count ?? 0} directory participants · ${unit?.expected_roster_count ?? 0} expected · ${periodLabel}`} helperText="Standings sort by TC, SE, early percentage, unique valid submitted volume, then highly technical reports on time. OTPS is displayed and is not a sort key." rows={rows} rowKey={row => row.participant_key} columns={columns} emptyTitle={(unit?.rows?.length || 0) > 0 ? 'No participants match search' : 'No directory participants'} emptyDescription="The unit roster is resolved from the current organization directory; no placeholder participants are created." />
         </div>
         {canConfigure && (unit?.tie_groups || []).filter(group => group.resolvable).map(group => <TieResolutionForm key={group.fingerprint} unit={unit} group={group} rows={unit?.rows || []} periodKey={periodKey} asOfDate={asOfDate} />)}
-        <CrudDetailsModal open={Boolean(detailRow)} title="Assessment evidence details" subtitle={detailRow ? `${unit?.label} · ${detailRow.name} · ${periodLabel}` : ''} icon={<Icon icon="lucide:clipboard-check" width="18" height="18" aria-hidden="true" />} onClose={() => setDetailRow(null)} summary={detailRow && <div className="grid gap-2 sm:grid-cols-3"><Metric label="Due denominator N" value={detailRow.due_count == null ? 'Withheld' : detailRow.due_count} /><Metric label="Submitted by cutoff" value={detailRow.submitted_count == null ? 'N/A' : detailRow.submitted_count} /><Metric label="Participant score state" value={detailRow.score_status} /></div>} maxWidth="max-w-5xl" compact>
+        <CrudDetailsModal open={Boolean(detailRow)} title="Assessment evidence details" subtitle={detailRow ? `${unit?.label} · ${detailRow.name} · ${periodLabel}` : ''} icon={<Icon icon="lucide:clipboard-check" width="18" height="18" aria-hidden="true" />} onClose={() => setDetailRow(null)} summary={detailRow && <div className="grid gap-2 sm:grid-cols-3"><Metric label="Due denominator N" value={detailRow.due_count == null ? 'Withheld' : detailRow.due_count} /><Metric label="Submitted by cutoff" value={metricCount(detailRow.submitted_count)} /><Metric label="Participant score state" value={detailRow.score_status} /></div>} maxWidth="max-w-5xl" compact>
             {detailRow && <div className="space-y-4">
                 <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-3 text-xs leading-5 text-sky-950 dark:border-sky-900 dark:bg-sky-950/30 dark:text-sky-100">
                     <p><strong>N</strong> includes verified obligations whose deadline is on or before the effective cutoff. <strong>T</strong> is the source-specific allowed duration from its approved start to deadline. <strong>D</strong> is elapsed duration from that same start to accepted {detailRow.obligation_details?.[0]?.receipt_endpoint || 'date_received_penro'}.</p>
@@ -409,5 +409,5 @@ function TechnicalClassificationPanel({ items, canConfigure }) {
     </details>;
 }
 
-function metricCount(value) { return value == null ? 'N/A' : Number(value).toLocaleString(); }
-function metricPercent(value) { return value == null ? 'N/A' : `${Number(value).toFixed(2)}%`; }
+function metricCount(value) { return value == null ? 'Coverage incomplete' : Number(value).toLocaleString(); }
+function metricPercent(value) { return value == null ? 'Coverage incomplete' : `${Number(value).toFixed(2)}%`; }

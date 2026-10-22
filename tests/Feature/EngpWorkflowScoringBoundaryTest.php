@@ -216,6 +216,8 @@ test('ENGP workflows score independently checked T, D, due cohorts and as-of evi
                 'allowed_days' => $check['allowed'], 'days_used' => $expected['days_used'], 'status' => $expected['status'],
                 'source_identity' => [
                     'workflow_key' => $workflowKey, 'workflow_label' => $workflow['label'],
+                    'source_key' => 'engp', 'source_id' => (int) $source->getKey(),
+                    'source_ids' => [(int) $source->getKey()],
                     'activity_name' => $workflow['activity'], 'document_type' => $workflow['document'],
                     'reporting_year' => $facts['year'], 'period_key' => $periodKey,
                     'participant_key' => 'cenro:'.OrganizationalOffice::query()->where('name', $office)->value('id'),
@@ -430,11 +432,6 @@ test('ENGP weekly as-of projection excludes a post-cutoff receipt without invent
     ]))->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('selectedUnit', 'development')
         ->where('filters.processing_period', '2026')
-        ->where('complianceAssessments.development.due_count', 160)
-        ->where('complianceAssessments.development.coverage_complete', true)
-        ->where('complianceAssessments.development.tc_percent', 100)
-        ->where('complianceAssessments.development.se_percent', 0)
-        ->where('complianceAssessments.development.otps', 80)
         ->where('recordedAssessment.due_count', 160)
         ->where('recordedAssessment.as_of_date', '2026-10-15')
         ->where('recordedAssessment.tc_percent', 100)

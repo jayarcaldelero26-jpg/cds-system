@@ -135,6 +135,7 @@ class EngpReportController extends Controller
         return $request->validate([
             'office' => ['required', Rule::in($config['offices'])],
             'section_name' => ['nullable', 'string', 'max:255'],
+            'activity_name' => ['nullable', 'string', 'max:255'],
             'reporting_year' => ['required', 'integer', 'between:2000,2100'],
             'period_key' => ['required', Rule::in($periodKeys)],
             'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx', 'max:10240'],
@@ -155,7 +156,7 @@ class EngpReportController extends Controller
         unset($validated['_editing'], $validated['mov']);
         $file = $request->file('mov');
         $period = $this->workflows->period($workflow, (int) $validated['reporting_year'], $validated['period_key']);
-        $validated = [...$validated, 'workflow_key' => $workflow, 'activity_name' => $config['activity'], 'document_type' => $config['document'], 'period_label' => $period['label'], 'deadline_submission' => $this->workflows->deadline($workflow, (int) $validated['reporting_year'], $validated['period_key']), 'updated_by' => $request->user()?->id];
+        $validated = [...$validated, 'workflow_key' => $workflow, 'activity_name' => trim((string) ($validated['activity_name'] ?? '')) ?: $config['activity'], 'document_type' => $config['document'], 'period_label' => $period['label'], 'deadline_submission' => $this->workflows->deadline($workflow, (int) $validated['reporting_year'], $validated['period_key']), 'updated_by' => $request->user()?->id];
         $save = function (EngpReportSubmission $target) use (&$validated, &$record): void {
             DB::transaction(function () use ($target, $validated): void {
                 if ($target->trashed()) $target->restore();

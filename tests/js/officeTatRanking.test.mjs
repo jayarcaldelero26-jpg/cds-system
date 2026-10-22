@@ -38,7 +38,8 @@ test('duration formatting preserves seconds and accepts a valid zero-duration me
     assert.equal(formatDuration(0), '0 seconds');
     assert.equal(formatDuration(1.5), '1.5 seconds');
     assert.equal(formatDuration(6 * day + 10 * 3600 + 54 * 60 + 46), '6 days 10 hours 54 minutes 46 seconds');
-    assert.equal(formatDuration(null), 'N/A');
+    assert.equal(formatDuration(null), 'No completed office handoffs');
+    assert.equal(formatDuration(-1), 'No data');
 });
 
 test('historical source fields do not create a live interval or rank', () => {

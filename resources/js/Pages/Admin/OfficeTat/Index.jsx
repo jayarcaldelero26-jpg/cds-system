@@ -217,11 +217,11 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
 
             <section className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Average Office Processing Time summary">
                 <SummaryCard icon="lucide:clock-3" label="Average processing time" value={liveAverage == null ? 'No completed intervals' : formatDuration(liveAverage)} detail={periodLabel + ' · ' + liveCompleted + ' completed live reports · weighted by report count'} />
-                <SummaryCard icon="lucide:files" label="Eligible completed reports" value={liveCompleted} detail="One completed interval sample per source report and office." />
+                <SummaryCard icon="lucide:files" label="Eligible completed reports" value={liveCompleted} detail="One completed interval per source report and office." />
                 <SummaryCard icon="lucide:hourglass" label="Pending / incomplete intervals" value={livePending + ' / ' + liveMissing} detail="Pending and incomplete intervals are excluded from the average." />
                 {analytics.category === 'PAMO' && pamoPreparation?.available && <>
                     <SummaryCard icon="lucide:hourglass" label="PAMO preparation average" value={pamoPreparationAverage == null ? 'No completed intervals' : formatDuration(pamoPreparationAverage)} detail={periodLabel + ' · first saved draft to accepted PAMO handoff · weighted by report count'} />
-                    <SummaryCard icon="lucide:files" label="PAMO preparation reports" value={pamoPreparationCompleted + ' / ' + (pamoPreparation.overall?.documents_started || 0)} detail="Completed samples / drafts started in the selected start-date cohort." />
+                    <SummaryCard icon="lucide:files" label="PAMO preparation reports" value={pamoPreparationCompleted + ' / ' + (pamoPreparation.overall?.documents_started || 0)} detail="Completed preparation intervals / drafts started in the selected start-date cohort." />
                     <SummaryCard icon="lucide:clock-3" label="PAMO pending / incomplete" value={pamoPreparationPending + ' / ' + pamoPreparationMissing} detail="Open drafts and incomplete intervals are excluded from the average." />
                 </>}
             </section>
@@ -354,10 +354,10 @@ function RankingSection({ title, description, rows, evidence = 'live' }) {
         >
             {selectedRow && <div className="space-y-3">
                 <p className="text-xs leading-5 text-gray-700 dark:text-gray-200">Elapsed calendar time from each accepted office receipt to the next accepted handoff. Each report contributes the sum of its completed correction intervals once.</p>
-                {(selectedRow.tatIntervalDetails || []).map(sample => <article key={sample.source_reference} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
-                    <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{sample.source_reference}</h3>
-                    <p className="mt-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">Total report processing time: {formatDuration(sample.elapsed_seconds)}</p>
-                    {(sample.intervals || []).map((interval, index) => <dl key={sample.source_reference + '-' + index} className="mt-2 grid gap-2 text-[11px] sm:grid-cols-3">
+                {(selectedRow.tatIntervalDetails || []).map(reportInterval => <article key={reportInterval.source_reference} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
+                    <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{reportInterval.source_reference}</h3>
+                    <p className="mt-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">Total report processing time: {formatDuration(reportInterval.elapsed_seconds)}</p>
+                    {(reportInterval.intervals || []).map((interval, index) => <dl key={reportInterval.source_reference + '-' + index} className="mt-2 grid gap-2 text-[11px] sm:grid-cols-3">
                         <DataPoint label="Accepted receipt timestamp" value={interval.accepted_receipt_at} />
                         <DataPoint label="Next accepted handoff timestamp" value={interval.accepted_handoff_at} />
                         <DataPoint label="Elapsed calendar time" value={formatDuration(interval.elapsed_seconds)} />
@@ -385,7 +385,7 @@ function EvidenceDetails({ row, evidence }) {
     return <div className="space-y-1 text-xs leading-4 text-gray-600 dark:text-gray-300">
         <p>{evidence === 'live' ? 'Accepted office receipt → next accepted handoff' : 'First saved draft → accepted PAMO handoff'}</p>
         {(pending > 0 || missing > 0) && <p className="text-amber-800 dark:text-amber-300">{pending} pending · {missing} incomplete intervals</p>}
-        {pending === 0 && missing === 0 && <p className="text-gray-500 dark:text-gray-400">{row.completedDocuments} completed report samples</p>}
+        {pending === 0 && missing === 0 && <p className="text-gray-500 dark:text-gray-400">{row.completedDocuments} completed report intervals</p>}
     </div>;
 }
 

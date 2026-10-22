@@ -128,7 +128,7 @@ test('recorded module coverage includes native BMS reports and deduplicates comp
     expect($recorded['activity_count'])->toBe(2)
         ->and($recorded['received_activity_count'])->toBe(2)
         ->and($recorded['not_yet_due_count'])->toBe(2)
-        ->and($participant['due_count'])->toBe(0)
+        ->and($participant['due_count'])->toBe(2)
         ->and($bmsDetails)->toHaveCount(2)
         ->and($bmsDetails->pluck('source_identity.source_id')->sort()->values()->all())->toBe($rows->pluck('id')->map(fn ($id): int => (int) $id)->sort()->values()->all())
         ->and($bmsDetails->every(fn (array $detail): bool => $detail['deadline'] > '2026-10-21'))->toBeTrue()
@@ -371,12 +371,39 @@ test('validated Restoration Plan reports resolve free-text titles through their 
 
     expect($recorded['activity_count'])->toBe(1)
         ->and($recorded['received_activity_count'])->toBe(1)
-        ->and($recorded['due_count'])->toBe(0)
+        ->and($recorded['due_count'])->toBe(1)
         ->and($row['not_yet_due_count'])->toBe(1)
         ->and($detail)->not->toBeNull()
         ->and($detail['deadline'])->toBe('2026-10-28')
         ->and($detail['source_identity']['workflow_key'])->toBe('restoration_plan_5_year')
         ->and($detail['source_identity']['activity_name'])->toBe('Preparation of 5-Year Restoration Plan')
+        ->and($detail['source_identity']['source_ids'])->toBe([$record->getKey()]);
+});
+
+test('registered Restoration Plan free-text title remains included in recorded counts', function (): void {
+    $actor = automaticTatGlobalViewer();
+    $area = automaticTatArea('Restoration Free Text Fixture');
+    $record = ConservationReportSubmission::query()->create([
+        'workflow_key' => 'restoration_plan_5_year', 'protected_area_id' => $area->getKey(),
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Restoration field progress update',
+        'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 4',
+        'date_conducted' => '2026-10-18', 'date_accomplished' => '2026-10-18',
+        'date_received_penro' => '2026-10-20',
+    ]);
+
+    $recorded = app(OfficeTatComplianceAssessmentService::class)->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-21');
+    $row = collect($recorded['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
+    $detail = collect($row['obligation_details'])->firstWhere('source_reference', 'Conservation report #'.$record->getKey());
+
+    expect($recorded['activity_count'])->toBe(1)
+        ->and($recorded['received_activity_count'])->toBe(1)
+        ->and($recorded['due_count'])->toBe(1)
+        ->and($row['not_yet_due_count'])->toBe(1)
+        ->and($row['on_time_count'])->toBe(1)
+        ->and($detail)->not->toBeNull()
+        ->and($detail['source_identity']['workflow_key'])->toBe('restoration_plan_5_year')
+        ->and($detail['source_identity']['activity_name'])->toBe('Preparation of 5-Year Restoration Plan')
+        ->and($detail['due_status'])->toBe('received_before_deadline')
         ->and($detail['source_identity']['source_ids'])->toBe([$record->getKey()]);
 });
 
@@ -395,13 +422,28 @@ test('ambiguous free-text Conservation identity stays unsupported without fuzzy 
     $row = collect($recorded['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
     $detail = collect($row['obligation_details'])->firstWhere('source_reference', 'Conservation report #'.$record->getKey());
 
+    $later = app(OfficeTatComplianceAssessmentService::class)->recordedAssessments($actor, 'conservation', '2026-H2', '2026-12-31');
+    $laterRow = collect($later['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
+    $laterDetail = collect($laterRow['obligation_details'])->firstWhere('source_reference', 'Conservation report #'.$record->getKey());
+
     expect($detail)->not->toBeNull()
         ->and($detail['status'])->toBe('Unsupported report identity')
+        ->and($detail['source_reference'])->toBe('Conservation report #'.$record->getKey())
         ->and($detail['source_identity']['activity_name'])->toBe('Unclassified CEPA progress narrative')
         ->and($detail['source_identity']['registered_activity_name'])->toBeNull()
+        ->and($detail['received'])->toBe('2026-10-20')
         ->and($detail['deadline'])->toBeGreaterThan('2026-10-21')
-        ->and($detail['issue'])->toContain('after selected date 2026-10-21')
-        ->and($row['due_count'])->toBe(0);
+        ->and($detail['due_as_of_date'])->toBe('2026-10-21')
+        ->and($detail['due_status'])->toBe('not_yet_due')
+        ->and($detail['issue'])->not->toContain('after selected date')
+        ->and($row['activity_count'])->toBe(0)
+        ->and($row['received_activity_count'])->toBe(0)
+        ->and($row['due_count'])->toBe(0)
+        ->and($laterDetail['status'])->toBe('Unsupported report identity')
+        ->and($laterDetail['due_status'])->toBe('due')
+        ->and($later['activity_count'])->toBe(0)
+        ->and($later['received_activity_count'])->toBe(0)
+        ->and($later['due_count'])->toBe(0);
 });
 
 test('recorded assessment enforces the viewer unit and designated CENRO scope', function (): void {
@@ -420,4 +462,89 @@ test('recorded assessment enforces the viewer unit and designated CENRO scope', 
 
     expect(fn () => $service->recordedAssessments($viewer, 'conservation', '2026-H2', '2026-10-31'))
         ->toThrow(HttpException::class);
+});
+
+test('recognized ENGP source identity stays excluded until its canonical definition is active, then scores without rewriting title', function (): void {
+    $actor = automaticTatGlobalViewer();
+    $requirements = app(ReportRequirementRegistry::class);
+    \App\Models\ModuleDefinition::query()->where('code', 'engp_elcac')->delete();
+    $requirements->forgetCache();
+
+    $title = 'QA Office TAT Run01 ELCAC free-text activity';
+    $record = EngpReportSubmission::query()->create([
+        'workflow_key' => 'elcac', 'office' => 'CENRO Baganga', 'section_name' => 'ENGP',
+        'activity_name' => $title, 'document_type' => 'Monthly Report',
+        'reporting_year' => 2026, 'period_key' => '2026-10', 'period_label' => 'October 2026',
+        'deadline_submission' => '2026-10-20', 'date_received_penro' => '2026-10-22',
+    ]);
+
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $before = $service->recordedAssessments($actor, 'development', '2026-H2', '2026-10-22');
+    $beforeRow = collect($before['rows'])->firstWhere('name', 'CENRO Baganga');
+    $excluded = collect($beforeRow['obligation_details'])->firstWhere('source_reference', 'ENGP report #'.$record->getKey());
+
+    expect($excluded['status'])->toBe('Missing or inactive workflow definition')
+        ->and($excluded['issue'])->toContain('workflow is recognized')
+        ->and($beforeRow['activity_count'])->toBe(0)
+        ->and($beforeRow['incomplete_evidence_count'])->toBe(1);
+
+    $setup = app(\App\Services\Modules\CanonicalModuleDefinitionService::class)->ensureCanonicalEngpDefinitions();
+    $requirements->forgetCache();
+    $after = $service->recordedAssessments($actor, 'development', '2026-H2', '2026-10-22');
+    $afterRow = collect($after['rows'])->firstWhere('name', 'CENRO Baganga');
+    $scored = collect($afterRow['obligation_details'])->firstWhere('source_identity.workflow_key', 'elcac');
+
+    expect($setup['created'])->toHaveCount(1)
+        ->and($afterRow['activity_count'])->toBe(1)
+        ->and($afterRow['received_activity_count'])->toBe(1)
+        ->and($afterRow['due_count'])->toBe(1)
+        ->and($afterRow['on_time_count'])->toBe(0)
+        ->and($afterRow['tc_percent'])->toEqual(0.0)
+        ->and($afterRow['incomplete_evidence_count'])->toBe(0)
+        ->and($scored['status'])->toBe('Submitted late')
+        ->and($scored['deadline'])->toBe('2026-10-20')
+        ->and($scored['received'])->toBe('2026-10-22')
+        ->and($scored['source_reference'])->toBe('ENGP report #'.$record->getKey())
+        ->and($scored['source_identity']['source_ids'])->toBe([$record->getKey()])
+        ->and($record->fresh()->activity_name)->toBe($title);
+});
+
+test('uniquely registered Conservation identity preserves the free-text title and assesses an early PENRO receipt', function (): void {
+    $actor = automaticTatGlobalViewer();
+    $area = automaticTatArea('Free-text PAMB identity fixture');
+    $catalogue = app(App\Services\OfficeTatObligationEvidenceSetupService::class)->catalogue();
+    $report = collect($catalogue)->first(fn (array $pair): bool => $pair['workflow_key'] === 'regular_pamb' && $pair['document_type'] === 'Report');
+    $periods = app(ReportRequirementRegistry::class)->periods('pa', 'regular_pamb', 2026);
+    $period = collect($periods)->firstWhere('key', 'Q4') ?? collect($periods)->firstWhere('key', 'quarter_4') ?? $periods[3];
+    $title = 'QA OFFICE - MHRWS - 2026-10-19';
+    $record = ConservationReportSubmission::query()->create([
+        'workflow_key' => 'regular_pamb', 'protected_area_id' => $area->getKey(),
+        'target_office' => 'CENRO Baganga', 'activity_name' => $title,
+        'document_type' => $report['document_type'], 'reporting_period' => $period['label'],
+        'date_conducted' => '2026-10-19', 'date_accomplished' => '2026-10-19',
+        'date_received_penro' => '2026-10-19',
+    ]);
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $recorded = $service->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-20');
+    $row = collect($recorded['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
+    $detail = collect($row['obligation_details'])->firstWhere('source_identity.submitted_activity_name', $title);
+    $later = $service->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-31');
+    $laterRow = collect($later['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
+    $laterDetail = collect($laterRow['obligation_details'])->firstWhere('source_identity.submitted_activity_name', $title);
+    expect($detail)->not->toBeNull()
+        ->and($detail['status'])->toBe('Submitted early')
+        ->and($detail['source_identity']['registered_activity_name'])->toBe('Regular PAMB')
+        ->and($detail['source_identity']['submitted_activity_name'])->toBe($title)
+        ->and($detail['deadline'])->toBe('2026-10-29')
+        ->and($detail['due_status'])->toBe('received_before_deadline')
+        ->and($recorded['activity_count'])->toBe(1)
+        ->and($recorded['received_activity_count'])->toBe(1)
+        ->and($recorded['due_count'])->toBe(1)
+        ->and($row['tc_percent'])->toEqual(100.0)
+        ->and($row['se_percent'])->toEqual(100.0)
+        ->and($row['otps'])->toEqual(100.0)
+        ->and($laterDetail['due_status'])->toBe('due')
+        ->and($later['activity_count'])->toBe(1)
+        ->and($later['received_activity_count'])->toBe(1)
+        ->and($later['due_count'])->toBe(1);
 });

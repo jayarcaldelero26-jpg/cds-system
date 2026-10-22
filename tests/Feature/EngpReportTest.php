@@ -61,6 +61,31 @@ test('ENGP registry contains exactly twelve workflows, office exception, and exa
     }
 });
 
+test('ENGP store preserves free-text activity names while deriving workflow metadata', function (): void {
+    $title = 'QA Office TAT Run01 Baganga CBEP Monthly';
+
+    $this->actingAs($this->user)
+        ->post(route('engp-reports.store', 'cbep'), [
+            'office' => 'CENRO Baganga',
+            'section_name' => 'QA Office TAT Run01',
+            'activity_name' => $title,
+            'reporting_year' => 2026,
+            'period_key' => '2026-10',
+        ])
+        ->assertRedirect()
+        ->assertSessionHasNoErrors();
+
+    $this->assertDatabaseHas('engp_report_submissions', [
+        'workflow_key' => 'cbep',
+        'office' => 'CENRO Baganga',
+        'reporting_year' => 2026,
+        'period_key' => '2026-10',
+        'activity_name' => $title,
+        'document_type' => 'Monthly Report',
+        'deadline_submission' => '2026-10-20',
+    ]);
+});
+
 test('ENGP RIMS store path persists the January exception and generic monthly deadlines', function () {
     $this->actingAs($this->user)
         ->post(route('engp-reports.store', 'rims'), [

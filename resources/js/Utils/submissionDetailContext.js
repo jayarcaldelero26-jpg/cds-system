@@ -47,6 +47,19 @@ export function custodyContext(row) {
     };
 }
 
+/** Use the accountable holder in "At ..." statuses, while keeping office context separate. */
+export function presentCurrentRoutingStatus(row, status) {
+    const value = text(status);
+    if (!value || !/^At\s+/i.test(value)) return value;
+
+    const custody = custodyContext(row);
+    const holder = sameText(custody.holder, "PAMO") && custody.office
+        ? custody.office
+        : custody.holder;
+
+    return holder ? `At ${holder}` : value;
+}
+
 /** Document type is a stored field; an activity name is never its fallback. */
 export function reportContextFields(row, expanded = false) {
     if (!row) return [];

@@ -5,6 +5,7 @@ import {
     movActionAvailability,
     movPrerequisiteFor,
     nextSubmissionAction,
+    presentCurrentRoutingStatus,
     refreshSubmissionSelection,
     reportContextFields,
 } from '../../resources/js/Utils/submissionDetailContext.js';
@@ -34,6 +35,30 @@ test('same originating/current office is represented once, while a different cur
     assert.equal(custodyContext(moved).officeMatchesOrigin, false);
     assert.equal(custodyContext(moved).office, 'PENRO Davao Oriental');
     assert.equal(new Map(reportContextFields(moved)).get('Originating Office'), 'CENRO Baganga');
+});
+
+test('current routing status names the accountable document holder and keeps the office field separate', () => {
+    const row = {
+        target_office: 'CENRO Baganga',
+        routing: {
+            current_status: 'At PENRO Davao Oriental',
+            responsible_office: 'PENRO Davao Oriental',
+            responsible_user_category: 'PENRO_RECORDS',
+        },
+    };
+    assert.equal(presentCurrentRoutingStatus(row, row.routing.current_status), 'At PENRO Records Unit');
+    assert.equal(custodyContext(row).office, 'PENRO Davao Oriental');
+    assert.equal(presentCurrentRoutingStatus(row, 'Awaiting Receipt by Office of the PENRO'), 'Awaiting Receipt by Office of the PENRO');
+
+    const pamo = {
+        target_office: 'CENRO Baganga',
+        routing: {
+            current_status: 'At CENRO Baganga',
+            responsible_office: 'PAMO-MHRWS',
+            responsible_user_category: 'PAMO',
+        },
+    };
+    assert.equal(presentCurrentRoutingStatus(pamo, pamo.routing.current_status), 'At PAMO-MHRWS');
 });
 
 test('PAMO route context keeps captured origin, protected area, and receiving/current office separate', () => {
