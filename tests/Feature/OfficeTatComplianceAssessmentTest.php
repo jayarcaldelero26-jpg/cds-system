@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
 use App\Models\EngpReportSubmission;
 use App\Models\HistoricalReportOrigin;
@@ -289,7 +290,7 @@ test('tie approval requires configure permission and rechecks its live fingerpri
     }
 });
 
-test('Office TAT view follows authorized unit selection for a local CENRO focal viewer', function (): void {
+test('Office TAT limits a local participant roster and does not label a partial view as global', function (): void {
     $view = Permission::findOrCreate('office-tat.view', 'web');
     $configure = Permission::findOrCreate('office-tat.configure', 'web');
     $viewer = User::factory()->create([
@@ -298,18 +299,29 @@ test('Office TAT view follows authorized unit selection for a local CENRO focal 
     ]);
     $viewer->givePermissionTo([$view, $configure]);
 
-    $this->actingAs($viewer)->get('/admin/office-tat?unit=development&category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')
-        ->assertOk()->assertInertia(fn ($page) => $page
-            ->component('Admin/OfficeTat/Index')
-            ->where('selectedUnit', 'development')
-            ->where('authorizedUnits', ['conservation', 'development'])
-            ->where('recordedAssessment.unit', 'development'));
-    $this->actingAs($viewer)->get('/admin/office-tat?unit=conservation&category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')
-        ->assertOk()->assertInertia(fn ($page) => $page
-            ->component('Admin/OfficeTat/Index')
-            ->where('selectedUnit', 'conservation')
-            ->where('recordedAssessment.unit', 'conservation'));
+    $this->actingAs($viewer)->get('/admin/office-tat?unit=development&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Admin/OfficeTat/Index')
+        ->where('selectedUnit', 'development')
+        ->where('authorizedUnits', ['conservation', 'development'])
+        ->where('recordedAssessment.unit', 'development')
+        ->where('recordedAssessment.roster_count', 1)
+        ->where('recordedAssessment.roster_complete', false)
+        ->where('recordedAssessment.ranking_scope', 'authorized_participants_only')
+        ->where('recordedAssessment.rows.0.name', 'CENRO Baganga')
+        ->where('recordedAssessment.rows.0.rank_status', 'Comparison limited by organizational access'));
+
+    $global = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $global->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $global->givePermissionTo([$view, $configure]);
+    $this->actingAs($global)->get('/admin/office-tat?unit=conservation&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
+        ->component('Admin/OfficeTat/Index')
+        ->where('authorizedUnits', ['conservation', 'development'])
+        ->where('recordedAssessment.unit', 'conservation')
+        ->where('recordedAssessment.expected_roster_count', 6)
+        ->where('recordedAssessment.roster_count', 0)
+        ->where('recordedAssessment.ranking_scope', 'authorized_participants_only'));
 });
+
 test('Office TAT route returns a roster whose selected unit and participant identities agree', function (): void {
     $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
     $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
@@ -331,6 +343,62 @@ test('Office TAT route returns a roster whose selected unit and participant iden
             ->where('filters.unit', 'development')
             ->where('recordedAssessment.unit', 'development')
             ->where('recordedAssessment.rows.0.participant_key', fn ($key) => str_starts_with($key, 'cenro:')));
+});
+
+test('recorded Conservation assessment includes native BMS with its source deadline and receipt', function (): void {
+    $areas = collect([
+        ['Mati Protected Landscape (MPL)', 'Active', 'PAMO-MPL'],
+        ['Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'Active', 'PAMO-MHRWS'],
+        ['Pujada Bay Protected Landscape and Seascape (PBPLS)', 'Active', 'PAMO-PBPLS'],
+        ['Aliwagwag Protected Landscape (APL)', 'Proposed', 'APL-PAMO'],
+        ['Baganga Mangrove Swamp Forest Reserve', 'Proposed', 'BMSFR-PAMO'],
+        ['Baganga Protected Landscape', 'Proposed', 'BPL-PAMO'],
+    ])->map(fn (array $row) => complianceAssessmentArea(...$row));
+    $area = $areas[4];
+
+    $record = BmsReportSubmission::query()->create([
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
+        'activity_name' => 'QA Run01 BMSFR BMS 2nd Semester 2026 Report',
+        'document_type' => 'Progress Report', 'semester' => '2nd Semester',
+        'date_accomplished' => '2026-10-26', 'date_received_penro' => '2026-10-26',
+    ]);
+
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    $result = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-26');
+    $paRow = collect($result['rows'])->firstWhere('participant_key', 'pa:'.$area->id);
+    $detail = collect($paRow['obligation_details'])->first(
+        fn (array $item): bool => ($item['source_identity']['source_key'] ?? null) === 'bms'
+            && ($item['source_identity']['source_id'] ?? null) === (int) $record->id,
+    );
+
+    expect($result['basis'])->toBe('recorded_live_source')
+        ->and($result['activity_count'])->toBe(1)
+        ->and($result['received_activity_count'])->toBe(1)
+        ->and($result['due_count'])->toBe(2)
+        ->and($result['tc_percent'])->toEqual(50.0)
+        ->and($result['se_percent'])->toEqual(50.0)
+        ->and($result['otps'])->toEqual(50.0)
+        ->and($paRow['activity_count'])->toBe(1)
+        ->and($paRow['received_activity_count'])->toBe(1)
+        ->and($paRow['due_count'])->toBe(2)
+        ->and(collect($paRow['obligation_details'])->contains(fn (array $item): bool =>
+            ($item['source_identity']['source_key'] ?? null) === 'bms'
+            && ($item['source_identity']['period_key'] ?? null) === 'S1'
+            && ($item['source_identity']['source_id'] ?? null) === null
+            && $item['status'] === 'No accepted PENRO receipt by cutoff'
+        ))->toBeTrue()
+        ->and($detail)->not->toBeNull()
+        ->and($detail['source_reference'])->toBe('BMS report #'.$record->id)
+        ->and($detail['source_rows_matched'])->toBe(1)
+        ->and($detail['deadline'])->toBe($record->deadline_submission)
+        ->and($detail['allowed_days'])->toBe(15)
+        ->and($detail['days_used'])->toBe(0)
+        ->and($detail['day_convention'])->toContain('Conservation working days')
+        ->and($detail['due_status'])->toBe('received_before_deadline');
 });
 
 test('Conservation applicability and highly technical workflow classifications remain separate and versioned', function (): void {
@@ -606,7 +674,7 @@ test('CBEP October submission scoring counts the first through twentieth calenda
 test('accepted early Conservation receipt enters the assessed denominator before its future deadline', function (): void {
     $service = app(OfficeTatComplianceAssessmentService::class);
     $makeObligation = new ReflectionMethod($service, 'makeObligation');
-    $scoreParticipant = new ReflectionMethod($service, 'scoreParticipant');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreRecordedParticipant');
     $obligation = $makeObligation->invoke(
         $service, 'pa:18|regular_pamb|2026|quarter_4', '2026-10-19', '2026-10-29', '2026-10-19', '2026-10-29',
         false, 4, false, 'conservation', 'pamb_working_days', 'PAMO-MHRWS', null, 'Regular PAMB · Quarter 4',
@@ -614,6 +682,7 @@ test('accepted early Conservation receipt enters the assessed denominator before
     $cutoff = \Carbon\CarbonImmutable::parse('2026-10-20', 'Asia/Manila')->endOfDay();
     $scored = $scoreParticipant->invoke($service, [$obligation], $cutoff);
     $detail = $scored['obligation_details'][0];
+
     expect($scored['due_count'])->toBe(1)
         ->and($scored['submitted_count'])->toBe(1)
         ->and($scored['on_time_count'])->toBe(1)
@@ -621,4 +690,83 @@ test('accepted early Conservation receipt enters the assessed denominator before
         ->and($scored['se_percent'])->toEqual(100.0)
         ->and($scored['otps'])->toEqual(100.0)
         ->and($detail['status'])->toBe('Submitted early');
+});
+
+test('automated TAT formulas use one as-of cohort and reject invalid periods', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreRecordedParticipant');
+    $cutoff = CarbonImmutable::parse('2026-10-20', 'Asia/Manila')->startOfDay();
+    $make = fn (string $start, string $deadline, ?string $received) => $makeObligation->invoke(
+        $service, 'fixture|'.($received ?? 'unreceived').'|'.$start.'|'.$deadline, $start, $deadline, $received, $deadline,
+        null, null, false, 'engp', 'calendar_days', 'CENRO Baganga', null, 'TAT formula fixture',
+    );
+    $score = fn (array $obligations, ?CarbonImmutable $asOf = null) => $scoreParticipant->invoke($service, $obligations, $asOf ?? $cutoff);
+
+    $halfEfficiency = $score([$make('2026-10-01', '2026-10-11', '2026-10-06')]);
+    $deadlineDay = $score([$make('2026-10-01', '2026-10-11', '2026-10-11')]);
+    $late = $score([$make('2026-10-01', '2026-10-11', '2026-10-12')]);
+    $zeroDaysUsed = $score([$make('2026-10-01', '2026-10-11', '2026-10-01')]);
+
+    expect($halfEfficiency['obligation_details'][0]['allowed_days'])->toBe(10)
+        ->and($halfEfficiency['obligation_details'][0]['days_used'])->toBe(5)
+        ->and($halfEfficiency['obligation_details'][0]['individual_efficiency_percent'])->toBe(50.0)
+        ->and($halfEfficiency['tc_percent'])->toEqual(100.0)
+        ->and($halfEfficiency['se_percent'])->toBe(50.0)
+        ->and($halfEfficiency['otps'])->toBe(90.0)
+        ->and($deadlineDay['tc_percent'])->toEqual(100.0)
+        ->and($deadlineDay['se_percent'])->toBe(0.0)
+        ->and($deadlineDay['otps'])->toBe(80.0)
+        ->and($late['tc_percent'])->toEqual(0.0)
+        ->and($late['se_percent'])->toEqual(0.0)
+        ->and($late['obligation_details'][0]['individual_efficiency_percent'])->toEqual(0.0)
+        ->and($zeroDaysUsed['obligation_details'][0]['individual_efficiency_percent'])->toEqual(100.0);
+
+    $dueUnreceived = $make('2026-10-01', '2026-10-11', null);
+    $earlyReceipt = $make('2026-10-01', '2026-10-11', '2026-10-03');
+    $futureUnreceived = $make('2026-10-01', '2026-10-20', null);
+    $mixed = $score([$dueUnreceived, $earlyReceipt, $futureUnreceived], CarbonImmutable::parse('2026-10-11', 'Asia/Manila'));
+    expect($mixed['due_count'])->toBe(2)
+        ->and($mixed['on_time_count'])->toBe(1)
+        ->and($mixed['tc_percent'])->toEqual(50.0)
+        ->and($mixed['se_percent'])->toBe(40.0)
+        ->and($mixed['otps'])->toBe(48.0)
+        ->and($mixed['obligation_details'][0]['status'])->toBe('No accepted PENRO receipt by cutoff')
+        ->and($mixed['obligation_details'][1]['status'])->toBe('Submitted early')
+        ->and($mixed['obligation_details'][2]['status'])->toBe('Not yet due; excluded from N');
+
+    $noDue = $score([]);
+    $invalidT = $score([$make('2026-10-01', '2026-10-01', '2026-10-01')]);
+    $invalidChronology = $score([$make('2026-10-01', '2026-10-11', '2026-09-30')]);
+    expect($noDue['due_count'])->toBe(0)
+        ->and($noDue['tc_percent'])->toBeNull()
+        ->and($noDue['se_percent'])->toBeNull()
+        ->and($noDue['otps'])->toBeNull()
+        ->and($invalidT['score_status'])->toBe('Coverage incomplete')
+        ->and($invalidT['score_issues'][0])->toContain('Allowed period must be positive')
+        ->and($invalidChronology['score_status'])->toBe('Coverage incomplete')
+        ->and($invalidChronology['obligation_details'][0]['issue'])->toContain('precedes the authoritative workflow start');
+});
+
+test('recognition ranking follows TC then SE and uses shared competition ranks', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $rankRows = new ReflectionMethod($service, 'rankRecordedRows');
+    $sample = [
+        ['name' => 'PAMO B', 'score_status' => 'Scored', 'tc_numerator' => 100, 'tc_denominator' => 1, 'se_ratio' => '65/1'],
+        ['name' => 'APL', 'score_status' => 'Scored', 'tc_numerator' => 100, 'tc_denominator' => 1, 'se_ratio' => '50/1'],
+        ['name' => 'PAMO C', 'score_status' => 'Scored', 'tc_numerator' => 95, 'tc_denominator' => 1, 'se_ratio' => '80/1'],
+        ['name' => 'PAMO D', 'score_status' => 'Scored', 'tc_numerator' => 95, 'tc_denominator' => 1, 'se_ratio' => '60/1'],
+    ];
+    $rankRows->invokeArgs($service, [&$sample, 'conservation', '2026-H2', str_repeat('a', 64)]);
+
+    expect(array_column($sample, 'name'))->toBe(['PAMO B', 'APL', 'PAMO C', 'PAMO D'])
+        ->and(array_column($sample, 'rank'))->toBe([1, 2, 3, 4]);
+
+    $ties = [
+        ['name' => 'Scaled copy', 'score_status' => 'Scored', 'tc_numerator' => 200, 'tc_denominator' => 2, 'se_ratio' => '130/2'],
+        ['name' => 'Original', 'score_status' => 'Scored', 'tc_numerator' => 100, 'tc_denominator' => 1, 'se_ratio' => '65/1'],
+        ['name' => 'Next score', 'score_status' => 'Scored', 'tc_numerator' => 100, 'tc_denominator' => 1, 'se_ratio' => '60/1'],
+    ];
+    $rankRows->invokeArgs($service, [&$ties, 'development', '2026-H2', str_repeat('b', 64)]);
+    expect(array_column($ties, 'rank'))->toBe([1, 1, 3]);
 });

@@ -38,21 +38,31 @@ test('duration formatting preserves seconds and accepts a valid zero-duration me
     assert.equal(formatDuration(0), '0 seconds');
     assert.equal(formatDuration(1.5), '1.5 seconds');
     assert.equal(formatDuration(6 * day + 10 * 3600 + 54 * 60 + 46), '6 days 10 hours 54 minutes 46 seconds');
-    assert.equal(formatDuration(null), 'No completed office handoffs');
+    assert.equal(formatDuration(null), 'No completed samples');
     assert.equal(formatDuration(-1), 'No data');
 });
 
-test('historical source fields do not create a live interval or rank', () => {
+test('manual historical date-gap averages use separate evidence fields and never merge with live rows', () => {
+    const rows = rankTatRows([
+        { office: 'CENRO A', manual_historical_handoff_average_elapsed_calendar_days: 3, manual_historical_handoff_elapsed_calendar_days_total: 3, manual_historical_handoff_completed_documents: 1 },
+        { office: 'CENRO B', manual_historical_handoff_average_elapsed_calendar_days: null, manual_historical_handoff_completed_documents: 0 },
+    ], 'historical', 'handoff');
+
+    assert.deepEqual(rows.map(row => [row.office, row.rank, row.completedDocuments]), [['CENRO A', 1, 1], ['CENRO B', null, 0]]);
+    assert.equal(rows[0].averageSeconds, 3 * day);
+});
+
+test('historical report counts stay distinct from eligible date-gap samples', () => {
     const [row] = rankTatRows([{
-        office: 'APL-PAMO', tat_average_elapsed_seconds: null, event_derived_tat_completed_documents: 0,
+        office: 'APL-PAMO',
         historical_report_count: 1,
         manual_historical_handoff_average_elapsed_calendar_days: null,
         manual_historical_handoff_completed_documents: 0,
-    }]);
+    }], 'historical', 'handoff');
 
+    assert.equal(row.historicalReports, 1);
     assert.equal(row.completedDocuments, 0);
     assert.equal(row.averageSeconds, null);
     assert.equal(row.rank, null);
-    assert.equal('historicalReports' in row, false);
     assert.equal(weightedAverageSeconds([row]), null);
 });
