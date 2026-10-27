@@ -28,8 +28,9 @@ export function dispatchModalKeydown(event, entries = [...layers.values()]) {
 
     const target = event.target;
     const openControl = target?.closest?.('[aria-expanded="true"]');
+    const modalDisclosure = openControl?.hasAttribute?.('data-cds-modal-disclosure');
     const nestedPopup = target?.closest?.('.cds-select-menu, .cds-filter-dropdown, .cds-menu-panel, .cds-filter-panel, [role="listbox"], [role="dialog"]:not([aria-modal="true"])');
-    if ((openControl && (top.panel?.contains?.(openControl) || nestedPopup)) || nestedPopup) return false;
+    if ((openControl && !modalDisclosure && (top.panel?.contains?.(openControl) || nestedPopup)) || nestedPopup) return false;
 
     if (event.key === 'Escape') {
         stopEvent(event);

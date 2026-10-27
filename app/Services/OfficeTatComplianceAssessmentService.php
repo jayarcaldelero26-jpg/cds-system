@@ -238,6 +238,10 @@ final class OfficeTatComplianceAssessmentService
                             $incompleteDetails[] = $this->recordedIncompleteDetail(
                                 $this->recordedPaLabel($pair, $sourcePeriod), 'Incomplete source dates', $start, $deadline, $received,
                                 'A source start or supported deadline is missing; this activity is not scored.',
+                                'Report #'.$record->getKey(), ['source_key' => 'conservation', 'calendar_office' => $record->target_office,
+                                    'workflow_key' => $workflow, 'workflow_label' => $pair['workflow_label'],
+                                    'activity_name' => $pair['activity_name'], 'document_type' => $pair['document_type'],
+                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                             );
                         }
                         continue;
@@ -262,6 +266,10 @@ final class OfficeTatComplianceAssessmentService
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
                             $this->recordedPaLabel($pair, $sourcePeriod), 'Conflicting historical receipt', $start, $deadline, $received,
                             'An original historical receipt exists for this source identity; it cannot be credited as live or treated as a verified miss.',
+                            'Report #'.$record->getKey(), ['source_key' => 'conservation', 'calendar_office' => $record->target_office,
+                                'workflow_key' => $workflow, 'workflow_label' => $pair['workflow_label'],
+                                'activity_name' => $pair['activity_name'], 'document_type' => $pair['document_type'],
+                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                         );
                         continue;
                     }
@@ -275,6 +283,9 @@ final class OfficeTatComplianceAssessmentService
                     );
                     $obligation['source_rows_matched'] = $liveMatches->count();
                     $obligation['source_identity'] = [
+                        'source_key' => 'conservation', 'source_id' => (int) $record->getKey(),
+                        'source_ids' => $liveMatches->pluck('id')->map(static fn ($id): int => (int) $id)->unique()->values()->all(),
+                        'calendar_office' => $record->target_office,
                         'participant_key' => $participant['participant_key'], 'workflow_key' => $workflow,
                         'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
                         'document_type' => $pair['document_type'], 'reporting_year' => $year,
@@ -294,6 +305,10 @@ final class OfficeTatComplianceAssessmentService
                             $incompleteDetails[] = $this->recordedIncompleteDetail(
                                 $this->recordedPaLabel($pair, $sourcePeriod), 'Evidence incomplete', $start, $deadline, $received,
                                 $policyIssue !== '' ? $policyIssue : 'The source record does not meet the current evidence policy for scoring.',
+                                'Report #'.$record->getKey(), ['source_key' => 'conservation', 'calendar_office' => $record->target_office,
+                                    'workflow_key' => $workflow, 'workflow_label' => $pair['workflow_label'],
+                                    'activity_name' => $pair['activity_name'], 'document_type' => $pair['document_type'],
+                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                             );
                             continue;
                         }
@@ -385,6 +400,10 @@ final class OfficeTatComplianceAssessmentService
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
                             (string) $definition['label'].' · '.$sourcePeriod['label'], 'Incomplete source dates', $expectedStart, $expectedDeadline, $received,
                             'The ENGP source deadline is missing; this activity is not scored.',
+                            'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
+                                'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
+                                'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
+                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                         );
                         continue;
                     }
@@ -393,6 +412,10 @@ final class OfficeTatComplianceAssessmentService
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
                             (string) $definition['label'].' · '.$sourcePeriod['label'], 'Unsupported deadline evidence', $expectedStart, $expectedDeadline, $received,
                             'The stored ENGP source deadline does not match the active Report Requirement Registry rule.',
+                            'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
+                                'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
+                                'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
+                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                         );
                         continue;
                     }
@@ -406,6 +429,10 @@ final class OfficeTatComplianceAssessmentService
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
                             (string) $definition['label'].' · '.$sourcePeriod['label'], 'Conflicting historical receipt', $expectedStart, $expectedDeadline, $received,
                             'An original historical receipt exists for this source identity; it cannot be credited as live or treated as a verified miss.',
+                            'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
+                                'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
+                                'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
+                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                         );
                         continue;
                     }
@@ -417,6 +444,9 @@ final class OfficeTatComplianceAssessmentService
                         (string) $definition['label'].' · '.$sourcePeriod['label']);
                     $obligation['source_rows_matched'] = $liveMatches->count();
                     $obligation['source_identity'] = [
+                        'source_key' => 'engp', 'source_id' => (int) $record->getKey(),
+                        'source_ids' => $liveMatches->pluck('id')->map(static fn ($id): int => (int) $id)->unique()->values()->all(),
+                        'calendar_office' => $record->office,
                         'participant_key' => $participant['participant_key'], 'workflow_key' => (string) $workflow,
                         'workflow_label' => $definition['label'], 'activity_name' => $definition['activity'],
                         'document_type' => $definition['document'], 'reporting_year' => $year,
@@ -436,6 +466,10 @@ final class OfficeTatComplianceAssessmentService
                             $incompleteDetails[] = $this->recordedIncompleteDetail(
                                 (string) $definition['label'].' · '.$sourcePeriod['label'], 'Evidence incomplete', $expectedStart, $expectedDeadline, $received,
                                 $policyIssue !== '' ? $policyIssue : 'The source record does not meet the current evidence policy for scoring.',
+                                'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
+                                    'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
+                                    'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
+                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
                             );
                             continue;
                         }
@@ -502,13 +536,19 @@ final class OfficeTatComplianceAssessmentService
     }
 
     /** @return array<string,mixed> */
-    private function recordedIncompleteDetail(string $label, string $status, ?string $start, ?string $deadline, ?string $received, string $issue): array
+    private function recordedIncompleteDetail(string $label, string $status, ?string $start, ?string $deadline, ?string $received, string $issue, ?string $sourceReference = null, ?array $sourceIdentity = null): array
     {
+        if ($sourceReference !== null && preg_match('/^Report #(\d+)$/i', $sourceReference, $match)) {
+            $sourceId = (int) $match[1];
+            $sourceIdentity = array_replace($sourceIdentity ?? [], ['source_id' => $sourceId, 'source_ids' => [$sourceId]]);
+        }
+
         return [
             'label' => $label, 'status' => $status, 'start_date' => $start,
             'deadline' => $deadline, 'received' => $received, 'receipt_endpoint' => 'date_received_penro',
             'allowed_days' => null, 'days_used' => null, 'technical' => null, 'issue' => $issue,
             'source_rows_matched' => 0,
+            'source_reference' => $sourceReference, 'source_identity' => $sourceIdentity,
         ];
     }
 

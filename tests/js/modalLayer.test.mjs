@@ -61,6 +61,20 @@ test('top modal traps only the Tab boundary and gives open dropdowns first Escap
     assert.equal(escapeEvent.prevented, false);
 });
 
+test('top modal handles Escape from an explicitly marked modal disclosure', () => {
+    let closes = 0;
+    const disclosure = {
+        closest: selector => selector.includes('aria-expanded') ? disclosure : null,
+        hasAttribute: name => name === 'data-cds-modal-disclosure',
+    };
+    const modal = makeLayer({ id: 'details', zIndex: 50, focusables: [disclosure], onEscape: () => closes++ });
+    const event = makeEvent('Escape', { target: disclosure });
+
+    assert.equal(dispatchModalKeydown(event, [modal.entry]), true);
+    assert.equal(event.prevented, true);
+    assert.equal(closes, 1);
+});
+
 test('layer registration shares scroll locking until the final dialog exits', () => {
     const first = makeLayer({ id: 'first', zIndex: 50 });
     const second = makeLayer({ id: 'second', zIndex: 60, documentObject: first.documentObject });

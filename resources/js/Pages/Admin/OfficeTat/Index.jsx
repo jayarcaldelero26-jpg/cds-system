@@ -10,6 +10,7 @@ import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { FloatingInput, FloatingSelect } from '@/Components/Form';
 import UtilityIconButton from '@/Components/UtilityIconButton';
 import ComplianceFirstAssessments from './ComplianceFirstAssessments';
+import DocumentTurnaround from './DocumentTurnaround';
 import { formatDuration, rankTatRows, weightedAverageSeconds } from './ranking.mjs';
 import { assessmentPeriodKey, parseAssessmentPeriodKey, selectAssessmentType } from './assessmentPeriodSelection.mjs';
 import { officeTatDisplayUnit } from './unitPresentation.mjs';
@@ -26,7 +27,7 @@ const historicalGapBases = {
     handoff: 'Original CENRO Release → Original PENRO Receipt',
 };
 
-export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfigure = false, configurationSaved = null, assessmentSaved = null, complianceAssessments = null, recordedAssessment = null, selectedUnit = 'conservation', authorizedUnits = [], selectedView = 'report-performance', globalAssessmentAccess = false }) {
+export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfigure = false, configurationSaved = null, assessmentSaved = null, complianceAssessments = null, recordedAssessment = null, documentTurnaround = null, selectedUnit = 'conservation', authorizedUnits = [], selectedView = 'report-performance', globalAssessmentAccess = false }) {
     const [search, setSearch] = useState('');
     const [showConfig, setShowConfig] = useState(null);
     const [secondaryOpen, setSecondaryOpen] = useState(false);
@@ -238,6 +239,11 @@ export default function OfficeTatIndex({ analytics = {}, filters = {}, canConfig
                 authorizedUnits={authorizedUnits}
                 onUnitChange={switchReportUnit}
                 saved={assessmentSaved}
+            />}
+            {activeView === 'report-performance' && <DocumentTurnaround
+                data={documentTurnaround}
+                selectedUnit={displayedReportUnit}
+                periodLabel={periodLabel}
             />}
 
             {activeView === 'average-tat' && <>

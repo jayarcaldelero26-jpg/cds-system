@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Services\OfficeTatAnalyticsService;
 use App\Services\OfficeTatComplianceAssessmentService;
+use App\Services\OfficeTatDocumentTurnaroundService;
 use App\Services\OfficeTatObligationEvidenceSetupService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
@@ -16,7 +17,7 @@ use Inertia\Response;
 
 final class OfficeTatController extends Controller
 {
-    public function index(Request $request, OfficeTatAnalyticsService $analytics, OfficeTatComplianceAssessmentService $assessments): Response|RedirectResponse
+    public function index(Request $request, OfficeTatAnalyticsService $analytics, OfficeTatComplianceAssessmentService $assessments, OfficeTatDocumentTurnaroundService $documentTurnaround): Response|RedirectResponse
     {
         $filters = $request->only([
             'category', 'processing_period', 'as_of_date', 'reporting_period', 'reporting_year',
@@ -44,10 +45,12 @@ final class OfficeTatController extends Controller
             ? $filters['view'] : 'report-performance';
         $globalAssessmentAccess = $organization->isGlobal($request->user());
         $officialAssessments = $globalAssessmentAccess ? $assessments->assessments($periodKey, $data['as_of_date']) : null;
+        $recordedAssessment = $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $data['as_of_date']);
         return Inertia::render('Admin/OfficeTat/Index', [
             'analytics' => $data,
             'complianceAssessments' => $officialAssessments,
-            'recordedAssessment' => $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $data['as_of_date']),
+            'recordedAssessment' => $recordedAssessment,
+            'documentTurnaround' => $documentTurnaround->forAssessment($request->user(), $recordedAssessment),
             'selectedUnit' => $selectedUnit,
             'authorizedUnits' => $authorizedUnits,
             'selectedView' => $filters['view'],
