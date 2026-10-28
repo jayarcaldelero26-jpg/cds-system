@@ -481,10 +481,9 @@ final class FinalDocumentArchiveService
         $latestCandidates = $scopedCandidates;
         if ($latestCandidates->isEmpty()) return [];
 
-        $moduleCodes = $latestCandidates->map(function (array $item): ?string {
-            $resolver = $item['definition']['archive_module_code'] ?? null;
-            return is_callable($resolver) ? (string) $resolver($item['record']) : null;
-        })->filter()->unique()->values();
+        $moduleCodes = $latestCandidates->map(fn (array $item): ?string =>
+            $this->archiveModuleCode((string) $item['source'], $item['definition'], $item['record'])
+        )->filter()->unique()->values();
         $activeModuleCodes = ModuleDefinition::query()->active()->notRetired()
             ->whereIn('code', $moduleCodes)->pluck('code')->map(fn ($code) => (string) $code)->all();
 
@@ -506,9 +505,7 @@ final class FinalDocumentArchiveService
             $verified = [];
             $receivingOfficeCache = [];
             foreach ($latestCandidates as $identity => $item) {
-                $moduleCode = is_callable($item['definition']['archive_module_code'] ?? null)
-                    ? (string) $item['definition']['archive_module_code']($item['record'])
-                    : null;
+                $moduleCode = $this->archiveModuleCode((string) $item['source'], $item['definition'], $item['record']);
                 if ($moduleCode === null || ! in_array($moduleCode, $activeModuleCodes, true)) continue;
                 $officeAttribute = $item['source'] === 'engp'
                     ? 'office'
@@ -666,7 +663,7 @@ final class FinalDocumentArchiveService
             $archiveUnit = (string) ($sourceDefinition['archive_unit'] ?? '');
             $archiveOffice = $this->archiveOffices->resolveRegionalReturn($sourceDefinition, $record);
             $primaryExtension = strtolower(pathinfo((string) $manifest->files->first()?->original_filename, PATHINFO_EXTENSION)) ?: 'pdf';
-            $this->archivePaths->build($module, $archiveUnit, $archiveOffice, (string) $record->getKey(), $primaryExtension, true);
+            $this->archivePaths->build($module, $archiveUnit, $archiveOffice, (string) $record->getKey(), $primaryExtension, true, null, true);
 
             foreach ($manifest->files as $file) {
                 $alreadyVerified = $file->file_status === 'ARCHIVED'
@@ -732,6 +729,7 @@ final class FinalDocumentArchiveService
                     $archiveOffice,
                     FinalDocumentArchiveManifest::PHASE,
                     $this->sourceContracts->allowedMimeTypes((string) $manifest->source_type),
+                    true,
                 );
 
                 if (($result['status'] ?? null) !== 'archived') {
@@ -875,7 +873,21 @@ final class FinalDocumentArchiveService
         abort_unless($contract, 404);
         $moduleCode = $sourceDefinition['archive_module_code'] ?? null;
         abort_unless(is_callable($moduleCode), 404);
-        $module = ModuleDefinition::query()->active()->notRetired()->where('code', (string) $moduleCode($record))->firstOrFail();
+        $expectedCode = (string) $moduleCode($record);
+        $workflow = (string) $record->getAttribute('workflow_key');
+        $module = match ($source) {
+            'engp' => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, $workflow),
+            'conservation' => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::PA, $workflow),
+            'management-plans' => ModuleDefinition::query()->active()->notRetired()->where('code', $expectedCode)->first(),
+            default => (function () use ($source, $expectedCode): ?ModuleDefinition {
+                $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->findBySource($source);
+                if (! $native || $native['workflow'] !== $expectedCode) return null;
+                return ModuleDefinition::query()->notRetired()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
+                    ->requirementDomain(\App\Services\Reports\ReportRequirementRegistry::PA)->where('code', $expectedCode)->first();
+            })(),
+        };
+        if ($module && $source !== 'engp' && ! in_array($expectedCode, [$module->code, $module->requirement_key], true)) $module = null;
+        abort_unless($module, 404);
         return [$sourceDefinition, $record, $module];
     }
 
@@ -898,6 +910,23 @@ final class FinalDocumentArchiveService
             && $this->sameOffice($this->organization->normalizeOffice($actor->office_designated), $expectedOffice)
             && $sourceDefinition !== null
             && $this->routingAccess->canView($actor, $record, $source, $sourceDefinition['ability']);
+    }
+
+    /** Resolve the persisted catalogue identity for configurable source modules. */
+    private function archiveModuleCode(string $source, array $definition, Model $record): ?string
+    {
+        $workflow = (string) $record->getAttribute('workflow_key');
+        $module = match ($source) {
+            'engp' => app(\App\Services\Reports\ReportRequirementRegistry::class)
+                ->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, $workflow),
+            'conservation' => app(\App\Services\Reports\ReportRequirementRegistry::class)
+                ->model(\App\Services\Reports\ReportRequirementRegistry::PA, $workflow),
+            default => null,
+        };
+        if ($module) return (string) $module->code;
+
+        $resolver = $definition['archive_module_code'] ?? null;
+        return is_callable($resolver) ? (string) $resolver($record) : null;
     }
 
     /** Actor-only portion of the final receipt writer predicate; release and record gates remain separate. */

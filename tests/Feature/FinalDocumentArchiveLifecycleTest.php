@@ -178,12 +178,15 @@ function finalArchiveReleasedSource(string $source, string $name, bool $legacyPa
         'engp' => 'engp_cbep',
         default => throw new InvalidArgumentException('Unsupported final archive source fixture.'),
     };
-    ModuleDefinition::query()->firstOrCreate(['code' => $moduleCode], [
+    $moduleDefinition = ModuleDefinition::query()->firstOrCreate(['code' => $moduleCode], [
         'name' => $name, 'program_area' => $development ? 'development' : 'protected_area_management_and_development',
         'implementation_type' => $source === 'conservation' ? 'generic' : 'specialized',
         'module_type' => 'regular_target', 'deadline_mode' => 'standard_working_days', 'is_active' => true,
         ...($source === 'conservation' ? ['requirement_domain' => 'pa', 'requirement_key' => $workflowKey] : []),
     ]);
+    if ($source === 'engp') {
+        $moduleDefinition->forceFill(['requirement_domain' => 'engp', 'requirement_key' => $workflowKey])->saveOrFail();
+    }
 
     $common = [
         'protected_area_id' => $area?->getKey(), 'target_office' => 'CENRO Mati',
@@ -453,6 +456,9 @@ test('each remaining generic source releases, receives, archives its returned se
     $gateway = $fixture['gateway'];
     $beforeReceiptUploads = $gateway->uploadAttempts();
     $beforeReceiptEvents = $fixture['events_before'];
+    if ($source === 'engp') {
+        expect(\App\Models\DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $fixture['report']->getKey())->count())->toBe(0);
+    }
     $receipt = $archives->recordReceipt(
         $fixture['penro_focal'], $source, (int) $fixture['report']->getKey(),
         now('Asia/Manila')->addMinutes(3)->format('Y-m-d H:i:s'),
@@ -475,6 +481,13 @@ test('each remaining generic source releases, receives, archives its returned se
 
     $manifest = FinalDocumentArchiveManifest::query()->with('files.archive')->where('receipt_id', $receipt->getKey())->firstOrFail();
     $file = $manifest->files->firstOrFail();
+    if ($source === 'engp') {
+        $regionalArchive = \App\Models\DocumentArchive::query()
+            ->where('source_type', 'engp')->where('source_id', $fixture['report']->getKey())
+            ->where('archive_phase', FinalDocumentArchiveManifest::PHASE)->firstOrFail();
+        expect($regionalArchive->archive_status)->toBe('ARCHIVED')
+            ->and($regionalArchive->getKey())->toBe($file->document_archive_id);
+    }
     expect($result['status'])->toBe('archived')
         ->and($manifest->archive_status)->toBe('ARCHIVED')
         ->and($manifest->archive_phase)->toBe(FinalDocumentArchiveManifest::PHASE)
@@ -506,6 +519,64 @@ test('each remaining generic source releases, receives, archives its returned se
     'Revenue' => ['revenue', false],
     'ENGP Development spreadsheet return' => ['engp', true],
 ]);
+
+test('inactive registered module keeps a released archive readable and permits only its existing receipt and manifest path', function (): void {
+    $fixture = finalArchiveReleasedBms('Inactive module released archive fixture');
+    $report = $fixture['report'];
+    $focal = $fixture['penro_focal'];
+    $archives = app(FinalDocumentArchiveService::class);
+    ModuleDefinition::query()->where('code', 'bms')->firstOrFail()->update(['is_active' => false]);
+
+    expect($archives->context($focal, 'bms', (int) $report->getKey())['released'])->toBeTrue();
+    $receipt = $archives->recordReceipt($focal, 'bms', (int) $report->getKey(), now('Asia/Manila')->addMinutes(2)->format('Y-m-d H:i:s'));
+    $result = $archives->createOrRetryManifest(
+        $focal, 'bms', (int) $report->getKey(), (string) Str::uuid(),
+        [UploadedFile::fake()->createWithContent('inactive-module-return.pdf', "%PDF-1.7\nVerified return copy")], true,
+    );
+    $manifest = FinalDocumentArchiveManifest::query()->with('files.archive')->where('receipt_id', $receipt->getKey())->firstOrFail();
+    $file = $manifest->files->firstOrFail();
+
+    expect($result['status'])->toBe('archived')
+        ->and($manifest->archive_status)->toBe('ARCHIVED')
+        ->and($archives->authorizeManifestFileReader($focal, $file)->getKey())->toBe($file->document_archive_id);
+    $this->actingAs($focal)->get(route('final-archives.index', ['source' => 'bms', 'record' => $report->getKey()]))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page->where('selected.latest_manifest.status', 'ARCHIVED'));
+    $this->actingAs($focal)->get(route('final-archives.files.show', $file->getKey()).'?download=1')->assertOk();
+
+    $foreign = finalArchiveActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    expect(fn () => $archives->authorizeManifestFileReader($foreign, $file))->toThrow(HttpException::class);
+    $this->actingAs($foreign)->get(route('final-archives.files.show', $file->getKey()).'?download=1')->assertNotFound();
+});
+
+test('inactive unrouted source has no receipt or manifest path without Regional release evidence', function (): void {
+    ModuleDefinition::query()->firstOrCreate(['code' => 'bms'], [
+        'name' => 'BMS', 'program_area' => 'protected_area_management_and_development',
+        'implementation_type' => 'specialized', 'module_type' => 'regular_target',
+        'deadline_mode' => 'standard_working_days', 'is_active' => true,
+    ])->update(['is_active' => false]);
+    $owner = User::factory()->create();
+    $area = finalArchiveArea($owner, 'CENRO Mati', 'Inactive unrouted BMS PA');
+    $report = BmsReportSubmission::query()->create([
+        'protected_area_id' => $area->getKey(), 'target_office' => 'CENRO Mati',
+        'activity_name' => 'Inactive unrouted BMS', 'document_type' => 'Report', 'semester' => '1st Semester',
+        'date_accomplished' => '2026-08-03',
+    ]);
+    $focal = finalArchiveActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $archives = app(FinalDocumentArchiveService::class);
+    $gateway = app(GoogleDriveArchiveGateway::class);
+    $attempts = $gateway->uploadAttempts();
+
+    expect($archives->context($focal, 'bms', (int) $report->getKey())['released'])->toBeFalse();
+    expect(fn () => $archives->recordReceipt($focal, 'bms', (int) $report->getKey(), now('Asia/Manila')->toDateTimeString()))
+        ->toThrow(ValidationException::class);
+    expect(fn () => $archives->createOrRetryManifest(
+        $focal, 'bms', (int) $report->getKey(), (string) Str::uuid(),
+        [UploadedFile::fake()->createWithContent('unrouted-return.pdf', "%PDF-1.7\nUnrouted fixture")], true,
+    ))->toThrow(ValidationException::class);
+    expect(FinalDocumentReceipt::query()->count())->toBe(0)
+        ->and(FinalDocumentArchiveManifest::query()->count())->toBe(0)
+        ->and($gateway->uploadAttempts())->toBe($attempts);
+});
 
 test('legacy Regular PAMB release evidence supports separate receipt and final archive without another custody event', function (): void {
     $fixture = finalArchiveReleasedSource('conservation', 'Legacy Regular PAMB final archive', true);
@@ -1491,7 +1562,7 @@ test('a finalization write failure retains the reserved Drive object for the sam
         ->and($gateway->objectIds())->toBe([$reservedId]);
 });
 
-test('eligible PENRO focal sees released records awaiting receipt while foreign PA scopes and inactive modules stay hidden', function (): void {
+test('eligible PENRO focal sees released records awaiting receipt while foreign PA scopes remain hidden', function (): void {
     $fixture = finalArchiveReleasedBms('Final archive receipt queue fixture');
     $gateway = $fixture['gateway'];
     $focal = $fixture['penro_focal'];
@@ -1516,8 +1587,7 @@ test('eligible PENRO focal sees released records awaiting receipt while foreign 
         ->assertNotFound();
 
     ModuleDefinition::query()->where('code', 'bms')->update(['is_active' => false]);
-    expect(fn () => $archives->context($focal, 'bms', $fixture['report']->id))
-        ->toThrow(ModelNotFoundException::class);
+    expect($archives->context($focal, 'bms', $fixture['report']->id)['can_receive_final'])->toBeTrue();
 });
 
 test('legacy PAMB release evidence seeds the authorized Awaiting Receipt queue', function (): void {

@@ -6,6 +6,7 @@ use App\Models\FinalDocumentArchiveManifest;
 use App\Models\DocumentRoutingEvent;
 use App\Models\OrganizationalOffice;
 use App\Models\PamoPambDraft;
+use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\SubmissionRoutingSnapshot;
@@ -26,6 +27,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -401,21 +403,38 @@ test('Forward validates current Homestay modal dates and promotes once without a
         ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->count())->toBe(1);
 });
 
-test('non-PAMB MHRWS draft routes directly to PENRO Records and inactive definitions stay closed', function (): void {
+test('non-PAMB MHRWS draft routes directly to PENRO Records while inactive modules keep existing PAMO drafts readable', function (): void {
     Storage::fake('local');
     Notification::fake();
     $owner = User::factory()->create();
     [$area, $office] = pamoPilotArea($owner, 'MHRWS', 'PAMO Catalog MHRWS', 'penro_davao_oriental');
     $pamo = pamoPilotActor(OrganizationalAccessService::PAMO, $office->name, (int) $area->getKey());
 
+    $inactiveToken = (string) Str::uuid();
+    expect(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission('water_quality_monitoring'))->toBeTrue();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', 'water_quality_monitoring'), [
+        'start_idempotency_key' => $inactiveToken,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $inactiveDraft = PamoPambDraft::query()->where('start_idempotency_key', $inactiveToken)->firstOrFail();
     \App\Models\ModuleDefinition::query()->where('code', 'water_quality_monitoring')->update(['is_active' => false]);
-    $this->actingAs($pamo)->get(route('conservation-reports.index', 'water_quality_monitoring'))->assertForbidden();
+    $this->actingAs($pamo)->get(route('conservation-reports.index', 'water_quality_monitoring'))
+        ->assertOk()->assertInertia(fn ($page) => $page->where('pamoWorkspace', true)
+            ->where('pamoDrafts.0.id', $inactiveDraft->draft_uuid));
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', 'water_quality_monitoring'), [
+        'start_idempotency_key' => (string) Str::uuid(),
+    ])->assertNotFound();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', ['water_quality_monitoring', $inactiveDraft->draft_uuid]), [
+        'lock_version' => $inactiveDraft->lock_version,
+    ])->assertNotFound();
+    expect(PamoPambDraft::query()->count())->toBe(1)
+        ->and(ConservationReportSubmission::query()->where('workflow_key', 'water_quality_monitoring')->count())->toBe(0)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'conservation')->exists())->toBeFalse();
     $this->actingAs($pamo)->get(route('conservation-reports.index', 'maintenance_monuments'))
         ->assertOk()->assertInertia(fn ($page) => $page->where('genericModuleNavigation', fn ($links) => count($links) === 21
             && collect($links)->doesntContain(fn (array $link) => str_ends_with($link['href'], '/water_quality_monitoring'))));
     \App\Models\ModuleDefinition::query()->where('implementation_type', 'generic')->update(['is_active' => false]);
     $this->actingAs($pamo)->get(route('dashboard'))
-        ->assertOk()->assertInertia(fn ($page) => $page->where('genericModuleNavigation', fn ($links) => count($links) === 0));
+        ->assertOk()->assertInertia(fn ($page) => $page->where('genericModuleNavigation', fn ($links) => collect($links)->every(fn (array $link): bool => str_starts_with($link['href'], '/engp-reports/'))));
     \App\Models\ModuleDefinition::query()->where('code', 'maintenance_monuments')->update(['is_active' => true]);
 
     $workflow = 'maintenance_monuments';
@@ -426,8 +445,9 @@ test('non-PAMB MHRWS draft routes directly to PENRO Records and inactive definit
         'date_accomplished' => '2026-10-02',
         'mov' => pamoPilotUpload(),
     ])->assertRedirect();
-    $draft = PamoPambDraft::query()->firstOrFail();
-    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), ['lock_version' => $draft->fresh()->lock_version])->assertRedirect()->assertSessionHasNoErrors();
+    $draft = PamoPambDraft::query()->where('workflow_key', $workflow)->firstOrFail();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), ['lock_version' => $draft->fresh()->lock_version])
+        ->assertRedirect()->assertSessionHasNoErrors();
     $source = ConservationReportSubmission::query()->findOrFail($draft->fresh()->conservation_report_submission_id);
     $event = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $source->getKey())->firstOrFail();
     expect($source->target_office)->toBe('PENRO Davao Oriental')
@@ -467,7 +487,7 @@ test('native source-link migration rejects references to nonexistent native repo
     ]))->toThrow(\Illuminate\Database\QueryException::class);
 });
 
-test('native module lists are bound to the authenticated PAMO PA and omit finance administration', function (): void {
+test('native module lists remain readable after deactivation while new native drafts stay closed', function (): void {
     $owner = User::factory()->create();
     [$area, $office] = pamoPilotArea($owner, 'APL', 'PAMO Native List APL', 'cenro_baganga');
     [$foreignArea, $foreignOffice] = pamoPilotArea($owner, 'MPL', 'PAMO Native List MPL', 'cenro_mati');
@@ -530,7 +550,51 @@ test('native module lists are bound to the authenticated PAMO PA and omit financ
     $this->actingAs($inactive)->get(route('pamo-native-reports.index', 'bms'))->assertRedirect(route('login'));
 
     \App\Models\ModuleDefinition::query()->where('code', 'bms')->firstOrFail()->update(['is_active' => false]);
-    $this->actingAs($pamo)->get(route('pamo-native-reports.index', 'bms'))->assertForbidden();
+    $this->actingAs($pamo)->get(route('pamo-native-reports.index', 'bms'))
+        ->assertOk()->assertInertia(fn ($page) => $page->component('PamoNativeReports/Index')->where('workflow.key', 'bms'));
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', 'bms'), [
+        'start_idempotency_key' => (string) Str::uuid(),
+    ])->assertNotFound();
+    expect(PamoPambDraft::query()->where('workflow_key', 'bms')->count())->toBe(0);
+});
+
+test('inactive definitions block first routing but keep an already captured route continuable', function (): void {
+    Notification::fake();
+    [$area] = pamoPilotArea(User::factory()->create(), 'APL', 'PAMO Route Deactivation APL', 'cenro_baganga');
+    $actor = pamoPilotActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $actor->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+    $module = ModuleDefinition::query()->where('code', 'homestay')->firstOrFail();
+    $routing = app(DocumentRoutingTransitionService::class);
+    $makeReport = fn () => ConservationReportSubmission::query()->create([
+        'workflow_key' => 'homestay', 'protected_area_id' => $area->getKey(), 'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report',
+        'reporting_period' => 'Quarter 1', 'date_accomplished' => '2026-10-01',
+        'created_by' => $actor->getKey(), 'updated_by' => $actor->getKey(),
+    ]);
+
+    $pending = $makeReport();
+    $pendingState = $routing->state($pending, 'conservation');
+    $pendingAction = collect($pendingState['actions'])->firstWhere('from', $pendingState['stage'])['key'];
+    $module->update(['is_active' => false]);
+    expect(fn () => $routing->transition($pending, 'conservation', $pendingAction, $actor->getKey()))
+        ->toThrow(ValidationException::class);
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $pending->getKey())->count())->toBe(0);
+
+    $module->update(['is_active' => true]);
+    $started = $makeReport();
+    $startedState = $routing->state($started, 'conservation');
+    $firstAction = collect($startedState['actions'])->firstWhere('from', $startedState['stage'])['key'];
+    $firstEvent = $routing->transition($started, 'conservation', $firstAction, $actor->getKey());
+    $snapshotId = data_get($firstEvent->metadata, 'route_snapshot_id');
+    $module->update(['is_active' => false]);
+    $continuedState = $routing->state($started->fresh(), 'conservation');
+    $continuedAction = collect($continuedState['actions'])->firstWhere('from', $continuedState['stage'])['key'];
+    $continuingActor = pamoPilotActor(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga');
+    $continuingActor->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+    $nextEvent = $routing->transition($started->fresh(), 'conservation', $continuedAction, $continuingActor->getKey());
+
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $started->getKey())->count())->toBe(2)
+        ->and(data_get($nextEvent->metadata, 'route_snapshot_id'))->toBe($snapshotId);
 });
 
 test('empty generic and native PAMO drafts save without content or attachments and reopen for partial edits', function (): void {

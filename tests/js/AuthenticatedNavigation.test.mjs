@@ -142,3 +142,19 @@ test('PAMO navigation has one global Archives destination and preserves its repo
     });
     assert.equal(unauthorized.some(item => item.href === '/submission-tracking/archives' || item.href === '/pamo/archives'), false);
 });
+test('generic ENGP definitions stay under National Greening Program with ENGP report routes', () => {
+    const navigation = [
+        { label: 'Protected Area Management and Development', children: [] },
+        { label: 'National Greening Program', children: [{ label: 'Static ENGP', href: '/engp-reports/summary' }] },
+        { label: 'CDS-SMART MONITORING' },
+    ];
+    const modules = [
+        { label: 'PA Development', href: '/conservation-reports/pa_development', program_area: protectedArea },
+        { label: 'ENGP RIMS', href: '/engp-reports/rims', program_area: 'engp' },
+    ];
+    const merged = withGenericModuleNavigation(navigation, modules);
+    const paReports = merged.find(item => item.label === 'Protected Area Management and Development').children;
+    const engpReports = merged.find(item => item.label === 'National Greening Program').children;
+
+    assert.deepEqual(paReports.map(item => item.href), ['/conservation-reports/pa_development']);
+    assert.deepEqual(engpReports.map(item => item.href), ['/engp-reports/summary', '/engp-reports/rims']);});

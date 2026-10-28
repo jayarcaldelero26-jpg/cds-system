@@ -38,7 +38,9 @@ class ConservationReportSubmissionController extends Controller
     public function index(Request $request, string $workflow): Response
     {
         $meetingWorkflow = $this->pambCompliance->isMeeting($workflow);
-        $config = [...$this->workflow($workflow), 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow), 'activity_required' => true, 'document_type_required' => false, 'period_required' => false, 'date_conducted_required' => $meetingWorkflow, 'date_accomplished_required' => ! $meetingWorkflow];
+        $workflowConfig = $this->workflow($workflow);
+        $configuredGenericFlow = (bool) ($workflowConfig['configured_generic_flow'] ?? false);
+        $config = [...$workflowConfig, 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow), 'activity_required' => true, 'document_type_required' => $configuredGenericFlow, 'period_required' => $configuredGenericFlow, 'date_conducted_required' => $meetingWorkflow, 'date_accomplished_required' => ! $meetingWorkflow];
         $submissions = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
             ->where('workflow_key', $workflow)
             ->with(['protectedArea:id,name,short_name', 'movReviewEvents.recordedBy'])
@@ -77,6 +79,9 @@ class ConservationReportSubmissionController extends Controller
     public function store(Request $request, string $workflow): RedirectResponse
     {
         abort_unless(! $this->pambAccess->isPamo($request->user()), 403, 'PAMO reports must be created from a saved draft.');
+        if (! $this->workflows->isActive($workflow)) {
+            throw ValidationException::withMessages(['workflow' => 'This report module is inactive and cannot accept a new report.']);
+        }
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
         $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
@@ -184,8 +189,8 @@ class ConservationReportSubmissionController extends Controller
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'target_office' => ['required', 'string', 'max:255'],
             'activity_name' => ['required', 'string', 'max:255'],
-            'document_type' => ['nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
-            'reporting_period' => ['nullable', 'string', Rule::in($config['periods'] ?? [])],
+            'document_type' => [($config['configured_generic_flow'] ?? false) ? 'required' : 'nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
+            'reporting_period' => [($config['configured_generic_flow'] ?? false) ? 'required' : 'nullable', 'string', Rule::in($config['periods'] ?? [])],
             'date_conducted_ranges' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'array', 'min:1'] : [],
             'date_conducted_ranges.*' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['array'] : [],
             'date_conducted_ranges.*.from' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'date_format:Y-m-d'] : [],
@@ -333,7 +338,7 @@ class ConservationReportSubmissionController extends Controller
         }
         if ($this->pambAccess->isPamo($user)) {
             abort_unless($this->organization->canViewPamoPilotWorkflow($user)
-                && $this->workflows->supportsPamoSubmission($workflow)
+                && $this->workflows->supportsPamoSubmission($workflow, false)
                 && $user->protected_area_id !== null
                 && (int) $user->protected_area_id === (int) $protectedAreaId, 403);
         }
@@ -341,7 +346,7 @@ class ConservationReportSubmissionController extends Controller
 
     private function assertPamoCorrectionEdit(?\App\Models\User $user, string $workflow, ConservationReportSubmission $submission): void
     {
-        abort_unless($user && $this->workflows->supportsPamoSubmission($workflow), 403);
+        abort_unless($user && $this->workflows->supportsPamoSubmission($workflow, false), 403);
         $state = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($submission, 'conservation');
         $position = $state['route_position'] ?? [];
         $last = $state['events']->last();
@@ -411,7 +416,7 @@ class ConservationReportSubmissionController extends Controller
 
     private function canPamoCorrect(\App\Models\User $user, ConservationReportSubmission $submission): bool
     {
-        if (! $this->workflows->supportsPamoSubmission((string) $submission->workflow_key)
+        if (! $this->workflows->supportsPamoSubmission((string) $submission->workflow_key, false)
             || ! app(OrganizationalAccessService::class)->canViewPamoPilotWorkflow($user)
             || (int) $user->protected_area_id !== (int) $submission->protected_area_id) return false;
 

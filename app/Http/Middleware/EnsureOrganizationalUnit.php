@@ -31,12 +31,12 @@ final class EnsureOrganizationalUnit
                 'pamo-native-reports.*',
             );
         $workflow = (string) $request->route('workflow');
-        $pamoWorkflow = app(ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow);
+        $pamoWorkflow = app(ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow, false);
         $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
         $nativeDraftWorkflow = $request->routeIs('conservation-reports.pamo-drafts.*')
-            && $nativeSources->isSchemaReady() && $nativeSources->isEligible($workflow);
+            && $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow);
         $nativePageWorkflow = $request->routeIs('pamo-native-reports.*')
-            && $nativeSources->isSchemaReady() && $nativeSources->isEligible($workflow);
+            && $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow);
         $pamoWorkspaceRoute = $request->routeIs('pamo-reports.index', 'pamo-archives.index', 'pamo-archives.file');
         $pamoPilotRequest = $unit === OrganizationalAccessService::CONSERVATION
             && ($pilotRoute || $pamoWorkspaceRoute)

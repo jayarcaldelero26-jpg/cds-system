@@ -8,11 +8,16 @@ use App\Models\User;
 use App\Services\CalendarMovEventService;
 use App\Services\BusinessCalendarService;
 use App\Services\Modules\ModuleDeadlineService;
+use App\Services\Engp\EngpReportWorkflowRegistry;
 use Database\Seeders\ModuleDefinitionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 
 uses(RefreshDatabase::class);
+
+beforeEach(function (): void {
+    $this->withoutVite();
+});
 
 function moduleManager(): User
 {
@@ -29,9 +34,10 @@ function moduleManager(): User
 function modulePayload(array $overrides = []): array
 {
     return [...[
-        'name' => 'Regular PAMB Meeting', 'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
+        'unit' => 'conservation', 'name' => 'Regular PAMB Meeting', 'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
         'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
         'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET, 'reporting_frequency' => 'quarterly',
+        'activity_name' => 'Regular PAMB Meeting', 'document_types' => 'Progress Report, Final Report',
         'deadline_mode' => ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, 'default_deadline_days' => 15,
         'allow_deadline_override' => false, 'description' => 'Registry test', 'is_active' => true,
     ], ...$overrides];
@@ -49,15 +55,17 @@ test('a manager can create regular target plan custom and no deadline module def
 
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload())->assertSessionHas('success');
     $regular = ModuleDefinition::query()->firstOrFail();
-    expect($regular->code)->toBe('regular_pamb_meeting')->and($regular->implementation_type)->toBe(ModuleDefinition::IMPLEMENTATION_GENERIC);
+    expect($regular->code)->toBe('regular_pamb_meeting')->and($regular->implementation_type)->toBe(ModuleDefinition::IMPLEMENTATION_GENERIC)
+        ->and($regular->requirement_domain)->toBe('pa')->and($regular->requirement_key)->toBe($regular->code)
+        ->and($regular->requirement_metadata['activities'])->toBe(['Regular PAMB Meeting']);
 
     $this->actingAs($manager)->put(route('module-definitions.update', $regular), modulePayload(['name' => 'Regular PAMB Meeting Updated']))->assertSessionHas('success');
     expect($regular->fresh()->code)->toBe('regular_pamb_meeting')->and($regular->fresh()->name)->toBe('Regular PAMB Meeting Updated');
 
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload([
         'name' => 'Protected Area Management Plan', 'module_type' => ModuleDefinition::TYPE_PLAN,
-        'reporting_frequency' => null, 'plan_duration_years' => 10,
-        'deadline_mode' => ModuleDefinition::DEADLINE_CUSTOM, 'default_deadline_days' => null, 'allow_deadline_override' => true,
+        'reporting_frequency' => 'annual',
+        'deadline_mode' => ModuleDefinition::DEADLINE_CUSTOM, 'default_deadline_days' => 15, 'allow_deadline_override' => true,
     ]))->assertSessionHas('success');
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload([
         'name' => 'Reference Plan', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'default_deadline_days' => null,
@@ -65,11 +73,41 @@ test('a manager can create regular target plan custom and no deadline module def
     expect(ModuleDefinition::query()->count())->toBe(3);
 });
 
-test('module definition conditional validation protects registry configuration', function () {
+test('module definition validation requires a reporting frequency for both module types and valid deadlines', function () {
     $manager = moduleManager();
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['reporting_frequency' => null]))->assertSessionHasErrors('reporting_frequency');
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['module_type' => ModuleDefinition::TYPE_PLAN, 'reporting_frequency' => null, 'plan_duration_years' => null]))->assertSessionHasErrors('plan_duration_years');
+    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['module_type' => ModuleDefinition::TYPE_PLAN, 'reporting_frequency' => null]))->assertSessionHasErrors('reporting_frequency');
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['default_deadline_days' => 0]))->assertSessionHasErrors('default_deadline_days');
+});
+
+test('Create Module uses the Development ENGP registry and edits cannot move it into Conservation', function () {
+    $manager = moduleManager();
+    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload([
+        'name' => 'Dynamic Development Module', 'unit' => 'development', 'program_area' => ProgramArea::ENGP->value,
+    ]))->assertSessionHas('success');
+    $created = ModuleDefinition::query()->where('code', 'dynamic_development_module')->firstOrFail();
+    expect($created->requirement_domain)->toBe('engp')
+        ->and($created->requirement_key)->toBe('dynamic_development_module')
+        ->and(app(EngpReportWorkflowRegistry::class)->find($created->requirement_key)['activity'])->toBe('Regular PAMB Meeting');
+
+    $definition = ModuleDefinition::query()->create([...modulePayload([
+        'name' => 'Existing ENGP Workflow', 'program_area' => ProgramArea::ENGP->value,
+        'unit' => 'development',
+    ]), 'code' => 'engp_existing_workflow', 'requirement_domain' => 'engp', 'requirement_key' => 'existing_workflow']);
+
+    $this->actingAs($manager)->put(route('module-definitions.update', $definition), modulePayload([
+        'name' => 'Existing ENGP Workflow Updated', 'program_area' => ProgramArea::ENGP->value,
+        'unit' => 'development',
+    ]))->assertSessionHas('success');
+    expect($definition->fresh()->name)->toBe('Existing ENGP Workflow Updated')
+        ->and($definition->fresh()->code)->toBe('engp_existing_workflow');
+
+    $this->actingAs($manager)->put(route('module-definitions.update', $definition), modulePayload([
+        'name' => 'Existing ENGP Workflow Updated',
+        'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
+        'unit' => 'conservation',
+    ]))->assertSessionHasErrors('unit');
+    expect($definition->fresh()->program_area)->toBe(ProgramArea::ENGP);
 });
 
 test('module definitions deactivate rather than delete and existing registration seeding is idempotent', function () {

@@ -252,14 +252,38 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
                 : []),
-            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', fn () => ($canBrowseConservation || $canViewPamoReports) && ! $isMes && ($can('technical-reports.view') || $canViewPamoReports)
-                ? ModuleDefinition::query()->active()->generic()->notRetired()
-                    ->when($canViewPamoReports && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO, fn ($query) => $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys()))
-                    ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
-                    ->get(['name', 'code', 'program_area', 'display_order'])
-                    ->map(fn (ModuleDefinition $module): array => ['label' => $module->name, 'href' => route('conservation-reports.index', $module->code, false), 'program_area' => $module->program_area->value, 'display_order' => $module->display_order])
-                    ->values()
-                : []),
+            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', function () use ($user, $organization, $canBrowseConservation, $canBrowseDevelopment, $canViewPamoReports, $isMes, $can): array {
+                if (! $user || $isMes) return [];
+                $isPamo = $canViewPamoReports && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO;
+                if (! $can('technical-reports.view') && ! $isPamo) return [];
+
+                $modules = collect();
+                if ($canBrowseConservation || $isPamo) {
+                    $modules = ModuleDefinition::query()->active()->generic()->notRetired()
+                        ->requirementDomain(\App\Services\Reports\ReportRequirementRegistry::PA)
+                        ->when($isPamo, fn ($query) => $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys()))
+                        ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
+                        ->get(['name', 'code', 'program_area', 'display_order'])
+                        ->map(fn (ModuleDefinition $module): array => [
+                            'label' => $module->name,
+                            'href' => route('conservation-reports.index', $module->code, false),
+                            'program_area' => $module->program_area->value === 'development' ? 'protected_area_management_and_development' : $module->program_area->value,
+                            'display_order' => $module->display_order,
+                        ]);
+                }
+                if ($canBrowseDevelopment && $can('technical-reports.view')) {
+                    $modules = $modules->concat(app(\App\Services\Reports\ReportRequirementRegistry::class)
+                        ->definitions(\App\Services\Reports\ReportRequirementRegistry::ENGP, true, ModuleDefinition::IMPLEMENTATION_GENERIC)
+                        ->map(fn (array $definition): array => [
+                            'label' => $definition['label'],
+                            'href' => route('engp-reports.index', $definition['key'], false),
+                            'program_area' => 'engp',
+                            'display_order' => $definition['display_order'] ?? null,
+                        ]));
+                }
+
+                return $modules->values()->all();
+            }),
             'pamoNativeModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_pamo_native_module_nav', function () use ($user, $canViewPamoReports, $isMes): array {
                 $sources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
                 if (! $user || ! $canViewPamoReports || $isMes

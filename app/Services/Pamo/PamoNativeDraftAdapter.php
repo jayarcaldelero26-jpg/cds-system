@@ -38,7 +38,7 @@ final class PamoNativeDraftAdapter
     /** @return array<string,mixed> */
     public function partialPayload(Request $request, string $workflow): array
     {
-        $source = $this->requiredSource($workflow);
+        $source = $this->requiredSource($workflow, false);
         $protectedFields = [
             'protected_area_id' => ['prohibited'], 'pamo_office_id' => ['prohibited'], 'target_office' => ['prohibited'],
             'source' => ['prohibited'], 'source_key' => ['prohibited'], 'source_id' => ['prohibited'],
@@ -170,7 +170,7 @@ final class PamoNativeDraftAdapter
     public function updateCorrection(Request $request, string $workflow, int $recordId, array $facts, User $actor): Model
     {
         return DB::transaction(function () use ($request, $workflow, $recordId, $facts, $actor): Model {
-        $source = $this->requiredSource($workflow);
+        $source = $this->requiredSource($workflow, false);
         $model = $source['model'];
         $record = $model::query()->findOrFail($recordId);
         abort_unless((int) $record->protected_area_id === (int) $facts['protected_area_id'], 404);
@@ -241,10 +241,10 @@ final class PamoNativeDraftAdapter
         });
     }
 
-    private function requiredSource(string $workflow): array
+    private function requiredSource(string $workflow, bool $requireActive = true): array
     {
         $source = $this->sources->find($workflow);
-        abort_unless($source && $this->sources->isEligible($workflow), 404);
+        abort_unless($source && ($requireActive ? $this->sources->isEligible($workflow) : $this->sources->isConfigured($workflow)), 404);
         $this->sources->assertSchemaReady();
         return $source;
     }

@@ -53,7 +53,7 @@ final class PamoPambDraftController extends Controller
     {
         if (! Schema::hasTable('pamo_pamb_drafts')) return ['pamoDrafts' => [], 'pamoWorkspace' => false];
         $facts = $this->assertPamoActor($request->user());
-        $this->assertPilotWorkflow($workflow);
+        $this->assertConfiguredWorkflow($workflow);
         $drafts = PamoPambDraft::query()
             ->where('protected_area_id', $facts['protected_area_id'])
             ->where('pamo_office_id', $facts['pamo_office_id'])
@@ -70,9 +70,7 @@ final class PamoPambDraftController extends Controller
     {
         $actor = $request->user();
         $facts = $this->assertPamoActor($actor);
-        $this->assertPilotWorkflow($workflow);
-        $data = $this->partialPayload($request, $workflow);
-        $file = $request->file('mov');
+        $this->assertConfiguredWorkflow($workflow);
         $token = $request->validate([
             'start_idempotency_key' => ['required', 'uuid'],
             'protected_area_id' => ['prohibited'], 'pamo_office_id' => ['prohibited'],
@@ -86,9 +84,15 @@ final class PamoPambDraftController extends Controller
         $existing = PamoPambDraft::query()->where('start_idempotency_key', $token)->first();
         if ($existing) {
             $this->assertDraftAccess($actor, $existing, $workflow, $facts);
+            $data = $this->partialPayload($request, $workflow);
+            $file = $request->file('mov');
             $this->saveLocked($request, $existing, $workflow, $facts, $data, $file, null);
             return back()->with('success', 'Draft saved.');
         }
+
+        $this->assertPilotWorkflow($workflow);
+        $data = $this->partialPayload($request, $workflow);
+        $file = $request->file('mov');
 
         $uuid = (string) Str::uuid();
         $now = CarbonImmutable::now(BusinessCalendarService::TIMEZONE);
@@ -344,7 +348,7 @@ final class PamoPambDraftController extends Controller
 
     private function partialPayload(Request $request, string $workflow): array
     {
-        $this->assertPilotWorkflow($workflow);
+        $this->assertConfiguredWorkflow($workflow);
         if ($this->nativeSources->find($workflow)) return $this->nativeDrafts->partialPayload($request, $workflow);
         $definition = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->find($workflow) ?? [];
         $documents = array_values(array_unique(array_merge(...array_values($definition['activity_documents'] ?? ['default' => ($definition['documents'] ?? [])]))));
@@ -405,10 +409,17 @@ final class PamoPambDraftController extends Controller
         $this->nativeSources->assertSchemaReady();
     }
 
+    private function assertConfiguredWorkflow(string $workflow): void
+    {
+        if (app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow, false)) return;
+        abort_unless($this->nativeSources->isConfigured($workflow), 404);
+        $this->nativeSources->assertSchemaReady();
+    }
+
     private function supportsWorkflow(string $workflow): bool
     {
-        return app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow)
-            || ($this->nativeSources->isSchemaReady() && $this->nativeSources->isEligible($workflow));
+        return app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow, false)
+            || ($this->nativeSources->isSchemaReady() && $this->nativeSources->isConfigured($workflow));
     }
 
     private function isDraftPath(PamoPambDraft $draft, ?string $path): bool

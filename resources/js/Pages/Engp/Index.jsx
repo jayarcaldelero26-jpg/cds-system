@@ -46,13 +46,13 @@ function Tracker({ workflow, config, rows = {}, periods, periodsByYear, offices,
     const [modal, setModal] = useState(null);
     const [preview, setPreview] = useState(null);
     const officeOptions = targetOffices.filter(office => offices.includes(office.name));
-    const empty = { office: officeOptions.length === 1 ? String(officeOptions[0].id) : '', section_name: '', reporting_year: year, period_key: periods[0]?.key || '', mov: null, mov_external_url: '', remarks: '' };
+    const empty = { office: officeOptions.length === 1 ? String(officeOptions[0].id) : '', section_name: '', activity_name: config.activity || '', document_type: config.document || '', reporting_year: year, period_key: periods[0]?.key || '', mov: null, mov_external_url: '', remarks: '' };
     const form = useForm(empty);
 
     useEffect(() => () => { if (preview?.temporary) URL.revokeObjectURL(preview.url); }, [preview]);
 
     const openCreate = () => { form.setData(empty); form.clearErrors(); setSelected(null); setPreview(null); setModal('create'); };
-    const openEdit = record => { form.setData({ ...empty, office: String(officeOptions.find(office => office.name === record.office)?.id || ''), section_name: record.section_name || '', reporting_year: record.reporting_year || year, period_key: record.period_key || '', deadline_submission: record.deadline_submission || '', mov: null, mov_external_url: record.mov_external_url || '', remarks: record.remarks || '' }); form.clearErrors(); setSelected(record); setPreview(record.mov || null); setModal('edit'); };
+    const openEdit = record => { form.setData({ ...empty, office: String(officeOptions.find(office => office.name === record.office)?.id || ''), section_name: record.section_name || '', activity_name: record.activity_name || config.activity || '', document_type: record.document_type || config.document || '', reporting_year: record.reporting_year || year, period_key: record.period_key || '', deadline_submission: record.deadline_submission || '', mov: null, mov_external_url: record.mov_external_url || '', remarks: record.remarks || '' }); form.clearErrors(); setSelected(record); setPreview(record.mov || null); setModal('edit'); };
     const close = () => { setModal(null); setSelected(null); setPreview(null); form.reset(); form.clearErrors(); };
     const chooseMov = file => { form.setData('mov', file); setPreview(file ? { name: file.name, type: file.type, size: file.size, url: URL.createObjectURL(file), temporary: true } : selected?.mov || null); };
     const submit = event => { event.preventDefault(); if (form.processing) return; const edit = modal === 'edit'; form.transform(data => edit ? { ...data, _method: 'put' } : data); form.post(edit ? route('engp-reports.update', [workflow, selected.id]) : route('engp-reports.store', workflow), { forceFormData: true, preserveScroll: true, onSuccess: close }); };
@@ -83,6 +83,7 @@ function Tracker({ workflow, config, rows = {}, periods, periodsByYear, offices,
 function FormFields({ form, config, periods, periodsByYear, offices, selected, chooseMov, preview }) {
     const error = name => form.errors[name] && <span className="mt-1 block text-xs text-red-500">{form.errors[name]}</span>;
     const periodOptions = periodsByYear?.[String(form.data.reporting_year)] || periods;
+    const documentOptions = config.activity_documents?.[form.data.activity_name] || config.documents || [config.document];
     const change = name => event => {
         const value = event.target.value;
         form.setData(name, value);
@@ -93,8 +94,8 @@ function FormFields({ form, config, periods, periodsByYear, offices, selected, c
         <CrudSection title="General / Report Information"><div className="grid gap-4 sm:grid-cols-2">
             <div className={label}><TargetOfficeSelect id="engp-office" label="Office" required value={form.data.office} options={offices} onChange={value => form.setData('office', value)} error={form.errors.office} /></div>
             <div className={label}><FloatingInput id="engp-section" label="Name of Section" value={form.data.section_name || ''} onChange={change('section_name')} />{error('section_name')}</div>
-            <div className={label}><FloatingInput id="engp-activity" label="Name of Activity" value={config.activity} readOnly /></div>
-            <div className={label}><FloatingInput id="engp-document" label="Document Type" value={config.document} readOnly /></div>
+            {config.configured_generic_flow ? <div className={label}><FloatingSelect id="engp-activity" label="Name of Activity" required value={form.data.activity_name || config.activity} onChange={change('activity_name')}>{(config.activities || [config.activity]).map(activity => <option key={activity} value={activity}>{activity}</option>)}</FloatingSelect>{error('activity_name')}</div> : <div className={label}><FloatingInput id="engp-activity" label="Name of Activity" value={config.activity} readOnly /></div>}
+            {config.configured_generic_flow ? <div className={label}><FloatingSelect id="engp-document" label="Document Type" required value={form.data.document_type || documentOptions[0] || ''} onChange={change('document_type')}>{documentOptions.map(document => <option key={document} value={document}>{document}</option>)}</FloatingSelect>{error('document_type')}</div> : <div className={label}><FloatingInput id="engp-document" label="Document Type" value={config.document} readOnly /></div>}
             <div className={label}><FloatingInput id="engp-year" label="Reporting Year" required type="number" value={form.data.reporting_year} onChange={change('reporting_year')} />{error('reporting_year')}</div>
             <div className={label}><FloatingSelect id="engp-period" label="Reporting Period" required value={form.data.period_key} onChange={change('period_key')}><option value="">Select Period</option>{periodOptions.map(period => <option key={period.key} value={period.key}>{period.label}</option>)}</FloatingSelect>{error('period_key')}</div>
         </div></CrudSection>

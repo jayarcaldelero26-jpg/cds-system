@@ -5,6 +5,7 @@ use App\Models\EngpReportSubmission;
 use App\Models\DocumentArchive;
 use App\Models\DocumentAttachmentHistory;
 use App\Models\DocumentRoutingEvent;
+use App\Models\ModuleDefinition;
 use App\Models\NonWorkingDay;
 use App\Models\ReportTrackingReference;
 use App\Models\User;
@@ -20,6 +21,7 @@ use App\Services\Archive\GoogleDriveArchiveGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
@@ -93,6 +95,39 @@ test('ENGP RIMS store path persists the January exception and generic monthly de
         'period_key' => '2026-02',
         'deadline_submission' => '2026-02-20',
     ]);
+});
+
+test('inactive ENGP blocks new periods while existing records retain their period contract and cannot start routing', function (): void {
+    $definition = ModuleDefinition::query()->firstOrCreate(['code' => 'engp_site_visit'], [
+        'name' => 'ENGP Site Visit', 'program_area' => 'engp',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC, 'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'quarterly', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE,
+        'requirement_domain' => 'engp', 'requirement_key' => 'site_visit', 'is_active' => true,
+    ]);
+    $definition->update(['is_active' => false]);
+
+    $this->actingAs($this->user)->post(route('engp-reports.store', 'site_visit'), [
+        'office' => 'CENRO Baganga', 'reporting_year' => 2026, 'period_key' => 'Q1',
+    ])->assertSessionHasErrors('workflow');
+    expect(EngpReportSubmission::query()->where('workflow_key', 'site_visit')->count())->toBe(0);
+
+    $report = EngpReportSubmission::query()->create(engpPayload([
+        'workflow_key' => 'site_visit', 'period_key' => 'Q1', 'period_label' => 'Quarter 1',
+        'deadline_submission' => '2026-03-10', 'created_by' => $this->user->id, 'updated_by' => $this->user->id,
+    ]));
+    $this->actingAs($this->user)->put(route('engp-reports.update', ['site_visit', $report->id]), [
+        'office' => 'CENRO Baganga', 'section_name' => 'Continued existing report',
+        'reporting_year' => 2026, 'period_key' => 'Q1',
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    expect($report->fresh()->section_name)->toBe('Continued existing report')
+        ->and($report->fresh()->period_label)->toBe('Quarter 1')
+        ->and($report->fresh()->deadline_submission?->toDateString())->toBe('2026-03-10');
+
+    $state = app(DocumentRoutingTransitionService::class)->state($report->fresh(), 'engp');
+    $firstAction = collect($state['actions'])->firstWhere('from', $state['stage'])['key'];
+    expect(fn () => app(DocumentRoutingTransitionService::class)->transition($report->fresh(), 'engp', $firstAction, $this->user->id))
+        ->toThrow(ValidationException::class);
+    expect(DocumentRoutingEvent::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe(0);
 });
 
 test('ENGP MOV replacement removes the superseded physical file after persistence', function (): void {
@@ -281,8 +316,13 @@ test('ENGP PENRO receipt is nonterminal even when no legacy release components e
     expect($conservation->submission_status)->toBe('Pending Regional Endorsement');
 });
 
-test('ENGP checkpoint uses the shared archive lifecycle and canonical Development path', function (): void {
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+test('ENGP checkpoint persists the Development handoff while final-return archive lifecycle is enabled', function (): void {
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => true,
+    ]);
+    expect(app(\App\Services\Archive\ArchiveCheckpointPolicy::class)->finalReturnLifecycleEnabled())->toBeTrue();
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     app()->forgetInstance(GoogleDriveArchiveGateway::class);
     app()->instance(GoogleDriveArchiveGateway::class, new \App\Services\Archive\FakeDocumentArchiveGateway());
@@ -322,12 +362,15 @@ test('ENGP checkpoint uses the shared archive lifecycle and canonical Developmen
     $forward = 'forward_to_office_penro';
     $this->actingAs($actors['penro'])
         ->post(route('submission-tracking.transition', ['engp', $report->id, $forward]), ['stage' => $forward])
-        ->assertRedirect();
+        ->assertRedirect()->assertSessionHasNoErrors();
 
-    $archive = DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $report->id)->firstOrFail();
-    expect($archive->archive_status)->toBe('ARCHIVED')
-        ->and($archive->google_drive_file_id)->toStartWith('fake-archive-')
-        ->and($archive->original_filename)->toBe('Community-Based Employment Program (CBEP).pdf')
+    $handoff = DocumentRoutingEvent::query()
+        ->where('source_type', 'engp')->where('source_id', $report->id)
+        ->where('event_key', 'forwarded')->where('from_stage', 'penro_records')
+        ->where('to_stage', DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO)
+        ->firstOrFail();
+    expect(DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $report->id)->count())->toBe(0)
+        ->and(data_get($handoff->metadata, 'action_key'))->toBe($forward)
         ->and($report->fresh()->mov_file_path)->toBe($path)
         ->and(app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)->state($report->fresh(), 'engp')['stage'])
             ->toBe(DocumentRoutingProfileRegistry::TRANSIT_OFFICE_PENRO);

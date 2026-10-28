@@ -161,8 +161,8 @@ final class PamoReportWorkspaceController extends Controller
     /** @return list<array<string,mixed>> */
     private function workflowCatalog(): array
     {
-        $genericKeys = $this->workflows->pamoSubmissionKeys();
-        $generic = ModuleDefinition::query()->active()->notRetired()
+        $genericKeys = $this->workflows->pamoSubmissionKeys(false);
+        $generic = ModuleDefinition::query()->notRetired()
             ->where('implementation_type', ModuleDefinition::IMPLEMENTATION_GENERIC)
             ->whereIn('code', $genericKeys)
             ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
@@ -178,12 +178,12 @@ final class PamoReportWorkspaceController extends Controller
 
         $native = collect();
         if ($this->nativeSources->isSchemaReady()) {
-            $native = ModuleDefinition::query()->active()->notRetired()
+            $native = ModuleDefinition::query()->notRetired()
                 ->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
                 ->where('requirement_domain', 'pa')->whereIn('code', array_keys($this->nativeSources->all()))
                 ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
                 ->get(['code'])
-                ->filter(fn (ModuleDefinition $module): bool => $this->nativeSources->isEligible((string) $module->code))
+                ->filter(fn (ModuleDefinition $module): bool => $this->nativeSources->isConfigured((string) $module->code))
                 ->map(fn (ModuleDefinition $module): array => $this->nativeReports->workspaceWorkflowConfig((string) $module->code));
         }
 

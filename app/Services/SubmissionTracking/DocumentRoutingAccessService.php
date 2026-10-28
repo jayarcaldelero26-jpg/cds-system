@@ -23,7 +23,7 @@ final class DocumentRoutingAccessService
         if ($isPamo) {
             if ($sourceKey === 'conservation') {
                 return $record instanceof ConservationReportSubmission
-                    && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key)
+                    && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key, false)
                     && $this->organization->canViewSubmission($user, $record);
             }
             return $this->canViewPamoNativeRecord($user, $record, $sourceKey);
@@ -40,7 +40,7 @@ final class DocumentRoutingAccessService
             || ! $user->is_active || ! $user->is_approved
             || ! $this->organization->canViewPamoPilotWorkflow($user)
             || ! app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)
-                ->supportsPamoSubmission((string) $record->workflow_key)) return false;
+                ->supportsPamoSubmission((string) $record->workflow_key, false)) return false;
 
         $areaId = (int) $record->protected_area_id;
         if ($areaId <= 0 || (int) $user->protected_area_id !== $areaId
@@ -204,7 +204,7 @@ final class DocumentRoutingAccessService
         if (! $registered) return false;
         $workflow = $registered['workflow'];
         $definition = $registered['definition'];
-        if (! $registry->isEligible($workflow) || ! $record instanceof $definition['model']) return false;
+        if (! $registry->isConfigured($workflow) || ! $record instanceof $definition['model']) return false;
         $areaId = (int) $record->getAttribute('protected_area_id');
         $facts = $this->organization->pamoAssignmentForProtectedArea($areaId);
         if (! $facts || (int) $user->protected_area_id !== $areaId) return false;
@@ -217,7 +217,7 @@ final class DocumentRoutingAccessService
         $registry = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
         if (! $registry->isSchemaReady()) return false;
         $registered = $registry->findBySource($sourceKey);
-        if (! $registered || ! $registry->isEligible($registered['workflow'])) return false;
+        if (! $registered || ! $registry->isConfigured($registered['workflow'])) return false;
         $definition = $registered['definition'];
         $linked = PamoPambDraft::query()
             ->where('workflow_key', $registered['workflow'])

@@ -66,7 +66,7 @@ class AppServiceProvider extends ServiceProvider
             $sources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
             $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
 
-            return $sources->isSchemaReady() && $sources->isEligible($workflow)
+            return $sources->isSchemaReady() && $sources->isConfigured($workflow)
                 && $user->is_active && $user->is_approved
                 && $organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO
                 && $organization->canViewPamoPilotWorkflow($user);
@@ -109,16 +109,16 @@ class AppServiceProvider extends ServiceProvider
             $organization = app(\App\Services\Authorization\OrganizationalAccessService::class);
             if ($ability === 'technical-reports.update'
                 && $organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO) {
-                return app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) request()->route('workflow'))
+                return app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) request()->route('workflow'), false)
                     && request()->routeIs('conservation-reports.update')
                     && $organization->canViewPamoPilotWorkflow($user);
             }
             if (in_array($ability, $conservationReadAbilities, true)) {
                 if ($organization->effectiveCategory($user) === \App\Services\Authorization\OrganizationalAccessService::PAMO) {
                     $workflow = (string) request()->route('workflow');
-                    $pilotWorkflow = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow);
+                    $pilotWorkflow = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow, false);
                     $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
-                    $nativeDraftWorkflow = $nativeSources->isSchemaReady() && $nativeSources->isEligible($workflow);
+                    $nativeDraftWorkflow = $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow);
                     $pilotReadRoute = request()->routeIs('conservation-reports.index', 'conservation-reports.mov', 'conservation-reports.pamo-drafts.*');
 
                     return ($pilotWorkflow || ($nativeDraftWorkflow && request()->routeIs('conservation-reports.pamo-drafts.*')))

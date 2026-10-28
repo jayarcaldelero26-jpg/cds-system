@@ -49,8 +49,14 @@ final class PamoNativeSourceRegistry
 
     public function isEligible(string $workflow): bool
     {
-        return $this->find($workflow) !== null
+        return $this->isConfigured($workflow)
             && ModuleDefinition::query()->active()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)->where('requirement_domain', 'pa')->where('code', $workflow)->exists();
+    }
+
+    public function isConfigured(string $workflow): bool
+    {
+        return $this->find($workflow) !== null
+            && ModuleDefinition::query()->notRetired()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)->where('requirement_domain', 'pa')->where('code', $workflow)->exists();
     }
 
     public function isSchemaReady(): bool

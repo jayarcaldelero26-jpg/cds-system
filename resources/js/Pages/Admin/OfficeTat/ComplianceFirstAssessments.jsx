@@ -121,7 +121,7 @@ export default function ComplianceFirstAssessments({
                 <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs leading-5 text-gray-700 dark:bg-gray-950 dark:text-gray-200">{activeOfficial ? 'This result covers the full official unit assessment and its all-required-obligations denominator.' : 'This result covers supported live report identities only. It does not assert that missing obligations or events did not occur.'}{assessmentUnit === 'conservation' ? ' Proposed status is a directory fact; registration eligibility is separate.' : ''}</p>
                 {(detailRow.obligation_details || []).map((item, index) => <article key={detailRow.participant_key + '-' + index} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                     <h3 className="text-xs font-extrabold text-gray-900 dark:text-white">{item.label || 'Source activity'}</h3>
-                    <p className="mt-1 text-[11px] font-semibold text-emerald-800 dark:text-emerald-200">{item.status || 'Source detail'}</p>
+                    <p className={`mt-1 text-[11px] font-semibold ${item.status === 'Submitted late' ? 'text-amber-900 dark:text-amber-200' : 'text-emerald-800 dark:text-emerald-200'}`}>{item.status || 'Source detail'}</p>
                     <dl className="mt-3 grid gap-2 text-[11px] sm:grid-cols-2 lg:grid-cols-4">
                         <DataPoint label="Source start" value={item.start_date || 'Incomplete'} />
                         <DataPoint label="Source deadline" value={item.deadline || 'Incomplete'} />

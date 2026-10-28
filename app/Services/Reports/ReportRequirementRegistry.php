@@ -149,13 +149,21 @@ final class ReportRequirementRegistry
             $mode = $definition['deadline_mode'] ?? ModuleDefinition::DEADLINE_CUSTOM;
             if ($mode !== ModuleDefinition::DEADLINE_CUSTOM) {
                 if ($mode === ModuleDefinition::DEADLINE_NONE) return null;
-                $range = $this->periodRange($year, $periodKey, $frequency);
+                $range = $this->periodRange($year, $periodKey, $frequency) ?? $this->configuredPeriodRange($metadata, $periodKey);
                 $days = (int) ($definition['default_deadline_days'] ?? 0);
                 if (! $range || $days <= 0) return null;
                 if ($mode === ModuleDefinition::DEADLINE_CALENDAR_DAYS) return $range[1]->addDays($days)->toDateString();
                 if ($mode === ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS) {
+                    if (($metadata['configured_generic_flow'] ?? false) === true) {
+                        return app(BusinessCalendarService::class)->addConservationWorkingDays($range[1], $days)->toDateString();
+                    }
                     return app(BusinessCalendarService::class)->addWorkingDays($range[1], $days, null, BusinessCalendarService::STANDARD_WORKING_WEEKDAYS)->toDateString();
                 }
+            }
+            if (($metadata['custom_deadline_after_period'] ?? false) === true) {
+                $range = $this->periodRange($year, $periodKey, $frequency) ?? $this->configuredPeriodRange($metadata, $periodKey);
+                $days = (int) ($definition['default_deadline_days'] ?? 0);
+                if ($range && $days > 0) return $range[1]->addDays($days)->toDateString();
             }
             if ($frequency === 'monthly') {
                 [$periodYear, $month] = array_map('intval', explode('-', $periodKey));
@@ -174,7 +182,7 @@ final class ReportRequirementRegistry
             return $period['deadline'] ?? null;
         }
 
-        $range = $this->periodRange($year, $periodKey, $frequency);
+        $range = $this->periodRange($year, $periodKey, $frequency) ?? $this->configuredPeriodRange($metadata, $periodKey);
         if (! $range) {
             return null;
         }
@@ -205,7 +213,7 @@ final class ReportRequirementRegistry
         if (! $definition || ! $this->period($domain, $key, $year, $periodKey)) return null;
 
         $frequency = strtolower((string) ($definition['reporting_frequency'] ?? $definition['period'] ?? 'custom'));
-        $range = $this->periodRange($year, $periodKey, $frequency);
+        $range = $this->periodRange($year, $periodKey, $frequency) ?? $this->configuredPeriodRange($definition['requirement_metadata'] ?? [], $periodKey);
         if ($range) return $range[0]->toDateString();
 
         if ($frequency === 'weekly' && preg_match('/^W(\d{2})$/', $periodKey, $match)) {
@@ -344,18 +352,39 @@ final class ReportRequirementRegistry
 
     private function periodIsEffective(array $definition, int $year, string $periodKey): bool
     {
-        $range = $this->periodRange($year, $periodKey, strtolower((string) ($definition['reporting_frequency'] ?? $definition['period'] ?? 'custom')));
+        $range = $this->periodRange($year, $periodKey, strtolower((string) ($definition['reporting_frequency'] ?? $definition['period'] ?? 'custom')))
+            ?? $this->configuredPeriodRange($definition['requirement_metadata'] ?? [], $periodKey);
         $date = $range[0] ?? CarbonImmutable::create($year, 1, 1);
         if (filled($definition['effective_from']) && $date->lessThan(CarbonImmutable::parse($definition['effective_from']))) return false;
         if (filled($definition['effective_to']) && $date->greaterThan(CarbonImmutable::parse($definition['effective_to']))) return false;
         return true;
     }
 
-    /** @return list<array{key:string,label:string}> */
+    /** @return list<array{key:string,label:string,start_date?:string,end_date?:string}> */
     private function explicitPeriods(array $definition, int $year): array
     {
         $periods = $definition['periods'] ?? ($definition['requirement_metadata']['periods'] ?? []);
-        return array_map(fn (string $label): array => ['key' => Str::slug($label, '_'), 'label' => $label], array_values($periods));
+        return array_values(array_filter(array_map(function (string|array $period): array {
+            if (is_string($period)) return ['key' => Str::slug($period, '_'), 'label' => $period];
+            $label = (string) ($period['label'] ?? $period['key'] ?? '');
+            return [
+                'key' => (string) ($period['key'] ?? Str::slug($label, '_')),
+                'label' => $label,
+                ...array_filter(['start_date' => $period['start_date'] ?? null, 'end_date' => $period['end_date'] ?? null]),
+            ];
+        }, array_values($periods)), fn (array $period): bool => ! filled($period['start_date'] ?? null) || substr((string) $period['start_date'], 0, 4) === (string) $year));
+    }
+
+    /** @param array<string,mixed> $metadata @return array{0:CarbonImmutable,1:CarbonImmutable}|null */
+    private function configuredPeriodRange(array $metadata, string $periodKey): ?array
+    {
+        $period = collect($metadata['periods'] ?? [])->first(fn ($item): bool => is_array($item) && (string) ($item['key'] ?? '') === $periodKey);
+        if (! is_array($period) || ! filled($period['start_date'] ?? null) || ! filled($period['end_date'] ?? null)) return null;
+
+        return [
+            CarbonImmutable::parse($period['start_date'], BusinessCalendarService::TIMEZONE)->startOfDay(),
+            CarbonImmutable::parse($period['end_date'], BusinessCalendarService::TIMEZONE)->startOfDay(),
+        ];
     }
 
     /** @return list<array{key:string,label:string,deadline?:string}> */

@@ -95,7 +95,9 @@ class ConservationReportSubmission extends Model
         if (! is_int($days)) return $days;
 
         $module = $this->moduleDefinition();
-        if ($module && ! in_array($module->deadline_mode, [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true)) {
+        $customModuleDeadline = $module && $module->deadline_mode === ModuleDefinition::DEADLINE_CUSTOM
+            && ($module->requirement_metadata['custom_deadline_from_actual_date'] ?? false);
+        if ($module && ! $customModuleDeadline && ! in_array($module->deadline_mode, [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true)) {
             return 'No Data';
         }
         $standard = $module ? (($module->default_deadline_days ?? 0) <= 7 ? 'B' : 'A') : $this->deadlineRule()['timeliness_standard'];

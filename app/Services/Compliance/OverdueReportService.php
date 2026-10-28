@@ -440,7 +440,7 @@ class OverdueReportService
 
         $year = $today->year;
         $definitions = collect($this->engpWorkflows->all())->keyBy('key');
-        $offices = $definitions->flatMap(fn (array $definition): array => $definition['offices'] ?? [])->unique()->values();
+        $offices = $definitions->flatMap(fn (array $definition): array => $definition['reminder_offices'] ?? $definition['offices'] ?? [])->unique()->values();
         if ($user = auth()->user()) {
             $offices = $offices->filter(fn (string $office): bool => $this->organization->canUseDevelopmentOffice($user, $office));
         }
@@ -453,7 +453,7 @@ class OverdueReportService
         if (! array_key_exists($cacheKey, self::$engpScheduleCache)) {
             $schedule = [];
             foreach ($definitions as $workflow) {
-                foreach (array_intersect($workflow['offices'] ?? [], $officeList) as $office) {
+                foreach (array_intersect($workflow['reminder_offices'] ?? $workflow['offices'] ?? [], $officeList) as $office) {
                     foreach ($this->engpWorkflows->periods($workflow['key'], $year) as $period) {
                         $deadline = $this->engpWorkflows->deadline($workflow['key'], $year, $period['key']);
                         if ($deadline !== null) {

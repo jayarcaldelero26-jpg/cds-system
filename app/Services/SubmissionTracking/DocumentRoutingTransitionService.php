@@ -3,6 +3,7 @@
 namespace App\Services\SubmissionTracking;
 
 use App\Models\DocumentRoutingEvent;
+use App\Models\ModuleDefinition;
 use App\Models\User;
 use App\Support\LocalNavigationTrace;
 use App\Services\Archive\ArchiveCheckpointPolicy;
@@ -352,6 +353,7 @@ final class DocumentRoutingTransitionService
             $lockedEvents = $this->eventsForTransition($locked, $sourceKey);
             $position = $this->positionSnapshots->resolve($locked, $sourceKey, $lockedEvents->isNotEmpty(), $lockedEvents->isEmpty(), true);
             $state = $this->state($locked, $sourceKey, $lockedEvents, $actor, $position);
+            $this->assertModuleCanStartRouting($locked, $sourceKey, $lockedEvents, (bool) $state['bootstrapped']);
             // Authorize known effective actions before checking whether they
             // are still current. Custom position-dependent dispatches must use
             // the captured graph and current actor scope just like base actions.
@@ -445,6 +447,24 @@ final class DocumentRoutingTransitionService
         return $event;
     }
 
+    private function assertModuleCanStartRouting(EloquentModel $record, string $sourceKey, Collection $events, bool $bootstrapped): void
+    {
+        if ($events->isNotEmpty() || $bootstrapped) return;
+
+        $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->findBySource($sourceKey);
+        $module = match ($sourceKey) {
+            'conservation' => ModuleDefinition::query()->requirementDomain('pa')->where('implementation_type', ModuleDefinition::IMPLEMENTATION_GENERIC)->where('code', (string) $record->getAttribute('workflow_key'))->first(),
+            'engp' => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, (string) $record->getAttribute('workflow_key')),
+            default => $native
+                ? ModuleDefinition::query()->requirementDomain('pa')->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)->where('code', (string) $native['workflow'])->first()
+                : null,
+        };
+
+        if ($module && ! $module->is_active) {
+            throw ValidationException::withMessages(['workflow' => 'This report module is inactive and cannot start a new routing flow.']);
+        }
+    }
+
     /** Check an initial dispatch action before taking its cross-worker in-progress lock. */
     public function assertCanAttemptCheckpoint(EloquentModel $record, string $sourceKey, string $actionKey, ?User $actor): void
     {
@@ -505,6 +525,7 @@ final class DocumentRoutingTransitionService
             $lockedEvents = $this->eventsForTransition($locked, $sourceKey);
             $position = $this->positionSnapshots->resolve($locked, $sourceKey, $lockedEvents->isNotEmpty(), $lockedEvents->isEmpty(), true);
             $state = $this->state($locked, $sourceKey, $lockedEvents, null, $position);
+            $this->assertModuleCanStartRouting($locked, $sourceKey, $lockedEvents, (bool) $state['bootstrapped']);
             $action = collect($state['actions'])->firstWhere('key', $actionKey);
             if (! $action || $action['from'] !== $state['stage']) {
                 throw ValidationException::withMessages(['stage' => 'This document is no longer awaiting that routing action.']);

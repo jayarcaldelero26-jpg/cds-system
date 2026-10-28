@@ -3,11 +3,18 @@
 namespace App\Services\Engp;
 
 use Carbon\CarbonImmutable;
+use App\Models\ModuleDefinition;
 use App\Services\Reports\ReportRequirementRegistry;
 
 final class EngpReportWorkflowRegistry
 {
     private const OFFICES = ['CENRO Baganga', 'CENRO Manay', 'CENRO Mati', 'CENRO Lupon'];
+
+    /** @return list<string> */
+    public function availableOffices(): array
+    {
+        return self::OFFICES;
+    }
 
     /** @var array<string, array<string, mixed>> */
     private const WORKFLOWS = [
@@ -27,8 +34,21 @@ final class EngpReportWorkflowRegistry
 
     public function find(string $key): ?array
     {
-        return app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $key)
-            ?? $this->defaultFind($key);
+        $canonical = app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $key);
+        if (! $canonical) return $this->defaultFind($key);
+
+        return $this->normalize([...($this->defaultFind($key) ?? []), ...$canonical]);
+    }
+
+    public function isActive(string $key): bool
+    {
+        $module = ModuleDefinition::query()->generic()->notRetired()->requirementDomain(ReportRequirementRegistry::ENGP)
+            ->where(fn ($query) => $query->where('requirement_key', $key)->orWhereIn('code', [$key, 'engp_'.$key]))->first();
+        if ($module) return (bool) $module->is_active;
+        $bound = ModuleDefinition::query()->generic()->requirementDomain(ReportRequirementRegistry::ENGP)
+            ->where(fn ($query) => $query->where('requirement_key', $key)->orWhereIn('code', [$key, 'engp_'.$key]))->exists();
+
+        return ! $bound && $this->defaultFind($key) !== null;
     }
 
     /** Static defaults used only when seeding/backfilling canonical definitions. */
@@ -74,12 +94,36 @@ final class EngpReportWorkflowRegistry
     public function all(): array
     {
         $definitions = app(ReportRequirementRegistry::class)
-            ->definitions(ReportRequirementRegistry::ENGP, true)
-            ->all();
+            ->definitions(ReportRequirementRegistry::ENGP, true);
 
-        return $definitions !== []
-            ? $definitions
+        return $definitions->isNotEmpty()
+            ? $definitions->map(fn (array $definition): array => $this->normalize([...($this->defaultFind((string) $definition['key']) ?? []), ...$definition]))->all()
             : array_map(fn (string $key): array => $this->defaultFind($key), $this->defaultKeys());
+    }
+
+    /** Convert shared registry metadata to the fields consumed by the ENGP form and tracker. */
+    private function normalize(array $definition): array
+    {
+        $activities = $definition['activities'] ?? array_values(array_filter([$definition['activity'] ?? $definition['default_activity'] ?? null]));
+        $documents = $definition['documents'] ?? array_values(array_filter([$definition['document'] ?? null]));
+        $activity = $definition['activity'] ?? $definition['default_activity'] ?? $activities[0] ?? $definition['label'] ?? 'Report';
+        $document = $definition['document'] ?? $documents[0] ?? 'Report';
+        $frequency = $definition['reporting_frequency'] ?? $definition['period'] ?? 'monthly';
+
+        return [
+            ...$definition,
+            'key' => $definition['key'] ?? $definition['code'] ?? '',
+            'label' => $definition['label'] ?? 'Development Report',
+            'activity' => $activity,
+            'document' => $document,
+            'activities' => $activities ?: [$activity],
+            'documents' => $documents ?: [$document],
+            'activity_documents' => $definition['activity_documents'] ?? [$activity => ($documents ?: [$document])],
+            'period' => $frequency,
+            'offices' => $definition['offices'] ?? self::OFFICES,
+            'configured_generic_flow' => (bool) ($definition['configured_generic_flow'] ?? false),
+            'reminder_offices' => $definition['reminder_offices'] ?? (($definition['configured_generic_flow'] ?? false) ? [] : ($definition['offices'] ?? self::OFFICES)),
+        ];
     }
 
     /** @return list<string> */

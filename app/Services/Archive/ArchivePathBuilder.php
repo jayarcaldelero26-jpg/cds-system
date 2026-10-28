@@ -9,9 +9,9 @@ use RuntimeException;
 final class ArchivePathBuilder
 {
     /** @return array{unit:string,office:string,group:string,module:string,segments:list<string>,filename:string} */
-    public function build(ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $filenameBase, string $extension = 'pdf', bool $allowPenroOffice = false, ?string $folderGroup = null): array
+    public function build(ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $filenameBase, string $extension = 'pdf', bool $allowPenroOffice = false, ?string $folderGroup = null, bool $allowInactiveModule = false): array
     {
-        if (! $module->is_active || $module->isRetired() || ! filled($module->name)) {
+        if ((! $module->is_active && ! $allowInactiveModule) || $module->isRetired() || ! filled($module->name)) {
             throw new RuntimeException('The active submission module is unmapped for archive storage.');
         }
         if (! in_array($archiveUnit, ['Conservation Unit', 'Development Unit'], true)) {

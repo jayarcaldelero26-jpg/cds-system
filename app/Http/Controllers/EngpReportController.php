@@ -84,12 +84,37 @@ class EngpReportController extends Controller
         abort_unless($config, 404);
         app(SubmissionFormScopeService::class)->normalizeRequest($request, 'office', '');
         $this->rejectRoutingFields($request);
-        $validated = $this->validateData($request, $workflow, $config, false);
+        $active = $this->workflows->isActive($workflow);
+        if ($active) {
+            $validated = $this->validateData($request, $workflow, $config, false);
+        } else {
+            $validated = $request->validate([
+                'office' => ['required', Rule::in($config['offices'])],
+                'section_name' => ['nullable', 'string', 'max:255'],
+                'reporting_year' => ['required', 'integer', 'between:2000,2100'],
+                'period_key' => ['required', 'string', 'max:32'],
+                'mov' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx,xls,xlsx', 'max:10240'],
+                'mov_external_url' => ['nullable', 'url', 'max:2048', function (string $attribute, mixed $value, \Closure $fail): void {
+                    $scheme = is_string($value) ? strtolower((string) parse_url($value, PHP_URL_SCHEME)) : '';
+                    if ($scheme !== 'https') $fail('The external MOV URL must use HTTPS.');
+                }],
+                'remarks' => ['nullable', 'string'],
+            ]);
+        }
         abort_unless($this->organization->canUseDevelopmentOffice($request->user(), $validated['office']), 403);
         $record = $this->findSubmissionForPeriod($workflow, $validated);
         if ($record) {
             $this->rejectTrashedPeriodMatch($record);
             $this->tracking->assertMutable($record);
+        }
+
+        if (! $active && ! $record) {
+            throw ValidationException::withMessages(['workflow' => 'This report module is inactive and cannot accept a new report.']);
+        }
+        if (! $active && $record && ($record->workflow_key !== $workflow
+            || (int) $record->reporting_year !== (int) $validated['reporting_year']
+            || (string) $record->period_key !== (string) $validated['period_key'])) {
+            throw ValidationException::withMessages(['period_key' => 'An inactive module can only continue an existing report period.']);
         }
 
         $record ??= new EngpReportSubmission;
@@ -104,7 +129,7 @@ class EngpReportController extends Controller
         $this->rejectRoutingFields($request);
         $this->tracking->assertMutable($engpReportSubmission);
         app(SubmissionFormScopeService::class)->normalizeRequest($request, 'office', '');
-        $validated = $this->validateData($request, $workflow, $config, true);
+        $validated = $this->validateData($request, $workflow, $config, true, (string) $engpReportSubmission->period_key);
         return $this->persist($request, $engpReportSubmission, $validated, $workflow, $config, 'ENGP report updated.');
     }
 
@@ -127,12 +152,14 @@ class EngpReportController extends Controller
         return $this->attachments->response('engp-report', $engpReportSubmission, 'mov');
     }
 
-    private function validateData(Request $request, string $workflow, array $config, bool $editing): array
+    private function validateData(Request $request, string $workflow, array $config, bool $editing, ?string $retainedPeriodKey = null): array
     {
         $year = $request->integer('reporting_year') ?: CarbonImmutable::now('Asia/Manila')->year;
-        $periodKeys = collect($this->workflows->periods($workflow, $year))->pluck('key')->all();
+        $periodKeys = collect($this->workflows->periods($workflow, $year))->pluck('key')->when($retainedPeriodKey, fn ($keys) => $keys->push($retainedPeriodKey))->all();
         return $request->validate([
             'office' => ['required', Rule::in($config['offices'])],
+            'activity_name' => [($config['configured_generic_flow'] ?? false) ? 'required' : 'nullable', 'string', Rule::in($config['activities'] ?? [$config['activity']])],
+            'document_type' => [($config['configured_generic_flow'] ?? false) ? 'required' : 'nullable', 'string', Rule::in($config['documents'] ?? [$config['document']])],
             'section_name' => ['nullable', 'string', 'max:255'],
             'reporting_year' => ['required', 'integer', 'between:2000,2100'],
             'period_key' => ['required', Rule::in($periodKeys)],
@@ -154,7 +181,7 @@ class EngpReportController extends Controller
         unset($validated['_editing'], $validated['mov']);
         $file = $request->file('mov');
         $period = $this->workflows->period($workflow, (int) $validated['reporting_year'], $validated['period_key']);
-        $validated = [...$validated, 'workflow_key' => $workflow, 'activity_name' => $config['activity'], 'document_type' => $config['document'], 'period_label' => $period['label'], 'deadline_submission' => $this->workflows->deadline($workflow, (int) $validated['reporting_year'], $validated['period_key']), 'updated_by' => $request->user()?->id];
+        $validated = [...$validated, 'workflow_key' => $workflow, 'activity_name' => $validated['activity_name'] ?? $config['activity'], 'document_type' => $validated['document_type'] ?? $config['document'], 'period_label' => $period['label'] ?? ($record->exists ? $record->period_label : null), 'deadline_submission' => $period ? $this->workflows->deadline($workflow, (int) $validated['reporting_year'], $validated['period_key']) : ($record->exists ? $record->deadline_submission : null), 'updated_by' => $request->user()?->id];
         $save = function (EngpReportSubmission $target) use (&$validated, &$record): void {
             DB::transaction(function () use ($target, $validated): void {
                 if ($target->trashed()) $target->restore();

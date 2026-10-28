@@ -123,7 +123,7 @@ final class PamoNativeReportsController extends Controller
     private function assertActor(?User $actor, string $workflow): array
     {
         $source = $this->sources->find($workflow);
-        abort_unless($source && $this->sources->isEligible($workflow), 404);
+        abort_unless($source && $this->sources->isConfigured($workflow), 404);
         $this->sources->assertSchemaReady();
         $this->pamoOrigins->assertDraftAndOriginSchemaReady();
         abort_unless($actor && $actor->is_active && $actor->is_approved
@@ -216,7 +216,7 @@ final class PamoNativeReportsController extends Controller
     public function workspaceWorkflowConfig(string $workflow): array
     {
         $source = $this->sources->find($workflow);
-        $definition = ModuleDefinition::query()->active()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
+        $definition = ModuleDefinition::query()->notRetired()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
             ->where('requirement_domain', 'pa')->where('code', $workflow)->firstOrFail();
         $form = match ($workflow) {
             'bms' => 'standard_bms',

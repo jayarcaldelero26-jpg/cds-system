@@ -2,6 +2,7 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\ModuleDefinition;
 use App\Models\DocumentAttachmentHistory;
 use App\Models\NonWorkingDay;
 use App\Models\ProtectedArea;
@@ -191,6 +192,23 @@ test('a report persists its route workflow key and cannot appear in another work
 
     $this->assertDatabaseHas('conservation_report_submissions', ['workflow_key' => 'homestay', 'activity_name' => 'Training on Homestay Program', 'document_type' => 'Progress Report']);
     $this->actingAs($this->user)->get(route('conservation-reports.index', 'homestay'))->assertInertia(fn (Assert $page) => $page->component('ConservationReports/Index')->count('submissions.data', 1)->where('submissions.data.0.workflow_key', 'homestay')->where('submissions.data.0.document_type', 'Progress Report'));
+});
+
+test('inactive generic module remains readable but its direct creation endpoint has no report or file side effect', function (): void {
+    $definition = ModuleDefinition::query()->create([
+        'name' => 'Inactive Generic Fixture', 'code' => 'inactive_generic_fixture', 'program_area' => 'development',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC, 'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'monthly', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'is_active' => false,
+        'requirement_domain' => 'pa', 'requirement_key' => 'inactive_generic_fixture',
+    ]);
+    $this->actingAs($this->user)->get(route('conservation-reports.index', $definition->code))->assertOk();
+
+    $this->actingAs($this->user)->post(route('conservation-reports.store', $definition->code), [
+        'mov' => UploadedFile::fake()->create('inactive-report.pdf', 8, 'application/pdf'),
+    ])->assertSessionHasErrors('workflow');
+
+    expect(ConservationReportSubmission::query()->where('workflow_key', $definition->code)->count())->toBe(0)
+        ->and(Storage::disk('local')->allFiles())->toBe([]);
 });
 
 test('meeting PAMB stores independent dates and uses Date Accomplished when present', function () {

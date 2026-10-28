@@ -169,11 +169,11 @@ final class PamoArchiveController extends Controller
     /** @return array<string,array{column:string,workflows:list<string>}> */
     private function eligibleSourceLinks(): array
     {
-        $generic = $this->workflows->pamoSubmissionKeys();
+        $generic = $this->workflows->pamoSubmissionKeys(false);
         $sources = $generic ? ['conservation' => ['column' => 'conservation_report_submission_id', 'workflows' => $generic]] : [];
         if (! $this->nativeSources->isSchemaReady()) return $sources;
         foreach ($this->nativeSources->all() as $workflow => $definition) {
-            if (! $this->nativeSources->isEligible($workflow)) continue;
+            if (! $this->nativeSources->isConfigured($workflow)) continue;
             $sources[$definition['source']] = ['column' => $definition['column'], 'workflows' => [$workflow]];
         }
 
@@ -183,8 +183,8 @@ final class PamoArchiveController extends Controller
     /** @return array<string,string> */
     private function workflowLabels(): array
     {
-        $labels = ModuleDefinition::query()->active()->notRetired()->whereIn('code', array_merge(
-            $this->workflows->pamoSubmissionKeys(),
+        $labels = ModuleDefinition::query()->notRetired()->whereIn('code', array_merge(
+            $this->workflows->pamoSubmissionKeys(false),
             array_keys($this->nativeSources->all()),
         ))->pluck('name', 'code')->all();
 
@@ -205,9 +205,9 @@ final class PamoArchiveController extends Controller
                 ->where('protected_area_id', $facts['protected_area_id'])->where('pamo_office_id', $facts['pamo_office_id'])
                 ->where('status', 'forwarded')->where($definition['column'], $archive->source_id)->firstOrFail();
             $workflow = (string) $draft->workflow_key;
-            abort_unless($this->workflows->supportsPamoSubmission($workflow), 404);
+            abort_unless($this->workflows->supportsPamoSubmission($workflow, false), 404);
         } else {
-            abort_unless($this->nativeSources->isSchemaReady() && $this->nativeSources->isEligible((string) $workflow), 404);
+            abort_unless($this->nativeSources->isSchemaReady() && $this->nativeSources->isConfigured((string) $workflow), 404);
             $draft = PamoPambDraft::query()->where('workflow_key', $workflow)
                 ->where('protected_area_id', $facts['protected_area_id'])->where('pamo_office_id', $facts['pamo_office_id'])
                 ->where('status', 'forwarded')->where($definition['column'], $archive->source_id)->firstOrFail();

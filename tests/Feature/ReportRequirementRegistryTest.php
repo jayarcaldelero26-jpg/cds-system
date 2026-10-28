@@ -119,3 +119,31 @@ test('retired definitions are never generated', function () {
     expect(app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::PA, 'cds_lawin'))->toBeNull()
         ->and(ModuleDefinition::query()->whereKey($definition->id)->exists())->toBeTrue();
 });
+
+test('ENGP module identity resolves explicit keys and unprefixed codes only inside the ENGP domain', function () {
+    $unprefixed = ModuleDefinition::query()->create([
+        'name' => 'Unprefixed ENGP Fixture', 'code' => 'unprefixed_fixture_code', 'program_area' => 'engp',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC, 'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'monthly', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'is_active' => false,
+        'requirement_domain' => ReportRequirementRegistry::ENGP, 'requirement_key' => 'unprefixed_fixture_key',
+    ]);
+    $wrongDomain = ModuleDefinition::query()->create([
+        'name' => 'Wrong Domain Fixture', 'code' => 'wrong_domain_fixture', 'program_area' => 'development',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC, 'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'monthly', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'is_active' => true,
+        'requirement_domain' => ReportRequirementRegistry::PA, 'requirement_key' => 'wrong_domain_fixture_key',
+    ]);
+    $prefixed = ModuleDefinition::query()->create([
+        'name' => 'Legacy Prefixed ENGP Fixture', 'code' => 'engp_legacy_fixture_key', 'program_area' => 'engp',
+        'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC, 'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET,
+        'reporting_frequency' => 'monthly', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'is_active' => true,
+        'requirement_domain' => ReportRequirementRegistry::ENGP,
+    ]);
+    app(ReportRequirementRegistry::class)->forgetCache();
+
+    expect(app(ReportRequirementRegistry::class)->model(ReportRequirementRegistry::ENGP, 'unprefixed_fixture_code')->getKey())->toBe($unprefixed->getKey())
+        ->and(app(ReportRequirementRegistry::class)->model(ReportRequirementRegistry::ENGP, 'unprefixed_fixture_key')->getKey())->toBe($unprefixed->getKey())
+        ->and(app(ReportRequirementRegistry::class)->model(ReportRequirementRegistry::ENGP, 'legacy_fixture_key')->getKey())->toBe($prefixed->getKey())
+        ->and(app(ReportRequirementRegistry::class)->model(ReportRequirementRegistry::ENGP, 'wrong_domain_fixture_key'))->toBeNull()
+        ->and($wrongDomain->requirement_domain)->toBe(ReportRequirementRegistry::PA);
+});

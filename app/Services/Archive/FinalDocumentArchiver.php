@@ -42,6 +42,7 @@ final class FinalDocumentArchiver
         ?string $archiveOffice = null,
         string $archivePhase = 'dispatch_checkpoint',
         array $allowedMimeTypes = ['application/pdf'],
+        bool $allowInactiveModule = false,
     ): array {
         return $this->archiveFinalDocumentUsingAdapter(
             $record,
@@ -57,6 +58,7 @@ final class FinalDocumentArchiver
             $archiveOffice,
             $archivePhase,
             $allowedMimeTypes,
+            $allowInactiveModule,
         );
     }
 
@@ -75,6 +77,7 @@ final class FinalDocumentArchiver
         ?string $archiveOffice = null,
         string $archivePhase = 'dispatch_checkpoint',
         array $allowedMimeTypes = ['application/pdf'],
+        bool $allowInactiveModule = false,
     ): array {
         $archiveStartedAt = hrtime(true);
         $assertFinalAndAuthorized($record);
@@ -157,7 +160,7 @@ final class FinalDocumentArchiver
             $folderGroup = $this->folderGrouping->forFinalReturn($sourceType, $record, $archivePhase);
             $archiveContext = $this->archiveContext(
                 $record, $sourceType, $module, $archiveUnit, $archiveOffice, $fileExtension,
-                $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE, $folderGroup,
+                $archivePhase === \App\Models\FinalDocumentArchiveManifest::PHASE, $folderGroup, $allowInactiveModule,
             );
             $archiveFilename = $archiveContext['filename'];
             $this->logPhase('archive_path_resolution', $phaseStartedAt);
@@ -367,7 +370,7 @@ final class FinalDocumentArchiver
     }
 
     /** @return array{year:string,protected_area:string,archive_unit:string,archive_office:string,archive_folder_group:string,module_name:string,folder_path:list<string>,filename:string} */
-    private function archiveContext(Model $record, string $sourceType, ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $extension = 'pdf', bool $allowPenroOffice = false, ?string $folderGroup = null): array
+    private function archiveContext(Model $record, string $sourceType, ModuleDefinition $module, string $archiveUnit, string $archiveOffice, string $extension = 'pdf', bool $allowPenroOffice = false, ?string $folderGroup = null, bool $allowInactiveModule = false): array
     {
         $tracking = ReportTrackingReference::query()
             ->where('source_type', $sourceType)
@@ -400,7 +403,7 @@ final class FinalDocumentArchiver
             ? $activityName
             : (string) ($trackingNumber ?: 'Report-'.$record->getKey());
 
-        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase, $extension, $allowPenroOffice, $folderGroup);
+        $path = $this->paths->build($module, $archiveUnit, $archiveOffice, $filenameBase, $extension, $allowPenroOffice, $folderGroup, $allowInactiveModule);
 
         return [
             'year' => (string) ($year ?: now()->format('Y')),

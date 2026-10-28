@@ -167,7 +167,7 @@ final class OrganizationalAccessService
         if ($record instanceof EngpReportSubmission) return $this->canViewDevelopmentRecord($user, $record);
         if ($this->effectiveCategory($user) === self::PAMO) {
             return $record instanceof ConservationReportSubmission
-                && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key)
+                && app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->supportsPamoSubmission((string) $record->workflow_key, false)
                 && $this->canAccessProtectedArea($user, $record->protected_area_id);
         }
         if ($record->getAttribute('protected_area_id') !== null) return $this->canAccessProtectedArea($user, $record->getAttribute('protected_area_id'));
@@ -193,7 +193,7 @@ final class OrganizationalAccessService
             if ($source === 'conservation') return true;
             $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->findBySource($source);
             return $native !== null
-                && app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->isEligible($native['workflow'])
+                && app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->isConfigured($native['workflow'])
                 && $this->canViewPamoPilotWorkflow($user);
         }
         if ($source === 'engp') return in_array(self::DEVELOPMENT, $this->effectiveUnits($user), true);

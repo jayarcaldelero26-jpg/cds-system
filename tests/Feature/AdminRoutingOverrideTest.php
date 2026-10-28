@@ -1,10 +1,14 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
+use App\Models\ModuleDefinition;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\AdminRoutingOverrideService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Permission;
 
 function overrideAdmin(): User
@@ -22,6 +26,91 @@ function overrideReport(User $owner): ConservationReportSubmission
         'date_accomplished' => '2026-08-03', 'created_by' => $owner->id, 'updated_by' => $owner->id,
     ]);
 }
+
+function overrideGenericModule(string $code, bool $active): ModuleDefinition
+{
+    return ModuleDefinition::query()->create([
+        'name' => 'Override Fixture '.str_replace('_', ' ', $code), 'code' => $code,
+        'program_area' => 'development', 'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
+        'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET, 'reporting_frequency' => 'quarterly',
+        'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'is_active' => $active,
+        'requirement_domain' => 'pa', 'requirement_key' => $code,
+    ]);
+}
+
+function overrideReportForModule(User $owner, string $workflowKey): ConservationReportSubmission
+{
+    $report = overrideReport($owner);
+    $report->update(['workflow_key' => $workflowKey]);
+    return $report->fresh();
+}
+
+test('generic administrative override cannot start routing for an inactive module', function (): void {
+    $owner = User::factory()->create(['unit_assignment' => 'conservation', 'section' => OrganizationalAccessService::CENRO_FOCAL, 'office_designated' => 'CENRO Mati']);
+    $admin = overrideAdmin();
+    $module = overrideGenericModule('override_inactive_fixture', false);
+    $report = overrideReportForModule($owner, $module->code);
+    $adminOverrides = app(AdminRoutingOverrideService::class);
+    $available = $adminOverrides->available('conservation', $report->id, $admin);
+    $action = collect($available['actions'])->first();
+
+    expect($available['available'])->toBeTrue()
+        ->and($action)->not->toBeNull();
+
+    $routing = app(DocumentRoutingTransitionService::class);
+    expect(fn () => $routing->transitionAsOverride(
+        $report, 'conservation', $action['key'], $admin,
+        ['override_for_category' => $action['accountable_category_key'], 'override_for_office' => $action['accountable_office']],
+        'Inactive module regression fixture',
+    ))->toThrow(ValidationException::class, 'This report module is inactive and cannot start a new routing flow.');
+
+    expect(DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->count())->toBe(0);
+});
+
+test('active module admin override and already-routed correction resubmission preserve captured route versions', function (): void {
+    $owner = User::factory()->create(['unit_assignment' => 'conservation', 'section' => OrganizationalAccessService::CENRO_FOCAL, 'office_designated' => 'CENRO Mati']);
+    $chief = User::factory()->create(['unit_assignment' => 'conservation', 'section' => OrganizationalAccessService::CENRO_CHIEF, 'office_designated' => 'CENRO Mati']);
+    $admin = overrideAdmin();
+    $module = overrideGenericModule('override_active_fixture', true);
+    $activeReport = overrideReportForModule($owner, $module->code);
+    $routing = app(DocumentRoutingTransitionService::class);
+    $activeState = $routing->state($activeReport, 'conservation');
+    $activeAction = collect($activeState['actions'])->firstWhere('from', $activeState['stage']);
+    $activeEvent = $routing->transitionAsOverride(
+        $activeReport, 'conservation', $activeAction['key'], $admin,
+        ['override_for_category' => OrganizationalAccessService::CENRO_FOCAL, 'override_for_office' => 'CENRO Mati'],
+        'Active module fixture',
+    );
+    expect(data_get($activeEvent->metadata, 'administrative_override'))->toBeTrue();
+
+    $continuedReport = overrideReportForModule($owner, $module->code);
+    $tracking = app(SubmissionTrackingService::class);
+    test()->actingAs($owner);
+    $tracking->transition('conservation', $continuedReport->id, 'forward_to_cenro_chief', null, $owner->id);
+    test()->actingAs($chief);
+    $tracking->transition('conservation', $continuedReport->id, 'receive_at_cenro_chief', null, $chief->id);
+    $tracking->transition('conservation', $continuedReport->id, 'return_to_cenro_focal', null, $chief->id, 'Correct the report before review.');
+    test()->actingAs($owner);
+    $tracking->transition('conservation', $continuedReport->id, 'receive_correction', null, $owner->id);
+
+    $firstEvent = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $continuedReport->id)->orderBy('id')->firstOrFail();
+    $module->update(['is_active' => false]);
+    $current = app(AdminRoutingOverrideService::class)->available('conservation', $continuedReport->id, $admin);
+    $resubmit = collect($current['actions'])->firstWhere('key', 'forward_to_cenro_chief');
+    expect($resubmit)->not->toBeNull();
+
+    $resubmission = $routing->transitionAsOverride(
+        $continuedReport, 'conservation', $resubmit['key'], $admin,
+        ['override_for_category' => $resubmit['accountable_category_key'], 'override_for_office' => $resubmit['accountable_office']],
+        'Continue existing correction cycle',
+    );
+    foreach (['route_setting_version', 'route_setting_version_id', 'route_snapshot_id', 'route_graph_version'] as $key) {
+        expect(data_get($resubmission->metadata, $key))->toBe(data_get($firstEvent->metadata, $key));
+    }
+    expect($resubmission->from_stage)->toBe($current['current_stage'])
+        ->and($resubmission->to_stage)->toBe('transit_to_cenro_chief')
+        ->and(data_get($resubmission->metadata, 'administrative_override'))->toBeTrue();
+});
 
 test('normal users cannot access emergency override and Super Admin without a passkey cannot start it', function (): void {
     $owner = User::factory()->create(['unit_assignment' => 'conservation', 'section' => OrganizationalAccessService::CENRO_FOCAL, 'office_designated' => 'CENRO Mati']);
