@@ -149,3 +149,40 @@ test('processed document inventory includes generic Conservation, native PA, and
         ->and(array_intersect($conservationKeys, $nativeUnprocessedKeys))->toBe([])
         ->and($developmentKeys)->not->toContain('engp:'.$engpUnprocessed->getKey());
 });
+
+test('deadline memoization keeps stored ENGP deadlines distinct for one participant', function (): void {
+    $actor = officeProcessedSourcesActor();
+    $fixtures = [
+        ['deadline' => '2026-09-15', 'period_key' => 'quarter_3', 'period_label' => 'Quarter 3'],
+        ['deadline' => '2026-09-30', 'period_key' => 'quarter_4', 'period_label' => 'Quarter 4'],
+    ];
+    $expected = [];
+
+    foreach ($fixtures as $fixture) {
+        $deadline = $fixture['deadline'];
+        $record = EngpReportSubmission::query()->create([
+            'workflow_key' => 'cbep', 'office' => 'CENRO Baganga',
+            'activity_name' => 'Same ENGP activity', 'document_type' => 'Quarterly Report',
+            'reporting_year' => 2026, 'period_key' => $fixture['period_key'], 'period_label' => $fixture['period_label'],
+            'deadline_submission' => $deadline,
+        ]);
+        $expected[(int) $record->getKey()] = $deadline;
+        officeProcessedSourcesRouteEvent(
+            $actor, 'engp', (int) $record->getKey(),
+            DocumentRoutingProfileRegistry::PREPARATION,
+            DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF,
+            '2026-10-20 09:00:00', 'forward_to_cenro_chief',
+        );
+    }
+
+    $rows = app(OfficeTatProcessedDocumentSourceService::class)->forAssessment(
+        $actor,
+        officeProcessedSourcesAssessment('development', 'cenro:CENRO Baganga', 'CENRO Baganga'),
+    );
+    $actual = collect($rows)->flatMap(fn (array $row): array => $row['obligation_details'])
+        ->mapWithKeys(fn (array $detail): array => [
+            (int) $detail['source_identity']['source_id'] => $detail['deadline'],
+        ])->all();
+
+    expect($actual)->toBe($expected);
+});

@@ -18,6 +18,9 @@ use Throwable;
 /** Read-only inventory of source reports with explicit processing evidence. */
 final class OfficeTatProcessedDocumentSourceService
 {
+    /** @var array<string,?string> */
+    private array $deadlineCache = [];
+
     private const PROCESSED_EVENT_KEYS = [
         'forwarded', 'received', 'endorsed', 'recommended', 'approved', 'released',
         'returned_for_correction', 'correction_received',
@@ -39,6 +42,7 @@ final class OfficeTatProcessedDocumentSourceService
      */
     public function forAssessment(User $user, array $assessment): array
     {
+        $this->deadlineCache = [];
         $unit = (string) ($assessment['unit'] ?? '');
         abort_unless($user->can('office-tat.view'), 403);
         abort_unless(in_array($unit, $this->organization->effectiveUnits($user), true), 403);
@@ -55,7 +59,10 @@ final class OfficeTatProcessedDocumentSourceService
         $cutoff = CarbonImmutable::parse($cutoffDate, BusinessCalendarService::TIMEZONE)->endOfDay();
 
         $participants = [];
-        foreach (($unitAssessment['rows'] ?? []) as $row) {
+        $assessmentRows = is_array($unitAssessment['rows'] ?? null)
+            ? $unitAssessment['rows']
+            : (is_array($assessment['rows'] ?? null) ? $assessment['rows'] : []);
+        foreach ($assessmentRows as $row) {
             if (! is_array($row) || ! is_string($row['participant_key'] ?? null)) continue;
             $participants[$row['participant_key']] = [
                 'participant_key' => $row['participant_key'],
@@ -217,7 +224,7 @@ final class OfficeTatProcessedDocumentSourceService
             'calendar_office' => $office,
         ];
         $participant['details'][] = [
-            'label' => $workflowLabel, 'deadline' => $this->recordDate($record, ['deadline_submission']),
+            'label' => $workflowLabel, 'deadline' => $this->deadlineForRecord($record),
             'received' => $this->recordDate($record, ['date_received_penro']),
             'source_reference' => 'Report #'.$id, 'source_identity' => $identity,
             'processed_evidence' => true,
@@ -279,13 +286,34 @@ final class OfficeTatProcessedDocumentSourceService
             if (is_numeric($value)) return (int) $value;
         }
         foreach ([
-            $this->recordDate($record, ['date_accomplished', 'start_date', 'monitoring_period_start', 'date_conducted']),
-            $this->recordDate($record, ['deadline_submission']),
-            $this->recordDate($record, ['date_received_penro', 'date_report_released_cenro']),
-        ] as $date) {
+            ['date_accomplished', 'start_date', 'monitoring_period_start', 'date_conducted'],
+            ['deadline_submission'],
+            ['date_received_penro', 'date_report_released_cenro'],
+        ] as $fields) {
+            $date = $this->recordDate($record, $fields);
             if ($date !== null) return (int) substr($date, 0, 4);
         }
         return null;
+    }
+
+    private function deadlineForRecord(Model $record): ?string
+    {
+        $cacheKey = serialize([
+            $record::class,
+            $record->getRawOriginal('workflow_key'),
+            $record->getRawOriginal('activity_name'),
+            $record->getRawOriginal('document_type'),
+            $record->getRawOriginal('date_accomplished'),
+            $record->getRawOriginal('date_conducted'),
+            $record->getRawOriginal('date_received_penro'),
+            $record->getRawOriginal('deadline_submission'),
+            $record->getRawOriginal('target_office'),
+        ]);
+        if (! array_key_exists($cacheKey, $this->deadlineCache)) {
+            $this->deadlineCache[$cacheKey] = $this->recordDate($record, ['deadline_submission']);
+        }
+
+        return $this->deadlineCache[$cacheKey];
     }
 
     private function recordPeriodLabel(Model $record): ?string

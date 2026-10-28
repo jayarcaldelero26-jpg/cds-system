@@ -54,7 +54,7 @@ class ConservationReportSubmission extends Model
         }
 
         if (! $this->date_accomplished) return null;
-        $rule = $this->deadlineRule();
+        $rule = $this->deadlineRuleUsingModuleDefinition($module);
         return app(\App\Services\Modules\PaMonitoringDeadlineService::class)
             ->deadline(CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->startOfDay(), $rule, $this->target_office);
     }
@@ -129,7 +129,13 @@ class ConservationReportSubmission extends Model
     /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
     public function deadlineRule(): array
     {
-        if ($module = $this->moduleDefinition()) {
+        return $this->deadlineRuleUsingModuleDefinition($this->moduleDefinition());
+    }
+
+    /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
+    private function deadlineRuleUsingModuleDefinition(?ModuleDefinition $module): array
+    {
+        if ($module) {
             return [
                 'deadline_mode' => $module->deadline_mode,
                 'deadline_days' => (int) ($module->default_deadline_days ?? 0),

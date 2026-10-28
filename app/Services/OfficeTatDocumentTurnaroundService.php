@@ -47,10 +47,13 @@ final class OfficeTatDocumentTurnaroundService
         $unitAssessment = is_array($assessment['office_tat_assessment'] ?? null)
             ? $assessment['office_tat_assessment']
             : [];
+        $assessmentRows = is_array($unitAssessment['rows'] ?? null)
+            ? $unitAssessment['rows']
+            : (is_array($assessment['rows'] ?? null) ? $assessment['rows'] : []);
         $cutoffValue = $unitAssessment['as_of_date'] ?? $assessment['as_of_date'] ?? null;
         $cutoffDate = $this->dateValue($cutoffValue);
         $cutoff = CarbonImmutable::parse($cutoffDate ?? now(self::TIMEZONE)->toDateString(), self::TIMEZONE)->endOfDay();
-        $documents = $this->documentsFromRows($unitAssessment['rows'] ?? [], $unit);
+        $documents = $this->documentsFromRows($assessmentRows, $unit);
         foreach ($this->documentsFromRows($this->processedSources->forAssessment($user, $assessment), $unit) as $key => $document) {
             $documents[$key] = $document;
         }
@@ -61,7 +64,7 @@ final class OfficeTatDocumentTurnaroundService
 
         $participantRows = [];
         $allReports = [];
-        foreach (($unitAssessment['rows'] ?? []) as $participant) {
+        foreach ($assessmentRows as $participant) {
             if (! is_array($participant) || ! is_string($participant['participant_key'] ?? null)) continue;
             $participantRows[$participant['participant_key']] = [
                 'participant_key' => $participant['participant_key'],
