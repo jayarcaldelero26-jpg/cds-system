@@ -37,12 +37,12 @@ export default function Index({ monitorings = { data: [] }, filters = {} }) {
   {
     key: 'ecoregion',
     label: 'Ecoregion',
-    render: (item) => item?.ecoregion || 'N/A'
+    render: (item) => item?.ecoregion || 'Not provided'
   },
   {
     key: 'team_leader',
     label: 'Team Leader',
-    render: (item) => item?.team_leader || 'N/A'
+    render: (item) => item?.team_leader || 'Not provided'
   },
   {
     key: 'team_members_count',

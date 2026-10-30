@@ -7,7 +7,7 @@ import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import Tooltip from '@/Components/Tooltip';
 import AwsWeatherRemarkBadge from './AwsWeatherRemarkBadge';
 
-const displayValue = (value, fallback = '—') => value === null || value === undefined || value === '' ? fallback : String(value);
+const displayValue = (value, fallback = 'Not recorded') => value === null || value === undefined || value === '' ? fallback : String(value);
 const protectedAreaTableLabel = protectedArea => {
     const fullName = protectedArea?.name?.trim() || '';
     const shortName = protectedArea?.short_name?.trim();
@@ -15,10 +15,10 @@ const protectedAreaTableLabel = protectedArea => {
     if (shortName) return { label: shortName, fullName: fullName || shortName };
 
     const parentheticalAcronym = fullName.match(/\(([^()]+)\)\s*$/)?.[1]?.trim();
-    return { label: parentheticalAcronym || fullName || '—', fullName: fullName || '—' };
+    return { label: parentheticalAcronym || fullName || 'Not recorded', fullName: fullName || 'Not recorded' };
 };
 
-const metric = (value, unit, fallback = '—') => (
+const metric = (value, unit, fallback = 'Not recorded') => (
     <span>
         {displayValue(value, fallback)}
         {value !== null && value !== undefined && value !== '' && unit && (
@@ -49,13 +49,13 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
                 return <Tooltip content={protectedArea.fullName}><span className="block w-full truncate whitespace-nowrap font-semibold text-gray-900 dark:text-white">{protectedArea.label}</span></Tooltip>;
             },
         },
-        { key: 'date', label: 'Date', headerClassName: 'w-[10%] whitespace-normal px-3 py-3 text-left text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-3 py-3 text-xs font-medium text-gray-900 dark:text-white', render: row => String(row.timestamps || row.start_date || '—') },
+        { key: 'date', label: 'Date', headerClassName: 'w-[10%] whitespace-normal px-3 py-3 text-left text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-3 py-3 text-xs font-medium text-gray-900 dark:text-white', render: row => displayValue(row.timestamps || row.start_date) },
         { key: 'precipitation', label: <><span className="block">Precipitation</span><span className="block">(mm)</span></>, headerClassName: 'w-[11%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[11%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => displayValue(row.precipitation) },
-        { key: 'wind_direction', label: <><span className="block">Wind</span><span className="block">Direction</span></>, headerClassName: 'w-[9%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[9%] whitespace-nowrap px-2 py-3 text-center text-xs', render: row => String(row.wind_direction ?? '—') },
-        { key: 'wind_speed', label: <><span className="block">Wind Speed</span><span className="block">(m/s)</span></>, headerClassName: 'w-[10%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.wind_speed ?? '—') },
-        { key: 'air_temperature', label: <><span className="block">Air Temperature</span><span className="block">(°C)</span></>, headerClassName: 'w-[11%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[11%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.air_temperature ?? '—') },
-        { key: 'relative_humidity', label: <><span className="block">Relative Humidity</span><span className="block">(%)</span></>, headerClassName: 'w-[12%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[12%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.relative_humidity ?? '—') },
-        { key: 'atmospheric_pressure', label: <><span className="block">Atmospheric Pressure</span><span className="block">(kPa)</span></>, headerClassName: 'w-[14%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[14%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => String(row.atmospheric_pressure ?? 'N/A') },
+        { key: 'wind_direction', label: <><span className="block">Wind</span><span className="block">Direction</span></>, headerClassName: 'w-[9%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[9%] whitespace-nowrap px-2 py-3 text-center text-xs', render: row => displayValue(row.wind_direction) },
+        { key: 'wind_speed', label: <><span className="block">Wind Speed</span><span className="block">(m/s)</span></>, headerClassName: 'w-[10%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[10%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => displayValue(row.wind_speed) },
+        { key: 'air_temperature', label: <><span className="block">Air Temperature</span><span className="block">(°C)</span></>, headerClassName: 'w-[11%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[11%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => displayValue(row.air_temperature) },
+        { key: 'relative_humidity', label: <><span className="block">Relative Humidity</span><span className="block">(%)</span></>, headerClassName: 'w-[12%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[12%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => displayValue(row.relative_humidity) },
+        { key: 'atmospheric_pressure', label: <><span className="block">Atmospheric Pressure</span><span className="block">(kPa)</span></>, headerClassName: 'w-[14%] whitespace-normal px-2 py-3 text-center text-[10px] leading-tight tracking-normal', cellClassName: 'w-[14%] whitespace-nowrap px-2 py-3 text-center text-xs tabular-nums', render: row => displayValue(row.atmospheric_pressure) },
         {
             key: 'remarks',
             label: 'Remarks',
@@ -107,7 +107,7 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
             open={Boolean(selectedMetric)}
             icon="☁"
             title="AWS Raw Data Full Details"
-            subtitle={selectedMetric ? `${selectedMetric.protected_area?.name || 'N/A'} · ${selectedMetric.timestamps || selectedMetric.start_date || 'No date'}` : ''}
+            subtitle={selectedMetric ? `${displayValue(selectedMetric.protected_area?.name)} · ${displayValue(selectedMetric.timestamps || selectedMetric.start_date)}` : ''}
             onClose={() => setSelectedMetric(null)}
             maxWidth="max-w-5xl"
             summary={selectedMetric && <CrudSummaryGrid columns={4} items={[
@@ -115,7 +115,7 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
                 { label: 'Precipitation', render: () => metric(selectedMetric.precipitation, 'mm') },
                 { label: 'Air Temperature', render: () => metric(selectedMetric.air_temperature, '°C') },
                 { label: 'Relative Humidity', render: () => metric(selectedMetric.relative_humidity, '%') },
-                { label: 'Atmospheric Pressure', render: () => metric(selectedMetric.atmospheric_pressure, 'kPa', 'N/A') },
+                { label: 'Atmospheric Pressure', render: () => metric(selectedMetric.atmospheric_pressure, 'kPa') },
             ]} />}
         >
             {selectedMetric && <div className="grid gap-4 lg:grid-cols-2">
@@ -130,13 +130,13 @@ export default function AwsTable({ records = [], selectedIds = [], handleSelectA
                 <CrudSection title="Atmospheric Conditions"><dl className="grid gap-4 sm:grid-cols-3">
                     <Detail label="Air Temperature">{metric(selectedMetric.air_temperature, '°C')}</Detail>
                     <Detail label="Relative Humidity">{metric(selectedMetric.relative_humidity, '%')}</Detail>
-                    <Detail label="Atmospheric Pressure">{metric(selectedMetric.atmospheric_pressure, 'kPa', 'N/A')}</Detail>
+                    <Detail label="Atmospheric Pressure">{metric(selectedMetric.atmospheric_pressure, 'kPa')}</Detail>
                 </dl></CrudSection>
                 <CrudSection title="Location / Station"><dl className="grid gap-4 sm:grid-cols-2">
-                    <Detail label="Protected Area">{displayValue(selectedMetric.protected_area?.name)}</Detail>
-                    <Detail label="Station Name">{displayValue(selectedMetric.station_name)}</Detail>
-                    <Detail label="Location">{displayValue(selectedMetric.location)}</Detail>
-                    <Detail label="Coordinates">{selectedMetric.latitude !== null && selectedMetric.latitude !== undefined && selectedMetric.longitude !== null && selectedMetric.longitude !== undefined ? `${selectedMetric.latitude}, ${selectedMetric.longitude}` : '—'}</Detail>
+                    <Detail label="Protected Area">{displayValue(selectedMetric.protected_area?.name, 'Not provided')}</Detail>
+                    <Detail label="Station Name">{displayValue(selectedMetric.station_name, 'Not provided')}</Detail>
+                    <Detail label="Location">{displayValue(selectedMetric.location, 'Not provided')}</Detail>
+                    <Detail label="Coordinates">{selectedMetric.latitude !== null && selectedMetric.latitude !== undefined && selectedMetric.longitude !== null && selectedMetric.longitude !== undefined ? `${selectedMetric.latitude}, ${selectedMetric.longitude}` : 'Not provided'}</Detail>
                 </dl></CrudSection>
                 <CrudSection title="Remarks" className="lg:col-span-2"><div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                     <AwsWeatherRemarkBadge remark={selectedMetric.remarks} />

@@ -7,7 +7,7 @@ import AppliedFilterChip from '@/Components/Form/AppliedFilterChip';
 import PageHeader from '@/Components/PageHeader';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 
-const FALLBACK = '\u2014';
+const FALLBACK = 'No data';
 const cards = [
     ['Expected Reports', 'expected'], ['Submitted Reports', 'submitted'], ['Submission Compliance', 'compliance_rate', '%'],
     ['Overdue / Not Submitted', 'overdue'], ['Pending PENRO Receipt', 'pending_receipt'],

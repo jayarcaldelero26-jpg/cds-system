@@ -10,10 +10,11 @@ use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use App\Services\AuditLogService;
+use App\Services\Modules\CanonicalModuleDefinitionService;
 
 class ModuleDefinitionController extends Controller
 {
-    public function index(Request $request): Response
+    public function index(Request $request, CanonicalModuleDefinitionService $canonicalDefinitions): Response
     {
         $definitions = ModuleDefinition::query()
             ->notRetired()
@@ -29,6 +30,8 @@ class ModuleDefinitionController extends Controller
             'filters' => $request->only(['search', 'program_area', 'module_type', 'status']),
             'programAreas' => ProgramArea::options(),
             'frequencies' => ModuleDefinition::FREQUENCIES,
+            'needsCanonicalConservationSetup' => $canonicalDefinitions->missingCanonicalConservationDefinitionCount() > 0,
+            'needsCanonicalEngpSetup' => $canonicalDefinitions->missingCanonicalEngpDefinitionCount() > 0,
         ]);
     }
 
@@ -46,6 +49,94 @@ class ModuleDefinitionController extends Controller
         $definition = ModuleDefinition::query()->create($data);
         app(AuditLogService::class)->record('module_management', 'Module Created', ModuleDefinition::class, $definition->id, $definition->name, 'Created module definition.', ['name' => $definition->name, 'code' => $definition->code, 'program_area' => $definition->program_area->value]);
         return back()->with('success', 'Module definition created.');
+    }
+
+    public function ensureDevelopmentCbep(Request $request, CanonicalModuleDefinitionService $definitions): RedirectResponse
+    {
+        [$definition, $created] = $definitions->ensureDevelopmentCbep();
+        if ($created) {
+            app(AuditLogService::class)->record(
+                'module_management',
+                'Canonical Development Module Added',
+                ModuleDefinition::class,
+                $definition->id,
+                $definition->name,
+                'Added the missing canonical ENGP CBEP module definition.',
+                ['code' => 'engp_cbep', 'program_area' => $definition->program_area->value, 'source_key' => 'engp'],
+            );
+        }
+
+        return back()->with('success', $created
+            ? 'Canonical Development module definition added.'
+            : 'Canonical Development module definition is already available.');
+    }
+
+    public function ensureCanonicalConservation(Request $request, CanonicalModuleDefinitionService $definitions): RedirectResponse
+    {
+        $result = $definitions->ensureCanonicalConservationDefinitions();
+        foreach ($result['created'] as $definition) {
+            app(AuditLogService::class)->record(
+                'module_management',
+                'Canonical Conservation Module Added',
+                ModuleDefinition::class,
+                $definition->id,
+                $definition->name,
+                'Added a missing canonical Conservation report definition.',
+                [
+                    'code' => $definition->code,
+                    'program_area' => $definition->program_area->value,
+                    'implementation_type' => $definition->implementation_type,
+                    'source_key' => $definition->existing_source_key,
+                ],
+            );
+        }
+
+        $message = sprintf(
+            'Canonical Conservation catalog checked: %d added, %d already active, %d existing inactive, %d code conflicts left unchanged.',
+            count($result['created']),
+            count($result['present']),
+            count($result['inactive']),
+            count($result['conflicts']),
+        );
+        if ($result['conflicts'] !== []) {
+            $message .= ' Review these codes in Module Management: '.implode(', ', array_keys($result['conflicts'])).'.';
+        }
+
+        return back()->with('success', $message);
+    }
+
+    public function ensureCanonicalEngp(Request $request, CanonicalModuleDefinitionService $definitions): RedirectResponse
+    {
+        $result = $definitions->ensureCanonicalEngpDefinitions();
+        foreach ($result['created'] as $definition) {
+            app(AuditLogService::class)->record(
+                'module_management',
+                'Canonical ENGP Module Added',
+                ModuleDefinition::class,
+                $definition->id,
+                $definition->name,
+                'Added a missing canonical ENGP workflow definition.',
+                [
+                    'code' => $definition->code,
+                    'program_area' => $definition->program_area->value,
+                    'workflow_key' => $definition->requirement_key,
+                    'source_key' => $definition->existing_source_key,
+                ],
+            );
+        }
+
+        $message = sprintf(
+            'Canonical ENGP catalog checked: %d added, %d already active, %d existing inactive, %d code conflicts left unchanged.',
+            count($result['created']),
+            count($result['present']),
+            count($result['inactive']),
+            count($result['conflicts']),
+        );
+        if ($result['conflicts'] !== []) {
+            $message .= ' Review these codes in Module Management: '.implode(', ', array_keys($result['conflicts'])).'.';
+        }
+
+        return back()->with('success', $message);
     }
 
     public function update(Request $request, ModuleDefinition $moduleDefinition): RedirectResponse

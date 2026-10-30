@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Services\CalendarMovEventService;
 use App\Services\BusinessCalendarService;
 use App\Services\Modules\ModuleDeadlineService;
+use App\Services\Modules\CanonicalModuleDefinitionService;
 use Database\Seeders\ModuleDefinitionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -70,6 +71,86 @@ test('module definition conditional validation protects registry configuration',
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['reporting_frequency' => null]))->assertSessionHasErrors('reporting_frequency');
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['module_type' => ModuleDefinition::TYPE_PLAN, 'reporting_frequency' => null, 'plan_duration_years' => null]))->assertSessionHasErrors('plan_duration_years');
     $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['default_deadline_days' => 0]))->assertSessionHasErrors('default_deadline_days');
+});
+
+test('the canonical Development CBEP definition uses registry metadata and the ensure operation is idempotent', function () {
+    expect(ModuleDefinition::query()->where('code', 'engp_cbep')->count())->toBe(0);
+
+    [$definition, $created] = app(CanonicalModuleDefinitionService::class)->ensureDevelopmentCbep();
+    expect($created)->toBeTrue()
+        ->and($definition->code)->toBe('engp_cbep')
+        ->and($definition->name)->toBe('Community-Based Employment Program (CBEP)')
+        ->and($definition->program_area)->toBe(ProgramArea::ENGP)
+        ->and($definition->requirement_domain)->toBe('engp')
+        ->and($definition->requirement_key)->toBe('cbep')
+        ->and($definition->existing_route_name)->toBe('engp-reports.index')
+        ->and($definition->existing_source_key)->toBe('engp')
+        ->and($definition->is_active)->toBeTrue();
+
+    [$existing, $createdAgain] = app(CanonicalModuleDefinitionService::class)->ensureDevelopmentCbep();
+    expect($createdAgain)->toBeFalse()
+        ->and($existing->id)->toBe($definition->id)
+        ->and(ModuleDefinition::query()->where('code', 'engp_cbep')->count())->toBe(1);
+});
+
+test('the canonical Development CBEP admin action requires create permission and repeats safely', function () {
+    $viewer = User::factory()->create();
+    $this->actingAs($viewer)->post(route('module-definitions.ensure-development-cbep'))->assertForbidden();
+
+    $manager = moduleManager();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-development-cbep'))->assertSessionHas('success');
+    $definition = ModuleDefinition::query()->where('code', 'engp_cbep')->firstOrFail();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-development-cbep'))->assertSessionHas('success');
+
+    expect(ModuleDefinition::query()->where('code', 'engp_cbep')->count())->toBe(1)
+        ->and(ModuleDefinition::query()->where('code', 'engp_cbep')->first()->id)->toBe($definition->id);
+});
+
+test('canonical ENGP definitions follow registered metadata and preserve existing inactive settings', function () {
+    $registry = app(\App\Services\Engp\EngpReportWorkflowRegistry::class);
+    $keys = $registry->defaultKeys();
+    $result = app(CanonicalModuleDefinitionService::class)->ensureCanonicalEngpDefinitions();
+
+    expect($result['created'])->toHaveCount(count($keys))
+        ->and($result['present'])->toBeEmpty()
+        ->and($result['inactive'])->toBeEmpty()
+        ->and($result['conflicts'])->toBeEmpty();
+
+    $elcac = ModuleDefinition::query()->where('code', 'engp_elcac')->firstOrFail();
+    expect($elcac->name)->toBe('End Local Communist Armed Conflict (ELCAC)')
+        ->and($elcac->program_area)->toBe(ProgramArea::ENGP)
+        ->and($elcac->requirement_domain)->toBe('engp')
+        ->and($elcac->requirement_key)->toBe('elcac')
+        ->and($elcac->implementation_type)->toBe(ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
+        ->and($elcac->existing_source_key)->toBe('engp')
+        ->and($elcac->requirement_metadata['document'])->toBe('Monthly Report');
+
+    $elcac->update(['name' => 'Owner Maintained ELCAC', 'description' => 'Keep this text', 'is_active' => false]);
+    $again = app(CanonicalModuleDefinitionService::class)->ensureCanonicalEngpDefinitions();
+
+    expect($again['created'])->toBeEmpty()
+        ->and($again['inactive'])->toBe(['engp_elcac'])
+        ->and($again['conflicts'])->toBeEmpty()
+        ->and(ModuleDefinition::query()->whereIn('code', array_map(fn (string $key): string => 'engp_'.$key, $keys))->count())->toBe(count($keys))
+        ->and($elcac->fresh()->name)->toBe('Owner Maintained ELCAC')
+        ->and($elcac->fresh()->description)->toBe('Keep this text')
+        ->and($elcac->fresh()->is_active)->toBeFalse();
+});
+
+test('canonical ENGP setup action requires module create permission and repeats safely', function () {
+    $viewer = User::factory()->create();
+    $this->actingAs($viewer)->post(route('module-definitions.ensure-canonical-engp'))->assertForbidden();
+    expect(ModuleDefinition::query()->count())->toBe(0);
+
+    $manager = moduleManager();
+    $keys = app(\App\Services\Engp\EngpReportWorkflowRegistry::class)->defaultKeys();
+    $codes = array_map(fn (string $key): string => 'engp_'.$key, $keys);
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-engp'))->assertSessionHas('success');
+    $firstIds = ModuleDefinition::query()->whereIn('code', $codes)->pluck('id')->sort()->values()->all();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-engp'))->assertSessionHas('success');
+
+    expect(ModuleDefinition::query()->whereIn('code', $codes)->count())->toBe(count($codes))
+        ->and(ModuleDefinition::query()->whereIn('code', $codes)->pluck('id')->sort()->values()->all())->toBe($firstIds);
 });
 
 test('module definitions deactivate rather than delete and existing registration seeding is idempotent', function () {
@@ -149,4 +230,58 @@ test('dynamic custom and no-deadline reports do not fabricate deadline or timeli
         $record = ConservationReportSubmission::query()->create(['workflow_key' => $definition->code, 'activity_name' => 'General Report', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-03', 'date_received_penro' => '2026-08-24']);
         expect($record->deadline_submission)->toBeNull()->and($record->timeliness)->toBe('No Data');
     }
+});
+
+test('canonical Conservation definitions use registered metadata, preserve conflicting saved entries, and exclude retired plans', function () {
+    $existing = ModuleDefinition::query()->create([
+        ...modulePayload(['name' => 'Owner Maintained PAMB', 'description' => 'Keep this text', 'is_active' => false]),
+        'code' => 'regular_pamb',
+        'requirement_domain' => 'pa',
+        'requirement_key' => 'regular_pamb',
+        'existing_route_name' => 'conservation-reports.index',
+        'existing_source_key' => 'conservation-reports',
+        'requirement_metadata' => ['key' => 'regular_pamb', 'activities' => ['Owner-defined activity']],
+    ]);
+
+    $result = app(CanonicalModuleDefinitionService::class)->ensureCanonicalConservationDefinitions();
+
+    expect($result['created'])->toHaveCount(28)
+        ->and($result['conflicts'])->toHaveKey('regular_pamb')
+        ->and($existing->fresh()->name)->toBe('Owner Maintained PAMB')
+        ->and($existing->fresh()->description)->toBe('Keep this text')
+        ->and($existing->fresh()->is_active)->toBeFalse()
+        ->and(ModuleDefinition::query()->where('code', 'management_plans')->exists())->toBeFalse()
+        ->and(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys())->toContain('cepa_plan');
+
+    $cepa = ModuleDefinition::query()->where('code', 'cepa_plan')->firstOrFail();
+    expect($cepa->requirement_metadata['activity_documents']['Submission of Final CEPA Plan'])->toBe(['Final Report'])
+        ->and(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->deadlineRule('cepa_plan', 'Submission of Final CEPA Plan', 'Final Report')['deadline_days'])->toBe(15);
+
+    $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+    expect(array_filter(array_keys($native->all()), fn ($code) => $native->isEligible($code)))->toHaveCount(7)
+        ->and(ModuleDefinition::query()->where('code', 'automated_weather_station')->value('existing_source_key'))->toBe('aws')
+        ->and(ModuleDefinition::query()->where('code', 'revenue_collection')->value('existing_source_key'))->toBe('revenue');
+
+    $again = app(CanonicalModuleDefinitionService::class)->ensureCanonicalConservationDefinitions();
+    expect($again['created'])->toBeEmpty()
+        ->and($again['conflicts'])->toHaveKey('regular_pamb')
+        ->and(ModuleDefinition::query()->where('code', 'management_plans')->exists())->toBeFalse();
+});
+
+test('the canonical Conservation catalog action requires module create permission and repeats safely', function () {
+    $viewer = User::factory()->create();
+    $this->actingAs($viewer)->post(route('module-definitions.ensure-canonical-conservation'))->assertForbidden();
+    expect(ModuleDefinition::query()->count())->toBe(0);
+
+    $manager = moduleManager();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-conservation'))->assertSessionHas('success');
+    $codes = [
+        ...app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->defaultKeys(),
+        ...array_keys(app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->all()),
+    ];
+    expect(ModuleDefinition::query()->whereIn('code', $codes)->count())->toBe(29);
+
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-conservation'))->assertSessionHas('success');
+    expect(ModuleDefinition::query()->whereIn('code', $codes)->count())->toBe(29)
+        ->and(ModuleDefinition::query()->where('code', 'management_plans')->exists())->toBeFalse();
 });

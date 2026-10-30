@@ -3,7 +3,7 @@ import { TableSkeleton } from '@/Components/Skeleton';
 import Tooltip from '@/Components/Tooltip';
 import { shouldActivateRow } from './rowActivation.mjs';
 
-export default function CrudTable({ title, subtitle, helperText, headerAside, columns = [], rows = [], rowKey = 'id', rowAriaLabel, onRowClick, isRowDisabled, rowFocusVisibleOnly = false, loading = false, emptyTitle = 'No records found', emptyDescription, emptyStateClassName = '', preserveFrameWhenEmpty = false, selectable = false, selectedKeys = [], onSelectRow, onSelectAll, headerActions, filters, pagination, caption, className = '', tableClassName = '', tableContainerClassName = '', tableHeaderClassName = '', compact = false, compactEmpty = false }) {
+export default function CrudTable({ title, subtitle, helperText, headerAside, columns = [], rows = [], rowKey = 'id', rowAriaLabel, onRowClick, isRowDisabled, rowFocusVisibleOnly = false, focusRowOnClick = false, loading = false, emptyTitle = 'No records found', emptyDescription, emptyStateClassName = '', preserveFrameWhenEmpty = false, selectable = false, selectedKeys = [], onSelectRow, onSelectAll, headerActions, filters, pagination, caption, className = '', tableClassName = '', tableContainerClassName = '', tableHeaderClassName = '', compact = false, compactEmpty = false }) {
     const safeRows = Array.isArray(rows) ? rows : [];
     const safeColumns = Array.isArray(columns) ? columns : [];
     const keyFor = row => typeof rowKey === 'function' ? rowKey(row) : row[rowKey];
@@ -13,6 +13,7 @@ export default function CrudTable({ title, subtitle, helperText, headerAside, co
         if (!onRowClick || isRowDisabled?.(row)) return;
         if (!shouldActivateRow(event, event.currentTarget)) return;
         if (event.type === 'keydown') event.preventDefault();
+        if (event.type === 'click' && focusRowOnClick) event.currentTarget.focus({ preventScroll: true });
         onRowClick(row, event);
     };
     const cellContent = (column, row) => column.render ? column.render(row) : row[column.key];

@@ -207,6 +207,9 @@ test('the Reports workspace exposes the active PA catalog and only the actor PA 
             ->where('rows.data.0.workflow_label', 'Regular PAMB Meetings')
             ->where('workflows', fn ($workflows) => collect($workflows)->contains(fn (array $workflow) => $workflow['key'] === 'regular_pamb')
                 && collect($workflows)->contains(fn (array $workflow) => $workflow['key'] === 'automated_weather_station')
+                && collect($workflows)->contains(fn (array $workflow) => $workflow['key'] === 'additional_bms_site'
+                    && ($workflow['date_conducted_ranges_enabled'] ?? false) === true
+                    && ($workflow['date_conducted_required'] ?? false) === true)
                 && collect($workflows)->doesntContain(fn (array $workflow) => $workflow['key'] === 'engp')));
 
     $this->actingAs($pamo)->get(route('pamo-reports.index', ['tab' => 'submitted', 'search' => 'Quarter 1']))
@@ -1368,10 +1371,19 @@ test('partial PAMO drafts remain private until exact-once APL promotion and CENR
             'reporting_period' => 'Quarter 4', 'evidence_type' => 'live',
         ]);
         $preparation = collect($tat['pamo_preparation']['rows'])->firstWhere('office_id', $office->getKey());
+        $tatRow = collect($tat['rows'])->firstWhere('office', $office->name);
+        $correctionReceipt = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $submission->getKey())->where('event_key', 'correction_received')->sole();
+        $nextHandoff = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $submission->getKey())->where('event_key', 'forwarded')->where('occurred_at', '>', $correctionReceipt->occurred_at)->orderBy('occurred_at')->firstOrFail();
+        $tatElapsedSeconds = CarbonImmutable::parse($correctionReceipt->occurred_at, 'Asia/Manila')->diffInSeconds(CarbonImmutable::parse($nextHandoff->occurred_at, 'Asia/Manila'));
         expect($preparation['documents_started'])->toBe(1)
             ->and($preparation['completed_documents'])->toBe(1)
             ->and($preparation['elapsed_seconds_total'])->toBe(4500.0)
-            ->and(collect($tat['rows'])->firstWhere('office', $office->name)['tat_completed_documents'])->toBe(0);
+            ->and($tatRow['tat_completed_documents'])->toBe(1)
+            ->and($tatRow['tat_elapsed_seconds_total'])->toBe(1800.0)
+            ->and($tatRow['tat_average_elapsed_seconds'])->toBe(1800.0)
+            ->and($tatRow['tat_missing_evidence'])->toBe(0)
+            ->and($tatRow['pending'])->toBe(0)
+            ->and($tatElapsedSeconds)->toBe(1800.0);
     } finally {
         CarbonImmutable::setTestNow($previousNow);
     }
@@ -1955,10 +1967,18 @@ test('TWC meeting drafts support coworker completion, validated forwarding, corr
         ]);
         $preparation = collect($analytics['pamo_preparation']['rows'])->firstWhere('office_id', $office->getKey());
         $receipt = collect($analytics['rows'])->firstWhere('office', $office->name);
+        $correctionReceipt = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $submission->getKey())->where('event_key', 'correction_received')->sole();
+        $nextHandoff = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $submission->getKey())->where('event_key', 'forwarded')->where('occurred_at', '>', $correctionReceipt->occurred_at)->orderBy('occurred_at')->firstOrFail();
+        $tatElapsedSeconds = CarbonImmutable::parse($correctionReceipt->occurred_at, 'Asia/Manila')->diffInSeconds(CarbonImmutable::parse($nextHandoff->occurred_at, 'Asia/Manila'));
         expect($preparation['documents_started'])->toBe(1)
             ->and($preparation['completed_documents'])->toBe(1)
             ->and($preparation['elapsed_seconds_total'])->toBe(3600.0)
-            ->and($receipt['tat_completed_documents'])->toBe(0)
+            ->and($receipt['tat_completed_documents'])->toBe(1)
+            ->and($receipt['tat_elapsed_seconds_total'])->toBe(1800.0)
+            ->and($receipt['tat_average_elapsed_seconds'])->toBe(1800.0)
+            ->and($receipt['tat_missing_evidence'])->toBe(0)
+            ->and($receipt['pending'])->toBe(0)
+            ->and($tatElapsedSeconds)->toBe(1800.0)
             ->and(ConservationReportSubmission::query()->count())->toBe(1);
     } finally {
         CarbonImmutable::setTestNow($previousNow);

@@ -1,9 +1,12 @@
 <?php
 
+use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\EngpReportSubmission;
 use App\Models\HistoricalReportOrigin;
 use App\Models\OrganizationalOffice;
+use App\Models\PamoPambDraft;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
@@ -23,6 +26,7 @@ use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -289,7 +293,7 @@ test('tie approval requires configure permission and rechecks its live fingerpri
     }
 });
 
-test('a configure-capable local viewer cannot read cross-unit assessments without global Office TAT access', function (): void {
+test('Office TAT limits a local participant roster and does not label a partial view as global', function (): void {
     $view = Permission::findOrCreate('office-tat.view', 'web');
     $configure = Permission::findOrCreate('office-tat.configure', 'web');
     $viewer = User::factory()->create([
@@ -298,19 +302,27 @@ test('a configure-capable local viewer cannot read cross-unit assessments withou
     ]);
     $viewer->givePermissionTo([$view, $configure]);
 
-    $this->actingAs($viewer)->get('/admin/office-tat?category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
+    $this->actingAs($viewer)->get('/admin/office-tat?unit=development&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
         ->component('Admin/OfficeTat/Index')
-        ->where('globalAssessmentAccess', false)
-        ->where('complianceAssessments', null));
+        ->where('selectedUnit', 'development')
+        ->where('authorizedUnits', ['conservation', 'development'])
+        ->where('recordedAssessment.unit', 'development')
+        ->where('recordedAssessment.roster_count', 1)
+        ->where('recordedAssessment.roster_complete', false)
+        ->where('recordedAssessment.ranking_scope', 'authorized_participants_only')
+        ->where('recordedAssessment.rows.0.name', 'CENRO Baganga')
+        ->where('recordedAssessment.rows.0.rank_status', 'Comparison limited by organizational access'));
 
     $global = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
     $global->assignRole(Role::findOrCreate('CDS Admin', 'web'));
     $global->givePermissionTo([$view, $configure]);
-    $this->actingAs($global)->get('/admin/office-tat?category=CENRO&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
+    $this->actingAs($global)->get('/admin/office-tat?unit=conservation&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
         ->component('Admin/OfficeTat/Index')
-        ->where('globalAssessmentAccess', true)
-        ->has('complianceAssessments.conservation')
-        ->has('complianceAssessments.development'));
+        ->where('authorizedUnits', ['conservation', 'development'])
+        ->where('recordedAssessment.unit', 'conservation')
+        ->where('recordedAssessment.expected_roster_count', 6)
+        ->where('recordedAssessment.roster_count', 0)
+        ->where('recordedAssessment.ranking_scope', 'authorized_participants_only'));
 });
 
 test('Office TAT route returns a roster whose selected unit and participant identities agree', function (): void {
@@ -334,6 +346,299 @@ test('Office TAT route returns a roster whose selected unit and participant iden
             ->where('filters.unit', 'development')
             ->where('recordedAssessment.unit', 'development')
             ->where('recordedAssessment.rows.0.participant_key', fn ($key) => str_starts_with($key, 'cenro:')));
+});
+
+test('recorded Conservation assessment includes native BMS with its source deadline and receipt', function (): void {
+    $areas = collect([
+        ['Mati Protected Landscape (MPL)', 'Active', 'PAMO-MPL'],
+        ['Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'Active', 'PAMO-MHRWS'],
+        ['Pujada Bay Protected Landscape and Seascape (PBPLS)', 'Active', 'PAMO-PBPLS'],
+        ['Aliwagwag Protected Landscape (APL)', 'Proposed', 'APL-PAMO'],
+        ['Baganga Mangrove Swamp Forest Reserve', 'Proposed', 'BMSFR-PAMO'],
+        ['Baganga Protected Landscape', 'Proposed', 'BPL-PAMO'],
+    ])->map(fn (array $row) => complianceAssessmentArea(...$row));
+    $area = $areas[4];
+
+    $record = BmsReportSubmission::query()->create([
+        'protected_area_id' => $area->id, 'target_office' => 'CENRO Baganga',
+        'activity_name' => 'QA Run01 BMSFR BMS 2nd Semester 2026 Report',
+        'document_type' => 'Progress Report', 'semester' => '2nd Semester',
+        'date_accomplished' => '2026-10-26', 'date_received_penro' => '2026-10-26',
+    ]);
+
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    $result = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-26');
+    $paRow = collect($result['rows'])->firstWhere('participant_key', 'pa:'.$area->id);
+    $detail = collect($paRow['obligation_details'])->first(
+        fn (array $item): bool => ($item['source_identity']['source_key'] ?? null) === 'bms'
+            && ($item['source_identity']['source_id'] ?? null) === (int) $record->id,
+    );
+
+    expect($result['basis'])->toBe('processed_reports_only')
+        ->and($result['activity_count'])->toBe(1)
+        ->and($result['received_activity_count'])->toBe(1)
+        ->and($result['due_count'])->toBe(1)
+        ->and($result['tc_percent'])->toEqual(100.0)
+        ->and($result['se_percent'])->toEqual(100.0)
+        ->and($result['otps'])->toEqual(100.0)
+        ->and($paRow['activity_count'])->toBe(1)
+        ->and($paRow['received_activity_count'])->toBe(1)
+        ->and($paRow['due_count'])->toBe(1)
+        ->and(collect($paRow['obligation_details'])->count())->toBe(1)
+        ->and($detail)->not->toBeNull()
+        ->and($detail['source_reference'])->toBe('Report #'.$record->id)
+        ->and($detail['source_rows_matched'])->toBe(1)
+        ->and($detail['deadline'])->toBe($record->deadline_submission)
+        ->and($detail['allowed_days'])->toBe(15)
+        ->and($detail['days_used'])->toBe(0)
+        ->and($detail['day_convention'])->toContain('Conservation working days')
+        ->and($detail['due_status'])->toBe('received_before_deadline');
+});
+
+test('recorded Conservation scores an actual processed report without generating catalogue targets', function (): void {
+    $area = complianceAssessmentArea('Automatic PA Assignment Test', 'Active', 'PAMO Automatic');
+    $record = ConservationReportSubmission::query()->create([
+        'workflow_key' => 'maintenance_monuments', 'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Maintenance of Monuments',
+        'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
+        'date_accomplished' => '2027-03-01', 'date_received_penro' => '2027-03-05',
+    ]);
+
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    expect(OfficeTatApplicabilityVersion::query()->count())->toBe(0)
+        ->and(OfficeTatObligationScheduleVersion::query()->count())->toBe(0);
+
+    $result = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'conservation', '2027', '2027-12-31');
+    $row = collect($result['office_tat_assessment']['rows'])->firstWhere('participant_key', 'pa:'.$area->id);
+    $otherPair = collect($row['obligation_details'])->first(fn (array $item): bool =>
+        ($item['source_identity']['workflow_key'] ?? null) === 'maintenance_monuments'
+        && ($item['source_identity']['period_key'] ?? null) === 'quarter_2'
+    );
+
+    expect($row['score_status'])->toBe('Scored')
+        ->and($row['processed_count'])->toBe(1)
+        ->and($row['due_count'])->toBe(1)
+        ->and($row['submitted_count'])->toBe(1)
+        ->and($row['on_time_count'])->toBe(1)
+        ->and($row['tc_percent'])->not->toBeNull()
+        ->and($otherPair)->toBeNull()
+        ->and($record->deadline_submission)->not->toBeNull();
+});
+
+test('recorded Conservation leaves catalogue-only rows and private PAMO drafts outside the processed cohort', function (): void {
+    $area = complianceAssessmentArea('No Assigned PA Workflow Test', 'Active', 'PAMO No Assignment');
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'tat-private-draft-pamo', 'name' => 'PAMO Private Draft Test', 'office_type' => 'pamo', 'is_active' => true,
+    ]);
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    PamoPambDraft::query()->create([
+        'draft_uuid' => (string) Str::uuid(), 'start_idempotency_key' => (string) Str::uuid(),
+        'protected_area_id' => $area->id, 'pamo_office_id' => $pamoOffice->id, 'pamo_office_name' => $pamoOffice->name,
+        'originator_user_id' => $actor->id, 'created_by' => $actor->id, 'updated_by' => $actor->id,
+        'workflow_key' => 'regular_pamb', 'report_payload' => ['activity_name' => 'Regular PAMB'],
+        'started_at' => '2026-10-01 09:00:00', 'status' => 'draft', 'lock_version' => 1,
+    ]);
+
+    $result = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-26');
+    $row = collect($result['office_tat_assessment']['rows'])->firstWhere('participant_key', 'pa:'.$area->id);
+
+    expect($row['required_count_status'])->toBe('no_assessed_reports')
+        ->and($row['processed_count'])->toBe(0)
+        ->and($row['due_count'])->toBe(0)
+        ->and($row['tc_percent'])->toBeNull()
+        ->and($row['incomplete_evidence_count'])->toBe(0)
+        ->and($row['obligation_details'])->toBe([]);
+});
+
+test('Development counts recorded ENGP reports only and computes TC despite missing technical classification', function (): void {
+    $report = EngpReportSubmission::query()->create([
+        'workflow_key' => 'cbep', 'office' => 'CENRO Baganga',
+        'activity_name' => 'Community-Based Employment Program (CBEP)', 'document_type' => 'Monthly Report',
+        'reporting_year' => 2027, 'period_key' => '2027-01', 'period_label' => 'January 2027',
+        'deadline_submission' => '2027-01-20', 'date_received_penro' => '2027-01-19',
+    ]);
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    expect(OfficeTatApplicabilityVersion::query()->count())->toBe(0)
+        ->and(OfficeTatObligationScheduleVersion::query()->count())->toBe(0);
+
+    $result = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'development', '2027', '2027-12-31');
+    $assessment = $result['office_tat_assessment'];
+    $baganga = collect($assessment['rows'])->firstWhere('name', 'CENRO Baganga');
+
+    expect($assessment['basis'])->toBe('processed_reports_only')
+        ->and($assessment['processed_count'])->toBe(1)
+        ->and($assessment['due_count'])->toBe(1)
+        ->and($assessment['submitted_count'])->toBe(1)
+        ->and($assessment['tc_percent'])->not->toBeNull()
+        ->and($assessment['se_percent'])->not->toBeNull()
+        ->and($assessment['otps'])->not->toBeNull()
+        ->and($baganga['due_count'])->toBe(1)
+        ->and($baganga['technical_on_time_count'])->toBeNull();
+});
+
+test('recorded TAT counts actual report IDs once and keeps PA, ENGP, pending, early and future rows separate', function (): void {
+    $area = complianceAssessmentArea('Processed Cohort Test PA', 'Active', 'PAMO Processed Test');
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'tat-processed-private-pamo', 'name' => 'PAMO Processed Draft Test', 'office_type' => 'pamo', 'is_active' => true,
+    ]);
+    PamoPambDraft::query()->create([
+        'draft_uuid' => (string) Str::uuid(), 'start_idempotency_key' => (string) Str::uuid(),
+        'protected_area_id' => $area->id, 'pamo_office_id' => $pamoOffice->id, 'pamo_office_name' => $pamoOffice->name,
+        'originator_user_id' => User::factory()->create()->id, 'created_by' => User::factory()->create()->id,
+        'updated_by' => User::factory()->create()->id, 'workflow_key' => 'regular_pamb',
+        'report_payload' => ['activity_name' => 'Regular PAMB'], 'started_at' => '2027-02-01 09:00:00',
+        'status' => 'draft', 'lock_version' => 1,
+    ]);
+
+    ConservationReportSubmission::query()->create([
+        'workflow_key' => 'maintenance_monuments', 'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Maintenance of Monuments',
+        'document_type' => 'Progress Report', 'reporting_period' => 'Quarter 1',
+        'date_accomplished' => '2027-02-02', 'date_received_penro' => '2027-02-10',
+    ]);
+
+    $makeEngp = static fn (string $period, string $deadline, ?string $received = null): EngpReportSubmission => EngpReportSubmission::query()->create([
+        'workflow_key' => 'cbep', 'office' => 'CENRO Baganga',
+        'activity_name' => 'Community-Based Employment Program (CBEP)', 'document_type' => 'Monthly Report',
+        'reporting_year' => 2027, 'period_key' => '2027-'.$period, 'period_label' => $period,
+        'deadline_submission' => $deadline, 'date_received_penro' => $received,
+    ]);
+    $pending = $makeEngp('01', '2027-01-20');
+    $early = $makeEngp('02', '2027-02-20', '2027-02-10');
+    $future = $makeEngp('03', '2027-03-20');
+    $route = static function (EngpReportSubmission $report, string $at, bool $duplicate = false): void {
+        $event = [
+            'source_type' => 'engp', 'source_id' => $report->id, 'workflow_key' => 'cbep',
+            'event_key' => 'forwarded', 'from_stage' => 'cenro_records', 'to_stage' => 'transit_penro_records',
+            'occurred_at' => $at, 'recorded_by' => null,
+        ];
+        DocumentRoutingEvent::query()->create($event);
+        if ($duplicate) DocumentRoutingEvent::query()->create([...$event, 'occurred_at' => CarbonImmutable::parse($at)->addMinute()->toDateTimeString()]);
+    };
+    $route($pending, '2027-01-15 09:00:00', true);
+    $route($early, '2027-02-09 09:00:00');
+    $route($future, '2027-02-12 09:00:00');
+
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $development = $service->recordedAssessments($actor, 'development', '2027', '2027-02-15');
+    $baganga = collect($development['rows'])->firstWhere('name', 'CENRO Baganga');
+    $engpDetails = collect($baganga['obligation_details'])->filter(fn (array $item): bool =>
+        ($item['source_identity']['source_key'] ?? null) === 'engp'
+    );
+    $pendingDetails = $engpDetails->filter(fn (array $item): bool =>
+        ($item['source_identity']['source_id'] ?? null) === (int) $pending->id
+    );
+    $earlyDetail = $engpDetails->first(fn (array $item): bool =>
+        ($item['source_identity']['source_id'] ?? null) === (int) $early->id
+    );
+    $futureDetail = $engpDetails->first(fn (array $item): bool =>
+        ($item['source_identity']['source_id'] ?? null) === (int) $future->id
+    );
+    $conservation = $service->recordedAssessments($actor, 'conservation', '2027', '2027-02-15');
+
+    expect($development['processed_count'])->toBe(3)
+        ->and($development['received_by_penro_count'])->toBe(1)
+        ->and($development['assessed_count'])->toBe(2)
+        ->and($development['on_time_count'])->toBe(1)
+        ->and($development['tc_percent'])->toEqual(50.0)
+        ->and($pendingDetails)->toHaveCount(1)
+        ->and($pendingDetails->first()['status'])->toBe('No accepted PENRO receipt by cutoff')
+        ->and($earlyDetail['status'])->toBe('Submitted early')
+        ->and($futureDetail['status'])->toBe('Not yet due; excluded from N')
+        ->and($conservation['processed_count'])->toBe(1)
+        ->and($conservation['received_by_penro_count'])->toBe(1);
+});
+
+test('PAMO preparation average route exposes the retained preparation measurement separately', function (): void {
+    $this->withoutVite();
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    $this->actingAs($actor)
+        ->get('/admin/office-tat/pamo-preparation-average?processing_period=2026-H2&as_of_date=2026-10-26')
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->component('Admin/OfficeTat/PamoPreparationAverage')
+            ->where('preparation.available', true)
+            ->where('preparation.basis', 'First persisted PAMO draft started_at in the selected Asia/Manila assessment period.')
+            ->has('preparation.rows'));
+});
+
+test('recorded Conservation assessment maps a unique MEA activity inside a QA-prefixed title', function (): void {
+    $areas = collect([
+        ['Mati Protected Landscape (MPL)', 'Active', 'PAMO-MPL'],
+        ['Mt. Hamiguitan Range Wildlife Sanctuary (MHRWS)', 'Active', 'PAMO-MHRWS'],
+        ['Pujada Bay Protected Landscape and Seascape (PBPLS)', 'Active', 'PAMO-PBPLS'],
+        ['Aliwagwag Protected Landscape (APL)', 'Proposed', 'APL-PAMO'],
+        ['Baganga Mangrove Swamp Forest Reserve', 'Proposed', 'BMSFR-PAMO'],
+        ['Baganga Protected Landscape', 'Proposed', 'BPL-PAMO'],
+    ])->map(fn (array $row) => complianceAssessmentArea(...$row));
+    $area = $areas[1];
+    $record = ConservationReportSubmission::query()->create([
+        'workflow_key' => 'management_effectiveness_assessment', 'protected_area_id' => $area->id,
+        'target_office' => 'PENRO Davao Oriental',
+        'activity_name' => 'QA Run01 MHRWS Management Effectiveness Assessment Key Informant Interview 2nd Semester',
+        'document_type' => 'Progress Report', 'reporting_period' => '2nd Semester',
+        'date_conducted' => '2026-10-27', 'date_accomplished' => '2026-10-27',
+        'date_received_penro' => '2026-10-27',
+    ]);
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    $assessment = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-27', 'management_effectiveness_assessment');
+    $row = collect($assessment['rows'])->firstWhere('participant_key', 'pa:'.$area->id);
+    $unitRow = collect($assessment['office_tat_assessment']['rows'])->firstWhere('participant_key', 'pa:'.$area->id);
+    $recordedDetail = collect($unitRow['recorded_obligation_details'])->first(fn (array $item): bool =>
+        ($item['source_identity']['source_key'] ?? null) === 'conservation'
+        && ($item['source_identity']['source_id'] ?? null) === (int) $record->id,
+    );
+    $detail = collect($row['obligation_details'])->first(fn (array $item): bool =>
+        ($item['source_identity']['source_key'] ?? null) === 'conservation'
+        && ($item['source_identity']['source_id'] ?? null) === (int) $record->id,
+    );
+
+    expect($assessment['basis'])->toBe('processed_reports_only')
+        ->and($assessment['activity_count'])->toBe(1)
+        ->and($assessment['received_activity_count'])->toBe(1)
+        ->and($assessment['office_tat_assessment']['coverage_complete'])->toBeTrue()
+        ->and($assessment['office_tat_assessment']['tc_percent'])->not->toBeNull()
+        ->and($assessment['office_tat_assessment']['se_percent'])->not->toBeNull()
+        ->and($assessment['office_tat_assessment']['otps'])->not->toBeNull()
+        ->and($row['activity_count'])->toBe(1)
+        ->and($row['received_activity_count'])->toBe(1)
+        ->and($detail)->not->toBeNull()
+        ->and($detail['source_reference'])->toBe('Report #'.$record->id)
+        ->and($detail['source_identity']['registered_activity_name'])->toBe('Key Informant Interview')
+        ->and($detail['source_identity']['submitted_activity_name'])->toBe($record->activity_name)
+        ->and($detail['start_date'])->not->toBeNull()
+        ->and($detail['deadline'])->not->toBeNull()
+        ->and($detail['received'])->toBe('2026-10-27')
+        ->and($detail['individual_efficiency_percent'])->not->toBeNull()
+        ->and($recordedDetail)->not->toBeNull()
+        ->and($recordedDetail['source_reference'])->toBe('Report #'.$record->id)
+        ->and($recordedDetail['source_identity']['registered_activity_name'])->toBe('Key Informant Interview')
+        ->and($recordedDetail['received'])->toBe('2026-10-27')
+        ->and($recordedDetail['individual_efficiency_percent'])->not->toBeNull();
 });
 
 test('Conservation applicability and highly technical workflow classifications remain separate and versioned', function (): void {
@@ -500,9 +805,318 @@ test('source day conventions count Manila business dates through the shared cale
     $method = new ReflectionMethod($service, 'durationDays');
     $start = CarbonImmutable::parse('2027-06-07', 'Asia/Manila');
     $end = CarbonImmutable::parse('2027-06-11', 'Asia/Manila');
+    $calendar = ['day_mode' => 'calendar_days'];
+    $cbep = ['day_mode' => 'engp_cbep_allowed_calendar_days'];
     $standard = ['day_mode' => 'engp_standard_working_days', 'office' => 'CENRO Baganga'];
     $conservation = ['day_mode' => \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, 'office' => 'CENRO Baganga'];
 
-    expect($method->invoke($service, $start, $end, $standard))->toBe(4)
+    expect($method->invoke($service, $start, $end, $calendar))->toBe(4)
+        ->and($method->invoke($service, $start, $end, $cbep))->toBe(5)
+        ->and($method->invoke($service, $start, $end, $standard))->toBe(4)
         ->and($method->invoke($service, $start, $end, $conservation))->toBe(3);
+});
+
+test('CBEP October submission scoring counts the first through twentieth calendar days inclusively', function (): void {
+    $requirements = app(App\Services\Reports\ReportRequirementRegistry::class);
+    $registry = app(EngpReportWorkflowRegistry::class);
+    expect($requirements->periodStartDate('engp', 'cbep', 2026, '2026-10'))->toBe('2026-10-01')
+        ->and($registry->deadline('cbep', 2026, '2026-10'))->toBe('2026-10-20');
+
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $engpDayMode = new ReflectionMethod($service, 'engpDayMode');
+    expect($engpDayMode->invoke($service, 'cbep', ['deadline_mode' => \App\Models\ModuleDefinition::DEADLINE_CUSTOM]))
+        ->toBe('engp_cbep_allowed_calendar_days')
+        ->and($engpDayMode->invoke($service, 'elcac', ['deadline_mode' => \App\Models\ModuleDefinition::DEADLINE_CUSTOM]))
+        ->toBe('calendar_days')
+        ->and($engpDayMode->invoke($service, 'weekly_accomplishment', ['deadline_mode' => \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS]))
+        ->toBe('engp_standard_working_days');
+
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreParticipant');
+    $cutoff = CarbonImmutable::parse('2026-10-31', 'Asia/Manila')->endOfDay();
+    $cases = [
+        ['2026-10-01', 1, 1, 95.0],
+        ['2026-10-05', 5, 1, 75.0],
+        ['2026-10-19', 19, 1, 5.0],
+        ['2026-10-20', 20, 1, 0.0],
+        ['2026-10-21', 21, 0, 0.0],
+    ];
+
+    foreach ($cases as [$received, $expectedDaysUsed, $expectedOnTime, $expectedSe]) {
+        $obligation = $makeObligation->invoke(
+            $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', $received, '2026-10-20',
+            false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+        );
+        $scored = $scoreParticipant->invoke($service, [$obligation], $cutoff);
+        $detail = $scored['obligation_details'][0];
+
+        expect($detail['allowed_days'])->toBe(20)
+            ->and($detail['days_used'])->toBe($expectedDaysUsed)
+            ->and($detail['day_convention'])->toContain('inclusive')
+            ->and($scored['on_time_count'])->toBe($expectedOnTime)
+            ->and($scored['se_percent'])->toBe($expectedSe)
+            ->and($scored['score_status'])->toBe('Scored');
+    }
+
+    $deadlineObligation = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-10-20', '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $oldElapsedObligation = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-10-20', '2026-10-20',
+        false, 2, false, 'engp', 'calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $newDeadlineScore = $scoreParticipant->invoke($service, [$deadlineObligation], $cutoff);
+    $oldElapsedScore = $scoreParticipant->invoke($service, [$oldElapsedObligation], $cutoff);
+    expect($newDeadlineScore['obligation_details'][0]['allowed_days'])->toBe(20)
+        ->and($newDeadlineScore['obligation_details'][0]['days_used'])->toBe(20)
+        ->and($oldElapsedScore['obligation_details'][0]['allowed_days'])->toBe(19)
+        ->and($oldElapsedScore['obligation_details'][0]['days_used'])->toBe(19)
+        ->and($newDeadlineScore['evidence_fingerprint'])->not->toBe($oldElapsedScore['evidence_fingerprint']);
+
+    $beforeWindow = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-09-30', '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $beforeWindowScore = $scoreParticipant->invoke($service, [$beforeWindow], $cutoff);
+    expect($beforeWindowScore['score_status'])->toBe('Coverage incomplete')
+        ->and($beforeWindowScore['obligation_details'][0]['issue'])->toContain('precedes the approved workflow start');
+
+    $futureReceipt = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', '2026-11-01', '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $futureReceiptScore = $scoreParticipant->invoke($service, [$futureReceipt], $cutoff);
+    expect($futureReceiptScore['submitted_count'])->toBe(0)
+        ->and($futureReceiptScore['obligation_details'][0]['days_used'])->toBeNull();
+
+    $missingReceipt = $makeObligation->invoke(
+        $service, 'cenro:1|cbep|2026|2026-10', '2026-10-01', '2026-10-20', null, '2026-10-20',
+        false, 2, false, 'engp', 'engp_cbep_allowed_calendar_days', 'CENRO Baganga', null, 'CBEP October 2026',
+    );
+    $missingReceiptScore = $scoreParticipant->invoke($service, [$missingReceipt], $cutoff);
+    expect($missingReceiptScore['obligation_details'][0]['days_used'])->toBeNull();
+
+    $source = new EngpReportSubmission(['deadline_submission' => '2026-10-20', 'date_received_penro' => '2026-10-20']);
+    expect($source->days_complied)->toBe(0)
+        ->and($source->timeliness_rating)->toBe('Unsatisfactory');
+
+    $assessment = $service->assessments('2026-H2', '2026-10-31');
+    $cataloguedCbep = collect($assessment['classification_catalogue'])->firstWhere('workflow_key', 'cbep');
+    expect($cataloguedCbep['allowed_days'])->toBe(20)
+        ->and($cataloguedCbep['day_convention'])->toContain('period start as day 1')
+        ->and($assessment['development']['coverage_complete'])->toBeFalse()
+        ->and($assessment['development']['tc_percent'])->toBeNull()
+        ->and($assessment['development']['se_percent'])->toBeNull()
+        ->and($assessment['development']['otps'])->toBeNull();
+});
+
+test('accepted early Conservation receipt enters the assessed denominator before its future deadline', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreRecordedParticipant');
+    $obligation = $makeObligation->invoke(
+        $service, 'pa:18|regular_pamb|2026|quarter_4', '2026-10-19', '2026-10-29', '2026-10-19', '2026-10-29',
+        false, 4, false, 'conservation', 'pamb_working_days', 'PAMO-MHRWS', null, 'Regular PAMB · Quarter 4',
+    );
+    $cutoff = \Carbon\CarbonImmutable::parse('2026-10-20', 'Asia/Manila')->endOfDay();
+    $scored = $scoreParticipant->invoke($service, [$obligation], $cutoff);
+    $detail = $scored['obligation_details'][0];
+
+    expect($scored['due_count'])->toBe(1)
+        ->and($scored['submitted_count'])->toBe(1)
+        ->and($scored['on_time_count'])->toBe(1)
+        ->and($scored['tc_percent'])->toEqual(100.0)
+        ->and($scored['se_percent'])->toEqual(100.0)
+        ->and($scored['otps'])->toEqual(100.0)
+        ->and($detail['status'])->toBe('Submitted early');
+});
+
+test('automated TAT formulas use one as-of cohort and reject invalid periods', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $scoreParticipant = new ReflectionMethod($service, 'scoreRecordedParticipant');
+    $cutoff = CarbonImmutable::parse('2026-10-20', 'Asia/Manila')->startOfDay();
+    $make = fn (string $start, string $deadline, ?string $received) => $makeObligation->invoke(
+        $service, 'fixture|'.($received ?? 'unreceived').'|'.$start.'|'.$deadline, $start, $deadline, $received, $deadline,
+        null, null, false, 'engp', 'calendar_days', 'CENRO Baganga', null, 'TAT formula fixture',
+    );
+    $score = fn (array $obligations, ?CarbonImmutable $asOf = null) => $scoreParticipant->invoke($service, $obligations, $asOf ?? $cutoff);
+
+    $halfEfficiency = $score([$make('2026-10-01', '2026-10-11', '2026-10-06')]);
+    $deadlineDay = $score([$make('2026-10-01', '2026-10-11', '2026-10-11')]);
+    $late = $score([$make('2026-10-01', '2026-10-11', '2026-10-12')]);
+    $zeroDaysUsed = $score([$make('2026-10-01', '2026-10-11', '2026-10-01')]);
+
+    expect($halfEfficiency['obligation_details'][0]['allowed_days'])->toBe(10)
+        ->and($halfEfficiency['obligation_details'][0]['days_used'])->toBe(5)
+        ->and($halfEfficiency['obligation_details'][0]['individual_efficiency_percent'])->toBe(50.0)
+        ->and($halfEfficiency['tc_percent'])->toEqual(100.0)
+        ->and($halfEfficiency['se_percent'])->toBe(50.0)
+        ->and($halfEfficiency['otps'])->toBe(90.0)
+        ->and($deadlineDay['tc_percent'])->toEqual(100.0)
+        ->and($deadlineDay['se_percent'])->toBe(0.0)
+        ->and($deadlineDay['otps'])->toBe(80.0)
+        ->and($late['tc_percent'])->toEqual(0.0)
+        ->and($late['se_percent'])->toEqual(0.0)
+        ->and($late['obligation_details'][0]['individual_efficiency_percent'])->toEqual(0.0)
+        ->and($zeroDaysUsed['obligation_details'][0]['individual_efficiency_percent'])->toEqual(100.0);
+
+    $dueUnreceived = $make('2026-10-01', '2026-10-11', null);
+    $earlyReceipt = $make('2026-10-01', '2026-10-11', '2026-10-03');
+    $futureUnreceived = $make('2026-10-01', '2026-10-20', null);
+    $mixed = $score([$dueUnreceived, $earlyReceipt, $futureUnreceived], CarbonImmutable::parse('2026-10-11', 'Asia/Manila'));
+    expect($mixed['due_count'])->toBe(2)
+        ->and($mixed['on_time_count'])->toBe(1)
+        ->and($mixed['tc_percent'])->toEqual(50.0)
+        ->and($mixed['se_percent'])->toBe(40.0)
+        ->and($mixed['otps'])->toBe(48.0)
+        ->and($mixed['obligation_details'][0]['status'])->toBe('No accepted PENRO receipt by cutoff')
+        ->and($mixed['obligation_details'][1]['status'])->toBe('Submitted early')
+        ->and($mixed['obligation_details'][2]['status'])->toBe('Not yet due; excluded from N');
+
+    $noDue = $score([]);
+    $invalidT = $score([$make('2026-10-01', '2026-10-01', '2026-10-01')]);
+    $invalidChronology = $score([$make('2026-10-01', '2026-10-11', '2026-09-30')]);
+    $validSibling = $make('2026-10-01', '2026-10-11', '2026-10-06');
+    $invalidSibling = $make('2026-10-01', '2026-10-01', '2026-10-01');
+    $mixedInvalid = $score([$validSibling, $invalidSibling]);
+    expect($noDue['due_count'])->toBe(0)
+        ->and($noDue['tc_percent'])->toBeNull()
+        ->and($noDue['se_percent'])->toBeNull()
+        ->and($noDue['otps'])->toBeNull()
+        ->and($invalidT['score_status'])->toBe('No assessed reports')
+        ->and($invalidT['score_issues'][0])->toContain('Allowed period must be positive')
+        ->and($invalidChronology['score_status'])->toBe('No assessed reports')
+        ->and($invalidChronology['obligation_details'][0]['issue'])->toContain('precedes the authoritative workflow start')
+        ->and($mixedInvalid['due_count'])->toBe(1)
+        ->and($mixedInvalid['tc_percent'])->toEqual(100.0)
+        ->and($mixedInvalid['se_percent'])->toEqual(50.0)
+        ->and($mixedInvalid['excluded_report_count'])->toBe(1);
+});
+
+test('a participant data gap preserves another supported result and keeps unknown N separate from zero N', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $makeObligation = new ReflectionMethod($service, 'makeObligation');
+    $finishUnit = new ReflectionMethod($service, 'finishUnit');
+    $received = $makeObligation->invoke(
+        $service, 'fixture:a:received', '2026-10-01', '2026-10-11', '2026-10-06', '2026-10-11',
+        false, null, false, 'engp', 'calendar_days', 'CENRO A', null, 'Received report',
+    );
+    $dueUnreceived = $makeObligation->invoke(
+        $service, 'fixture:a:unreceived', '2026-10-01', '2026-10-11', null, '2026-10-11',
+        false, null, false, 'engp', 'calendar_days', 'CENRO A', null, 'Due report without receipt',
+    );
+    $participants = [
+        ['participant_key' => 'cenro:1', 'name' => 'A Office'],
+        ['participant_key' => 'cenro:2', 'name' => 'B Office'],
+        ['participant_key' => 'cenro:3', 'name' => 'C Office'],
+    ];
+    $result = $finishUnit->invoke(
+        $service, 'development', 'Development', 3, $participants,
+        ['cenro:1' => [$received, $dueUnreceived], 'cenro:2' => [], 'cenro:3' => []],
+        '2026-H2', CarbonImmutable::parse('2026-10-01', 'Asia/Manila'),
+        CarbonImmutable::parse('2026-10-31', 'Asia/Manila')->endOfDay(),
+        ['B Office: Required report count is not available yet.'], [], 0, [],
+    );
+    $rows = collect($result['rows'])->keyBy('participant_key');
+    $supported = $rows->get('cenro:1');
+    $unknown = $rows->get('cenro:2');
+    $confirmedZero = $rows->get('cenro:3');
+
+    expect($result['coverage_complete'])->toBeFalse()
+        ->and($result['tc_percent'])->toBeNull()
+        ->and($result['se_percent'])->toBeNull()
+        ->and($result['otps'])->toBeNull()
+        ->and($supported['required_count_status'])->toBe('known')
+        ->and($supported['due_count'])->toBe(2)
+        ->and($supported['on_time_count'])->toBe(1)
+        ->and($supported['tc_percent'])->toEqual(50)
+        ->and($supported['se_percent'])->toEqual(25)
+        ->and($supported['otps'])->toEqual(45)
+        ->and($supported['obligation_details'][1]['status'])->toBe('Non-receipt evidence is not verified')
+        ->and($unknown['required_count_status'])->toBe('unknown')
+        ->and($unknown['due_count'])->toBeNull()
+        ->and($unknown['tc_percent'])->toBeNull()
+        ->and($unknown['result_reason'])->toBe('Required report count is not available yet.')
+        ->and($confirmedZero['required_count_status'])->toBe('confirmed_zero')
+        ->and($confirmedZero['due_count'])->toBe(0)
+        ->and($confirmedZero['result_reason'])->toBe('No reports due for this period.')
+        ->and(array_column($result['rows'], 'rank'))->toBe([null, null, null]);
+});
+
+test('recognition ranking follows all six approved criteria and leaves exact ties for the recorded manual order', function (): void {
+    $service = app(OfficeTatComplianceAssessmentService::class);
+    $rankRows = new ReflectionMethod($service, 'rankRows');
+    $makeRow = static fn (string $key, string $name, int $tcNumerator, int $tcDenominator, string $seRatio, int $early, int $due, int $volume, int $technical): array => [
+        'participant_key' => $key, 'name' => $name, 'score_status' => 'Scored',
+        'tc_numerator' => $tcNumerator, 'tc_denominator' => $tcDenominator,
+        'se_ratio' => $seRatio, 'early_count' => $early, 'due_count' => $due,
+        'volume_count' => $volume, 'technical_on_time_count' => $technical, 'rank' => null,
+    ];
+    $assertWinner = function (array $winner, array $loser) use ($rankRows, $service): void {
+        $rows = [$loser, $winner];
+        $rankRows->invokeArgs($service, [&$rows, 'development', '2027-H2', str_repeat('d', 64)]);
+        expect(array_column($rows, 'participant_key'))->toBe([$winner['participant_key'], $loser['participant_key']])
+            ->and(array_column($rows, 'rank'))->toBe([1, 2]);
+    };
+
+    $sample = [
+        $makeRow('pa:pamo-b', 'PAMO B', 100, 100, '65/1', 5, 10, 10, 2),
+        $makeRow('pa:apl', 'APL', 100, 100, '50/1', 9, 10, 12, 3),
+        $makeRow('pa:pamo-c', 'PAMO C', 95, 100, '80/1', 9, 10, 9, 4),
+        $makeRow('pa:pamo-d', 'PAMO D', 95, 100, '60/1', 8, 10, 8, 1),
+    ];
+    $rankRows->invokeArgs($service, [&$sample, 'conservation', '2026-H2', str_repeat('a', 64)]);
+    expect(array_column($sample, 'name'))->toBe(['PAMO B', 'APL', 'PAMO C', 'PAMO D'])
+        ->and(array_column($sample, 'rank'))->toBe([1, 2, 3, 4]);
+
+    $assertWinner(
+        $makeRow('tc-high', 'Lower TC variance', 90, 100, '40/1', 1, 10, 1, 0),
+        $makeRow('tc-low', 'Higher TC variance', 80, 100, '100/1', 10, 10, 100, 100),
+    );
+    $assertWinner(
+        $makeRow('se-high', 'Higher SE', 90, 100, '70/1', 1, 10, 1, 0),
+        $makeRow('se-low', 'Lower SE', 90, 100, '69/1', 10, 10, 100, 100),
+    );
+    $assertWinner(
+        $makeRow('early-high', 'Higher early rate', 90, 100, '50/1', 8, 10, 1, 0),
+        $makeRow('early-low', 'Lower early rate', 90, 100, '50/1', 2, 10, 100, 100),
+    );
+    $assertWinner(
+        $makeRow('volume-high', 'Higher verified volume', 90, 100, '50/1', 5, 10, 15, 0),
+        $makeRow('volume-low', 'Lower verified volume', 90, 100, '50/1', 2, 4, 14, 100),
+    );
+    $assertWinner(
+        $makeRow('tech-high', 'More technical on time', 90, 100, '50/1', 5, 10, 15, 8),
+        $makeRow('tech-low', 'Fewer technical on time', 90, 100, '50/1', 5, 10, 15, 7),
+    );
+
+    $tiedRows = [
+        $makeRow('pa:zulu', 'Zulu', 90, 100, '50/1', 5, 10, 15, 8),
+        $makeRow('pa:alpha', 'Alpha', 90, 100, '50/1', 5, 10, 15, 8),
+        $makeRow('pa:next', 'Next', 80, 100, '100/1', 10, 10, 100, 100),
+    ];
+    $tieGroups = $rankRows->invokeArgs($service, [&$tiedRows, 'conservation', '2027-H2', str_repeat('e', 64)]);
+    $tie = $tieGroups[0];
+    expect($tie['resolvable'])->toBeTrue()
+        ->and(array_column(array_slice($tiedRows, 0, 2), 'rank'))->toBe([null, null])
+        ->and(array_column(array_slice($tiedRows, 0, 2), 'rank_status'))->toBe(['Awaiting tie resolution', 'Awaiting tie resolution']);
+
+    $approver = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    \App\Models\OfficeTatTieDecision::query()->create([
+        'unit' => 'conservation', 'period_key' => '2027-H2',
+        'metric_fingerprint' => $tie['fingerprint'],
+        'participant_keys' => $tie['participant_keys'],
+        'ordered_participant_keys' => ['pa:zulu', 'pa:alpha'],
+        'reason' => 'Approved test order', 'approved_by' => $approver->id, 'approved_at' => now(),
+    ]);
+    $resolvedRows = [
+        $makeRow('pa:zulu', 'Zulu', 90, 100, '50/1', 5, 10, 15, 8),
+        $makeRow('pa:alpha', 'Alpha', 90, 100, '50/1', 5, 10, 15, 8),
+        $makeRow('pa:next', 'Next', 80, 100, '100/1', 10, 10, 100, 100),
+    ];
+    $rankRows->invokeArgs($service, [&$resolvedRows, 'conservation', '2027-H2', str_repeat('e', 64)]);
+    expect(array_column($resolvedRows, 'participant_key'))->toBe(['pa:zulu', 'pa:alpha', 'pa:next'])
+        ->and(array_column($resolvedRows, 'rank'))->toBe([1, 2, 3]);
 });

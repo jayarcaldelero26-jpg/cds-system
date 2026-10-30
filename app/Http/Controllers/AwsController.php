@@ -988,12 +988,14 @@ class AwsController extends Controller
 
     private function reportingPeriodLabel(Aws $report): string
     {
-        if (! $report->monitoring_period_start || ! $report->monitoring_period_end) return $report->quarter ? 'Q'.$report->quarter.' · '.($report->reporting_year ?: '—') : '—';
+        $quarter = filled($report->quarter) ? 'Q'.$report->quarter : 'Not recorded';
+        $year = filled($report->reporting_year) ? $report->reporting_year : 'Not recorded';
+        if (! $report->monitoring_period_start || ! $report->monitoring_period_end) return $quarter === 'Not recorded' ? 'Not recorded' : $quarter.' · '.$year;
         $start = CarbonImmutable::parse($report->monitoring_period_start);
         $end = CarbonImmutable::parse($report->monitoring_period_end);
         $dash = "\u{2013}";
         $range = $start->format('F j').($start->toDateString() === $end->toDateString() ? '' : $dash.$end->format('F j')).', '.$end->year;
-        return 'Q'.($report->quarter ?: '—').' · '.$range;
+        return $quarter.' · '.$range;
     }
 
     private function rawData(Aws $record): array

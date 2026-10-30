@@ -112,6 +112,8 @@ Route::middleware('auth')->group(function () {
         ->where('source', '[a-z0-9-]+')->whereNumber('record')
         ->middleware('can:historical-reports.view')->name('settings.historical-reports.show');
     Route::get('admin/office-tat', [OfficeTatController::class, 'index'])->middleware('can:office-tat.view')->name('office-tat.index');
+    Route::get('admin/office-tat/routing-average', [OfficeTatController::class, 'liveRoutingAverage'])->middleware('can:office-tat.view')->name('office-tat.routing-average');
+    Route::get('admin/office-tat/pamo-preparation-average', [OfficeTatController::class, 'pamoPreparationAverage'])->middleware('can:office-tat.view')->name('office-tat.pamo-preparation-average');
     Route::post('admin/office-tat/configuration', [OfficeTatController::class, 'storeConfiguration'])->middleware('can:office-tat.configure')->name('office-tat.configuration.store');
     Route::post('admin/office-tat/assessment-scope', [OfficeTatController::class, 'storeAssessmentScope'])->middleware('can:office-tat.configure')->name('office-tat.assessment-scope.store');
     Route::post('admin/office-tat/approval-evidence', [OfficeTatController::class, 'storeApprovalEvidence'])->middleware('can:office-tat.configure')->name('office-tat.approval-evidence.store');
@@ -129,8 +131,12 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/system-diagnostics', [SystemDiagnosticsController::class, 'index'])->middleware('can:system-diagnostics.view')->name('settings.system-diagnostics.index');
     Route::get('settings/storage', [StorageSettingsController::class, 'index'])->middleware('admin')->name('settings.storage.index');
     Route::post('settings/storage/refresh', [StorageSettingsController::class, 'refresh'])->middleware('admin')->name('settings.storage.refresh');
+    Route::post('settings/storage/verify-archive-root', [StorageSettingsController::class, 'verifyArchiveRoot'])->middleware('admin')->name('settings.storage.verify-archive-root');
     Route::get('settings/module-management', [ModuleDefinitionController::class, 'index'])->middleware('can:module-definitions.view')->name('module-definitions.index');
     Route::post('settings/module-management', [ModuleDefinitionController::class, 'store'])->middleware('can:module-definitions.create')->name('module-definitions.store');
+    Route::post('settings/module-management/ensure-development-cbep', [ModuleDefinitionController::class, 'ensureDevelopmentCbep'])->middleware('can:module-definitions.create')->name('module-definitions.ensure-development-cbep');
+    Route::post('settings/module-management/ensure-canonical-conservation', [ModuleDefinitionController::class, 'ensureCanonicalConservation'])->middleware('can:module-definitions.create')->name('module-definitions.ensure-canonical-conservation');
+    Route::post('settings/module-management/ensure-canonical-engp', [ModuleDefinitionController::class, 'ensureCanonicalEngp'])->middleware('can:module-definitions.create')->name('module-definitions.ensure-canonical-engp');
     Route::put('settings/module-management/{moduleDefinition}', [ModuleDefinitionController::class, 'update'])->middleware('can:module-definitions.update')->name('module-definitions.update');
     Route::patch('settings/module-management/{moduleDefinition}/status', [ModuleDefinitionController::class, 'toggle'])->middleware('can:module-definitions.activate')->name('module-definitions.status');
     Route::get('settings/compliance-alerts', [ComplianceAlertController::class, 'settings'])->middleware('can:compliance-alerts.manage')->name('settings.compliance-alerts');

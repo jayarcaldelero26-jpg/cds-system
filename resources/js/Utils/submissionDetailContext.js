@@ -12,6 +12,7 @@ const categoryLabels = {
 
 const text = (value) => value === null || value === undefined
     ? null : String(value).trim() || null;
+const HIDE_FIELD = Symbol("hide-report-context-field");
 const sameText = (left, right) => Boolean(text(left) && text(right))
     && text(left).toLowerCase() === text(right).toLowerCase();
 const routingFor = (row) => row?.routing || row?.routing_summary || {};
@@ -46,6 +47,19 @@ export function custodyContext(row) {
     };
 }
 
+/** Use the accountable holder in "At ..." statuses, while keeping office context separate. */
+export function presentCurrentRoutingStatus(row, status) {
+    const value = text(status);
+    if (!value || !/^At\s+/i.test(value)) return value;
+
+    const custody = custodyContext(row);
+    const holder = sameText(custody.holder, "PAMO") && custody.office
+        ? custody.office
+        : custody.holder;
+
+    return holder ? `At ${holder}` : value;
+}
+
 /** Document type is a stored field; an activity name is never its fallback. */
 export function reportContextFields(row, expanded = false) {
     if (!row) return [];
@@ -57,27 +71,32 @@ export function reportContextFields(row, expanded = false) {
     const pamoOrigin = routing.route_position?.origin_kind === "pamo_pamb"
         && Boolean(text(routing.originating_office));
     const sourceOffice = text(row.target_office);
+    const releaseFallback = row.cenro_release_applicable === false
+        ? "Not applicable"
+        : row.cenro_release_state === "awaiting_cenro_release"
+            ? "Awaiting CENRO release"
+            : "Not recorded";
     const fields = [
-        ["Tracking Reference", row.tracking_number],
-        ["Workflow / Module", module],
-        ["Activity", sameText(activity, module) || sameText(activity, documentType) ? null : activity],
-        ["Report / Document Type", documentType],
-        ["Protected Area", row.protected_area],
-        [pamoOrigin ? "Originating Office" : custody.officeMatchesOrigin ? "Originating / Current Office" : "Originating Office", pamoOrigin ? routing.originating_office : sourceOffice],
+        ["Tracking Reference", row.tracking_number, false, "Not recorded"],
+        ["Workflow / Module", module, false, "Not recorded"],
+        ["Activity", sameText(activity, module) || sameText(activity, documentType) ? HIDE_FIELD : activity, false, "Not provided"],
+        ["Report / Document Type", documentType, false, "Not provided"],
+        ["Protected Area", row.source === "engp" && !text(row.protected_area) ? HIDE_FIELD : row.protected_area, false, "Not recorded"],
+        [pamoOrigin ? "Originating Office" : custody.officeMatchesOrigin ? "Originating / Current Office" : "Originating Office", pamoOrigin ? routing.originating_office : sourceOffice, false, "Not recorded"],
         ...(pamoOrigin && text(routing.responsible_office) ? [[
             routing.current_stage === "transit_to_cenro_focal" ? "Receiving Office" : "Current Office",
-            routing.responsible_office,
+            routing.responsible_office, false, "Not recorded",
         ]] : []),
-        ["Reporting Period", text(row.reporting_period) || text(row.period_label)],
+        ["Reporting Period", text(row.reporting_period) || text(row.period_label), false, "Not provided"],
     ];
     if (expanded) fields.push(
-        ["Date Conducted", row.date_conducted, true],
-        ["Date Accomplished", row.date_accomplished, true],
-        ["CENRO Release", row.date_report_released_cenro, true],
-        ["PENRO Receipt", row.date_received_penro, true],
-        ["Regional Endorsement", row.date_endorsed_regional, true],
+        ["Date Conducted", row.date_conducted ?? null, true, "Not recorded"],
+        ["Date Accomplished", row.date_accomplished ?? null, true, "Not recorded"],
+        ["CENRO Release", row.cenro_release_applicable === false ? "Not applicable" : row.date_report_released_cenro ?? null, true, releaseFallback],
+        ["PENRO Receipt", row.date_received_penro ?? null, true, "Not recorded"],
+        ["Regional Endorsement", row.date_endorsed_regional ?? null, true, "Not recorded"],
     );
-    return fields.filter(([, value]) => text(value) !== null);
+    return fields.filter(([, value]) => value !== HIDE_FIELD);
 }
 
 /** Show the unmet MOV prerequisite without exposing a blocked custody action. */

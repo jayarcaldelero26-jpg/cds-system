@@ -26,6 +26,14 @@ class EngpReportSubmission extends Model
         return $this->hasMany(EngpReportReleaseEvent::class);
     }
 
+    public function documentRoutingEvents(): HasMany
+    {
+        return $this->hasMany(DocumentRoutingEvent::class, 'source_id')
+            ->where('source_type', 'engp')
+            ->orderBy('occurred_at')
+            ->orderBy('id');
+    }
+
     public function getDaysCompliedAttribute(): ?int
     {
         if (! $this->date_received_penro || ! $this->deadline_submission) {

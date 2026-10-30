@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import React from 'react';
+import { App as InertiaApp } from '@inertiajs/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
@@ -13,7 +14,12 @@ const load = async (path) => {
     server ??= await createServer({
         configFile: false,
         plugins: [viteReactInterop(), react()],
-        resolve: { alias: { '@': resolve('resources/js') } },
+        resolve: { alias: {
+            '@': resolve('resources/js'),
+            ...(process.env.CDS_TEST_READER_SOURCE ? {
+                '@/Components/SubmissionTracking/SubmissionTrackingReaderDialog': resolve(process.env.CDS_TEST_READER_SOURCE),
+            } : {}),
+        } },
         server: { middlewareMode: true },
         appType: 'custom',
         logLevel: 'error',
@@ -22,6 +28,12 @@ const load = async (path) => {
 };
 
 test.after(async () => { await server?.close(); });
+
+const renderWithPageContext = element => renderToStaticMarkup(React.createElement(InertiaApp, {
+    initialPage: { component: 'Fixture', props: { auth: { user: { id: 1 } } }, url: '/', version: null },
+    initialComponent: () => null,
+    children: () => element,
+}));
 
 test('real single-select component renders one selected value without checkbox options', async () => {
     const { default: ScopedOptionSelect, ScopedSelectOption } = await load('Components/Form/ScopedOptionSelect.jsx');
@@ -236,6 +248,8 @@ test('Destination Coverage labels an absent recipient while preserving real reci
     const { recipientCellValue } = await load('Pages/ComplianceAlerts/Index.jsx');
     assert.equal(recipientCellValue(null), 'No recipient assigned');
     assert.equal(recipientCellValue('records@example.test'), 'records@example.test');
+    const source = readFileSync(new URL('../../resources/js/Pages/ComplianceAlerts/Index.jsx', import.meta.url), 'utf8');
+    assert.match(source, /const dateLabel = value => formatReportDate\(value, 'Not recorded'\)/);
 });
 
 test('report modal card context applies shared card treatment to genuine section surfaces', async () => {
@@ -258,7 +272,7 @@ test('PAMB review-history action remains canonical and the timeline does not dup
 test('populated PAMB meeting timeline exposes the pending Office forwarding action', async () => {
     const { default: PambRoutingTimeline } = await load('Components/SubmissionTracking/PambRoutingTimeline.jsx');
     for (const workflow of ['regular_pamb', 'special_pamb', 'twc_meetings']) {
-        const html = renderToStaticMarkup(React.createElement(PambRoutingTimeline, {
+        const html = renderWithPageContext(React.createElement(PambRoutingTimeline, {
             row: {
                 workflow_key: workflow,
                 pamb_routing_applicable: true,
@@ -312,8 +326,8 @@ test('projected focal custody action renders in sidebar and Full Details while M
     const sidebar = React.createElement(SubmissionDetailsPanel, {
         row, context: {}, onAction: (next) => actionCalls.push(next), onPreview: (next) => previewCalls.push(next),
     });
-    const sidebarHtml = renderToStaticMarkup(sidebar);
-    const detailsHtml = renderToStaticMarkup(React.createElement(DocumentRoutingTimeline, { row, onAction: (next) => actionCalls.push(next) }));
+    const sidebarHtml = renderWithPageContext(sidebar);
+    const detailsHtml = renderWithPageContext(React.createElement(DocumentRoutingTimeline, { row, onAction: (next) => actionCalls.push(next) }));
     assert.match(sidebarHtml, />Forward</);
     assert.match(sidebarHtml, /Preview/);
     assert.match(sidebarHtml, /data-cds-action-variant="cancel"[^>]*>Preview<\/button>/);
@@ -334,31 +348,31 @@ test('projected focal custody action renders in sidebar and Full Details while M
     assert.deepEqual(previewCalls, [row]);
 
     const outgoingRow = { ...row, can_transition: false, routing: { ...row.routing, actions: [] }, current_document: { ...row.current_document, can_preview: false } };
-    const outgoingHtml = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: outgoingRow, onPreview: () => assert.fail('Preview callback must not be offered') }));
+    const outgoingHtml = renderWithPageContext(React.createElement(SubmissionDetailsPanel, { row: outgoingRow, onPreview: () => assert.fail('Preview callback must not be offered') }));
     assert.match(outgoingHtml, /Preview unavailable for this account/);
     assert.doesNotMatch(outgoingHtml, />Preview</);
 
     const noPermissionRow = { ...row, can_transition: false };
-    assert.doesNotMatch(renderToStaticMarkup(React.createElement(DocumentRoutingTimeline, { row: noPermissionRow })), />Forward</);
+    assert.doesNotMatch(renderWithPageContext(React.createElement(DocumentRoutingTimeline, { row: noPermissionRow })), />Forward</);
     const chiefMov = { ...row, mov_processing: { ...row.mov_processing, status_key: 'submitted_for_review' }, pamb_action_flags: { can_review: true } };
-    const movHtml = renderToStaticMarkup(React.createElement(PambMovActions, { row: chiefMov, onReview() {} }));
+    const movHtml = renderWithPageContext(React.createElement(PambMovActions, { row: chiefMov, onReview() {} }));
     assert.match(movHtml, /Ready for Release/);
     assert.match(movHtml, /Return MOV to CENRO Focal for Correction/);
     assert.match(movHtml, /data-cds-action-variant="warning"[^>]*>Return MOV to CENRO Focal for Correction<\/button>/);
-    assert.doesNotMatch(renderToStaticMarkup(React.createElement(PambMovActions, { row, onRelease() {} })), /Release/);
+    assert.doesNotMatch(renderWithPageContext(React.createElement(PambMovActions, { row, onRelease() {} })), /Release/);
 
     const awaitingReceipt = {
         ...chiefMov,
         routing: { ...row.routing, current_stage: 'transit_to_cenro_chief', next_expected_action: 'Receive', actions: [{ key: 'receive_cenro_chief', label: 'Receive', action_label: 'Receive' }] },
         pamb_action_flags: { can_submit: false, can_review: false, can_release: false },
     };
-    const awaitingSidebar = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: awaitingReceipt, onAction() {}, onReviewMov() {} }));
+    const awaitingSidebar = renderWithPageContext(React.createElement(SubmissionDetailsPanel, { row: awaitingReceipt, onAction() {}, onReviewMov() {} }));
     const receivePosition = awaitingSidebar.indexOf('>Receive</button>');
     const executableMovReviewControl = /<button[^>]*>(?:Ready for Release|Return MOV to CENRO Focal for Correction)<\/button>/;
     assert.ok(receivePosition >= 0, 'the transit recipient can receive the report');
     assert.doesNotMatch(awaitingSidebar, executableMovReviewControl);
 
-    const fullDetailsActions = renderToStaticMarkup(React.createElement(React.Fragment, null,
+    const fullDetailsActions = renderWithPageContext(React.createElement(React.Fragment, null,
         React.createElement(DocumentRoutingTimeline, { row: awaitingReceipt, onAction() {} }),
         React.createElement(PambMovProgress, { row: awaitingReceipt, hideReleaseAction: true, onReview() {} }),
     ));
@@ -370,7 +384,7 @@ test('projected focal custody action renders in sidebar and Full Details while M
         routing: { ...row.routing, current_stage: 'cenro_chief', actions: [] },
         pamb_action_flags: { can_submit: false, can_review: true, can_release: false },
     };
-    const receivedActions = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: afterReceipt, onReviewMov() {} }));
+    const receivedActions = renderWithPageContext(React.createElement(SubmissionDetailsPanel, { row: afterReceipt, onReviewMov() {} }));
     assert.match(receivedActions, />Ready for Release<\/button>/);
     assert.match(receivedActions, />Return MOV to CENRO Focal for Correction<\/button>/);
 
@@ -385,8 +399,8 @@ test('projected focal custody action renders in sidebar and Full Details while M
         mov_processing: { ...row.mov_processing, status_key: 'needs_correction', status_label: 'Needs Correction', review_remarks: 'Correct the attachment.' },
         pamb_action_flags: { can_submit: false, can_review: false, can_release: false },
     };
-    const correctionSidebar = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: needsCorrection, onAction() {} }));
-    const correctionDetails = renderToStaticMarkup(React.createElement(PambMovProgress, { row: needsCorrection, hideReleaseAction: true }));
+    const correctionSidebar = renderWithPageContext(React.createElement(SubmissionDetailsPanel, { row: needsCorrection, onAction() {} }));
+    const correctionDetails = renderWithPageContext(React.createElement(PambMovProgress, { row: needsCorrection, hideReleaseAction: true }));
     for (const markup of [correctionSidebar, correctionDetails]) {
         assert.match(markup, /Needs Correction is an MOV review verdict only; no custody return has been recorded yet\./);
         assert.match(markup, /Next custody action: Return Report to CENRO Focal/);
@@ -403,8 +417,8 @@ test('projected focal custody action renders in sidebar and Full Details while M
             cenro_review: { custody_return_recorded: true },
         },
     };
-    const atomicSidebar = renderToStaticMarkup(React.createElement(SubmissionDetailsPanel, { row: atomicCorrection }));
-    const atomicDetails = renderToStaticMarkup(React.createElement(PambMovProgress, { row: atomicCorrection, hideReleaseAction: true }));
+    const atomicSidebar = renderWithPageContext(React.createElement(SubmissionDetailsPanel, { row: atomicCorrection }));
+    const atomicDetails = renderWithPageContext(React.createElement(PambMovProgress, { row: atomicCorrection, hideReleaseAction: true }));
     for (const markup of [atomicSidebar, atomicDetails]) {
         assert.match(markup, /Needs Correction is the MOV review verdict, and the custody return has been recorded\./);
         assert.doesNotMatch(markup, /no custody return has been recorded yet/);
@@ -437,17 +451,17 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
 
     for (const workflow_key of ['regular_pamb', 'special_pamb', 'twc_meetings']) {
         const html = render({ ...pendingBase, workflow_key });
-        assert.equal((html.match(/Pending/g) || []).length, 4, `${workflow_key} should show four pending values`);
+        assert.equal((html.match(/Pending/g) || []).length, 1, `${workflow_key} should show only the current CENRO release action as pending`);
         assert.match(html, /Date Report Released by CENRO Records:<\/span><span[^>]*><span[^>]*>Pending/);
-        assert.match(html, /Date Received by PENRO Records:<\/span><span[^>]*><span[^>]*>Pending/);
-        assert.match(html, /Regional Endorsement:<\/span><span[^>]*><span[^>]*>Pending/);
-        assert.match(html, /Total Number of Days Delayed at PENRO:<\/span><span[^>]*><span[^>]*>Pending/);
+        assert.match(html, /Date Received by PENRO Records:<\/span><span[^>]*>Not recorded/);
+        assert.match(html, /Regional Endorsement:<\/span><span[^>]*>Not recorded/);
+        assert.match(html, /Total Number of Days Delayed at PENRO:<\/span><span[^>]*>Not calculated: required dates are missing/);
         assert.doesNotMatch(html, /Not Yet Available|Please Update Date Endorsed|—/);
     }
 
     const direct = render({ ...pendingBase, workflow_key: 'regular_pamb', cenro_release_applicable: false, submission_status: 'Pending Receipt by PENRO' });
-    assert.match(direct, /N\/A — PENRO-managed PA/);
-    assert.equal((direct.match(/Pending/g) || []).length, 3, 'direct-to-PENRO skips only the CENRO release value');
+    assert.match(direct, /Not applicable — PENRO-managed protected area/);
+    assert.equal((direct.match(/Pending/g) || []).length, 1, 'direct-to-PENRO keeps only the current PENRO receipt action pending');
 
     const specialInProgress = render({
         ...pendingBase,
@@ -456,7 +470,7 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
         submission_status: 'Pending Receipt by PENRO',
     });
     assert.match(specialInProgress, /Oct 1, 2026|October 1, 2026/);
-    assert.equal((specialInProgress.match(/Pending/g) || []).length, 3);
+    assert.equal((specialInProgress.match(/Pending/g) || []).length, 1);
 
     const twcAtRegional = render({
         ...pendingBase,
@@ -482,6 +496,17 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
     assert.match(completed, /Sep 1, 2026|September 1, 2026/);
     assert.match(completed, /Sep 5, 2026|September 5, 2026/);
 
+    const completedMissingDates = render({
+        workflow_key: 'regular_pamb',
+        date_report_released_cenro: null,
+        date_received_penro: null,
+        date_endorsed_regional: null,
+        total_days_delayed_penro: null,
+        submission_status: 'Completed',
+    });
+    assert.doesNotMatch(completedMissingDates, />Pending</);
+    assert.equal((completedMissingDates.match(/Not recorded/g) || []).length, 4);
+
     const { default: PamoSavedDraftsTable } = await load('Components/PamoSavedDraftsTable.jsx');
     const drafts = renderToStaticMarkup(React.createElement(PamoSavedDraftsTable, {
         workflow: { period_field: 'reporting_period', period_label: 'Reporting period' },
@@ -498,7 +523,7 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
     assert.equal((drafts.match(/<tr/g) || []).length, 3, 'both draft statuses remain visible in the table');
 
     const pamo = render({ ...pendingBase, pamo_origin: true, workflow_key: 'homestay' }, { isMeetingPamb: false });
-    assert.match(pamo, /Total Number of Days Delayed at PENRO:<\/span><span[^>]*>Not yet available/);
+    assert.match(pamo, /Total Number of Days Delayed at PENRO:<\/span><span[^>]*>Not calculated: required dates are missing/);
     assert.doesNotMatch(pamo, /Please Update Date Endorsed/);
     const completedZero = render({
         ...pendingBase,
@@ -514,6 +539,43 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
     assert.equal(daysCompliedDisplay({ pamo_origin: false, date_received_penro: null }, 'Pending Submission by CENRO'), 'Pending Submission by CENRO');
     assert.equal(daysCompliedDisplay({ pamo_origin: true, date_received_penro: '2026-10-08' }, 12), 12);
     assert.equal(daysCompliedDisplay({ pamo_origin: true, is_historical: true, date_received_penro: null }, 'Missing historical evidence'), 'Missing historical evidence');
+});
+
+test('shared Development report context renders missing, optional, inapplicable, and recorded values clearly', async () => {
+    const { default: SubmissionReportContext } = await load('Components/SubmissionTracking/SubmissionReportContext.jsx');
+    const html = renderToStaticMarkup(React.createElement(SubmissionReportContext, {
+        expanded: true,
+        row: {
+            source: 'engp', source_id: 2, module: 'Community-Based Employment Program (CBEP)',
+            target_office: 'CENRO Baganga', tracking_number: null, activity_name: null,
+            document_type: null, reporting_period: null, protected_area: null,
+            date_conducted: null, date_accomplished: null,
+            cenro_release_applicable: false, date_report_released_cenro: null,
+            date_received_penro: '2026-10-20', date_endorsed_regional: null,
+        },
+    }));
+
+    assert.match(html, /Not recorded/);
+    assert.match(html, /Not provided/);
+    assert.match(html, /Not applicable/);
+    assert.match(html, /October 20, 2026/);
+    assert.doesNotMatch(html, /<dt[^>]*>Protected Area<\/dt>/);
+});
+
+test('Office TAT ranking renders an explicit no-sample state instead of a dash or N/A', async () => {
+    const { RankingSection } = await load('Pages/Admin/OfficeTat/Index.jsx');
+    const { rankTatRows } = await load('Pages/Admin/OfficeTat/ranking.mjs');
+    const rows = rankTatRows([{
+        office: 'CENRO Baganga', tat_average_elapsed_seconds: null,
+        event_derived_tat_completed_documents: 0,
+    }], 'live');
+    const html = renderToStaticMarkup(React.createElement(RankingSection, {
+        title: 'Live TAT', description: 'Office receipt to next accepted handoff', rows, evidence: 'live',
+    }));
+
+    assert.match(html, /No completed samples/);
+    assert.match(html, /No valid live event averages/);
+    assert.doesNotMatch(html, />\s*(?:—|N\/A)\s*</);
 });
 
 test('correction reference upload appears only for return actions that allow it and never replaces the official copy', async () => {
@@ -566,10 +628,13 @@ test('protected preview explains projected denial without offering download or a
         onClose() {},
     }));
     assert.equal(typeof document, 'undefined');
+    // Portals are omitted by this server-render fixture; the access decision is guarded below.
     assert.equal(html, '');
     assert.match(source, /!canPreview \? <p role="alert"[^>]*>Your current account is not authorized to access this document\./);
-    assert.match(source, /canPreview && downloadUrl && \(!inline \|\| previewReady\)/);
-    assert.ok(source.indexOf('!canPreview ?') < source.indexOf(': inline ? previewReady ?'));
+    assert.match(source, /const canDownload = downloadAllowed === null\s*\? canPreview && Boolean\(downloadUrl\)\s*:\s*Boolean\(downloadAllowed && downloadUrl\);/);
+    const deniedBranch = source.indexOf('!canPreview ? <p role="alert"');
+    assert.ok(deniedBranch >= 0 && deniedBranch < source.indexOf('Loading document preview'));
+    assert.ok(deniedBranch < source.indexOf('{canDownload && <div'));
 
     const { default: FilePreviewPanel } = await load('Components/Crud/FilePreviewPanel.jsx');
     const protectedPanel = renderToStaticMarkup(React.createElement(FilePreviewPanel, {

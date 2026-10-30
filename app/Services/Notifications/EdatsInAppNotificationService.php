@@ -43,9 +43,23 @@ final class EdatsInAppNotificationService
 
         $source = self::trackingSource((string) ($data['source_type'] ?? ''));
         $sourceId = filter_var($data['source_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $storedUrl = $data['url'] ?? null;
+        $query = is_string($storedUrl) ? parse_url($storedUrl, PHP_URL_QUERY) : null;
+        $queryParameters = [];
+        if (is_string($query)) {
+            parse_str($query, $queryParameters);
+        }
+        $view = $queryParameters['view'] ?? null;
+        $view = is_string($view) && in_array($view, ['incoming', 'outgoing', 'history'], true)
+            ? $view
+            : null;
 
         return $source !== null && $sourceId !== false
-            ? route('submission-tracking.index', ['source' => $source, 'source_id' => $sourceId])
+            ? route('submission-tracking.index', array_filter([
+                'view' => $view,
+                'source' => $source,
+                'source_id' => $sourceId,
+            ], static fn (mixed $value): bool => $value !== null))
             : route('submission-tracking.index');
     }
 
@@ -241,6 +255,7 @@ final class EdatsInAppNotificationService
             if (! $organization->canAccessUnit($user, OrganizationalAccessService::CONSERVATION)) return false;
 
             $source = new ConservationReportSubmission([
+                'workflow_key' => $report->workflowKey,
                 'protected_area_id' => $report->protectedAreaId,
                 'target_office' => $report->targetOffice,
             ]);

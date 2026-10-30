@@ -1,7 +1,8 @@
 import { Icon } from '@iconify/react';
 import { createPortal } from 'react-dom';
-import { useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import { fixedBottomOverlayInset } from '@/Utils/fixedBottomOverlayInset.mjs';
 
 export default function SubmissionTrackingReaderDialog({
     open,
@@ -20,9 +21,11 @@ export default function SubmissionTrackingReaderDialog({
     closeOnEscape = true,
     idPrefix = 'tracking-reader',
     initialFocusSelector = '[data-reader-close]',
+    avoidBottomDebugbar = false,
 }) {
     const panelRef = useRef(null);
     const overlayRef = useRef(null);
+    const [bottomObstruction, setBottomObstruction] = useState(0);
     const { present, phase, onTransitionEnd } = useModalMotion(open, {
         onClose,
         panelRef,
@@ -31,13 +34,60 @@ export default function SubmissionTrackingReaderDialog({
         closeOnEscape,
     });
 
+    useLayoutEffect(() => {
+        if (!present || !avoidBottomDebugbar || typeof document === 'undefined') {
+            setBottomObstruction(0);
+            return undefined;
+        }
+
+        const toolbar = document.querySelector('.phpdebugbar');
+        if (!toolbar || !panelRef.current) {
+            setBottomObstruction(0);
+            return undefined;
+        }
+
+        const measure = () => {
+            const toolbarStyle = window.getComputedStyle(toolbar);
+            const toolbarRect = toolbar.getBoundingClientRect();
+            const panelRect = panelRef.current?.getBoundingClientRect();
+            const visible = toolbarStyle.position === 'fixed'
+                && toolbarStyle.display !== 'none'
+                && toolbarStyle.visibility !== 'hidden'
+                && Number(toolbarStyle.opacity || 1) > 0;
+            const nextInset = fixedBottomOverlayInset({
+                toolbarRect,
+                panelRect,
+                viewportHeight: window.innerHeight,
+                visible,
+            });
+            setBottomObstruction(current => current === nextInset ? current : nextInset);
+        };
+
+        measure();
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+        resizeObserver?.observe(toolbar);
+        const mutationObserver = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
+        mutationObserver?.observe(toolbar, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+        window.addEventListener('resize', measure);
+
+        return () => {
+            resizeObserver?.disconnect();
+            mutationObserver?.disconnect();
+            window.removeEventListener('resize', measure);
+        };
+    }, [present, avoidBottomDebugbar, expanded]);
+
     if (!present || typeof document === 'undefined') return null;
 
     const panelSizing = expanded
-        ? 'h-[100dvh] max-h-[100dvh] w-screen max-w-none rounded-none'
-        : 'h-[calc(100dvh-16px)] max-h-[calc(100dvh-16px)] w-[min(960px,calc(100vw-16px))] max-w-[960px] rounded-xl sm:h-[calc(100dvh-40px)] sm:max-h-[calc(100dvh-40px)] sm:w-[min(960px,calc(100vw-32px))] sm:rounded-2xl';
+        ? 'h-[calc(100dvh_-_var(--reader-bottom-obstruction))] max-h-[calc(100dvh_-_var(--reader-bottom-obstruction))] w-screen max-w-none rounded-none'
+        : 'h-[calc(100dvh_-_var(--reader-bottom-obstruction)_-_16px)] max-h-[calc(100dvh_-_var(--reader-bottom-obstruction)_-_16px)] w-[min(960px,calc(100vw-16px))] max-w-[960px] rounded-xl sm:h-[calc(100dvh_-_var(--reader-bottom-obstruction)_-_40px)] sm:max-h-[calc(100dvh_-_var(--reader-bottom-obstruction)_-_40px)] sm:w-[min(960px,calc(100vw-32px))] sm:rounded-2xl';
+    const overlayStyle = {
+        '--reader-bottom-obstruction': `${avoidBottomDebugbar ? bottomObstruction : 0}px`,
+        ...(avoidBottomDebugbar ? { bottom: `${bottomObstruction}px` } : {}),
+    };
 
-    return createPortal(<div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className={`cds-modal-motion-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/65 backdrop-blur-sm ${expanded ? 'p-0' : 'p-2 sm:p-4'}`} role="presentation">
+    return createPortal(<div ref={overlayRef} style={overlayStyle} data-cds-modal-layer data-motion-state={phase} className={`cds-modal-motion-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/65 backdrop-blur-sm ${expanded ? 'p-0' : 'p-2 sm:p-4'}`} role="presentation">
         <section ref={panelRef} onTransitionEnd={onTransitionEnd} role="dialog" aria-modal="true" aria-label={title || 'Document reader'} tabIndex={-1} data-motion-state={phase} className={`cds-modal-motion-panel relative flex min-h-0 flex-col overflow-hidden border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 ${panelSizing}`}>
             <div inert={contentInert || undefined} aria-hidden={contentInert || undefined} className="flex min-h-0 flex-1 flex-col">
                 <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-3 py-2.5 sm:px-4 dark:border-slate-700">

@@ -8,9 +8,9 @@ import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAx
 import { useEffect, useState } from 'react';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
 
-const DASH = '\u2014';
-const percent = value => `${Number(value || 0).toFixed(Number(value || 0) % 1 ? 1 : 0)}%`;
-const days = value => value === null || value === undefined ? DASH : `${Number(value).toFixed(1)} days`;
+const NO_DATA = 'No data';
+const percent = value => value === null || value === undefined || value === '' ? 'No data' : `${Number(value).toFixed(Number(value) % 1 ? 1 : 0)}%`;
+const days = value => value === null || value === undefined || value === '' ? NO_DATA : `${Number(value).toFixed(1)} days`;
 
 function Filters({ filters = {}, filterOptions = {}, tab }) {
     const [values, setValues] = useState(filters);
@@ -35,7 +35,7 @@ function Metric({ label, value, hint, tone = 'slate' }) {
     return <article className="cds-card-surface min-h-[94px] rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm dark:border-slate-700 dark:bg-slate-900"><p className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p><p className={`mt-1 text-[27px] font-semibold leading-none ${tones[tone]}`}>{value}</p><p className="mt-1 text-xs font-normal text-slate-500 dark:text-slate-400">{hint}</p></article>;
 }
 
-function ProcessStatus({ value }) { const name = String(value || 'Pending'); const lower = name.toLowerCase(); const color = lower.includes('overdue') || lower.includes('late') ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300' : lower.includes('progress') || lower.includes('correction') ? 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300' : lower.includes('time') || lower.includes('complete') ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{name}</span>; }
+function ProcessStatus({ value }) { const name = value === null || value === undefined || value === '' ? 'Not recorded' : String(value); const lower = name.toLowerCase(); const color = lower.includes('overdue') || lower.includes('late') ? 'bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300' : lower.includes('progress') || lower.includes('correction') ? 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300' : lower.includes('time') || lower.includes('complete') ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : lower.includes('pending') || lower.includes('awaiting') ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'; return <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${color}`}>{name}</span>; }
 function ReportTimeliness({ value, fallback }) { return value && String(value).trim() ? <TimelinessBadge value={value} /> : <ProcessStatus value={fallback} />; }
 
 function WorkCard({ title, items = [], overdue = false }) { return <section className="cds-card-surface overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900"><h3 className={`border-b border-slate-200 px-4 py-3 text-sm font-semibold uppercase tracking-wide dark:border-slate-700 ${overdue ? 'text-red-700 dark:text-red-400' : 'text-slate-900 dark:text-white'}`}>{title}</h3>{items.length ? <div className="divide-y divide-slate-100 dark:divide-slate-800">{items.map(item => <a key={item.id} href={item.source_url} className="grid gap-2 px-4 py-3 transition hover:bg-slate-50 dark:hover:bg-slate-800/60 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-center"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-100">{item.office}</p><p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{item.context}</p></div><div className="min-w-0"><p className="truncate text-sm text-slate-800 dark:text-slate-100">{item.report}</p><p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{item.period} · Due {formatReportDate(item.due)}</p></div>{overdue && Number.isFinite(item.days_overdue) ? <p className="text-sm font-semibold text-red-700 dark:text-red-400">{item.days_overdue} days overdue</p> : <ProcessStatus value={item.status} />}</a>)}</div> : <p className="px-4 py-8 text-center text-sm font-normal text-slate-500 dark:text-slate-400">No matching reports.</p>}</section>; }
@@ -57,7 +57,7 @@ function DevelopmentDashboard({ data = {} }) {
     const summary = data.summary || {};
     const rows = data.rows || [];
     const total = data.pagination?.total ?? summary.expected ?? 0;
-    const workItems = (items) => items.map((row) => ({ id: row.id, source_url: row.source_url, office: row.office, context: `${row.frequency} · ${row.reporting_period}`, report: row.report, period: row.reporting_period, due: row.deadline, status: row.monitoring_status, days_overdue: '—' }));
+    const workItems = (items) => items.map((row) => ({ id: row.id, source_url: row.source_url, office: row.office, context: `${row.frequency} · ${row.reporting_period}`, report: row.report, period: row.reporting_period, due: row.deadline, status: row.monitoring_status }));
 
     return <section className="space-y-4">
         <div className="cds-card-surface rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/30"><h2 className="text-lg font-semibold text-emerald-950 dark:text-emerald-100">DEVELOPMENT REPORTS <span className="mx-2 text-emerald-500">|</span> CENROs</h2><p className="text-sm font-normal text-emerald-800/70 dark:text-emerald-200/70">{data.filterOptions?.offices?.length || 0} authorized office{data.filterOptions?.offices?.length === 1 ? '' : 's'} · {total} scheduled requirement{total === 1 ? '' : 's'}</p></div>

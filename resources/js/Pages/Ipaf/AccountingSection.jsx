@@ -13,9 +13,9 @@ import Tooltip from '@/Components/Tooltip';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 const labelClass = 'block text-xs font-semibold text-gray-700 dark:text-gray-300';
-const peso = (value) => value === null || value === undefined ? '—' : `₱${formatMoney(value)}`;
-const show = (value) => value === null || value === undefined || value === '' ? '—' : value;
-const updatedAt = (value) => value ? new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : '—';
+const peso = (value) => value === null || value === undefined ? 'Not recorded' : `₱${formatMoney(value)}`;
+const show = (value) => value === null || value === undefined || value === '' ? 'Not provided' : value;
+const updatedAt = (value) => value ? new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) : 'Not recorded';
 const areaName = (row) => <span className={row.is_total ? 'font-extrabold text-green-900 dark:text-green-300' : 'font-semibold'}>{row.protected_area_name}</span>;
 const Detail = ({ label, value }) => <div><p className="text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p><p className="mt-1 text-sm font-semibold text-gray-900 dark:text-white">{value}</p></div>;
 

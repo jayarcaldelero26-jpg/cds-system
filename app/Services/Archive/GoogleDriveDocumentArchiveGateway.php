@@ -26,6 +26,8 @@ class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArch
     private ClientInterface $client;
     private string $uploadPhase = '';
     private array $uploadDiagnostics = [];
+    private string $rootValidationStage = 'not_started';
+    private bool $rootValidationInProgress = false;
 
     public function __construct(?ClientInterface $client = null)
     {
@@ -63,19 +65,31 @@ class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArch
     /** Validates the configured root without creating or changing anything. */
     public function validateRootFolder(): array
     {
-        if (! config('services.google_drive_archive.enabled')) {
-            throw new GoogleDriveArchiveException('Google Drive archive integration is disabled.');
-        }
+        $this->rootValidationStage = 'configuration';
+        $this->rootValidationInProgress = true;
+        try {
+            if (! config('services.google_drive_archive.enabled')) {
+                throw new GoogleDriveArchiveException('Google Drive archive integration is disabled.');
+            }
 
-        $folderId = $this->requiredConfig('folder_id');
-        $response = $this->driveRequest('GET', self::API.'/files/'.rawurlencode($folderId), [
-            'query' => ['fields' => 'id,mimeType,trashed'],
-        ]);
-        $folder = $this->json($response);
-        if (($folder['id'] ?? null) !== $folderId || ($folder['mimeType'] ?? null) !== self::FOLDER_MIME || ($folder['trashed'] ?? false)) {
-            throw new GoogleDriveArchiveException('Configured Google Drive root is not an accessible folder.', 200);
+            $folderId = $this->requiredConfig('folder_id');
+            $this->rootValidationStage = 'oauth_refresh';
+            $response = $this->driveRequest('GET', self::API.'/files/'.rawurlencode($folderId), [
+                'query' => ['fields' => 'id,mimeType,trashed'],
+            ]);
+            $folder = $this->json($response);
+            if (($folder['id'] ?? null) !== $folderId || ($folder['mimeType'] ?? null) !== self::FOLDER_MIME || ($folder['trashed'] ?? false)) {
+                throw new GoogleDriveArchiveException('Configured Google Drive root is not an accessible folder.', 200);
+            }
+            return ['status' => 200, 'valid' => true];
+        } finally {
+            $this->rootValidationInProgress = false;
         }
-        return ['status' => 200, 'valid' => true];
+    }
+
+    public function rootValidationStage(): string
+    {
+        return $this->rootValidationStage;
     }
 
     public function findByIdentityAndHash(array $identity, string $sha256): ?array
@@ -699,6 +713,7 @@ class GoogleDriveDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArch
         }
         $headers = $options['headers'] ?? [];
         $headers['Authorization'] = 'Bearer '.$this->accessToken();
+        if ($this->rootValidationInProgress) $this->rootValidationStage = 'root_folder_metadata';
         $options['headers'] = $headers;
         $options['http_errors'] = false;
         $options['connect_timeout'] = 10;

@@ -195,10 +195,12 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     }
   };
 
+  const measure = (value, unit) => value === null || value === undefined ? 'No data' : `${value.toFixed(1)} ${unit}`;
+
   const formatDate = (date) => {
-    if (!date) return '—';
+    if (!date) return 'Not recorded';
     const parsedDate = parseDateOnly(date);
-    if (!parsedDate) return '—';
+    if (!parsedDate) return 'Not recorded';
 
     return parsedDate.toLocaleDateString(undefined, {
       month: 'short',
@@ -262,9 +264,10 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     null;
   };
 
-  const sumValues = (values) =>
-  values.filter((value) => value !== null && Number.isFinite(value)).
-  reduce((sum, value) => sum + value, 0);
+  const sumValues = (values) => {
+    const valid = values.filter((value) => value !== null && Number.isFinite(value));
+    return valid.length ? valid.reduce((sum, value) => sum + value, 0) : null;
+  };
 
   const aggregateAllPa = () => {
     const dailyRecords = chartRecords;
@@ -309,7 +312,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     const dominantDirections = {};
     group.records.forEach((record) => {
       const direction = String(record.wind_direction || '').trim();
-      if (direction && direction !== '—') {
+      if (direction && direction !== 'No data' && direction !== '—' && direction !== 'Not recorded') {
         dominantDirections[direction] = (dominantDirections[direction] || 0) + 1;
       }
     });
@@ -326,10 +329,10 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
       averageWind: mean(wind),
       averageHumidity: mean(humidity),
       completeness: completeness.length ? mean(completeness) : null,
-      dominantDirection: dominant?.[0] || '—',
+      dominantDirection: dominant?.[0] || 'No completed samples',
       dominantDirectionFrequency: dominant ?
       dominant[1] / Object.values(dominantDirections).reduce((sum, value) => sum + value, 0) * 100 :
-      0,
+      null,
       rainyDays: rainfall.filter((value) => value !== null && value > 0).length
     };
   });
@@ -769,7 +772,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     rawRecords.forEach((record) => {
       const direction = String(record.wind_direction || '').trim();
 
-      if (direction && direction !== '—') {
+      if (direction && direction !== 'No data' && direction !== '—' && direction !== 'Not recorded') {
         directionCounts[direction] = (directionCounts[direction] || 0) + 1;
       }
     });
@@ -777,10 +780,10 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
     const dominantWindEntry =
     Object.entries(directionCounts).sort((a, b) => b[1] - a[1])[0] || null;
 
-    const dominantWindDirection = dominantWindEntry?.[0] || '—';
+    const dominantWindDirection = dominantWindEntry?.[0] || 'No completed samples';
     const dominantWindDirectionFrequency = dominantWindEntry ?
     dominantWindEntry[1] / Object.values(directionCounts).reduce((sum, value) => sum + value, 0) * 100 :
-    0;
+    null;
 
     const spellStats = calculateSpellStats(rawRecords);
 
@@ -794,14 +797,14 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
 
     let explanation = isAllPa ?
     `Across ${paGroups.length || 0} Protected Areas, the selected period shows generally balanced weather conditions. ` +
-    `Average temperature across monitored PA observations was ${avgTemp !== null ? avgTemp.toFixed(1) : '—'}°C, ` +
-    `average daily rainfall was ${averageDailyRainfall !== null ? averageDailyRainfall.toFixed(1) : '—'} mm, ` +
-    `average wind speed was ${avgWind !== null ? avgWind.toFixed(1) : '—'} m/s, ` +
-    `and average humidity was ${avgHum !== null ? avgHum.toFixed(1) : '—'}%.` :
-    `The selected period shows generally balanced weather conditions. Average temperature was ${avgTemp !== null ? avgTemp.toFixed(1) : '—'}°C, ` +
-    `cumulative precipitation was ${totalPrecipForSelectedPa.toFixed(1)} mm, ` +
-    `average wind speed was ${avgWind !== null ? avgWind.toFixed(1) : '—'} m/s, ` +
-    `and average humidity was ${avgHum !== null ? avgHum.toFixed(1) : '—'}%.`;
+    `Average temperature across monitored PA observations was ${measure(avgTemp, '°C')}, ` +
+    `average daily rainfall was ${measure(averageDailyRainfall, 'mm')}, ` +
+    `average wind speed was ${measure(avgWind, 'm/s')}, ` +
+    `and average humidity was ${measure(avgHum, '%')}.` :
+    `The selected period shows generally balanced weather conditions. Average temperature was ${measure(avgTemp, '°C')}, ` +
+    `cumulative precipitation was ${measure(totalPrecipForSelectedPa, 'mm')}, ` +
+    `average wind speed was ${measure(avgWind, 'm/s')}, ` +
+    `and average humidity was ${measure(avgHum, '%')}.`;
 
     if (heavyRainDays >= Math.max(2, Math.ceil(diffDays * 0.2)) || (averageDailyRainfall ?? 0) >= 8) {
       season = '🌧️ Wet / Rain-Dominant Period';
@@ -809,10 +812,10 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
 
       explanation = isAllPa ?
       `Across ${paGroups.length || 0} Protected Areas, the period was generally wet. ` +
-      `Average daily rainfall across monitored PA stations was ${averageDailyRainfall !== null ? averageDailyRainfall.toFixed(1) : '—'} mm, ` +
+      `Average daily rainfall across monitored PA stations was ${measure(averageDailyRainfall, 'mm')}, ` +
       `${rainDays} day(s) recorded measurable network rainfall, and ${heavyRainDays} day(s) had network average rainfall of at least 15 mm. ` +
       `These patterns may affect field access, trail conditions, drainage, and observation effort.` :
-      `The selected period was generally wet. Total precipitation reached ${totalPrecipForSelectedPa.toFixed(1)} mm, ` +
+      `The selected period was generally wet. Total precipitation reached ${measure(totalPrecipForSelectedPa, 'mm')}, ` +
       `with ${rainDays} rainy day(s) and ${heavyRainDays} day(s) at or above 15 mm. ` +
       `The wet pattern may affect field access, trail conditions, drainage, and observation effort.`;
     } else if ((avgTemp ?? 0) >= 26 && (averageDailyRainfall ?? 0) < 2.5) {
@@ -821,21 +824,21 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
 
       explanation = isAllPa ?
       `Across ${paGroups.length || 0} Protected Areas, the period was generally warm and relatively dry. ` +
-      `Average temperature was ${avgTemp !== null ? avgTemp.toFixed(1) : '—'}°C and average daily rainfall was ` +
-      `${averageDailyRainfall !== null ? averageDailyRainfall.toFixed(1) : '—'} mm. ` +
+      `Average temperature was ${measure(avgTemp, '°C')} and average daily rainfall was ` +
+      `${measure(averageDailyRainfall, 'mm')}. ` +
       `Monitor prolonged dry periods, elevated evaporation, and localized heat stress.` :
-      `The selected period was generally warm and relatively dry, with an average temperature of ${avgTemp !== null ? avgTemp.toFixed(1) : '—'}°C ` +
-      `and ${totalPrecipForSelectedPa.toFixed(1)} mm cumulative precipitation. Monitor prolonged dry spells, elevated evaporation, and localized heat stress.`;
+      `The selected period was generally warm and relatively dry, with an average temperature of ${measure(avgTemp, '°C')} ` +
+      `and ${measure(totalPrecipForSelectedPa, 'mm')} cumulative precipitation. Monitor prolonged dry spells, elevated evaporation, and localized heat stress.`;
     } else if (highWindDays > 0) {
       season = '💨 Wind-Active Period';
       badgeColor = 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20';
 
       explanation = isAllPa ?
       `Wind conditions were more noticeable across the selected Protected Areas. ${highWindDays} network day(s) exceeded 10 m/s, ` +
-      `with the strongest daily average reaching ${maxWindRecord?.windSpeed?.toFixed(1) ?? '—'} m/s. ` +
+      `with the strongest daily average reaching ${measure(maxWindRecord?.windSpeed, 'm/s')}. ` +
       `Consider wind exposure when scheduling field activities and interpreting sensor observations.` :
       `Wind conditions were more noticeable during this period. ${highWindDays} day(s) exceeded 10 m/s, ` +
-      `with the strongest daily average reaching ${maxWindRecord?.windSpeed?.toFixed(1) ?? '—'} m/s. ` +
+      `with the strongest daily average reaching ${measure(maxWindRecord?.windSpeed, 'm/s')}. ` +
       `Consider wind exposure when scheduling field activities and interpreting sensor observations.`;
     }
 
@@ -1210,13 +1213,13 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                         <div className="rounded-xl bg-white/80 dark:bg-gray-900/70 px-3 py-2 border border-gray-100 dark:border-gray-700">
                                             <span className="block text-[9px] uppercase text-gray-400">Avg Temp</span>
                                             <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                                {allPaSummary.averageTemperature !== null ? `${allPaSummary.averageTemperature.toFixed(1)}°C` : '—'}
+                                                {allPaSummary.averageTemperature !== null ? `${allPaSummary.averageTemperature.toFixed(1)}°C` : 'No data'}
                                             </span>
                                         </div>
                                         <div className="rounded-xl bg-white/80 dark:bg-gray-900/70 px-3 py-2 border border-gray-100 dark:border-gray-700">
                                             <span className="block text-[9px] uppercase text-gray-400">Avg Humidity</span>
                                             <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                                {allPaSummary.averageHumidity !== null ? `${allPaSummary.averageHumidity.toFixed(1)}%` : '—'}
+                                                {allPaSummary.averageHumidity !== null ? `${allPaSummary.averageHumidity.toFixed(1)}%` : 'No data'}
                                             </span>
                                         </div>
                                     </div>
@@ -1258,19 +1261,19 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                                         <div>
                                                             <span className="block text-gray-400 uppercase">Avg Temp</span>
                                                             <span className="font-semibold text-gray-700 dark:text-gray-200">
-                                                                {pa.averageTemperature !== null ? `${pa.averageTemperature.toFixed(1)}°C` : '—'}
+                                                                {pa.averageTemperature !== null ? `${pa.averageTemperature.toFixed(1)}°C` : 'No data'}
                                                             </span>
                                                         </div>
                                                         <div>
                                                             <span className="block text-gray-400 uppercase">Rainfall</span>
                                                             <span className="font-semibold text-gray-700 dark:text-gray-200">
-                                                                {pa.averageDailyRainfall !== null ? `${pa.averageDailyRainfall.toFixed(1)} mm/day` : '—'}
+                                                                {pa.averageDailyRainfall !== null ? `${pa.averageDailyRainfall.toFixed(1)} mm/day` : 'No data'}
                                                             </span>
                                                         </div>
                                                         <div>
                                                             <span className="block text-gray-400 uppercase">Humidity</span>
                                                             <span className="font-semibold text-gray-700 dark:text-gray-200">
-                                                                {pa.averageHumidity !== null ? `${pa.averageHumidity.toFixed(1)}%` : '—'}
+                                                                {pa.averageHumidity !== null ? `${pa.averageHumidity.toFixed(1)}%` : 'No data'}
                                                             </span>
                                                         </div>
                                                     </div>
@@ -1301,19 +1304,19 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                             <div className="rounded-xl bg-gray-50 dark:bg-gray-800/70 px-3 py-2 border border-gray-100 dark:border-gray-700">
                                 <span className="block text-[9px] uppercase text-gray-400">Average</span>
                                 <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                    {graphAverage !== null ? `${graphAverage.toFixed(currentMetric.decimals)} ${currentMetric.unit}` : '—'}
+                                    {graphAverage !== null ? `${graphAverage.toFixed(currentMetric.decimals)} ${currentMetric.unit}` : 'No data'}
                                 </span>
                             </div>
                             <div className="rounded-xl bg-gray-50 dark:bg-gray-800/70 px-3 py-2 border border-gray-100 dark:border-gray-700">
                                 <span className="block text-[9px] uppercase text-gray-400">Lowest</span>
                                 <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                    {graphMinimum !== null ? `${graphMinimum.toFixed(currentMetric.decimals)} ${currentMetric.unit}` : '—'}
+                                    {graphMinimum !== null ? `${graphMinimum.toFixed(currentMetric.decimals)} ${currentMetric.unit}` : 'No data'}
                                 </span>
                             </div>
                             <div className="rounded-xl bg-gray-50 dark:bg-gray-800/70 px-3 py-2 border border-gray-100 dark:border-gray-700">
                                 <span className="block text-[9px] uppercase text-gray-400">Highest</span>
                                 <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                    {graphMaximum !== null ? `${graphMaximum.toFixed(currentMetric.decimals)} ${currentMetric.unit}` : '—'}
+                                    {graphMaximum !== null ? `${graphMaximum.toFixed(currentMetric.decimals)} ${currentMetric.unit}` : 'No data'}
                                 </span>
                             </div>
                         </div>
@@ -1414,7 +1417,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                         <div className="bg-white/90 dark:bg-gray-800/80 p-4 rounded-xl border border-gray-100 dark:border-gray-700/80 shadow-xs">
                             <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Average Temperature</span>
                             <span className="mt-1 block text-xl font-extrabold text-gray-800 dark:text-white">
-                                {aiSummary.avgTemp !== null ? `${aiSummary.avgTemp.toFixed(1)}°C` : '—'}
+                                {aiSummary.avgTemp !== null ? `${aiSummary.avgTemp.toFixed(1)}°C` : 'No data'}
                             </span>
                             <span className="mt-1 block text-[10px] font-semibold text-gray-500">
                                 Observed: {aiSummary.temperatureTrend.strength}
@@ -1438,17 +1441,17 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                         <div className="bg-white/90 dark:bg-gray-800/80 p-4 rounded-xl border border-gray-100 dark:border-gray-700/80 shadow-xs">
                             <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Average Wind Speed</span>
                             <span className="mt-1 block text-xl font-extrabold text-gray-800 dark:text-white">
-                                {aiSummary.avgWind !== null ? `${aiSummary.avgWind.toFixed(1)} m/s` : '—'}
+                                {aiSummary.avgWind !== null ? `${aiSummary.avgWind.toFixed(1)} m/s` : 'No data'}
                             </span>
                             <span className="mt-1 block text-[10px] font-semibold text-gray-500">
-                                Most Common Direction: {aiSummary.dominantWindDirection} ({aiSummary.dominantWindDirectionFrequency.toFixed(1)}%)
+                                Most Common Direction: {aiSummary.dominantWindDirection} ({aiSummary.dominantWindDirectionFrequency === null ? 'No data' : `${aiSummary.dominantWindDirectionFrequency.toFixed(1)}%`})
                             </span>
                         </div>
 
                         <div className="bg-white/90 dark:bg-gray-800/80 p-4 rounded-xl border border-gray-100 dark:border-gray-700/80 shadow-xs">
                             <span className="block text-[9px] font-bold uppercase tracking-wider text-gray-400">Average Humidity</span>
                             <span className="mt-1 block text-xl font-extrabold text-gray-800 dark:text-white">
-                                {aiSummary.avgHum !== null ? `${aiSummary.avgHum.toFixed(1)}%` : '—'}
+                                {aiSummary.avgHum !== null ? `${aiSummary.avgHum.toFixed(1)}%` : 'No data'}
                             </span>
                             <span className="mt-1 block text-[10px] font-semibold text-gray-500">
                                 {aiSummary.isAllPa ?
@@ -1499,7 +1502,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                     <span className="font-bold text-gray-800 dark:text-white">
                                         {aiSummary.maxTempRecord ?
                   `${aiSummary.maxTempRecord.temperature.toFixed(1)}°C — ${formatDate(aiSummary.maxTempRecord.date)}` :
-                  '—'}
+                  'No completed samples'}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3">
@@ -1507,7 +1510,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                     <span className="font-bold text-gray-800 dark:text-white">
                                         {aiSummary.minTempRecord ?
                   `${aiSummary.minTempRecord.temperature.toFixed(1)}°C — ${formatDate(aiSummary.minTempRecord.date)}` :
-                  '—'}
+                  'No completed samples'}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3">
@@ -1517,7 +1520,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                     <span className="font-bold text-gray-800 dark:text-white">
                                         {aiSummary.maxRainRecord ?
                   `${aiSummary.maxRainRecord.precipitation.toFixed(1)} mm — ${formatDate(aiSummary.maxRainRecord.date)}` :
-                  '—'}
+                  'No completed samples'}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3">
@@ -1525,7 +1528,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                     <span className="font-bold text-gray-800 dark:text-white">
                                         {aiSummary.maxWindRecord ?
                   `${aiSummary.maxWindRecord.windSpeed.toFixed(1)} m/s — ${formatDate(aiSummary.maxWindRecord.date)}` :
-                  '—'}
+                  'No completed samples'}
                                     </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-3">
@@ -1550,7 +1553,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                 <div>
                                     <span className="block text-[9px] text-gray-400 uppercase">Average Data Completeness</span>
                                     <span className="text-sm font-bold text-gray-800 dark:text-white">
-                                        {aiSummary.avgCompleteness !== null ? `${aiSummary.avgCompleteness.toFixed(1)}%` : '—'}
+                                        {aiSummary.avgCompleteness !== null ? `${aiSummary.avgCompleteness.toFixed(1)}%` : 'No data'}
                                     </span>
                                 </div>
                                 <div>
@@ -1558,7 +1561,7 @@ export default function AwsGraph({ chartRecords = [], protectedAreas = [], filte
                                         {aiSummary.isAllPa ? 'Complete PA-Days' : 'Complete Data Days'}
                                     </span>
                                     <span className="text-sm font-bold text-gray-800 dark:text-white">
-                                        {aiSummary.qcDays > 0 ? `${aiSummary.fullyCoveredDays}/${aiSummary.qcDays}` : '—'}
+                                        {aiSummary.qcDays > 0 ? `${aiSummary.fullyCoveredDays}/${aiSummary.qcDays}` : 'No data'}
                                     </span>
                                 </div>
                             </div>

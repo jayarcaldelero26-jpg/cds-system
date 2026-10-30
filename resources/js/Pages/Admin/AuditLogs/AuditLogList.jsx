@@ -9,7 +9,8 @@ import DateRangePicker from '@/Components/DateRangePicker';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 import FloatingSelect from '@/Components/Form/FloatingSelect';
 
-const auditDash = '\u2014';
+const auditDash = 'Not recorded';
+const auditOptional = 'Not provided';
 const metadataLabels = {
     recipient_name: 'Recipient Name',
     recipient_email: 'Recipient Email',
@@ -39,7 +40,7 @@ function parseStructuredValue(value) {
 }
 
 function readableScalar(value, fieldKey = '') {
-    if (value === null || value === undefined || value === '') return auditDash;
+    if (value === null || value === undefined || value === '') return auditOptional;
     if (typeof value === 'boolean') {
         return fieldKey === 'is_active' ? (value ? 'Active' : 'Inactive') : (value ? 'Yes' : 'No');
     }
@@ -49,7 +50,7 @@ function readableScalar(value, fieldKey = '') {
 function ReadableValue({ value, fieldKey = '' }) {
     const parsed = parseStructuredValue(value);
     if (Array.isArray(parsed)) {
-        if (parsed.length === 0) return createElement('span', { className: 'text-gray-500' }, auditDash);
+        if (parsed.length === 0) return createElement('span', { className: 'text-gray-500' }, auditOptional);
         return createElement(
             'div',
             { className: 'space-y-1' },
@@ -63,7 +64,7 @@ function ReadableValue({ value, fieldKey = '' }) {
     }
     if (isRecord(parsed)) {
         const entries = Object.entries(parsed).filter(([key]) => !isSensitiveKey(key));
-        if (entries.length === 0) return createElement('span', { className: 'text-gray-500' }, auditDash);
+        if (entries.length === 0) return createElement('span', { className: 'text-gray-500' }, auditOptional);
         return createElement(
             'div',
             { className: 'space-y-1 rounded-lg bg-gray-50 p-2 dark:bg-gray-800/70' },

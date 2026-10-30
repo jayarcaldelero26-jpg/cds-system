@@ -243,9 +243,9 @@ export default function Archives({ archives = emptyPaginator, awaitingArchive = 
 
     const columns = [
         { key: 'file', label: 'Report / original file', render: row => <div><p className="max-w-[360px] truncate font-semibold text-slate-900 dark:text-white" title={archiveReportTitle(row)}>{archiveReportTitle(row)}</p>{archiveFiles(row)[0]?.name && <p className="mt-0.5 max-w-[360px] truncate text-xs text-slate-500 dark:text-slate-400" title={archiveFiles(row)[0].name}>File: {archiveFiles(row)[0].name}</p>}{archiveFiles(row).length > 1 && <p className="mt-1 text-[11px] text-slate-500">{archiveFiles(row).length} signed files</p>}</div> },
-        { key: 'protected_area', label: 'Protected Area / Office', render: row => <div><p className="font-medium">{row.protected_area || row.office || '—'}</p>{row.supervising_office && <p className="mt-0.5 text-xs text-slate-500">Receiving CENRO: {row.supervising_office}</p>}</div> },
-        { key: 'period', label: 'Period', render: row => [row.period, row.reporting_year].filter(Boolean).join(' · ') || '—' },
-        { key: 'date', label: tab === 'receipt' ? 'Released' : tab === 'awaiting' ? 'Received' : 'Archived', render: row => archiveRowDate(row, tab) ? formatManila(archiveRowDate(row, tab)) : '—' },
+        { key: 'protected_area', label: 'Protected Area / Office', render: row => <div><p className="font-medium">{row.protected_area || row.office || 'Not recorded'}</p>{row.supervising_office && <p className="mt-0.5 text-xs text-slate-500">Receiving CENRO: {row.supervising_office}</p>}</div> },
+        { key: 'period', label: 'Period', render: row => [row.period, row.reporting_year].filter(Boolean).join(' · ') || 'Not provided' },
+        { key: 'date', label: tab === 'receipt' ? 'Released' : tab === 'awaiting' ? 'Received' : 'Archived', render: row => archiveRowDate(row, tab) ? formatManila(archiveRowDate(row, tab)) : 'Not recorded' },
         ...(tab === 'archives' ? [{ key: 'archive_type', label: 'Archive type', render: row => row.earlier_dispatch_copy ? 'Earlier Dispatch copy' : 'Final signed Regional return' }] : []),
         ...(tab === 'archives' ? [] : [{ key: 'status', label: 'Status', render: row => { const status = archivePendingStatus(row, tab); return <span className={`inline-flex rounded-full border px-2 py-1 text-[11px] font-semibold ${status.state === 'processing' ? 'border-sky-200 bg-sky-50 text-sky-800' : status.state === 'failed' ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>{status.label}</span>; } }]),
     ];

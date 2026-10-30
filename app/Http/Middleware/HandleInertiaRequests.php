@@ -308,6 +308,7 @@ class HandleInertiaRequests extends Middleware
                 'archive_status' => fn () => $request->session()->get('archive_status'),
                 'archive_manifest_id' => fn () => $request->session()->get('archive_manifest_id'),
                 'archive_error_code' => fn () => $request->session()->get('archive_error_code'),
+                'archive_root_verification' => fn () => $request->session()->get('archive_root_verification'),
                 'registration_success' => fn () => $request->session()->get('registration_success'),
                 'pending_approval' => fn () => $request->session()->get('pending_approval'),
                 'account_inactive' => fn () => $request->session()->get('account_inactive'),

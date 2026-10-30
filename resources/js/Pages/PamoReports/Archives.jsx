@@ -29,7 +29,7 @@ export default function Archives({ archives = {}, assignedProtectedArea, filters
 
     const columns = [
         { key: 'report', label: 'Report / Activity', render: row => <div><p className="font-semibold text-slate-900 dark:text-white">{row.report}</p>{row.activity_name && <p className="mt-0.5 text-xs text-slate-500">{row.activity_name}{row.document_type ? ` · ${row.document_type}` : ''}</p>}</div> },
-        { key: 'reporting_period', label: 'Reporting Period', render: row => row.reporting_period || '—' },
+        { key: 'reporting_period', label: 'Reporting Period', render: row => row.reporting_period || 'Not provided' },
         { key: 'archived_at', label: 'Archive Checkpoint', render: row => formatManila(row.archived_at) },
         { key: 'status', label: 'Availability', render: row => <span className="text-xs text-slate-600 dark:text-slate-300">{row.status}</span> },
         { key: 'actions', label: 'Actions', render: row => <a className="inline-flex h-9 items-center rounded-lg border border-slate-300 px-3 text-xs font-semibold text-emerald-800 hover:bg-slate-50 dark:border-slate-600 dark:text-emerald-300 dark:hover:bg-slate-800" href={row.file_url}>Open protected copy</a> },

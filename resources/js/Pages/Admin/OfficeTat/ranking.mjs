@@ -111,9 +111,9 @@ export function weightedAverageSeconds(rows = []) {
 }
 
 export function formatDuration(seconds) {
-    if (seconds == null || seconds === '') return 'N/A';
+    if (seconds == null || seconds === '') return 'No completed office handoffs';
     const numeric = Number(seconds);
-    if (!Number.isFinite(numeric) || numeric < 0) return 'N/A';
+    if (!Number.isFinite(numeric) || numeric < 0) return 'No data';
 
     let remainingCentiseconds = Math.round(numeric * 100);
     const dayCentiseconds = 86400 * 100;

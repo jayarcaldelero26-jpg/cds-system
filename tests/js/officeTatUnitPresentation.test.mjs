@@ -10,9 +10,12 @@ test('the recorded roster unit controls labels when Inertia props are temporaril
     assert.equal(officeTatDisplayUnit({ unit: 'unexpected' }, 'unexpected'), 'conservation');
 });
 
-test('unit switching waits for server props before changing the visible report tab', async () => {
+test('the authorized reporting unit stays aligned with the returned assessment and navigation', async () => {
     const source = await readFile(new URL('../../resources/js/Pages/Admin/OfficeTat/Index.jsx', import.meta.url), 'utf8');
     assert.doesNotMatch(source, /setReportUnit|const \[reportUnit/);
-    assert.match(source, /officeTatDisplayUnit\(recordedAssessment, selectedUnit\)/);
+    assert.match(source, /const displayedReportUnit = officeTatDisplayUnit\(recordedAssessment, selectedUnit\)/);
+    assert.match(source, /const unit = next\.unit \|\| displayedReportUnit/);
+    assert.match(source, /value=\{displayedReportUnit\}/);
     assert.match(source, /selectedUnit=\{displayedReportUnit\}/);
+    assert.match(source, /data=\{documentTurnaround\}/);
 });

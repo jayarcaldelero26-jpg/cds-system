@@ -12,6 +12,45 @@ export function progressMeasureForSubmission(row) {
     };
 }
 
+export function submissionReferenceLabelForTrackingRow(row) {
+    if (row?.tracking_number) return row.tracking_number;
+    if (!row?.source) return null;
+    if (row.source === "engp") {
+        return row.source_id == null
+            ? "Development report"
+            : `Development report #${row.source_id}`;
+    }
+
+    return `${row.source} #${row.source_id}`;
+}
+
+export function protectedAreaLabelForTrackingRow(row) {
+    if (row?.source === "engp" && !row?.protected_area) return null;
+    return row?.protected_area || "Not recorded";
+}
+
+export function cenroReleaseFallbackForRow(row) {
+    if (row?.cenro_release_applicable === false) return "Not applicable";
+    if (row?.cenro_release_state === "awaiting_cenro_release") return "Awaiting CENRO release";
+    return "Not recorded";
+}
+
+export function finalArchiveStatusNoticeForTrackingRow(row) {
+    const routing = row?.routing || row?.routing_summary || {};
+    const currentOffice = String(routing.current_location || "");
+
+    if (
+        row?.source !== "engp" ||
+        row?.routing_complete !== true ||
+        row?.has_verified_final_archive !== false ||
+        !/regional office/i.test(currentOffice)
+    ) {
+        return null;
+    }
+
+    return "Released to Regional · Final archive not verified";
+}
+
 export function visibleTimelineForCapturedRoute(row, timeline = []) {
     const steps = Array.isArray(timeline) ? timeline : [];
     const routing = row?.routing || row?.routing_summary || {};

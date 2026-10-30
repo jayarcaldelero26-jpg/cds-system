@@ -136,15 +136,15 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
       pamo_name: row.pamo_name || '',
       assessment_year: row.assessment_year || '',
       assessment_period: row.assessment_period || 'Annual',
-      visitor_arrivals: row.visitor_arrivals || '',
+      visitor_arrivals: row.visitor_arrivals ?? '',
       trail_condition: row.trail_condition || '',
-      solid_waste_generation_kg: row.solid_waste_generation_kg || '',
+      solid_waste_generation_kg: row.solid_waste_generation_kg ?? '',
       wildlife_disturbance: row.wildlife_disturbance || '',
       vegetation_damage: row.vegetation_damage || '',
       water_quality: row.water_quality || '',
       carrying_capacity_compliance: row.carrying_capacity_compliance === 1 || row.carrying_capacity_compliance === true,
-      community_benefits_income: row.community_benefits_income || '',
-      visitor_satisfaction_rate: row.visitor_satisfaction_rate || '',
+      community_benefits_income: row.community_benefits_income ?? '',
+      visitor_satisfaction_rate: row.visitor_satisfaction_rate ?? '',
       biodiversity_impact_notes: row.biodiversity_impact_notes || '',
       environment_impact_notes: row.environment_impact_notes || '',
       social_cultural_impact_notes: row.social_cultural_impact_notes || '',
@@ -326,13 +326,13 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 <tbody className="divide-y divide-gray-200 text-sm dark:divide-gray-800">
                                     {assessments.data.map((row) =>
               <tr key={row.id} onClick={() => openViewAssessmentModal(row)} className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
-                                            <td className="px-6 py-4 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
+                                            <td className="px-6 py-4 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'Not recorded'}</td>
                                             <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.pamo_name}</td>
                                             <td className="px-6 py-4"><StatusBadge variant={row.status === 'Approved' ? 'active' : 'pending'}>{row.status || 'Pending'}</StatusBadge></td>
                                             <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.assessment_year} ({row.assessment_period})</td>
                                             <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.visitor_arrivals ?? '0'}</td>
                                             <td className="px-6 py-4"><StatusBadge variant={row.carrying_capacity_compliance ? 'active' : 'pending'}>{row.carrying_capacity_compliance ? 'Compliant' : 'Exceeded'}</StatusBadge></td>
-                                            <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.visitor_satisfaction_rate ? `${row.visitor_satisfaction_rate}%` : 'N/A'}</td>
+                                            <td className="px-6 py-4 text-gray-700 dark:text-gray-300">{row.visitor_satisfaction_rate === null || row.visitor_satisfaction_rate === undefined || row.visitor_satisfaction_rate === '' ? 'Not provided' : `${row.visitor_satisfaction_rate}%`}</td>
                                         </tr>
               )}
                                 </tbody>
@@ -413,7 +413,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                             <td className="px-4 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                                                 {canDelete && <input type="checkbox" checked={selectedFacilityIds.includes(row.id)} onChange={() => toggleSelectFacility(row.id)} className="rounded border-gray-300 text-green-600 focus:ring-green-500" />}
                                             </td>
-                                            <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
+                                            <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'Not recorded'}</td>
                                             <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">{row.facility_type}</td>
                                             <td className="px-4 py-3">{row.unit_no}</td>
                                             <td className="px-4 py-3">{row.year_established || 'â€”'}</td>
@@ -446,7 +446,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">IMEA Assessment Full Details</h3>
-                                <p className="text-xs text-gray-500">{selectedAssessment.protected_area?.name || 'N/A'} â€” PAMO: {selectedAssessment.pamo_name}</p>
+                                <p className="text-xs text-gray-500">{selectedAssessment.protected_area?.name || 'Not recorded'} â€” PAMO: {selectedAssessment.pamo_name || 'Not recorded'}</p>
                             </div>
                             <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close assessment details">âœ•</Button>
                         </div>
@@ -467,7 +467,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                                 </div>
                                 <div>
                                     <span className="block text-[11px] font-semibold text-gray-500 uppercase">Satisfaction Rate</span>
-                                    <span className="text-base font-bold text-gray-900 dark:text-white">{selectedAssessment.visitor_satisfaction_rate ? `${selectedAssessment.visitor_satisfaction_rate}%` : 'N/A'}</span>
+                                    <span className="text-base font-bold text-gray-900 dark:text-white">{selectedAssessment.visitor_satisfaction_rate === null || selectedAssessment.visitor_satisfaction_rate === undefined || selectedAssessment.visitor_satisfaction_rate === '' ? 'Not provided' : `${selectedAssessment.visitor_satisfaction_rate}%`}</span>
                                 </div>
                             </div>
 
@@ -852,7 +852,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">Facility Full Details</h3>
-                                <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} â€” {selectedFacility.facility_type}</p>
+                                <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'Not recorded'} â€” {selectedFacility.facility_type || 'Not provided'}</p>
                             </div>
                             <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-lg p-1.5 text-lg" aria-label="Close facility details">âœ•</Button>
                         </div>
