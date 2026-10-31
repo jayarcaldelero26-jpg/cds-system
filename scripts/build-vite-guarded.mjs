@@ -1,25 +1,23 @@
 import { randomUUID } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'vite';
+import { promoteViteBuild } from './vite-build-promotion.mjs';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(projectRoot, 'public');
 const buildRoot = path.join(publicRoot, 'build');
 const token = `${process.pid}-${randomUUID()}`;
 const stagingName = `.vite-build-staging-${token}`;
-const backupName = `.vite-build-backup-${token}`;
 const stagingRoot = path.join(publicRoot, stagingName);
-const backupRoot = path.join(publicRoot, backupName);
 const stagingRelative = path.posix.join('public', stagingName);
 const verifier = path.join(projectRoot, 'scripts', 'verify-vite-build.mjs');
 
-function ensureDirectPublicChild(target) {
+function ensureOwnStagingPath(target) {
     const resolved = path.resolve(target);
-    if (path.dirname(resolved) !== publicRoot || !path.basename(resolved).startsWith('.vite-build-')) {
-        throw new Error(`Refusing to mutate an unexpected build path: ${target}`);
+    if (path.dirname(resolved) !== publicRoot || path.basename(resolved) !== stagingName) {
+        throw new Error(`Refusing to clean an unexpected Vite staging path: ${target}`);
     }
 }
 
@@ -33,74 +31,31 @@ async function exists(target) {
     }
 }
 
-async function removeBuildTree(target) {
-    ensureDirectPublicChild(target);
-    await rm(target, { recursive: true, force: true });
-}
-
-async function stagedFiles(directory, root = directory) {
-    const entries = await readdir(directory, { withFileTypes: true });
-    const files = [];
-    for (const entry of entries) {
-        const target = path.join(directory, entry.name);
-        if (entry.isDirectory()) files.push(...await stagedFiles(target, root));
-        else if (entry.isFile()) files.push(path.relative(root, target));
-    }
-    return files;
-}
-
-async function promoteWithManifestSwitch() {
-    await mkdir(buildRoot, { recursive: true });
-    const files = await stagedFiles(stagingRoot);
-    const assets = files.filter(file => file !== 'manifest.json');
-
-    // Keep the old manifest live until every new asset is safely present.
-    for (const file of assets) {
-        const stagedPath = path.join(stagingRoot, file);
-        const activePath = path.join(buildRoot, file);
-        if (await exists(activePath) && !(await readFile(stagedPath)).equals(await readFile(activePath))) {
-            throw new Error(`Cannot safely publish while an active asset differs at ${file}.`);
-        }
-    }
-
-    for (const file of assets) {
-        const stagedPath = path.join(stagingRoot, file);
-        const activePath = path.join(buildRoot, file);
-        if (await exists(activePath)) continue;
-        await mkdir(path.dirname(activePath), { recursive: true });
-        try {
-            await copyFile(stagedPath, activePath, fsConstants.COPYFILE_EXCL);
-        } catch (error) {
-            if (error?.code !== 'EEXIST' || !(await readFile(stagedPath)).equals(await readFile(activePath))) throw error;
-        }
-        if (!(await readFile(stagedPath)).equals(await readFile(activePath))) {
-            throw new Error(`A staged asset did not verify after copying: ${file}.`);
-        }
-    }
-
-    const temporaryManifest = path.join(buildRoot, `.vite-build-manifest-${token}.tmp`);
+async function removeOwnStagingTree() {
+    ensureOwnStagingPath(stagingRoot);
+    let stagingInfo;
     try {
-        await copyFile(path.join(stagingRoot, 'manifest.json'), temporaryManifest);
-        if (!(await readFile(path.join(stagingRoot, 'manifest.json'))).equals(await readFile(temporaryManifest))) {
-            throw new Error('The temporary Vite manifest differs from the verified staging manifest.');
-        }
-        await rename(temporaryManifest, path.join(buildRoot, 'manifest.json'));
+        stagingInfo = await lstat(stagingRoot);
     } catch (error) {
-        await rm(temporaryManifest, { force: true }).catch(() => {});
+        if (error?.code === 'ENOENT') return;
         throw error;
     }
-
-    console.log(`Promoted ${assets.length} verified assets by atomically switching the manifest; existing assets were retained.`);
+    if (!stagingInfo.isDirectory() || stagingInfo.isSymbolicLink()) {
+        throw new Error(`Refusing to clean a non-directory Vite staging path: ${stagingRoot}`);
+    }
+    await rm(stagingRoot, { recursive: true, force: true });
 }
 
-ensureDirectPublicChild(stagingRoot);
-ensureDirectPublicChild(backupRoot);
+ensureOwnStagingPath(stagingRoot);
 await mkdir(publicRoot, { recursive: true });
 
-let previousBuildMoved = false;
 let promoted = false;
 
 try {
+    if (await exists(path.join(publicRoot, 'hot'))) {
+        throw new Error('Refusing to remove public/hot; stop the Vite dev server before running the guarded production build.');
+    }
+
     await build({
         configLoader: 'native',
         configFile: path.join(projectRoot, 'vite.config.js'),
@@ -116,54 +71,20 @@ try {
         else process.env.CDS_VITE_BUILD_DIR = previousBuildDirectory;
     }
 
-    await rm(path.join(publicRoot, 'hot'), { force: true });
+    const promotion = await promoteViteBuild({ publicRoot, buildRoot, stagingRoot, token });
+    promoted = true;
 
-    if (await exists(buildRoot)) {
-        try {
-            await rename(buildRoot, backupRoot);
-            previousBuildMoved = true;
-        } catch (error) {
-            if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error?.code)) throw error;
-            console.warn(`Windows did not allow renaming the active build directory (${error.code}); switching to a verified asset copy and atomic manifest replacement.`);
-            await promoteWithManifestSwitch();
-            promoted = true;
-        }
+    try {
+        await removeOwnStagingTree();
+    } catch (error) {
+        console.warn(`New assets are active; this run's staging directory remains at ${stagingName}: ${error.message}`);
     }
 
-    if (!promoted) {
-        try {
-            await rename(stagingRoot, buildRoot);
-            promoted = true;
-        } catch (error) {
-            if (previousBuildMoved && !(await exists(buildRoot))) {
-                await rename(backupRoot, buildRoot);
-                previousBuildMoved = false;
-            }
-            throw error;
-        }
-    }
-
-    if (previousBuildMoved) {
-        try {
-            await removeBuildTree(backupRoot);
-        } catch (error) {
-            console.warn(`New assets are active; prior build backup remains at ${backupName}: ${error.message}`);
-        }
-    }
-
-    if (promoted && await exists(stagingRoot)) {
-        try {
-            await removeBuildTree(stagingRoot);
-        } catch (error) {
-            console.warn(`New assets are active; the temporary staging directory remains at ${stagingName}: ${error.message}`);
-        }
-    }
-
-    console.log('Verified assets promoted to public/build.');
+    console.log(`Promoted ${promotion.assetCount} verified assets by atomically switching the manifest; ${promotion.reusedAssetCount} existing assets were retained.`);
 } catch (error) {
     if (!promoted && await exists(stagingRoot)) {
         try {
-            await removeBuildTree(stagingRoot);
+            await removeOwnStagingTree();
         } catch (cleanupError) {
             console.warn(`Could not remove failed staging build ${stagingName}: ${cleanupError.message}`);
         }
