@@ -26,7 +26,6 @@ final class OfficeTatDocumentTurnaroundService
         private readonly DocumentRoutingProfileRegistry $routingProfiles,
         private readonly BusinessCalendarService $calendar,
         private readonly PambRoutingTimelineService $pambTimeline,
-        private readonly OfficeTatProcessedDocumentSourceService $processedSources,
     ) {}
 
     /**
@@ -47,24 +46,15 @@ final class OfficeTatDocumentTurnaroundService
         $unitAssessment = is_array($assessment['office_tat_assessment'] ?? null)
             ? $assessment['office_tat_assessment']
             : [];
-        $assessmentRows = is_array($unitAssessment['rows'] ?? null)
-            ? $unitAssessment['rows']
-            : (is_array($assessment['rows'] ?? null) ? $assessment['rows'] : []);
         $cutoffValue = $unitAssessment['as_of_date'] ?? $assessment['as_of_date'] ?? null;
         $cutoffDate = $this->dateValue($cutoffValue);
         $cutoff = CarbonImmutable::parse($cutoffDate ?? now(self::TIMEZONE)->toDateString(), self::TIMEZONE)->endOfDay();
-        $documents = $this->documentsFromRows($assessmentRows, $unit);
-        foreach ($this->documentsFromRows($this->processedSources->forAssessment($user, $assessment), $unit) as $key => $document) {
-            $documents[$key] = $document;
-        }
+        $documents = $this->documentsFromRows($unitAssessment['rows'] ?? [], $unit);
         $eventsByDocument = $this->loadRouteEvents($documents, $unit);
-        $documents = array_filter($documents, fn (array $document, string $key): bool =>
-            $this->hasProcessingEvidence($document, $eventsByDocument[$key] ?? [], $cutoff), ARRAY_FILTER_USE_BOTH,
-        );
 
         $participantRows = [];
         $allReports = [];
-        foreach ($assessmentRows as $participant) {
+        foreach (($unitAssessment['rows'] ?? []) as $participant) {
             if (! is_array($participant) || ! is_string($participant['participant_key'] ?? null)) continue;
             $participantRows[$participant['participant_key']] = [
                 'participant_key' => $participant['participant_key'],
@@ -175,7 +165,6 @@ final class OfficeTatDocumentTurnaroundService
                         'reporting_year' => $identity['reporting_year'] ?? null,
                         'deadline' => $this->dateValue($detail['deadline'] ?? null),
                         'legacy_received' => $this->dateValue($detail['received'] ?? null),
-                        'processed_evidence' => ($detail['processed_evidence'] ?? false) === true,
                         'reference' => 'Report #'.$sourceId,
                     ];
                 }
@@ -356,26 +345,6 @@ final class OfficeTatDocumentTurnaroundService
             $office,
             BusinessCalendarService::PAMB_WORKING_WEEKDAYS,
         );
-    }
-
-    /** @param list<array<string,mixed>> $events */
-    private function hasProcessingEvidence(array $document, array $events, CarbonImmutable $cutoff): bool
-    {
-        if (($document['processed_evidence'] ?? false) === true) return true;
-        $legacyReceived = $document['legacy_received'] ?? null;
-        if (is_string($legacyReceived) && $legacyReceived <= $cutoff->toDateString()) return true;
-
-        $cutoffTimestamp = $cutoff->getTimestamp();
-        foreach ($events as $event) {
-            $time = $this->timestampValue($event['occurred_at'] ?? null);
-            if (! $time || $time->getTimestamp() > $cutoffTimestamp) continue;
-            if (($event['kind'] ?? null) === 'document'
-                && in_array($event['event_key'] ?? null, ['forwarded', 'received', 'endorsed', 'recommended', 'approved', 'released', 'returned_for_correction', 'correction_received'], true)
-                && trim((string) ($event['to_stage'] ?? '')) !== '') return true;
-            if (($event['kind'] ?? null) === 'pamb' && trim((string) ($event['stage_key'] ?? '')) !== '') return true;
-        }
-
-        return false;
     }
 
     /** @param array<string,mixed> $document @param array<string,mixed> $event */

@@ -2,7 +2,7 @@ import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect,
 import PageHeader from '@/Components/PageHeader';
 import { Head, router, useForm } from '@inertiajs/react';
 import { useState, useEffect, useRef } from 'react';
-import { parseDateOnly } from '@/Utils/dateFormatters';
+import { parseDateOnly, formatReportTime } from '@/Utils/dateFormatters';
 import DatePicker from '@/Components/DatePicker';
 import DateRangePicker from '@/Components/DateRangePicker';
 
@@ -52,7 +52,7 @@ const threatIcon = L.divIcon({
 });
 
 const formatStationDisplay = (stationStr) => {
-  if (!stationStr && stationStr !== 0) return { label: '-', meters: '' };
+  if ((!stationStr && stationStr !== 0) || stationStr === '-') return { label: 'Not recorded', meters: '' };
   const cleaned = (stationStr + '').replace(/station/gi, '').trim();
   const match = cleaned.match(/(\d+)\s*(?:-|to)\s*(\d+)/i);
   if (match) {
@@ -71,8 +71,10 @@ const formatStationDisplay = (stationStr) => {
       };
     }
   }
-  return { label: cleaned, meters: '' };
+  return { label: cleaned || 'Not recorded', meters: '' };
 };
+const notRecorded = (value) => value === null || value === undefined || value === '' ? 'Not recorded' : value;
+const notProvided = (value) => value === null || value === undefined || value === '' ? 'Not provided' : value;
 
 const calculateTrendStatus = (points) => {
   const n = points.length;
@@ -494,7 +496,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
       if (!map[key]) {
         map[key] = {
           species: r.species_scientific_name || 'Unknown',
-          common: r.species_common_name || '',
+          common: notProvided(r.species_common_name),
           category: r.category || 'Flora',
           station: r.station || '-',
           semesters: {}
@@ -585,21 +587,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
     return Array.from(yearsSet).sort((a, b) => b.localeCompare(a));
   };
 
-  const formatTimeOfArrival = (time) => {
-    if (!time) return '-';
-
-    const match = String(time).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
-    if (!match) return time;
-
-    const hour = Number(match[1]);
-    const minutes = match[2];
-    const meridiem = hour >= 12 ? 'PM' : 'AM';
-    const displayHour = hour % 12 || 12;
-
-    return `${String(displayHour).padStart(2, '0')}:${minutes} ${meridiem}`;
-  };
-
-  const headerValue = (field) => annexHeaderMetadata?.[field] || 'N/A';
+  const headerValue = (field) => notProvided(annexHeaderMetadata?.[field]);
 
   // Species Observed in the Annex header follows the active Category filter.
   // All Categories means the Annex covers both Flora and Fauna.
@@ -633,22 +621,22 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
     let csvContent = "data:text/csv;charset=utf-8,";
     csvContent += "REPUBLIC OF THE PHILIPPINES\n";
     csvContent += "Department of Environment and Natural Resources\n";
-    csvContent += `Location:,${first.location || 'N/A'},Date Conducted:,${first.monitoring_date || 'N/A'}\n`;
-    csvContent += `Start/End Time:,${first.time || 'N/A'},Length of Transect:,${first.length_of_transect || 'N/A'}\n`;
-    csvContent += `Start GPS:,${first.start_gps || 'N/A'},End GPS:,${first.end_gps || 'N/A'}\n`;
-    csvContent += `Weather:,${first.weather_condition || 'N/A'},Elevation:,${first.elevation || 'N/A'}\n`;
-    csvContent += `Ecosystem:,${first.ecosystem_type || 'N/A'},Observer:,${first.observer_name || 'N/A'}\n\n`;
+    csvContent += `Location:,${notRecorded(first.location)},Date Conducted:,${notRecorded(first.monitoring_date)}\n`;
+    csvContent += `Start/End Time:,${notRecorded(first.time)},Length of Transect:,${notProvided(first.length_of_transect)}\n`;
+    csvContent += `Start GPS:,${notProvided(first.start_gps)},End GPS:,${notProvided(first.end_gps)}\n`;
+    csvContent += `Weather:,${notRecorded(first.weather_condition)},Elevation:,${notProvided(first.elevation)}\n`;
+    csvContent += `Ecosystem:,${notProvided(first.ecosystem_type)},Observer:,${notProvided(first.observer_name)}\n\n`;
 
     csvContent += "Station / Meters,Time of Arrival,Species Observed (Local Name / Scientific Name),Count,Mode\n";
 
     bmsRecords.forEach((record) => {
       const stationInfo = formatStationDisplay(record.station);
-      const speciesName = `${record.species_common_name || ''} (${record.species_scientific_name || ''})`.replace(/,/g, '');
+      const speciesName = `${notProvided(record.species_common_name)} (${notRecorded(record.species_scientific_name)})`.replace(/,/g, '');
       const row = [
       `"${stationInfo.label}"`,
-      `"${formatTimeOfArrival(record.time)}"`,
+      `"${formatReportTime(record.time)}"`,
       `"${speciesName}"`,
-      `"${record.count || '-'}"`,
+      `"${notRecorded(record.count)}"`,
       `"${record.mode_of_observation || 'Seen'}"`];
 
       csvContent += row.join(",") + "\n";
@@ -695,11 +683,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
   <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400" role="alert">{errors[field]}</p> :
   null;
   const speciesColumns = [
-  { key: 'date_location', label: 'Date / Location', render: (record) => <><div className="font-semibold">{record.monitoring_date || 'N/A'}</div><SharedTooltip content={record.location}><div tabIndex={0} className="max-w-[150px] truncate text-[11px] text-gray-500 outline-none">{record.location || 'No location'}</div></SharedTooltip></> },
-  { key: 'station_time', label: 'Station / Time', render: (record) => <><div className="font-bold text-green-700 dark:text-green-400">{record.station || '-'}</div><div className="text-[11px] text-gray-500">{record.time || '-'}</div></> },
-  { key: 'category_group', label: 'Category / Group', render: (record) => <><span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="mt-1 text-[11px] capitalize text-gray-500">{record.taxonomic_group || '-'}</div></> },
-  { key: 'species', label: 'Species (Scientific / Common Name)', render: (record) => {const isNew = checkIsNewSpeciesRecord(record);const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700" data-cds-action="true" data-cds-action-variant="primary">✓ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{record.species_common_name || ''}</div></>;} },
-  { key: 'count', label: 'Count', cellClassName: 'text-center font-bold', headerClassName: 'text-center', render: (record) => record.count ?? '—' },
+  { key: 'date_location', label: 'Date / Location', render: (record) => <><div className="font-semibold">{record.monitoring_date || 'Not recorded'}</div><SharedTooltip content={record.location}><div tabIndex={0} className="max-w-[150px] truncate text-[11px] text-gray-500 outline-none">{record.location || 'Not recorded'}</div></SharedTooltip></> },
+  { key: 'station_time', label: 'Station / Time', render: (record) => <><div className="font-bold text-green-700 dark:text-green-400">{record.station && record.station !== '-' ? record.station : 'Not recorded'}</div><div className="text-[11px] text-gray-500">{record.time || 'Not recorded'}</div></> },
+  { key: 'category_group', label: 'Category / Group', render: (record) => <><span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${record.category === 'Fauna' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'}`}>{record.category || 'Flora'}</span><div className="mt-1 text-[11px] capitalize text-gray-500">{record.taxonomic_group || 'Not provided'}</div></> },
+  { key: 'species', label: 'Species (Scientific / Common Name)', render: (record) => {const isNew = checkIsNewSpeciesRecord(record);const speciesKey = `${record.species_scientific_name || 'Unknown'}___${record.station || '-'}`;return <><div className="flex flex-wrap items-center gap-2"><span className="font-bold italic text-gray-900 dark:text-white">{record.species_scientific_name || 'Unnamed Species'}</span>{isNew && <div className="flex items-center gap-1.5" onClick={(event) => event.stopPropagation()}><span className="animate-pulse rounded-lg bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold uppercase text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">✨ New Species</span>{canUpdateBms && <button type="button" onClick={() => handleAcknowledge(speciesKey)} className="rounded-lg bg-gray-200 px-2 py-0.5 text-[10px] font-semibold transition hover:bg-green-600 hover:text-white dark:bg-gray-700" data-cds-action="true" data-cds-action-variant="primary">✓ Acknowledge</button>}</div>}</div><div className="text-[11px] text-gray-600 dark:text-gray-400">{notProvided(record.species_common_name)}</div></>;} },
+  { key: 'count', label: 'Count', cellClassName: 'text-center font-bold', headerClassName: 'text-center', render: (record) => notRecorded(record.count) },
   { key: 'mode_of_observation', label: 'Mode', cellClassName: 'text-center', headerClassName: 'text-center', render: (record) => <span className="rounded-lg bg-gray-100 px-2 py-0.5 text-[11px] font-medium dark:bg-gray-700">{record.mode_of_observation || 'Seen'}</span> },
   { key: 'coordinates', label: 'GPS Coordinates', cellClassName: 'font-mono text-[11px]', render: (record) => record.latitude && record.longitude && Number.isFinite(Number.parseFloat(record.latitude)) && Number.isFinite(Number.parseFloat(record.longitude)) ? `${Number.parseFloat(record.latitude).toFixed(4)}, ${Number.parseFloat(record.longitude).toFixed(4)}` : <span className="italic text-gray-400">No GPS</span> }];
 
@@ -880,13 +868,13 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                             <div style={{ fontSize: '12pt' }} className="leading-snug pt-1">
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Location</span><span>:</span><span>{headerValue('location')}</span></div>
-                                                    <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Date Conducted</span><span>:</span><span>{annexHeaderMetadata?.date_conducted || bmsRecords[0]?.monitoring_date || 'N/A'}</span></div>
+                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Date Conducted</span><span>:</span><span>{annexHeaderMetadata?.date_conducted || notRecorded(bmsRecords[0]?.monitoring_date)}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Start/End time</span><span>:</span><span>{headerValue('start_end_time')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Length of Transect</span><span>:</span><span>{headerValue('length_of_transect')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Start GPS Reading</span><span>:</span><span>{headerValue('start_gps')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">End GPS Reading</span><span>:</span><span>{headerValue('end_gps')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Weather Condition</span><span>:</span><span>{headerValue('weather_condition')}</span></div>
-                                                    <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Elevation</span><span>:</span><span>{headerValue('elevation') !== 'N/A' ? `${headerValue('elevation')} MASL` : 'N/A'}</span></div>
+                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Elevation</span><span>:</span><span>{headerValue('elevation') !== 'Not provided' ? `${headerValue('elevation')} MASL` : 'Not provided'}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Ecosystem Type</span><span>:</span><span>{headerValue('ecosystem_type')}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1"><span className="font-bold text-black">Species Observed</span><span>:</span><span>{annexSpeciesObserved}</span></div>
                                                     <div className="grid grid-cols-[160px_10px_1fr] gap-1 md:col-span-2"><span className="font-bold text-black">Observer</span><span>:</span><span>{headerValue('observer')}</span></div>
@@ -922,9 +910,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                               return (
                                 <tr key={record.id}>
                                                                             {isFirst && <td className="border border-black p-1.5 align-middle bg-white font-bold" rowSpan={counts[st]}><div style={{ fontSize: '11pt' }}>{stationInfo.label}</div>{stationInfo.meters && <div style={{ fontSize: '9pt' }} className="font-normal text-gray-700 mt-0.5">({stationInfo.meters})</div>}</td>}
-                                                                            <td className="border border-black p-1 align-middle">{formatTimeOfArrival(record.time)}</td>
-                                                                            <td className="border border-black p-1 text-left px-2 break-words align-middle">{record.species_common_name ? record.species_common_name + ' ' : ''}{record.species_scientific_name && <span className="italic font-semibold">({record.species_scientific_name})</span>}</td>
-                                                                            <td className="border border-black p-1 align-middle">{record.count || '-'}</td>
+                                                                            <td className="border border-black p-1 align-middle">{formatReportTime(record.time)}</td>
+                                                                            <td className="border border-black p-1 text-left px-2 break-words align-middle">{notProvided(record.species_common_name)} {record.species_scientific_name && <span className="italic font-semibold">({record.species_scientific_name})</span>}</td>
+                                                                            <td className="border border-black p-1 align-middle">{notRecorded(record.count)}</td>
                                                                             <td className="border border-black p-1 align-middle">{record.mode_of_observation || 'Seen'}</td>
                                                                         </tr>);
 
@@ -1018,7 +1006,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                                                         </div>
                                                                         <div className="text-gray-500 text-[11px]">{item.common}</div>
                                                                     </td>
-                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3 font-bold text-green-700 dark:text-green-400">{item.station}</td>
+                                                                    <td className="border border-gray-200 dark:border-gray-700 p-3 font-bold text-green-700 dark:text-green-400">{item.station === '-' ? 'Not recorded' : item.station}</td>
                                                                     <td className="border border-gray-200 dark:border-gray-700 p-3 text-center">
                                                                         <div className="flex flex-wrap justify-center gap-1">
                                                                             {item.points.map((pt, pIdx) => <span key={pIdx} className="bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-lg text-[10px]"><strong>{pt.period}:</strong> {pt.count}</span>)}
@@ -1101,7 +1089,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                             return (
                               <tr key={idx}>
                                                                             <td className="border border-black p-2 text-left"><span className="italic font-bold">{item.species}</span>{item.isNewSpecies && !isAcknowledged && <span className="ml-2 text-[9pt] font-bold text-green-800">[New Species]</span>}<div className="text-[10pt] text-gray-700">{item.common}</div></td>
-                                                                            <td className="border border-black p-2 font-bold">{item.station}</td>
+                                                                            <td className="border border-black p-2 font-bold">{item.station === '-' ? 'Not recorded' : item.station}</td>
                                                                             <td className="border border-black p-2 text-[10pt]">{item.points.map((pt) => `${pt.period}: ${pt.count}`).join(' | ')}</td>
                                                                             <td className="border border-black p-2 font-semibold">{item.trend.status}</td>
                                                                         </tr>);
@@ -1353,11 +1341,11 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                 </div>
       }
 
-            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || '—' }, { label: 'Category', value: editingRecord.category || '—' }, { label: 'Station', value: editingRecord.station || '—' }, { label: 'Count', value: editingRecord.count ?? '—' }]} />}>
+            <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || 'Not recorded' }, { label: 'Category', value: editingRecord.category || 'Not provided' }, { label: 'Station', value: editingRecord.station || 'Not provided' }, { label: 'Count', value: editingRecord.count ?? 'Not recorded' }]} />}>
                 {editingRecord && <div className="space-y-4">
-                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || '—'}</dd></div>)}</dl></CrudSection>
-                    <CrudSection title="GPS Coordinates"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl></CrudSection>
-                    <CrudSection title="Additional Observation Notes"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Observer', editingRecord.observer_name], ['Elevation', editingRecord.elevation]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value || '—'}</dd></div>)}</dl><p className="mt-4 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
+                    <CrudSection title="Species & Observation"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Protected Area', editingRecord.protected_area?.name], ['Scientific Name', editingRecord.species_scientific_name], ['Common Name', editingRecord.species_common_name], ['Taxonomic Group', editingRecord.taxonomic_group], ['Time', editingRecord.time], ['Mode of Observation', editingRecord.mode_of_observation], ['Location', editingRecord.location]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className={`mt-1 font-semibold text-gray-900 dark:text-white ${label === 'Scientific Name' ? 'italic' : ''}`}>{value || 'Not provided'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="GPS Coordinates"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Latitude', editingRecord.latitude], ['Longitude', editingRecord.longitude]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value ?? 'Not provided'}</dd></div>)}</dl></CrudSection>
+                    <CrudSection title="Additional Observation Notes"><dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">{[['Observer', editingRecord.observer_name], ['Elevation', editingRecord.elevation]].map(([label, value]) => <div key={label}><dt className="text-xs font-semibold text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-900 dark:text-white">{value ?? 'Not provided'}</dd></div>)}</dl><p className="mt-4 whitespace-pre-wrap text-sm text-gray-700 dark:text-gray-200">{editingRecord.remarks || 'No remarks.'}</p></CrudSection>
                 </div>}
             </CrudDetailsModal>
 

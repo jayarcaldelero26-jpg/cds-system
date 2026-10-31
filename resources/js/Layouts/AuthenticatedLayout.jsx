@@ -186,7 +186,7 @@ function MenuIcon({ name, active = false, muted = false }) {
     return <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${active ? 'opacity-95' : muted ? 'opacity-35' : 'opacity-55'}`}><Icon name={name} /></span>;
 }
 
-function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], pamoNativeModuleNavigation = [] }) {
+function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], moduleNavigationCatalog = null, pamoNativeModuleNavigation = [] }) {
     const { url, props = {} } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
@@ -202,7 +202,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
     const trackingPageTitle = props.pamoWorkspace ? trackingViewLabel : 'Submission Tracking';
     const [openDropdowns, setOpenDropdowns] = useState({});
     const navigationRef = useRef(null);
-    const navigation = useMemo(() => buildSidebarNavigation(allNavigation, genericModuleNavigation, safeAuth, pamoNativeModuleNavigation, userUnit), [genericModuleNavigation, pamoNativeModuleNavigation, safeAuth, userUnit]);
+    const navigation = useMemo(() => buildSidebarNavigation(allNavigation, genericModuleNavigation, safeAuth, pamoNativeModuleNavigation, userUnit, moduleNavigationCatalog), [genericModuleNavigation, moduleNavigationCatalog, pamoNativeModuleNavigation, safeAuth, userUnit]);
 
     const toggleDropdown = (label) => {
         setOpenDropdowns((prev) => ({
@@ -427,7 +427,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 }
 
 export function AuthenticatedShell({ children }) {
-    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, pamoNativeModuleNavigation, demoDataNotice } = usePage().props;
+    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, moduleNavigationCatalog, pamoNativeModuleNavigation, demoDataNotice } = usePage().props;
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const [darkMode, setDarkMode] = useState(() => {
@@ -465,7 +465,7 @@ export function AuthenticatedShell({ children }) {
         <>
             <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} pamoNativeModuleNavigation={pamoNativeModuleNavigation} />
+                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} moduleNavigationCatalog={moduleNavigationCatalog} pamoNativeModuleNavigation={pamoNativeModuleNavigation} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" data-cds-action="true" data-cds-action-variant="primary">

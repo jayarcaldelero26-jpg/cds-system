@@ -1,14 +1,23 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentArchive;
+use App\Models\ModuleDefinition;
 use App\Models\OrganizationalOffice;
+use App\Models\PamoPambDraft;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
+use App\Models\SubmissionRoutingSnapshot;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\Archive\FakeDocumentArchiveGateway;
+use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
+use App\Services\SubmissionTracking\RoutingPositionSnapshotService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -133,6 +142,93 @@ test('assigned PAMO sees active generic PA Conservation submissions only for its
         ->get(route('settings.index'))
         ->assertForbidden()
         ->assertInertia(fn ($page) => $page->component('Errors/403'));
+});
+
+test('assigned PAMO retains inactive configured report history and archive access within its PA', function (): void {
+    $assigned = p2PamoScopeUser();
+    $areaA = ProtectedArea::create(['name' => 'P2 Inactive PAMO Area A', 'category' => 'Protected Landscape', 'municipality' => 'Baganga', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $assigned->id, 'updated_by' => $assigned->id]);
+    $areaB = ProtectedArea::create(['name' => 'P2 Inactive PAMO Area B', 'category' => 'Protected Landscape', 'municipality' => 'Mati', 'province' => 'Davao Oriental', 'region' => 'Region XI', 'created_by' => $assigned->id, 'updated_by' => $assigned->id]);
+    p2MapPamoArea($areaA, $assigned);
+    p2MapPamoArea($areaB, $assigned);
+    $assigned->update(['protected_area_id' => $areaA->id]);
+    $assigned->refresh();
+    $foreign = p2PamoScopeUser((int) $areaB->id);
+
+    ModuleDefinition::query()->where('code', 'maintenance_monuments')->firstOrFail()->update(['is_active' => false]);
+    $historic = ConservationReportSubmission::create([
+        'workflow_key' => 'maintenance_monuments', 'protected_area_id' => $areaA->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Maintenance of Monuments',
+        'document_type' => 'Progress Report', 'date_accomplished' => '2026-09-01',
+        'created_by' => $assigned->id, 'updated_by' => $assigned->id,
+    ]);
+    $outside = ConservationReportSubmission::create([
+        'workflow_key' => 'maintenance_monuments', 'protected_area_id' => $areaB->id,
+        'target_office' => 'CENRO Baganga', 'activity_name' => 'Maintenance of Monuments',
+        'document_type' => 'Progress Report', 'date_accomplished' => '2026-09-02',
+        'created_by' => $assigned->id, 'updated_by' => $assigned->id,
+    ]);
+    $draft = PamoPambDraft::create([
+        'draft_uuid' => (string) Str::uuid(), 'protected_area_id' => $areaA->id,
+        'pamo_office_id' => OrganizationalOffice::query()->where('code', 'p2_pamo_scope_office')->value('id'),
+        'pamo_office_name' => 'P2 Test PAMO Office', 'originator_user_id' => $assigned->id,
+        'created_by' => $assigned->id, 'updated_by' => $assigned->id,
+        'workflow_key' => 'maintenance_monuments',
+        'report_payload' => ['activity_name' => 'Maintenance of Monuments', 'document_type' => 'Progress Report'],
+        'started_at' => now(), 'status' => 'forwarded', 'forwarded_at' => now(),
+        'conservation_report_submission_id' => $historic->id, 'lock_version' => 2,
+    ]);
+    $settingVersionId = (int) DB::table('routing_position_setting_versions')->value('id');
+    SubmissionRoutingSnapshot::create([
+        'source_key' => 'conservation', 'source_id' => $historic->id,
+        'setting_version_id' => $settingVersionId, 'profile' => 'pamo_direct',
+        'graph_version' => RoutingPositionSnapshotService::PAMO_GRAPH_VERSION,
+        'captured_by' => $assigned->id, 'captured_at' => now(), 'origin_kind' => 'pamo_pamb',
+        'protected_area_id' => $areaA->id, 'pamo_office_id' => $draft->pamo_office_id,
+        'pamo_office_name' => $draft->pamo_office_name, 'originator_user_id' => $assigned->id,
+        'origin_started_at' => now(),
+    ]);
+    $archiveBytes = "%PDF-1.4\nInactive PAMO archive fixture\n%%EOF";
+    $archivePath = tempnam(sys_get_temp_dir(), 'pamo-inactive-archive-');
+    file_put_contents($archivePath, $archiveBytes);
+    $gateway = new FakeDocumentArchiveGateway();
+    app()->instance(GoogleDriveArchiveGateway::class, $gateway);
+    $archiveHash = hash('sha256', $archiveBytes);
+    $remote = $gateway->upload($archivePath, 'inactive-report.pdf', [
+        'source_type' => 'conservation', 'source_id' => (int) $historic->id, 'logical_slot' => 'mov',
+    ], $archiveHash, null);
+    unlink($archivePath);
+    $archive = DocumentArchive::create([
+        'source_type' => 'conservation', 'source_id' => $historic->id, 'logical_slot' => 'mov',
+        'google_drive_file_id' => $remote['file_id'], 'archived_sha256' => $archiveHash,
+        'archived_size' => strlen($archiveBytes), 'archived_at' => now(), 'archive_status' => 'ARCHIVED',
+        'original_filename' => 'inactive-report.pdf',
+    ]);
+
+    $access = app(PambSubmissionAccessService::class);
+    expect($access->canView($assigned, $historic))->toBeTrue()
+        ->and($access->canView($foreign, $historic))->toBeFalse()
+        ->and($access->scopeQuery(ConservationReportSubmission::query(), $assigned)->pluck('id')->all())->toContain($historic->id)
+        ->and($access->scopeQuery(ConservationReportSubmission::query(), $assigned)->pluck('id')->all())->not->toContain($outside->id);
+
+    $this->actingAs($assigned)->get(route('conservation-reports.index', 'maintenance_monuments'))
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->where('submissions.data.0.id', $historic->id)
+            ->where('pamoWorkspace', true));
+    $this->actingAs($assigned)->post(route('conservation-reports.pamo-drafts.store', 'maintenance_monuments'), [
+        'start_idempotency_key' => (string) Str::uuid(),
+    ])->assertNotFound();
+    expect(PamoPambDraft::query()->where('workflow_key', 'maintenance_monuments')->count())->toBe(1);
+
+    $this->actingAs($assigned)->get(route('pamo-archives.index'))
+        ->assertOk()->assertInertia(fn ($page) => $page
+            ->where('archives.total', 1)
+            ->where('archives.data.0.id', $archive->id)
+            ->where('archives.data.0.workflow_key', 'maintenance_monuments'));
+    $this->actingAs($assigned)->get(route('pamo-archives.file', $archive->id))->assertOk();
+    $this->actingAs($foreign)->get(route('pamo-archives.index'))
+        ->assertOk()->assertInertia(fn ($page) => $page->where('archives.total', 0));
+    $this->actingAs($foreign)->get(route('pamo-archives.file', $archive->id))->assertNotFound();
+    expect($gateway->retrievals())->toBe(1);
 });
 
 test('unassigned PAMO cannot see PAMB submissions and permission remains required', function (): void {

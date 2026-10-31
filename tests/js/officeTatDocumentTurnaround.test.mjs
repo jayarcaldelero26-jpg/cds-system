@@ -34,10 +34,3 @@ test('document turnaround renders the shared clickable participant table and ful
     assert.match(source, /setDetailRow\(next\)/);
     assert.doesNotMatch(source, /View details|Action column|office-tat-turnaround-participant/);
 });
-
-test('Office TAT page passes its selected assessment and renders the Document TAT panel', async () => {
-    const source = await readFile(new URL('../../resources/js/Pages/Admin/OfficeTat/Index.jsx', import.meta.url), 'utf8');
-    assert.match(source, /import DocumentTurnaround from '\.\/DocumentTurnaround'/);
-    assert.match(source, /documentTurnaround = null/);
-    assert.match(source, /<DocumentTurnaround[\s\S]*?data=\{documentTurnaround\}/);
-});

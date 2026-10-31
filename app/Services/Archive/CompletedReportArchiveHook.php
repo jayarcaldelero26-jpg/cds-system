@@ -120,9 +120,6 @@ final class CompletedReportArchiveHook
             $module,
             $archiveUnit,
             $archiveOffice,
-            'dispatch_checkpoint',
-            ['application/pdf'],
-            true,
         );
         if ($mandatory && $result['status'] !== 'archived') {
             throw ValidationException::withMessages(['archive' => 'The required archive checkpoint could not be verified. Routing was not advanced.']);
@@ -139,16 +136,7 @@ final class CompletedReportArchiveHook
             throw ValidationException::withMessages(['archive' => 'The required archive module is not mapped.']);
         }
 
-        $expectedCode = (string) $resolver($record);
-        $workflow = (string) $record->getAttribute('workflow_key');
-        $module = match ((string) ($source['model'] ?? '')) {
-            \App\Models\EngpReportSubmission::class => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, $workflow),
-            \App\Models\ConservationReportSubmission::class => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::PA, $workflow),
-            \App\Models\ManagementPlan::class => ModuleDefinition::query()->active()->notRetired()->where('code', $expectedCode)->first(),
-            default => ModuleDefinition::query()->notRetired()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
-                ->requirementDomain(\App\Services\Reports\ReportRequirementRegistry::PA)->where('code', $expectedCode)->first(),
-        };
-        if ($module && ! in_array($expectedCode, [$module->code, $module->requirement_key, 'engp_'.$workflow], true)) $module = null;
+        $module = ModuleDefinition::query()->active()->notRetired()->where('code', (string) $resolver($record))->first();
         if (! $module) {
             throw ValidationException::withMessages(['archive' => 'The required archive module is not mapped.']);
         }

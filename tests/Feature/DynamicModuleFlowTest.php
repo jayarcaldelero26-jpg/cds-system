@@ -33,6 +33,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Notification;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -150,6 +151,8 @@ function dynamicModuleRouteToPenro(string $source, int $recordId, string $office
 
 test('four configured unit and module type combinations use dynamic registries, entry routes, routing, and processed TAT details', function (): void {
     Storage::fake('local');
+    Mail::fake();
+    Notification::fake();
     $manager = dynamicModuleManager();
     $conservationFocal = dynamicModuleUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
     $developmentFocal = dynamicModuleUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
@@ -194,18 +197,69 @@ test('four configured unit and module type combinations use dynamic registries, 
                     ->component('ConservationReports/Index')
                     ->where('workflow.key', $code)
                     ->where('workflow.configured_generic_flow', true)
+                    ->where('workflow.document_type_required', true)
+                    ->where('workflow.period_required', true)
                     ->where('workflow.periods', fn ($periods): bool => collect($periods)->contains(fn ($period): bool => str_starts_with((string) $period, 'Current Period')) && collect($periods)->contains('Future Period 2027')));
 
-            $this->actingAs($conservationFocal)->post(route('conservation-reports.store', $code), [
+            $period = collect($workflow['periods'])->first(fn (string $period): bool => str_starts_with($period, 'Current Period'));
+            $validValues = [
                 'protected_area_id' => $area->id,
                 'target_office' => 'CENRO Mati',
                 'activity_name' => $case['name'].' Activity',
                 'document_type' => 'Progress Report',
-                'reporting_period' => collect($workflow['periods'])->first(fn (string $period): bool => str_starts_with($period, 'Current Period')),
+                'reporting_period' => $period,
                 'date_accomplished' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(),
+            ];
+            $missingDocument = $validValues;
+            unset($missingDocument['document_type']);
+            $this->actingAs($conservationFocal)->post(route('conservation-reports.store', $code), [
+                ...$missingDocument,
+                'mov' => UploadedFile::fake()->create('missing-document.pdf', 12, 'application/pdf'),
+            ])->assertSessionHasErrors('document_type');
+            expect(ConservationReportSubmission::query()->where('workflow_key', $code)->count())->toBe(0);
+
+            $missingPeriod = $validValues;
+            unset($missingPeriod['reporting_period']);
+            $this->actingAs($conservationFocal)->post(route('conservation-reports.store', $code), [
+                ...$missingPeriod,
+                'mov' => UploadedFile::fake()->create('missing-period.pdf', 12, 'application/pdf'),
+            ])->assertSessionHasErrors('reporting_period');
+            expect(ConservationReportSubmission::query()->where('workflow_key', $code)->count())->toBe(0);
+
+            $invalidDocument = [...$validValues, 'document_type' => 'Unlisted Report'];
+            $this->actingAs($conservationFocal)->post(route('conservation-reports.store', $code), [
+                ...$invalidDocument,
+                'mov' => UploadedFile::fake()->create('invalid-document.pdf', 12, 'application/pdf'),
+            ])->assertSessionHasErrors('document_type');
+            expect(ConservationReportSubmission::query()->where('workflow_key', $code)->count())->toBe(0);
+
+            $invalidPeriod = [...$validValues, 'reporting_period' => 'Unlisted Period'];
+            $this->actingAs($conservationFocal)->post(route('conservation-reports.store', $code), [
+                ...$invalidPeriod,
+                'mov' => UploadedFile::fake()->create('invalid-period.pdf', 12, 'application/pdf'),
+            ])->assertSessionHasErrors('reporting_period');
+            expect(ConservationReportSubmission::query()->where('workflow_key', $code)->count())->toBe(0);
+
+            $this->actingAs($conservationFocal)->post(route('conservation-reports.store', $code), [
+                ...$validValues,
                 'mov' => UploadedFile::fake()->create('dynamic-report.pdf', 12, 'application/pdf'),
             ])->assertSessionHasNoErrors();
             $record = ConservationReportSubmission::query()->where('workflow_key', $code)->firstOrFail();
+            expect($record->document_type)->toBe('Progress Report')
+                ->and($record->reporting_period)->toBe($period);
+
+            $updateValues = $validValues;
+            $missingUpdateDocument = $updateValues;
+            unset($missingUpdateDocument['document_type']);
+            $this->actingAs($conservationFocal)->put(route('conservation-reports.update', [$code, $record]), $missingUpdateDocument)
+                ->assertSessionHasErrors('document_type');
+            $missingUpdatePeriod = $updateValues;
+            unset($missingUpdatePeriod['reporting_period']);
+            $this->actingAs($conservationFocal)->put(route('conservation-reports.update', [$code, $record]), $missingUpdatePeriod)
+                ->assertSessionHasErrors('reporting_period');
+            expect($record->fresh()->document_type)->toBe('Progress Report')
+                ->and($record->fresh()->reporting_period)->toBe($period);
+
             dynamicModuleRouteToPenro('conservation', $record->id, 'CENRO Mati', $conservationFocal);
             expect($record->fresh()->date_received_penro)->not->toBeNull();
         } else {
@@ -317,6 +371,79 @@ test('four configured unit and module type combinations use dynamic registries, 
             ->and($definition->fresh()->is_active)->toBeTrue()
             ->and($sourceCount)->toBe(1);
     }
+
+    $legacyWorkflow = app(ConservationReportWorkflowRegistry::class)->find('homestay');
+    $this->actingAs($conservationFocal)->get(route('conservation-reports.index', 'homestay'))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('workflow.document_type_required', false)
+            ->where('workflow.period_required', false));
+    $this->actingAs($conservationFocal)->post(route('conservation-reports.store', 'homestay'), [
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Mati',
+        'activity_name' => $legacyWorkflow['default_activity'],
+        'date_conducted' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(),
+        'date_conducted_ranges' => [[
+            'from' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(),
+            'to' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(),
+        ]],
+        'date_accomplished' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(),
+        'mov' => UploadedFile::fake()->create('optional-native-report.pdf', 12, 'application/pdf'),
+    ])->assertSessionHasNoErrors();
+    $legacyRecord = ConservationReportSubmission::query()->where('workflow_key', 'homestay')->firstOrFail();
+    expect($legacyRecord->document_type)->toBeNull()
+        ->and($legacyRecord->reporting_period)->toBeNull();
+
+    $configuredDefinition = collect($definitions)->first(fn (ModuleDefinition $definition): bool => $definition->requirement_domain === 'pa');
+    $configuredWorkflow = app(ConservationReportWorkflowRegistry::class)->find($configuredDefinition->requirement_key);
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'dynamic_pamo_'.$area->getKey(),
+        'name' => 'PAMO Dynamic Flow Test',
+        'office_type' => 'pamo',
+        'is_active' => true,
+    ]);
+    $area->forceFill(['pamo' => $pamoOffice->name])->save();
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => $pamoOffice->id,
+        'assignment_type' => 'pamo',
+        'assigned_by' => $conservationFocal->id,
+    ]);
+    $pamo = dynamicModuleUser(OrganizationalAccessService::PAMO, $pamoOffice->name);
+    $pamo->forceFill(['protected_area_id' => $area->id])->save();
+
+    $pamoPeriod = collect($configuredWorkflow['periods'])->first(fn (string $period): bool => str_starts_with($period, 'Current Period'));
+    $pamoValues = [
+        'activity_name' => $configuredWorkflow['activities'][0],
+        'document_type' => $configuredWorkflow['documents'][0],
+        'reporting_period' => $pamoPeriod,
+        'date_accomplished' => CarbonImmutable::now(BusinessCalendarService::TIMEZONE)->toDateString(),
+    ];
+    $pamoSourceCount = ConservationReportSubmission::query()->where('workflow_key', $configuredDefinition->requirement_key)->count();
+    $pamoToken = (string) Str::uuid();
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $configuredDefinition->requirement_key), [
+        'start_idempotency_key' => $pamoToken,
+        'mov' => UploadedFile::fake()->createWithContent('configured-pamo-draft.pdf', "%PDF-1.7\nConfigured PAMO draft source MOV"),
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $pamoDraft = \App\Models\PamoPambDraft::query()->where('start_idempotency_key', $pamoToken)->firstOrFail();
+
+    foreach (['document_type', 'reporting_period'] as $requiredField) {
+        $incompleteValues = $pamoValues;
+        unset($incompleteValues[$requiredField]);
+        $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$configuredDefinition->requirement_key, $pamoDraft->draft_uuid]), [
+            'lock_version' => $pamoDraft->fresh()->lock_version,
+            ...$incompleteValues,
+        ])->assertRedirect()->assertSessionHasErrors($requiredField);
+        expect($pamoDraft->fresh()->status)->toBe('draft')
+            ->and(ConservationReportSubmission::query()->where('workflow_key', $configuredDefinition->requirement_key)->count())->toBe($pamoSourceCount);
+    }
+
+    $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$configuredDefinition->requirement_key, $pamoDraft->draft_uuid]), [
+        'lock_version' => $pamoDraft->fresh()->lock_version,
+        ...$pamoValues,
+    ])->assertRedirect()->assertSessionHasNoErrors();
+    $pamoSource = ConservationReportSubmission::query()->findOrFail($pamoDraft->fresh()->conservation_report_submission_id);
+    expect($pamoSource->document_type)->toBe($pamoValues['document_type'])
+        ->and($pamoSource->reporting_period)->toBe($pamoPeriod);
 });
 
 test('inactive arbitrary Conservation modules block first writes and overrides while allowing an existing route to continue', function (): void {
@@ -402,6 +529,63 @@ test('inactive arbitrary Conservation modules block first writes and overrides w
     expect((int) $definition->fresh()->getKey())->toBe((int) $definition->getKey())
         ->and($definition->fresh()->is_active)->toBeTrue()
         ->and(ConservationReportSubmission::query()->where('workflow_key', $definition->requirement_key)->count())->toBe(2);
+});
+
+test('inactive Development modules reject new submissions and first routing but keep an existing route moving', function (): void {
+    $manager = dynamicModuleManager();
+    $focal = dynamicModuleUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $chief = dynamicModuleUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga');
+    $otherFocal = dynamicModuleUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $name = 'QA Inactive Development Module';
+    $this->actingAs($manager)->post(route('module-definitions.store'), dynamicModulePayload(
+        $name, 'development', ModuleDefinition::TYPE_REGULAR_TARGET,
+        ['document_types' => 'Progress Report'],
+    ))->assertSessionHasNoErrors();
+    $definition = ModuleDefinition::query()->where('code', 'qa_inactive_development_module')->firstOrFail();
+    $workflow = app(EngpReportWorkflowRegistry::class)->find((string) $definition->code);
+
+    $this->actingAs($focal)->post(route('engp-reports.store', $definition->code), [
+        'office' => 'CENRO Baganga', 'reporting_year' => 2026, 'period_key' => 'current_period',
+        'activity_name' => 'Unexpected activity', 'document_type' => 'Progress Report',
+    ])->assertSessionHasErrors('activity_name');
+    $this->actingAs($focal)->post(route('engp-reports.store', $definition->code), [
+        'office' => 'CENRO Baganga', 'reporting_year' => 2026, 'period_key' => 'current_period',
+        'activity_name' => $name.' Activity', 'document_type' => 'Final Report',
+    ])->assertSessionHasErrors('document_type');
+    $this->actingAs($focal)->post(route('engp-reports.store', $definition->code), [
+        'office' => 'CENRO Baganga', 'reporting_year' => 2026, 'period_key' => 'current_period',
+        'activity_name' => $name.' Activity', 'document_type' => 'Progress Report',
+    ])->assertSessionHasNoErrors();
+    $existing = EngpReportSubmission::query()->where('workflow_key', $definition->code)->firstOrFail();
+    $tracking = app(SubmissionTrackingService::class);
+    $this->actingAs($focal);
+    $tracking->transition('engp', (int) $existing->getKey(), 'forward_to_cenro_chief', null, $focal->id);
+
+    $unrouted = EngpReportSubmission::query()->create([
+        'workflow_key' => $definition->code, 'office' => 'CENRO Mati', 'section_name' => 'Inactive module fixture',
+        'activity_name' => $name.' Activity', 'document_type' => 'Progress Report',
+        'reporting_year' => 2026, 'period_key' => 'current_period', 'period_label' => 'Current Period',
+        'deadline_submission' => app(EngpReportWorkflowRegistry::class)->deadline((string) $definition->code, 2026, 'current_period', false),
+        'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    $this->actingAs($manager)->patch(route('module-definitions.status', $definition))->assertSessionHasNoErrors();
+
+    $this->actingAs($focal)->post(route('engp-reports.store', $definition->code), [
+        'office' => 'CENRO Baganga', 'reporting_year' => 2027, 'period_key' => 'future_period_2027',
+        'activity_name' => $name.' Activity', 'document_type' => 'Progress Report',
+    ])->assertSessionHasErrors('workflow');
+    $routingErrors = [];
+    try {
+        app(DocumentRoutingTransitionService::class)->transition($unrouted, 'engp', 'forward_to_cenro_chief', $otherFocal->id);
+    } catch (ValidationException $exception) {
+        $routingErrors = $exception->errors();
+    }
+    expect($routingErrors['workflow'][0] ?? null)->toBe('This report module is inactive and cannot start a new routing flow.');
+
+    $this->actingAs($chief);
+    $tracking->transition('engp', (int) $existing->getKey(), 'receive_at_cenro_chief', null, $chief->id);
+    expect(DocumentRoutingEvent::query()->where('source_type', 'engp')->where('source_id', $existing->getKey())->count())->toBe(2)
+        ->and(DocumentRoutingEvent::query()->where('source_type', 'engp')->where('source_id', $unrouted->getKey())->count())->toBe(0);
 });
 
 test('dynamic Development reminders use only configured offices and resolve through the existing fake mail delivery', function (): void {

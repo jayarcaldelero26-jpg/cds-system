@@ -102,6 +102,7 @@ let promoted = false;
 
 try {
     await build({
+        configLoader: 'native',
         configFile: path.join(projectRoot, 'vite.config.js'),
         root: projectRoot,
         build: { outDir: stagingRoot, emptyOutDir: true },

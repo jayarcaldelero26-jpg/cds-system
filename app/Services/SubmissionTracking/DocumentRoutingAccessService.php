@@ -129,7 +129,7 @@ final class DocumentRoutingAccessService
         $registered = $registry->findBySource($sourceKey);
         $modelClass = $registered['definition']['model'] ?? null;
         if (! $registry->isSchemaReady() || ! $registered
-            || ! $registry->isEligible($registered['workflow'])
+            || ! $registry->isConfigured($registered['workflow'])
             || ! is_string($modelClass)
             || ! ($record instanceof $modelClass)) {
             return false;

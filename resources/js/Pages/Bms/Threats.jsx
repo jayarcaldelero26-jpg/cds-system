@@ -11,7 +11,7 @@ import ConfirmDialog from '@/Components/ConfirmDialog';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 
 const emptyThreat = { protected_area_id: '', date: '', location: '', threat_type: '', threat_detail: '', extent: '', severity: '', coord_format: 'DD', latitude: '', longitude: '', lat_deg: '', lat_min: '', lat_sec: '', long_deg: '', long_min: '', long_sec: '', utm_zone: '', easting: '', northing: '', actions_taken: '', remarks: '' };
-const display = (value) => value === null || value === undefined || value === '' ? '—' : String(value);
+const display = (value) => value === null || value === undefined || value === '' ? 'Not provided' : String(value);
 const Detail = ({ label, children }) => <div><dt className="text-xs text-gray-500">{label}</dt><dd className="mt-1 font-semibold text-gray-800 dark:text-gray-200">{children}</dd></div>;
 
 const coordinates = (threat) => {

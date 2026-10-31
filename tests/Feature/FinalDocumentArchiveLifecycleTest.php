@@ -29,6 +29,7 @@ use App\Services\Archive\RegionalReceivingOfficeResolver;
 use App\Services\Archive\GoogleDriveArchiveGateway;
 use App\Services\Attachments\ReportDocumentAdapterResolver;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
@@ -159,14 +160,15 @@ function finalArchiveReleasedBms(string $name = 'Final archive release fixture')
 }
 
 /** @return array{report:\Illuminate\Database\Eloquent\Model,penro_focal:User,events_before:int,gateway:FakeDocumentArchiveGateway} */
-function finalArchiveReleasedSource(string $source, string $name, bool $legacyPambRelease = false): array
+function finalArchiveReleasedSource(string $source, string $name, bool $legacyPambRelease = false, ?string $engpWorkflowKey = null): array
 {
     if ($legacyPambRelease && $source !== 'conservation') throw new InvalidArgumentException('Legacy PAMB release fixtures require the Conservation source.');
     $development = $source === 'engp';
     $unit = $development ? OrganizationalAccessService::DEVELOPMENT : OrganizationalAccessService::CONSERVATION;
     $owner = User::factory()->create();
     $area = $development ? null : finalArchiveArea($owner, 'CENRO Mati', $name.' PA');
-    $workflowKey = $legacyPambRelease ? 'regular_pamb' : 'homestay';
+    $workflowKey = $source === 'engp' ? ($engpWorkflowKey ?? 'cbep') : ($legacyPambRelease ? 'regular_pamb' : 'homestay');
+    $engpWorkflow = $source === 'engp' ? app(EngpReportWorkflowRegistry::class)->defaultFind($workflowKey) : null;
     $moduleCode = match ($source) {
         'conservation' => $workflowKey,
         'bams' => 'bams',
@@ -175,18 +177,21 @@ function finalArchiveReleasedSource(string $source, string $name, bool $legacyPa
         'aws' => 'automated_weather_station',
         'ipaf-management' => 'ipaf_management',
         'revenue' => 'revenue_collection',
-        'engp' => 'engp_cbep',
+        'engp' => 'engp_'.$workflowKey,
         default => throw new InvalidArgumentException('Unsupported final archive source fixture.'),
     };
-    $moduleDefinition = ModuleDefinition::query()->firstOrCreate(['code' => $moduleCode], [
+    ModuleDefinition::query()->firstOrCreate(['code' => $moduleCode], [
         'name' => $name, 'program_area' => $development ? 'development' : 'protected_area_management_and_development',
         'implementation_type' => $source === 'conservation' ? 'generic' : 'specialized',
         'module_type' => 'regular_target', 'deadline_mode' => 'standard_working_days', 'is_active' => true,
         ...($source === 'conservation' ? ['requirement_domain' => 'pa', 'requirement_key' => $workflowKey] : []),
+        ...($source === 'engp' ? [
+            'requirement_domain' => 'engp', 'requirement_key' => $workflowKey,
+            'reporting_frequency' => $engpWorkflow['period'], 'deadline_mode' => ModuleDefinition::DEADLINE_CUSTOM,
+            'allow_deadline_override' => true, 'existing_route_name' => 'engp-reports.index',
+            'existing_source_key' => 'engp', 'requirement_metadata' => $engpWorkflow,
+        ] : []),
     ]);
-    if ($source === 'engp') {
-        $moduleDefinition->forceFill(['requirement_domain' => 'engp', 'requirement_key' => $workflowKey])->saveOrFail();
-    }
 
     $common = [
         'protected_area_id' => $area?->getKey(), 'target_office' => 'CENRO Mati',
@@ -207,9 +212,11 @@ function finalArchiveReleasedSource(string $source, string $name, bool $legacyPa
             'reporting_month' => 10, 'reporting_year' => 2026, 'total_collected' => '1000.00',
         ]),
         'engp' => EngpReportSubmission::query()->create([
-            'workflow_key' => 'cbep', 'office' => 'CENRO Mati', 'section_name' => 'NGP',
-            'activity_name' => $name, 'document_type' => 'Monthly Report', 'reporting_year' => 2026,
-            'period_key' => '2026-10', 'period_label' => 'October 2026', 'deadline_submission' => '2026-11-10',
+            'workflow_key' => $workflowKey, 'office' => 'CENRO Mati', 'section_name' => 'NGP',
+            'activity_name' => $engpWorkflow['activity'], 'document_type' => $engpWorkflow['document'], 'reporting_year' => 2026,
+            'period_key' => match ($engpWorkflow['period']) { 'monthly' => '2026-10', 'quarterly' => 'Q3', 'weekly' => 'W03' },
+            'period_label' => match ($engpWorkflow['period']) { 'monthly' => 'October 2026', 'quarterly' => 'Quarter 3', 'weekly' => 'January Week 3 (Jan 19-Jan 22)' },
+            'deadline_submission' => match ($engpWorkflow['period']) { 'monthly' => '2026-10-20', 'quarterly' => '2026-09-10', 'weekly' => '2026-01-22' },
             'mov_external_url' => 'https://example.invalid/source-reference-only',
             'created_by' => $owner->getKey(), 'updated_by' => $owner->getKey(),
         ]),
@@ -239,6 +246,12 @@ function finalArchiveReleasedSource(string $source, string $name, bool $legacyPa
         'penro_focal' => finalArchiveActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental', $actorOverrides),
         'penro_chief' => finalArchiveActor(OrganizationalAccessService::PENRO_CHIEF, 'PENRO Davao Oriental', $actorOverrides),
     ];
+
+    if ($source === 'engp') {
+        expect(fn () => app(FinalDocumentArchiveService::class)->recordReceipt(
+            $actors['penro_focal'], 'engp', (int) $report->getKey(), now('Asia/Manila')->format('Y-m-d H:i:s'),
+        ))->toThrow(ValidationException::class);
+    }
 
     if ($legacyPambRelease) {
         $movProcessing = app(PambMovProcessingService::class);
@@ -456,9 +469,6 @@ test('each remaining generic source releases, receives, archives its returned se
     $gateway = $fixture['gateway'];
     $beforeReceiptUploads = $gateway->uploadAttempts();
     $beforeReceiptEvents = $fixture['events_before'];
-    if ($source === 'engp') {
-        expect(\App\Models\DocumentArchive::query()->where('source_type', 'engp')->where('source_id', $fixture['report']->getKey())->count())->toBe(0);
-    }
     $receipt = $archives->recordReceipt(
         $fixture['penro_focal'], $source, (int) $fixture['report']->getKey(),
         now('Asia/Manila')->addMinutes(3)->format('Y-m-d H:i:s'),
@@ -481,13 +491,6 @@ test('each remaining generic source releases, receives, archives its returned se
 
     $manifest = FinalDocumentArchiveManifest::query()->with('files.archive')->where('receipt_id', $receipt->getKey())->firstOrFail();
     $file = $manifest->files->firstOrFail();
-    if ($source === 'engp') {
-        $regionalArchive = \App\Models\DocumentArchive::query()
-            ->where('source_type', 'engp')->where('source_id', $fixture['report']->getKey())
-            ->where('archive_phase', FinalDocumentArchiveManifest::PHASE)->firstOrFail();
-        expect($regionalArchive->archive_status)->toBe('ARCHIVED')
-            ->and($regionalArchive->getKey())->toBe($file->document_archive_id);
-    }
     expect($result['status'])->toBe('archived')
         ->and($manifest->archive_status)->toBe('ARCHIVED')
         ->and($manifest->archive_phase)->toBe(FinalDocumentArchiveManifest::PHASE)
@@ -519,64 +522,6 @@ test('each remaining generic source releases, receives, archives its returned se
     'Revenue' => ['revenue', false],
     'ENGP Development spreadsheet return' => ['engp', true],
 ]);
-
-test('inactive registered module keeps a released archive readable and permits only its existing receipt and manifest path', function (): void {
-    $fixture = finalArchiveReleasedBms('Inactive module released archive fixture');
-    $report = $fixture['report'];
-    $focal = $fixture['penro_focal'];
-    $archives = app(FinalDocumentArchiveService::class);
-    ModuleDefinition::query()->where('code', 'bms')->firstOrFail()->update(['is_active' => false]);
-
-    expect($archives->context($focal, 'bms', (int) $report->getKey())['released'])->toBeTrue();
-    $receipt = $archives->recordReceipt($focal, 'bms', (int) $report->getKey(), now('Asia/Manila')->addMinutes(2)->format('Y-m-d H:i:s'));
-    $result = $archives->createOrRetryManifest(
-        $focal, 'bms', (int) $report->getKey(), (string) Str::uuid(),
-        [UploadedFile::fake()->createWithContent('inactive-module-return.pdf', "%PDF-1.7\nVerified return copy")], true,
-    );
-    $manifest = FinalDocumentArchiveManifest::query()->with('files.archive')->where('receipt_id', $receipt->getKey())->firstOrFail();
-    $file = $manifest->files->firstOrFail();
-
-    expect($result['status'])->toBe('archived')
-        ->and($manifest->archive_status)->toBe('ARCHIVED')
-        ->and($archives->authorizeManifestFileReader($focal, $file)->getKey())->toBe($file->document_archive_id);
-    $this->actingAs($focal)->get(route('final-archives.index', ['source' => 'bms', 'record' => $report->getKey()]))
-        ->assertOk()->assertInertia(fn (Assert $page) => $page->where('selected.latest_manifest.status', 'ARCHIVED'));
-    $this->actingAs($focal)->get(route('final-archives.files.show', $file->getKey()).'?download=1')->assertOk();
-
-    $foreign = finalArchiveActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
-    expect(fn () => $archives->authorizeManifestFileReader($foreign, $file))->toThrow(HttpException::class);
-    $this->actingAs($foreign)->get(route('final-archives.files.show', $file->getKey()).'?download=1')->assertNotFound();
-});
-
-test('inactive unrouted source has no receipt or manifest path without Regional release evidence', function (): void {
-    ModuleDefinition::query()->firstOrCreate(['code' => 'bms'], [
-        'name' => 'BMS', 'program_area' => 'protected_area_management_and_development',
-        'implementation_type' => 'specialized', 'module_type' => 'regular_target',
-        'deadline_mode' => 'standard_working_days', 'is_active' => true,
-    ])->update(['is_active' => false]);
-    $owner = User::factory()->create();
-    $area = finalArchiveArea($owner, 'CENRO Mati', 'Inactive unrouted BMS PA');
-    $report = BmsReportSubmission::query()->create([
-        'protected_area_id' => $area->getKey(), 'target_office' => 'CENRO Mati',
-        'activity_name' => 'Inactive unrouted BMS', 'document_type' => 'Report', 'semester' => '1st Semester',
-        'date_accomplished' => '2026-08-03',
-    ]);
-    $focal = finalArchiveActor(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
-    $archives = app(FinalDocumentArchiveService::class);
-    $gateway = app(GoogleDriveArchiveGateway::class);
-    $attempts = $gateway->uploadAttempts();
-
-    expect($archives->context($focal, 'bms', (int) $report->getKey())['released'])->toBeFalse();
-    expect(fn () => $archives->recordReceipt($focal, 'bms', (int) $report->getKey(), now('Asia/Manila')->toDateTimeString()))
-        ->toThrow(ValidationException::class);
-    expect(fn () => $archives->createOrRetryManifest(
-        $focal, 'bms', (int) $report->getKey(), (string) Str::uuid(),
-        [UploadedFile::fake()->createWithContent('unrouted-return.pdf', "%PDF-1.7\nUnrouted fixture")], true,
-    ))->toThrow(ValidationException::class);
-    expect(FinalDocumentReceipt::query()->count())->toBe(0)
-        ->and(FinalDocumentArchiveManifest::query()->count())->toBe(0)
-        ->and($gateway->uploadAttempts())->toBe($attempts);
-});
 
 test('legacy Regular PAMB release evidence supports separate receipt and final archive without another custody event', function (): void {
     $fixture = finalArchiveReleasedSource('conservation', 'Legacy Regular PAMB final archive', true);
@@ -1562,7 +1507,7 @@ test('a finalization write failure retains the reserved Drive object for the sam
         ->and($gateway->objectIds())->toBe([$reservedId]);
 });
 
-test('eligible PENRO focal sees released records awaiting receipt while foreign PA scopes remain hidden', function (): void {
+test('eligible PENRO focal sees released records awaiting receipt while foreign PA scopes and inactive modules stay hidden', function (): void {
     $fixture = finalArchiveReleasedBms('Final archive receipt queue fixture');
     $gateway = $fixture['gateway'];
     $focal = $fixture['penro_focal'];
@@ -1587,7 +1532,8 @@ test('eligible PENRO focal sees released records awaiting receipt while foreign 
         ->assertNotFound();
 
     ModuleDefinition::query()->where('code', 'bms')->update(['is_active' => false]);
-    expect($archives->context($focal, 'bms', $fixture['report']->id)['can_receive_final'])->toBeTrue();
+    expect(fn () => $archives->context($focal, 'bms', $fixture['report']->id))
+        ->toThrow(ModelNotFoundException::class);
 });
 
 test('legacy PAMB release evidence seeds the authorized Awaiting Receipt queue', function (): void {
@@ -1814,3 +1760,88 @@ test('Submission Tracking exposes the record archive link only for a scoped veri
         ->and(app(SubmissionTrackingService::class)->archiveSourceQuery('bms')->whereKey($completeId)->exists())->toBeFalse();
     expect($archives->verifiedFinalArchiveRecordKeys($outOfScopeReader, $completeCandidate))->toBe([]);
 });
+
+test('each ENGP workflow reaches Development History only after its verified Regional return is archived', function (string $workflowKey): void {
+    $fixture = finalArchiveReleasedSource('engp', 'ENGP '.$workflowKey.' History completion fixture', false, $workflowKey);
+    $writer = $fixture['penro_focal'];
+    $recordId = (int) $fixture['report']->getKey();
+    expect($fixture['report']->workflow_key)->toBe($workflowKey)
+        ->and($fixture['report']->activity_name)->toBe(app(EngpReportWorkflowRegistry::class)->defaultFind($workflowKey)['activity'])
+        ->and($fixture['report']->document_type)->toBe(app(EngpReportWorkflowRegistry::class)->defaultFind($workflowKey)['document'])
+        ->and(ModuleDefinition::query()->where('code', 'engp_'.$workflowKey)->value('requirement_key'))->toBe($workflowKey)
+        ->and((string) $fixture['report']->getKey())->toBe((string) $recordId);
+    $archives = app(FinalDocumentArchiveService::class);
+    $candidate = collect([['source' => 'engp', 'source_id' => $recordId]]);
+    $historyDetail = route('submission-tracking.index', [
+        'view' => 'history', 'source' => 'engp', 'source_id' => $recordId,
+    ]);
+
+    $this->actingAs($writer)->get($historyDetail)
+        ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('trackingContext.selected_record.routing_complete', true)
+            ->where('trackingContext.selected_record.has_verified_final_archive', false));
+    expect($archives->verifiedFinalArchiveRecordKeys($writer, $candidate))->toBe([]);
+
+    $foreignReader = finalArchiveActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga', [
+        'unit_assignment' => OrganizationalAccessService::DEVELOPMENT,
+    ]);
+    $foreignReader->givePermissionTo(Permission::findOrCreate('final-archives.view', 'web'));
+    $this->actingAs($foreignReader);
+    expect(app(SubmissionTrackingService::class)->archiveSourceQuery('engp')->whereKey($recordId)->exists())->toBeFalse()
+        ->and($archives->verifiedFinalArchiveRecordKeys($foreignReader, $candidate))->toBe([])
+        ->and(fn () => $archives->context($foreignReader, 'engp', $recordId))->toThrow(HttpException::class);
+    $this->get(route('final-archives.index', ['source' => 'engp', 'record' => $recordId]))->assertNotFound();
+
+    $receipt = $archives->recordReceipt(
+        $writer, 'engp', $recordId, now('Asia/Manila')->addMinutes(3)->format('Y-m-d H:i:s'),
+    );
+    expect($receipt->source_type)->toBe('engp')
+        ->and((int) $receipt->source_id)->toBe($recordId)
+        ->and($receipt->workflow_key)->toBe($workflowKey);
+    $result = $archives->createOrRetryManifest(
+        $writer, 'engp', $recordId, (string) Str::uuid(),
+        [UploadedFile::fake()->createWithContent('engp-'.$workflowKey.'-regional-signed-return.pdf', "%PDF-1.7\nSigned ENGP {$workflowKey} Regional return")], true,
+    );
+    $manifest = FinalDocumentArchiveManifest::query()->with(['receipt', 'files.archive'])
+        ->where('receipt_id', $receipt->getKey())->firstOrFail();
+    $file = $manifest->files->firstOrFail();
+    $uploadsAfterArchive = $fixture['gateway']->uploadAttempts();
+    $verifiedObjectId = $file->document_archive_id;
+    $retry = $archives->retry($writer, (int) $manifest->getKey());
+    $manifest->refresh()->load(['receipt', 'files.archive']);
+    $file = $manifest->files->firstOrFail();
+    $this->actingAs($writer);
+    expect($result['status'])->toBe('archived')
+        ->and($retry['status'])->toBe('archived')
+        ->and($manifest->archive_status)->toBe('ARCHIVED')
+        ->and($manifest->source_type)->toBe('engp')
+        ->and((int) $manifest->source_id)->toBe($recordId)
+        ->and($manifest->workflow_key)->toBe($workflowKey)
+        ->and($manifest->files)->toHaveCount(1)
+        ->and($file->original_filename)->toBe('engp-'.$workflowKey.'-regional-signed-return.pdf')
+        ->and($file->file_status)->toBe('ARCHIVED')
+        ->and($file->verified_at)->not->toBeNull()
+        ->and($manifest->files->first()->document_archive_id)->toBe($verifiedObjectId)
+        ->and($fixture['gateway']->uploadAttempts())->toBe($uploadsAfterArchive)
+        ->and($archives->verifiedFinalArchiveRecordKeys($writer, $candidate))->toBe(['engp:'.$recordId]);
+
+    $this->actingAs($writer)->get($historyDetail)
+        ->assertRedirect(route('final-archives.index', ['source' => 'engp', 'record' => $recordId]));
+    $this->actingAs($writer)->get(route('submission-tracking.index', ['view' => 'history']))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('workspaceQueues.history', fn ($rows): bool => collect($rows)->doesntContain(
+                fn ($row): bool => ($row['source'] ?? null) === 'engp' && (int) ($row['source_id'] ?? 0) === $recordId,
+            )));
+    $this->actingAs($writer)->get(route('final-archives.index', ['source' => 'engp', 'record' => $recordId]))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('selected.source', 'engp')
+            ->where('selected.source_id', $recordId)
+            ->where('selected.latest_manifest.status', 'ARCHIVED'));
+    $this->actingAs($foreignReader)->get(route('final-archives.files.show', $file->getKey()).'?download=1')->assertNotFound();
+})->with([
+    'cbep' => ['cbep'], 'elcac' => ['elcac'], 'ngp staff monthly accomplishment' => ['ngp_staff_accomplishment'],
+    'forest disturbance' => ['forest_disturbance'], 'monthly PMD and FMB' => ['monthly_accomplishment_pmd_fmb'],
+    'CENRO nursery seedling' => ['cenro_nursery_seedling'], 'tree replacement monthly' => ['tree_replacement'],
+    'RIMS' => ['rims'], 'NGP Produce quarterly' => ['ngp_produce'], 'nursery maintenance quarterly' => ['nursery_maintenance'],
+    'site visit quarterly' => ['site_visit'], 'weekly accomplishment' => ['weekly_accomplishment'],
+]);

@@ -57,8 +57,8 @@ final class ConservationReportWorkflowRegistry
             ...$definition,
             'key' => $key,
             'label' => $definition['label'] ?? 'Report Module',
-            'period_field' => 'reporting_period',
-            'period_label' => 'Reporting Period',
+            'period_field' => $definition['period_field'] ?? 'reporting_period',
+            'period_label' => $definition['period_label'] ?? 'Reporting Period',
             'periods' => $periods,
             'activities' => $activities,
             'default_activity' => $definition['default_activity'] ?? ($activities[0] ?? $definition['label'] ?? 'Report'),
@@ -184,10 +184,11 @@ final class ConservationReportWorkflowRegistry
     public function all(): array
     {
         $definitions = app(ReportRequirementRegistry::class)
-            ->definitions(ReportRequirementRegistry::PA, true, ModuleDefinition::IMPLEMENTATION_GENERIC);
+            ->definitions(ReportRequirementRegistry::PA, true, ModuleDefinition::IMPLEMENTATION_GENERIC)
+            ->all();
 
-        return $definitions->isNotEmpty()
-            ? $definitions->map(fn (array $definition): ?array => $this->find((string) $definition['key']))->filter()->values()->all()
+        return $definitions !== []
+            ? $definitions
             : array_values(array_filter(array_map(fn (string $key) => $this->defaultFind($key), $this->defaultKeys())));
     }
 
@@ -199,16 +200,14 @@ final class ConservationReportWorkflowRegistry
 
     public function isActive(string $key): bool
     {
-        $module = ModuleDefinition::query()->generic()->notRetired()->requirementDomain(ReportRequirementRegistry::PA)
-            ->where(fn ($query) => $query->where('code', $key)->orWhere('requirement_key', $key))->first();
-        if ($module) return (bool) $module->is_active;
-        $bound = ModuleDefinition::query()->generic()->requirementDomain(ReportRequirementRegistry::PA)
-            ->where(fn ($query) => $query->where('code', $key)->orWhere('requirement_key', $key))->exists();
-
-        return ! $bound && $this->defaultFind($key) !== null;
+        $requirements = app(ReportRequirementRegistry::class);
+        $definition = $requirements->find(ReportRequirementRegistry::PA, $key);
+        return $definition
+            ? $requirements->find(ReportRequirementRegistry::PA, $key, true) !== null
+            : $this->defaultFind($key) !== null;
     }
 
-    /** @return list<string> Generic PA report modules supported by the PAMO workflow. */
+    /** @return list<string> Configured generic PA report modules PAMO may read. */
     public function pamoSubmissionKeys(bool $activeOnly = true): array
     {
         $activeKeys = collect(app(ReportRequirementRegistry::class)->definitions(
@@ -217,7 +216,10 @@ final class ConservationReportWorkflowRegistry
             ModuleDefinition::IMPLEMENTATION_GENERIC,
         ))->pluck('key')->all();
 
-        return ModuleDefinition::query()->when($activeOnly, fn ($query) => $query->active())->generic()->notRetired()
+        $query = ModuleDefinition::query()->generic()->notRetired();
+        if ($activeOnly) $query->active();
+
+        return $query
             ->requirementDomain(ReportRequirementRegistry::PA)
             ->whereIn('program_area', [
                 ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,

@@ -96,6 +96,7 @@ export default function DocumentTurnaround({ data = null, selectedUnit = 'conser
             </div>}
             maxWidth="max-w-5xl"
             compact
+            avoidBottomDebugbar
         >
             {detailRow && <ParticipantReports key={String(detailRow.participant_key)} row={detailRow} rows={rows} unit={unit} setDetailRow={setDetailRow} />}
         </CrudDetailsModal>

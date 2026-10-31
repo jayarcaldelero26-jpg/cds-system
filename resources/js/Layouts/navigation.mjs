@@ -37,7 +37,7 @@ export function matchesNavigationItem(item, url) {
     return Object.entries(item.activeQuery || {}).every(([key, value]) => value === null ? !currentParams.has(key) : currentParams.get(key) === value);
 }
 
-export function withGenericModuleNavigation(navigation, modules = [], auth = {}, nativeModules = []) {
+export function withGenericModuleNavigation(navigation, modules = [], auth = {}, nativeModules = [], moduleCatalog = null) {
     // The authenticated category is the identity boundary. Inferring PAMO
     // mode from a browse flag made the module catalog fall back to the static
     // permission-filtered links on pages where that flag was also true.
@@ -63,15 +63,32 @@ export function withGenericModuleNavigation(navigation, modules = [], auth = {},
         });
         return result;
     }, {});
+    const catalogReady = moduleCatalog?.ready === true && Array.isArray(moduleCatalog.entries);
+    const catalogStatus = new Map(catalogReady
+        ? moduleCatalog.entries
+            .filter(entry => entry?.href)
+            .map(entry => [navigationHrefKey(entry.href), entry])
+        : []);
+    const isKnownInactive = href => {
+        const entry = catalogReady ? catalogStatus.get(navigationHrefKey(href)) : null;
+        return Boolean(entry && (entry.is_active === false || entry.is_retired === true));
+    };
     const represented = new Set();
     const merged = navigation.map(item => {
         const area = Object.entries(areas).find(([, value]) => value.label === item.label)?.[0];
-        if (!area) return item;
-        if (!grouped[area] && !pamoScoped) return item;
+        if (!area) {
+            if (!item.children?.length || !catalogReady) return item;
+            return { ...item, children: item.children.filter(child => !isKnownInactive(child.href)) };
+        }
+        if (!grouped[area] && !pamoScoped) {
+            if (!catalogReady || !item.children?.length) return item;
+            return { ...item, children: item.children.filter(child => !isKnownInactive(child.href)) };
+        }
 
         const available = grouped[area] || [];
         const byHref = new Map(available.map(child => [navigationHrefKey(child.href), child]));
         const existingChildren = (item.children || []).flatMap(child => {
+            if (isKnownInactive(child.href)) return [];
             const key = navigationHrefKey(child.href);
             const catalogChild = key ? byHref.get(key) : null;
             if (catalogChild) {
@@ -135,7 +152,7 @@ export function filterNavigationByUnit(items, unit, inheritedUnit = null, auth =
 }
 
 /** Exact navigation model consumed by AuthenticatedLayout's Sidebar render. */
-export function buildSidebarNavigation(navigation, modules, auth, nativeModules = [], unit = null) {
+export function buildSidebarNavigation(navigation, modules, auth, nativeModules = [], unit = null, moduleCatalog = null) {
     const pamoScoped = auth.user?.user_category === 'PAMO' && auth.canViewPamoReports === true;
     if (pamoScoped) {
         const preserved = navigation.filter(item => ['Manual Operation', 'Conservation Database', 'Alerts', 'Calendar', 'Administration'].includes(item.label));
@@ -151,7 +168,7 @@ export function buildSidebarNavigation(navigation, modules, auth, nativeModules 
         ];
         return filterNavigationByUnit(pamoNavigation, unit, null, auth);
     }
-    const merged = withGenericModuleNavigation(navigation, modules, auth, nativeModules);
+    const merged = withGenericModuleNavigation(navigation, modules, auth, nativeModules, moduleCatalog);
     return filterNavigationByUnit(
         merged.filter(item => !unit || item.section === 'BOTH' || item.section === 'CDS'),
         unit,

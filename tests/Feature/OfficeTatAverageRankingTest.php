@@ -227,6 +227,74 @@ test('historical gap reads leave live event averages and persisted routing evide
         ->and(collect($sideEffectTables)->mapWithKeys(fn (string $table): array => [$table => DB::table($table)->count()])->all())->toBe($beforeCounts);
 });
 
+test('live CENRO routing average is exposed separately and uses accepted event intervals', function (): void {
+    $record = officeTatEngpRecord($this->actor, '2026-01');
+    officeTatEvent($this->actor, $record, 'received', '2026-01-03 09:00:00', 'PENRO Davao Oriental', 'CENRO Baganga');
+    officeTatEvent($this->actor, $record, 'forwarded', '2026-01-05 09:00:00', 'CENRO Baganga', 'PENRO Davao Oriental');
+    $this->actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    $previousNow = CarbonImmutable::getTestNow();
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-03-31 12:00:00', 'Asia/Manila'));
+
+    try {
+        $this->withoutVite()->actingAs($this->actor)
+            ->get('/admin/office-tat/routing-average?processing_period=2026-H1&as_of_date=2026-04-30&return_unit=development&unit=conservation&category=PAMO&workflow=conservation%3Aother&evidence_type=historical')
+            ->assertOk()
+            ->assertInertia(fn ($page) => $page
+                ->component('Admin/OfficeTat/LiveRoutingAverage')
+                ->where('liveAnalytics.category', 'CENRO')
+                ->where('liveAnalytics.evidence_type', 'live')
+                ->where('liveAnalytics.processing_period', '2026-H1')
+                ->where('liveAnalytics.as_of_date', '2026-03-31')
+                ->where('filters.processing_period', '2026-H1')
+                ->where('filters.as_of_date', '2026-03-31')
+                ->where('filters.return_unit', 'development')
+                ->where('liveAnalytics.rows', fn ($rows): bool => collect($rows)->contains(fn (array $row): bool =>
+                    $row['office'] === 'CENRO Baganga'
+                        && $row['documents_received'] === 1
+                        && $row['tat_completed_documents'] === 1
+                        && (float) $row['tat_elapsed_seconds_total'] === 172800.0
+                        && (float) $row['tat_average_elapsed_seconds'] === 172800.0
+                ))
+                ->missing('liveAnalytics.rows.0.historical_report_count')
+                ->missing('liveAnalytics.rows.0.score'));
+    } finally {
+        CarbonImmutable::setTestNow($previousNow);
+    }
+});
+
+test('visible live routing navigation and route use the same CENRO authorization scope', function (): void {
+    $reader = User::factory()->create([
+        'section' => 'CENRO_CDS_CHIEF',
+        'office_designated' => 'CENRO Baganga',
+        'unit_assignment' => null,
+        'is_approved' => true,
+        'is_active' => true,
+    ]);
+    $reader->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+
+    $this->withoutVite()->actingAs($reader)
+        ->get('/admin/office-tat?unit=development&processing_period=2026-H2&as_of_date=2026-10-26')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('selectedUnit', 'development')
+            ->where('canViewLiveRoutingAverage', true));
+
+    $this->actingAs($reader)
+        ->get('/admin/office-tat/routing-average?processing_period=2026-H2&as_of_date=2026-10-26&return_unit=development')
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->where('liveAnalytics.category', 'CENRO')
+            ->where('liveAnalytics.evidence_type', 'live')
+            ->where('filters.return_unit', 'development'));
+
+    $pamo = User::factory()->create(['section' => 'PAMO', 'unit_assignment' => null, 'is_approved' => true, 'is_active' => true]);
+    $pamo->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    $this->actingAs($pamo)
+        ->get('/admin/office-tat/routing-average?processing_period=2026-H2&as_of_date=2026-10-26')
+        ->assertForbidden();
+});
+
 test('direct-to-PENRO historical reports do not receive a synthetic CENRO release interval', function (): void {
     $area = ProtectedArea::query()->create([
         'name' => 'Mt. Hamiguitan Range Wildlife Sanctuary', 'short_name' => 'MHRWS',
@@ -593,10 +661,10 @@ test('assessment keys default to the Philippine semester and normalize legacy pe
             ->and($data['assessment_period']['semester'])->toBe('H2');
 
         $this->actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
-        $this->actingAs($this->actor)->get(route('office-tat.index', ['category' => 'CENRO', 'processing_period' => '2026-Q4']))
-            ->assertRedirect(route('office-tat.index', ['category' => 'CENRO', 'processing_period' => '2026-H2']));
-        $this->actingAs($this->actor)->get(route('office-tat.index', ['category' => 'CENRO', 'processing_period' => '2026-11']))
-            ->assertRedirect(route('office-tat.index', ['category' => 'CENRO', 'processing_period' => '2026-H2']));
+        $this->actingAs($this->actor)->get(route('office-tat.index', ['unit' => 'development', 'processing_period' => '2026-Q4']))
+            ->assertOk()->assertInertia(fn ($page) => $page->where('recordedAssessment.period_key', '2026-H2'));
+        $this->actingAs($this->actor)->get(route('office-tat.index', ['unit' => 'development', 'processing_period' => '2026-11']))
+            ->assertOk()->assertInertia(fn ($page) => $page->where('recordedAssessment.period_key', '2026-H2'));
     } finally {
         CarbonImmutable::setTestNow($previousNow);
     }

@@ -418,9 +418,9 @@ final class DashboardMonitoringService
     private function workRow(array $row): array
     {
         return [
-            'id' => $row['id'], 'office' => $row['office_or_pa'] ?: '—', 'report' => $row['source_label'],
-            'period' => $row['reporting_period'] ?: '—', 'due' => $row['deadline_submission'],
-            'status' => $row['dashboard_status'], 'context' => $row['next_action'] ?: ($row['routing']['current_location'] ?? 'Awaiting report preparation'),
+            'id' => $row['id'], 'office' => $row['office_or_pa'] ?: 'Not recorded', 'report' => $row['source_label'],
+            'period' => $row['reporting_period'] ?: 'Not provided', 'due' => $row['deadline_submission'],
+            'status' => $row['dashboard_status'], 'context' => $row['next_action'] ?: ($row['routing']['current_location'] ?? 'Not recorded'),
             'days_overdue' => $row['days_overdue'], 'timeliness' => $row['timeliness'] ?? null,
             'source_url' => route('submission-tracking.index', ['source' => $row['source'], 'source_id' => $row['source_id']]),
         ];
@@ -431,8 +431,8 @@ final class DashboardMonitoringService
     {
         return [...$this->workRow($row),
             'program' => $row['program_key'] === 'engp' ? 'ENGP' : 'PA', 'received' => $row['date_received_penro'],
-            'days' => $row['days_overdue'] !== null ? $row['days_overdue'].' overdue' : ($row['day_delta'] === null ? '—' : ($row['day_delta'] > 0 ? $row['day_delta'].' early' : ($row['day_delta'] < 0 ? abs($row['day_delta']).' late' : '0 early'))),
-            'next_action' => $row['next_action'] ?: ($row['routing']['current_location'] ?? '—'),
+            'days' => $row['days_overdue'] !== null ? $row['days_overdue'].' overdue' : ($row['day_delta'] === null ? 'Not recorded' : ($row['day_delta'] > 0 ? $row['day_delta'].' early' : ($row['day_delta'] < 0 ? abs($row['day_delta']).' late' : '0 early'))),
+            'next_action' => $row['next_action'] ?: 'Not recorded',
         ];
     }
 
@@ -461,10 +461,10 @@ final class DashboardMonitoringService
             'id' => $row['id'],
             'report' => $row['module'] ?? $row['activity_name'] ?? 'PA Report',
             'activity' => $row['activity_name'] ?? null,
-            'office_or_pa' => $row['office_or_pa'] ?? '—',
+            'office_or_pa' => $row['office_or_pa'] ?? 'Not recorded',
             'deadline' => $deadline?->toDateString(),
             'days_overdue' => $deadline ? max(0, $deadline->diffInDays($today)) : null,
-            'current_stage' => data_get($row, 'routing.current_location') ?: ($row['current_document_location'] ?? $row['submission_status'] ?? '—'),
+            'current_stage' => data_get($row, 'routing.current_location') ?: ($row['current_document_location'] ?? $row['submission_status'] ?? 'Not recorded'),
             'source_url' => $row['source_url'] ?? null,
         ];
     }

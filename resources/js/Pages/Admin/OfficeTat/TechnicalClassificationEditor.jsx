@@ -82,7 +82,7 @@ export default function TechnicalClassificationEditor({ items = [], canConfigure
             Technical classification · {items.filter(item => item.is_highly_technical == null).length} workflows need an approved classification
         </summary>
         <div className="space-y-3 border-t border-gray-100 p-4 dark:border-gray-800">
-            <p className="text-xs leading-5 text-gray-600 dark:text-gray-300">Classification affects only the final tie-break. Choose one workflow to review its approved source and effective dates.</p>
+            <p className="text-xs leading-5 text-gray-600 dark:text-gray-300">Classification supplies criterion 5 after TC, SE, early percentage and verified volume. Choose one workflow to review its approved source and effective dates.</p>
             <ScopedOptionSelect id="office-tat-classification-workflow" label="Workflow" value={selected ? selected.domain + ':' + selected.workflow_key : ''} options={options} onChange={setSelectedKey} placeholder="Search registered workflows" disabled={!canConfigure} />
             {selected && <div className="rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                 <p className="text-xs font-semibold text-gray-800 dark:text-gray-100">

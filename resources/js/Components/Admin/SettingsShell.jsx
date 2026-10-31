@@ -20,7 +20,7 @@ export default function SettingsShell({ children, active }) {
             <span className="flex h-9 w-9 items-center justify-center rounded-xl border border-green-200 bg-green-50 text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300"><Icon icon="lucide:settings-2" width="17" height="17" aria-hidden="true" /></span>
             <div className="min-w-0"><p className="text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">Administration</p><h1 className="mt-0.5 text-xl font-extrabold tracking-tight text-gray-900 dark:text-white">Settings</h1><p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">Manage CDS-SMART configuration and connected services.</p></div>
         </header>
-        <div className="mt-5 grid gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
             <nav aria-label="Settings navigation" className="rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <p className="px-3 pb-2 pt-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">Settings</p>
                 <div className="flex gap-1 overflow-x-auto lg:block lg:space-y-1 lg:overflow-visible">

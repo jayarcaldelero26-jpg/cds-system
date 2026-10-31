@@ -16,14 +16,14 @@ const variants = {
 };
 
 const formatNumber = (value) =>
-value ?
+value !== null && value !== undefined && value !== '' ?
 Number(value).toLocaleString(undefined, {
   minimumFractionDigits: 2,
   maximumFractionDigits: 2
 }) :
-'—';
+'Not recorded';
 
-const displayValue = (value) => value || '—';
+const displayValue = (value) => value === null || value === undefined || value === '' ? 'Not provided' : value;
 
 function DetailItem({ label, value, className = '' }) {
   return (
@@ -216,9 +216,9 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
     clickableCell(
       area,
       <span className="whitespace-nowrap font-medium text-gray-800 dark:text-gray-200">
-                        {area.area_hectares ?
+                        {area.area_hectares !== null && area.area_hectares !== undefined && area.area_hectares !== '' ?
         `${formatNumber(area.area_hectares)} ha` :
-        '—'}
+        'Not recorded'}
                     </span>
     )
   },
@@ -229,9 +229,9 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
     clickableCell(
       area,
       <span className="whitespace-nowrap text-gray-700 dark:text-gray-300">
-                        {area.core_zone_hectares ?
+                        {area.core_zone_hectares !== null && area.core_zone_hectares !== undefined && area.core_zone_hectares !== '' ?
         `${formatNumber(area.core_zone_hectares)} ha` :
-        '—'}
+        'Not recorded'}
                     </span>
     )
   },
@@ -242,9 +242,9 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
     clickableCell(
       area,
       <span className="whitespace-nowrap text-gray-700 dark:text-gray-300">
-                        {area.buffer_zone_hectares ?
+                        {area.buffer_zone_hectares !== null && area.buffer_zone_hectares !== undefined && area.buffer_zone_hectares !== '' ?
         `${formatNumber(area.buffer_zone_hectares)} ha` :
-        '—'}
+        'Not recorded'}
                     </span>
     )
   },
@@ -411,7 +411,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
                                         Protected Area Full Details
                                     </h3>
                                     <p className="truncate text-xs text-gray-500 dark:text-gray-400">
-                                        {selectedArea.name || 'N/A'}
+                                        {selectedArea.name || 'Not recorded'}
                                         {selectedArea.short_name ?
                   ` — ${selectedArea.short_name}` :
                   ''}
@@ -532,11 +532,11 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
                                                 Total Area
                                             </p>
                                             <p className="mt-1 text-sm font-bold text-green-700 dark:text-green-400">
-                                                {selectedArea.area_hectares ?
+                                                {selectedArea.area_hectares !== null && selectedArea.area_hectares !== undefined && selectedArea.area_hectares !== '' ?
                       `${formatNumber(
                         selectedArea.area_hectares
                       )} ha` :
-                      '—'}
+                      'Not recorded'}
                                             </p>
                                         </div>
                                     </div>

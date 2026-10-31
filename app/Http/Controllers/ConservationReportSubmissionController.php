@@ -39,7 +39,7 @@ class ConservationReportSubmissionController extends Controller
     {
         $meetingWorkflow = $this->pambCompliance->isMeeting($workflow);
         $workflowConfig = $this->workflow($workflow);
-        $configuredGenericFlow = (bool) ($workflowConfig['configured_generic_flow'] ?? false);
+        $configuredGenericFlow = ($workflowConfig['configured_generic_flow'] ?? false) === true;
         $config = [...$workflowConfig, 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow), 'activity_required' => true, 'document_type_required' => $configuredGenericFlow, 'period_required' => $configuredGenericFlow, 'date_conducted_required' => $meetingWorkflow, 'date_accomplished_required' => ! $meetingWorkflow];
         $submissions = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
             ->where('workflow_key', $workflow)
@@ -79,11 +79,14 @@ class ConservationReportSubmissionController extends Controller
     public function store(Request $request, string $workflow): RedirectResponse
     {
         abort_unless(! $this->pambAccess->isPamo($request->user()), 403, 'PAMO reports must be created from a saved draft.');
-        if (! $this->workflows->isActive($workflow)) {
-            throw ValidationException::withMessages(['workflow' => 'This report module is inactive and cannot accept a new report.']);
-        }
         app(SubmissionFormScopeService::class)->normalizeRequest($request);
         $config = $this->workflow($workflow);
+        if (array_key_exists('is_active', $config) && ! $config['is_active']) {
+            throw ValidationException::withMessages(['workflow' => 'This report module is inactive and cannot accept a new submission.']);
+        }
+        if (($config['configured_generic_flow'] ?? null) === false) {
+            throw ValidationException::withMessages(['workflow' => 'Configure this report workflow before submitting reports.']);
+        }
         $validated = $request->validate($this->reportRules($config, requireMov: true, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString()));
         $this->assertNoFutureActualDates($validated, $request, $workflow);
         $validated['target_office'] = $this->resolvedTargetOffice($request, $validated['target_office'] ?? null);
@@ -132,7 +135,7 @@ class ConservationReportSubmissionController extends Controller
         if (app(SubmissionTrackingService::class)->isRoutingComplete($submission)) {
             throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
         }
-        $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString()), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
+        $validated = $request->validate($this->reportRules($config, $submission->document_type, activityName: $request->string('activity_name')->toString(), legacyActivityName: $submission->activity_name), $this->attachmentMessages($request->string('document_type')->toString() ?: $submission->document_type));
         $this->assertNoFutureActualDates($validated, $request, $workflow, $submission);
         $validated['target_office'] = $this->pambAccess->isPamo($request->user())
             ? $submission->target_office
@@ -176,9 +179,11 @@ class ConservationReportSubmissionController extends Controller
     }
 
     /** @param array<string, mixed> $config */
-    private function reportRules(array $config, ?string $legacyDocumentType = null, bool $requireMov = false, ?string $activityName = null): array
+    private function reportRules(array $config, ?string $legacyDocumentType = null, bool $requireMov = false, ?string $activityName = null, ?string $legacyActivityName = null): array
     {
         $activityDocuments = $config['activity_documents'] ?? [];
+        $configuredGeneric = ($config['configured_generic_flow'] ?? false) === true;
+        $activities = array_values(array_unique([...($config['activities'] ?? []), ...array_filter([$legacyActivityName])]));
         $documents = array_values(array_unique(array_filter([
             ...array_merge(...array_values($activityDocuments ?: ['default' => $config['documents'] ?? []])),
             $legacyDocumentType,
@@ -188,9 +193,9 @@ class ConservationReportSubmissionController extends Controller
         return [
             'protected_area_id' => ['required', 'exists:protected_areas,id'],
             'target_office' => ['required', 'string', 'max:255'],
-            'activity_name' => ['required', 'string', 'max:255'],
-            'document_type' => [($config['configured_generic_flow'] ?? false) ? 'required' : 'nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
-            'reporting_period' => [($config['configured_generic_flow'] ?? false) ? 'required' : 'nullable', 'string', Rule::in($config['periods'] ?? [])],
+            'activity_name' => ['required', 'string', 'max:255', ...($configuredGeneric ? [Rule::in($activities)] : [])],
+            'document_type' => [$configuredGeneric ? 'required' : 'nullable', 'string', Rule::in(array_values(array_unique([...$allowedDocuments, $legacyDocumentType])))],
+            'reporting_period' => [$configuredGeneric ? 'required' : 'nullable', 'string', Rule::in($config['periods'] ?? [])],
             'date_conducted_ranges' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'array', 'min:1'] : [],
             'date_conducted_ranges.*' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['array'] : [],
             'date_conducted_ranges.*.from' => $this->dateConductedRanges->supportsWorkflow($config['key'] ?? null) ? ['required', 'date_format:Y-m-d'] : [],
@@ -306,6 +311,9 @@ class ConservationReportSubmissionController extends Controller
             'deadline_mode' => $module->deadline_mode, 'default_deadline_days' => $module->default_deadline_days,
             'allow_deadline_override' => $module->allow_deadline_override,
             'module_definition_code' => $module->code,
+            'implementation_type' => $module->implementation_type,
+            'is_active' => (bool) $module->is_active,
+            'configured_generic_flow' => (bool) data_get($module->requirement_metadata, 'configured_generic_flow', false),
         ];
     }
 

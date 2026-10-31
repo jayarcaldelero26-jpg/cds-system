@@ -5,8 +5,8 @@ import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import { ProfileDetails, ProfileFormModal } from './PlanProfileFields';
 
-const show = value => value === null || value === undefined || value === '' ? '—' : value;
-const period = profile => profile?.planning_period_start || profile?.planning_period_end ? `${show(profile.planning_period_start)}–${show(profile.planning_period_end)}` : '—';
+const show = value => value === null || value === undefined || value === '' ? 'Not provided' : value;
+const period = profile => profile?.planning_period_start || profile?.planning_period_end ? `${show(profile.planning_period_start)}–${show(profile.planning_period_end)}` : 'Not provided';
 const completeness = profile => `${profile.completeness_completed} / ${profile.completeness_total} Complete`;
 const buttonClass = 'cds-button-interaction rounded-xl bg-gradient-to-b from-green-800 to-green-950 px-4 py-2.5 text-xs font-bold !text-white transition hover:from-green-700 hover:to-green-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 disabled:cursor-not-allowed disabled:opacity-50';
 

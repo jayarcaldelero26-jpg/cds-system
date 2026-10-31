@@ -84,13 +84,19 @@ class ModuleDefinition extends Model
 
             if ($domain === 'pa') {
                 $scoped->orWhere(function (Builder $legacy) use ($domain): void {
-                    $legacy->whereNull('requirement_domain')->where('program_area', '!=', ProgramArea::ENGP->value);
+                    $legacy->whereNull('requirement_domain')->whereNotIn('program_area', [
+                        ProgramArea::ENGP->value,
+                        ProgramArea::DEVELOPMENT->value,
+                    ]);
                 });
             }
 
             if ($domain === 'engp') {
                 $scoped->orWhere(function (Builder $legacy): void {
-                    $legacy->whereNull('requirement_domain')->where('program_area', ProgramArea::ENGP->value);
+                    $legacy->whereNull('requirement_domain')->whereIn('program_area', [
+                        ProgramArea::ENGP->value,
+                        ProgramArea::DEVELOPMENT->value,
+                    ]);
                 });
             }
         });

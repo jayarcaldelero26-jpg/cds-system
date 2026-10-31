@@ -673,7 +673,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
                                 <h3 className="font-bold text-gray-900 dark:text-white text-base">AWS Monitoring Full Details</h3>
-                                <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'N/A'}  Station: {selectedRecord.station_name}</p>
+                                <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'Not recorded'}  Station: {selectedRecord.station_name || 'Not recorded'}</p>
                             </div>
                         </div>
 

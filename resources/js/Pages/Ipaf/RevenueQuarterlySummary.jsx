@@ -11,9 +11,9 @@ import FloatingInput from '@/Components/Form/FloatingInput';
 import FloatingSelect from '@/Components/Form/FloatingSelect';
 
 const quarterMonths = { 1: 'January – March', 2: 'April – June', 3: 'July – September', 4: 'October – December' };
-const money = value => value === null || value === undefined ? '—' : `₱${formatMoney(value)}`;
+const money = value => value === null || value === undefined ? 'No data' : `₱${formatMoney(value)}`;
 const targetMoney = money;
-const percent = value => value === null || value === undefined ? '—' : `${value}%`;
+const percent = value => value === null || value === undefined ? 'No data' : `${value}%`;
 
 export default function RevenueQuarterlySummary({ summary = {}, targets = {}, annual = {}, protectedAreas = [], filters = {} }) {
     const { auth = {} } = usePage().props;

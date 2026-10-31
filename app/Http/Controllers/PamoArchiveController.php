@@ -201,7 +201,7 @@ final class PamoArchiveController extends Controller
         $workflow = $source['workflow'];
         $definition = $source['definition'];
         if ($archive->source_type === 'conservation') {
-            $draft = PamoPambDraft::query()->whereIn('workflow_key', $this->workflows->pamoSubmissionKeys())
+            $draft = PamoPambDraft::query()->whereIn('workflow_key', $this->workflows->pamoSubmissionKeys(false))
                 ->where('protected_area_id', $facts['protected_area_id'])->where('pamo_office_id', $facts['pamo_office_id'])
                 ->where('status', 'forwarded')->where($definition['column'], $archive->source_id)->firstOrFail();
             $workflow = (string) $draft->workflow_key;

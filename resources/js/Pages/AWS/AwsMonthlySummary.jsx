@@ -6,9 +6,8 @@ import { useEffect, useRef, useState } from 'react';
 import AwsSummaryExportModal from './AwsSummaryExportModal';
 import AwsWeatherRemarkBadge from './AwsWeatherRemarkBadge';
 
-const emptyMark = '\u2014';
-const blank = (value) => value === null || value === undefined || value === '' ? emptyMark : value;
-const number = (value, decimals = 2) => value === null || value === undefined ? emptyMark : Number(value).toFixed(decimals);
+const blank = (value) => value === null || value === undefined || value === '' ? 'Not recorded' : value;
+const number = (value, decimals = 2) => value === null || value === undefined ? 'No data' : Number(value).toFixed(decimals);
 const normalizeMode = (value) => value === 'custom_range' ? 'custom_range' : 'one_month';
 
 export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filters = {}, yearOptions = [], monthOptions = [], canImport = false, onImport }) {
@@ -90,7 +89,7 @@ export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filt
         window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
     };
     const monthName = (value) => monthOptions.find((month) => String(month.value) === String(value))?.label || new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date(2000, Number(value) - 1, 1));
-    const dateLabel = (value) => value ? new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(value + 'T00:00:00')) : emptyMark;
+    const dateLabel = (value) => value ? new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(value + 'T00:00:00')) : 'Not recorded';
     const reportingPeriod = confirmedForm.mode === 'one_month'
         ? monthName(confirmedForm.month) + ' ' + confirmedForm.year
         : dateLabel(confirmedForm.date_from) + String.fromCharCode(8211) + dateLabel(confirmedForm.date_to);
@@ -109,7 +108,7 @@ export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filt
     const rowValues = (row) => [row.period, number(row.average_atmospheric_pressure), number(row.average_air_temperature), number(row.average_vapor_pressure_deficit, 3), number(row.average_relative_humidity), number(row.mean_wind_direction), number(row.total_precipitation), number(row.average_wind_speed), row.remarks];
     const observationCount = rows.reduce((total, row) => total + (Number(row.observation_count) || 0), 0);
     const expectedObservations = rows.reduce((total, row) => total + (Number(row.expected_observations) || 0), 0);
-    const completeness = expectedObservations > 0 ? ((observationCount / expectedObservations) * 100).toFixed(1) + '%' : emptyMark;
+    const completeness = expectedObservations > 0 ? ((observationCount / expectedObservations) * 100).toFixed(1) + '%' : 'No completed samples';
     const totalPrecipitation = rows.reduce((total, row) => row.total_precipitation === null || row.total_precipitation === undefined ? total : total + (Number(row.total_precipitation) || 0), 0);
     const interpretableDays = rows.filter((row) => row.remarks && !['No Data', 'Weather Condition Unavailable'].includes(row.remarks)).length;
 
@@ -128,7 +127,7 @@ export default function AwsMonthlySummary({ rows = [], protectedAreas = [], filt
             <div className="mt-3 flex flex-wrap gap-2"><button ref={exportButtonRef} type="button" onClick={() => setExportModalOpen(true)} aria-haspopup="dialog" aria-expanded={exportModalOpen} data-cds-action="true" data-cds-action-variant="primary" className="inline-flex items-center gap-2 rounded-xl bg-green-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2">Export</button></div>
             </div>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {[['Observations', observationCount.toLocaleString()], ['Data Completeness', completeness], ['Total Precipitation', totalPrecipitation === 0 && rows.every((row) => row.total_precipitation === null || row.total_precipitation === undefined) ? emptyMark : totalPrecipitation.toFixed(2) + ' mm'], ['Interpretable Weather Days', interpretableDays.toLocaleString()]].map(([label, value]) => <div key={label} className="cds-card-surface rounded-2xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"><span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</span><span className="mt-1 block text-lg font-bold text-green-900 dark:text-green-300">{value}</span></div>)}
+                {[['Observations', observationCount.toLocaleString()], ['Data Completeness', completeness], ['Total Precipitation', totalPrecipitation === 0 && rows.every((row) => row.total_precipitation === null || row.total_precipitation === undefined) ? 'No data' : totalPrecipitation.toFixed(2) + ' mm'], ['Interpretable Weather Days', interpretableDays.toLocaleString()]].map(([label, value]) => <div key={label} className="cds-card-surface rounded-2xl border border-gray-100 bg-white px-4 py-3 shadow-sm dark:border-gray-800 dark:bg-gray-900"><span className="block text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</span><span className="mt-1 block text-lg font-bold text-green-900 dark:text-green-300">{value}</span></div>)}
             </div>
 
         {groupEntries.map((group) => <section key={String(group.name || 'unknown')} className="cds-card-surface overflow-x-auto rounded-2xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">

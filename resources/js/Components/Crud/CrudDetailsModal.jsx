@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import CrudModalHeader from './CrudModalHeader';
 import CrudModalFooter from './CrudModalFooter';
 import CrudSummaryGrid from './CrudSummaryGrid';
@@ -8,6 +8,7 @@ import TimelinessBadge from '../TimelinessBadge';
 import Button from '@/Components/Button';
 import CrudModalCardContext from './CrudModalCardContext';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import { fixedBottomOverlayInset } from '@/Utils/fixedBottomOverlayInset.mjs';
 
 function standardizedReportSummary(summary, reportData = null) {
     const items = summary?.props?.items;
@@ -26,20 +27,63 @@ function standardizedReportSummary(summary, reportData = null) {
     const timeliness = findItem(/timeliness/i) || (reportData?.timeliness ? { value: reportData.timeliness } : null);
     if (!reportStatus || !timeliness) return summary;
     return <CrudSummaryGrid columns={4} items={[
-        reportingPeriod ? { ...reportingPeriod, label: 'Reporting Period' } : { label: 'Reporting Period', value: reportData?.semester || reportData?.quarter || reportData?.reporting_period || '—' },
+        reportingPeriod ? { ...reportingPeriod, label: 'Reporting Period' } : { label: 'Reporting Period', value: reportData?.semester || reportData?.quarter || reportData?.reporting_period || 'Not provided' },
         { ...reportStatus, label: 'Submission Status' },
-        deadline ? { ...deadline, label: 'Deadline' } : { label: 'Deadline', value: reportData?.deadline_submission || '—' },
+        deadline ? { ...deadline, label: 'Deadline' } : { label: 'Deadline', value: reportData?.deadline_submission || 'Not recorded' },
         timeliness.render ? { ...timeliness, label: 'Timeliness Rating' } : { ...timeliness, label: 'Timeliness Rating', render: () => <TimelinessBadge value={timeliness.value || reportData?.timeliness} /> },
     ]} />;
 }
 
-export default function CrudDetailsModal({ open, icon, title, subtitle, onClose, children, summary, attachments, report = false, darkTheme = false, canEdit = false, canDelete = false, onEdit, onDelete, editLabel = 'Edit Details', deleteLabel = 'Delete Record', closeLabel = 'Close Details', maxWidth = 'max-w-4xl', compact = false, footerActions = null, closeOnEscape = true, busyOverlay = null, busyOverlayPresentation = 'default' }) {
+export default function CrudDetailsModal({ open, icon, title, subtitle, onClose, children, summary, attachments, report = false, darkTheme = false, canEdit = false, canDelete = false, onEdit, onDelete, editLabel = 'Edit Details', deleteLabel = 'Delete Record', closeLabel = 'Close Details', maxWidth = 'max-w-4xl', compact = false, footerActions = null, closeOnEscape = true, busyOverlay = null, busyOverlayPresentation = 'default', avoidBottomDebugbar = false }) {
     const overlayRef = useRef(null);
     const panelRef = useRef(null);
     const busyRef = useRef(null);
     const previousFocusRef = useRef(null);
+    const [bottomObstruction, setBottomObstruction] = useState(0);
     const busy = Boolean(busyOverlay);
     const { present, phase, onTransitionEnd } = useModalMotion(open, { onClose, panelRef, layerRef: overlayRef, closeOnEscape: busy ? false : closeOnEscape });
+    useLayoutEffect(() => {
+        if (!present || !avoidBottomDebugbar || typeof document === 'undefined') {
+            setBottomObstruction(0);
+            return undefined;
+        }
+
+        const toolbar = document.querySelector('.phpdebugbar');
+        if (!toolbar || !panelRef.current) {
+            setBottomObstruction(0);
+            return undefined;
+        }
+
+        const measure = () => {
+            const toolbarStyle = window.getComputedStyle(toolbar);
+            const toolbarRect = toolbar.getBoundingClientRect();
+            const panelRect = panelRef.current?.getBoundingClientRect();
+            const visible = toolbarStyle.position === 'fixed'
+                && toolbarStyle.display !== 'none'
+                && toolbarStyle.visibility !== 'hidden'
+                && Number(toolbarStyle.opacity || 1) > 0;
+            const nextInset = fixedBottomOverlayInset({
+                toolbarRect,
+                panelRect,
+                viewportHeight: window.innerHeight,
+                visible,
+            });
+            setBottomObstruction(current => current === nextInset ? current : nextInset);
+        };
+
+        measure();
+        const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+        resizeObserver?.observe(toolbar);
+        const mutationObserver = typeof MutationObserver === 'undefined' ? null : new MutationObserver(measure);
+        mutationObserver?.observe(toolbar, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+        window.addEventListener('resize', measure);
+
+        return () => {
+            resizeObserver?.disconnect();
+            mutationObserver?.disconnect();
+            window.removeEventListener('resize', measure);
+        };
+    }, [present, avoidBottomDebugbar]);
     useEffect(() => {
         if (busy) {
             const active = document.activeElement;
@@ -68,8 +112,8 @@ export default function CrudDetailsModal({ open, icon, title, subtitle, onClose,
     const displayAttachments = isReport && attachmentContent
         ? (attachmentContent.type === CrudSection ? attachmentContent : <CrudSection title="Attachment / MOV">{attachmentContent}</CrudSection>)
         : attachmentContent;
-    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className={`cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto ${darkTheme ? 'bg-gray-950/70 p-2 sm:p-4' : 'bg-gray-950/60 p-4'} backdrop-blur-xs`} role="presentation" onMouseDown={event => open && !busy && event.target === event.currentTarget && onClose?.()}>
-        <div ref={panelRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} data-motion-state={phase} className={`cds-modal-motion-panel relative flex ${darkTheme ? 'dark max-h-[calc(100dvh-1rem)] border-slate-700 bg-slate-950 sm:max-h-[90vh]' : 'max-h-[90vh] border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'} w-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${maxWidth}`}>
+    return <div ref={overlayRef} style={avoidBottomDebugbar ? { bottom: bottomObstruction + 'px' } : undefined} data-cds-modal-layer data-motion-state={phase} className={`cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center overflow-y-auto ${darkTheme ? 'bg-gray-950/70 p-2 sm:p-4' : 'bg-gray-950/60 p-4'} backdrop-blur-xs`} role="presentation" onMouseDown={event => open && !busy && event.target === event.currentTarget && onClose?.()}>
+        <div ref={panelRef} onTransitionEnd={onTransitionEnd} style={avoidBottomDebugbar ? { maxHeight: 'calc(90dvh - ' + bottomObstruction + 'px)' } : undefined} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} data-motion-state={phase} className={`cds-modal-motion-panel relative flex ${darkTheme ? 'dark max-h-[calc(100dvh-1rem)] border-slate-700 bg-slate-950 sm:max-h-[90vh]' : 'max-h-[90vh] border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'} w-full flex-col overflow-hidden rounded-2xl border shadow-2xl ${maxWidth}`}>
             <CrudModalHeader icon={icon} report={isReport} title={title} subtitle={subtitle} onClose={onClose} showClose={false} />
             <CrudModalCardContext.Provider value><ReportDetailsContext.Provider value={isReport ? (reportData || {}) : null}><div className={`custom-table-scrollbar min-h-0 flex-1 overflow-y-auto text-sm ${darkTheme ? 'bg-slate-950 text-slate-100' : ''} ${compact ? (darkTheme ? 'space-y-4 p-4 sm:p-5' : 'space-y-4 p-4 sm:p-5') : 'space-y-6 p-6'}`}>{displaySummary}{children}{displayAttachments}</div></ReportDetailsContext.Provider></CrudModalCardContext.Provider>
             <CrudModalFooter left={<>{canEdit && !terminalReport && onEdit && <Button type="button" size="compact" variant="primary" onClick={onEdit} className="rounded-xl px-4 py-2 text-xs">✏️ {editLabel}</Button>}{canDelete && !terminalReport && onDelete && <Button type="button" size="compact" variant="danger" onClick={onDelete} className="rounded-xl px-4 py-2 text-xs">{deleteLabel}</Button>}</>}>

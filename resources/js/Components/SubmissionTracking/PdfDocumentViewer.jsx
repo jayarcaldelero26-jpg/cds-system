@@ -394,7 +394,7 @@ export default function PdfDocumentViewer({
         <div className={`flex flex-none flex-wrap items-center justify-between gap-x-3 gap-y-1.5 ${toolbarTheme}`} aria-label="PDF controls">
             <div className="flex flex-wrap items-center gap-1">
                 <button type="button" aria-label="Zoom out" title="Zoom out" disabled={status !== 'ready'} onClick={() => changeZoom(-1)} className={`h-8 w-8 rounded-md border text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>−</button>
-                <span className="min-w-12 px-1 text-center text-xs tabular-nums" aria-label="Zoom percentage" aria-live="polite">{status === 'ready' ? Math.round(scale * 100) + '%' : '—%'}</span>
+                <span className="min-w-12 px-1 text-center text-xs tabular-nums" aria-label="Zoom percentage" aria-live="polite">{status === 'ready' ? Math.round(scale * 100) + '%' : status === 'loading' ? 'Loading' : 'Unavailable'}</span>
                 <button type="button" onClick={() => fitTo('page')} disabled={status !== 'ready'} className={`h-8 rounded-md border px-2.5 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>{archiveReader ? 'Fit page' : 'Fit Page'}</button>
                 {archiveReader && <button type="button" onClick={() => fitTo('width')} disabled={status !== 'ready'} className={`h-8 rounded-md border px-2.5 text-[11px] font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>Fit width</button>}
                 <button type="button" aria-label="Zoom in" title="Zoom in" disabled={status !== 'ready'} onClick={() => changeZoom(1)} className={`h-8 w-8 rounded-md border text-sm font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`}>+</button>
@@ -407,7 +407,7 @@ export default function PdfDocumentViewer({
                         commitPageInput();
                     }
                 }} onBlur={commitPageInput} className={`h-8 ${archiveReader ? 'w-14' : 'w-16'} rounded-md border px-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50 ${controlTheme}`} />
-                <span aria-live="polite">{archiveReader ? `of ${pageCount || '—'}` : `Page ${pageCount ? pageNumber : '—'} of ${pageCount || '—'}`}</span>
+                <span aria-live="polite">{status === 'loading' ? 'Loading pages' : status === 'error' ? 'Pages unavailable' : archiveReader ? `of ${pageCount || 'Not recorded'}` : `Page ${pageCount ? pageNumber : 'Not recorded'} of ${pageCount || 'Not recorded'}`}</span>
                 {archiveReader && downloadUrl && <a href={downloadUrl} download={downloadName || undefined} aria-label={`Download ${downloadName || 'current file'}`} title="Download file" className="inline-flex h-8 items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"><span aria-hidden="true">↓</span><span>Download</span></a>}
             </div>
         </div>

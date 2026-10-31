@@ -161,15 +161,20 @@ final class PamoReportWorkspaceController extends Controller
     /** @return list<array<string,mixed>> */
     private function workflowCatalog(): array
     {
-        $genericKeys = $this->workflows->pamoSubmissionKeys(false);
-        $generic = ModuleDefinition::query()->notRetired()
+        $genericKeys = $this->workflows->pamoSubmissionKeys();
+        $generic = ModuleDefinition::query()->active()->notRetired()
             ->where('implementation_type', ModuleDefinition::IMPLEMENTATION_GENERIC)
             ->whereIn('code', $genericKeys)
             ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
             ->get(['name', 'code'])
             ->map(function (ModuleDefinition $module): array {
+                $workflow = $this->workflows->find((string) $module->code) ?? [];
+                $rangeEnabled = app(\App\Services\DateConductedRangeService::class)->supportsWorkflow((string) $module->code);
+
                 return [
-                    ...($this->workflows->find((string) $module->code) ?? []),
+                    ...$workflow,
+                    'date_conducted_ranges_enabled' => $rangeEnabled,
+                    'date_conducted_required' => $rangeEnabled || (bool) ($workflow['date_conducted_required'] ?? false),
                     'key' => (string) $module->code,
                     'label' => (string) $module->name,
                     'source' => 'conservation',
@@ -178,12 +183,12 @@ final class PamoReportWorkspaceController extends Controller
 
         $native = collect();
         if ($this->nativeSources->isSchemaReady()) {
-            $native = ModuleDefinition::query()->notRetired()
+            $native = ModuleDefinition::query()->active()->notRetired()
                 ->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
                 ->where('requirement_domain', 'pa')->whereIn('code', array_keys($this->nativeSources->all()))
                 ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
                 ->get(['code'])
-                ->filter(fn (ModuleDefinition $module): bool => $this->nativeSources->isConfigured((string) $module->code))
+                ->filter(fn (ModuleDefinition $module): bool => $this->nativeSources->isEligible((string) $module->code))
                 ->map(fn (ModuleDefinition $module): array => $this->nativeReports->workspaceWorkflowConfig((string) $module->code));
         }
 

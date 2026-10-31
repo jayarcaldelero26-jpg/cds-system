@@ -233,6 +233,7 @@ final class PamoNativeReportsController extends Controller
             'key' => $workflow,
             'label' => $definition->name,
             'source' => $source['source'],
+            'is_active' => $this->sources->isEligible($workflow),
             'form' => $form,
             'activity_required' => $awsSubmission,
             'default_activity' => $awsSubmission ? 'Monitoring and Maintenance of AWS' : null,

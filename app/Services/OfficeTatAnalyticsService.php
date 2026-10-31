@@ -2,18 +2,9 @@
 
 namespace App\Services;
 
-use App\Models\Aws;
-use App\Models\BamsReportSubmission;
-use App\Models\BmsReportSubmission;
-use App\Models\ConservationReportSubmission;
 use App\Models\DocumentRoutingEvent;
-use App\Models\EngpReportSubmission;
+use App\Models\ConservationReportSubmission;
 use App\Models\HistoricalReportOrigin;
-use App\Models\ImeaFacilityMaintenanceReport;
-use App\Models\ImeaReportSubmission;
-use App\Models\IpafManagementReport;
-use App\Models\IpafRevenueCollection;
-use App\Models\ManagementPlan;
 use App\Models\OfficeTatConfigurationVersion;
 use App\Models\OrganizationalOffice;
 use App\Models\PamoPambDraft;
@@ -27,6 +18,7 @@ use App\Services\Engp\EngpReportWorkflowRegistry;
 use App\Services\HistoricalReports\HistoricalDateGapProjector;
 use App\Services\SubmissionTracking\PambRoutingTimelineService;
 use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
+use App\Services\SubmissionTracking\SubmissionTrackingService;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
@@ -46,20 +38,6 @@ final class OfficeTatAnalyticsService
 
     public const DRAFT_WEIGHTS = ['timeliness' => 0.50, 'tat_compliance' => 0.35, 'volume' => 0.15];
 
-    /** @var array<string,class-string<Model>> */
-    private const SOURCE_MODELS = [
-        'conservation' => ConservationReportSubmission::class,
-        'engp' => EngpReportSubmission::class,
-        'bms' => BmsReportSubmission::class,
-        'bams' => BamsReportSubmission::class,
-        'imea' => ImeaReportSubmission::class,
-        'imea-maintenance' => ImeaFacilityMaintenanceReport::class,
-        'aws' => Aws::class,
-        'ipaf-management' => IpafManagementReport::class,
-        'revenue' => IpafRevenueCollection::class,
-        'management-plans' => ManagementPlan::class,
-    ];
-
     private const HANDOFF_EVENTS = ['forwarded', 'endorsed', 'released', 'approved', 'recommended', 'returned_for_correction'];
 
     public function __construct(
@@ -68,6 +46,7 @@ final class OfficeTatAnalyticsService
         private readonly EngpReportWorkflowRegistry $engp,
         private readonly BusinessCalendarService $calendar,
         private readonly HistoricalDateGapProjector $historicalDateGaps,
+        private readonly SubmissionTrackingService $tracking,
         int $documentBatchSize = 300,
         int $eventChunkSize = 500,
     ) {
@@ -95,13 +74,7 @@ final class OfficeTatAnalyticsService
         $includeLive = in_array(($filters['evidence_type'] ?? 'all'), ['live', 'all'], true);
 
         if ($includeLive && $cohortEndExclusive->greaterThan($periodStart)) {
-            $sourceEvidenceRows = DocumentRoutingEvent::query()
-                ->where('event_key', 'received')
-                ->where('occurred_at', '>=', $periodStart)
-                ->where('occurred_at', '<', $cohortEndExclusive)
-                ->count();
-            $sourceEvidenceRows += $this->pambReceiptQuery($periodStart, $cohortEndExclusive, $filters)->count();
-            $this->aggregateLiveEvidence($user, $category, $periodStart, $cohortEndExclusive, $asOf, $filters, $rows);
+            $sourceEvidenceRows = $this->aggregateLiveEvidence($user, $category, $periodStart, $cohortEndExclusive, $asOf, $filters, $rows);
         }
 
         $this->addHistoricalEvidence($user, $category, $periodStart, $cohortEndExclusive, $filters, $rows);
@@ -146,7 +119,7 @@ final class OfficeTatAnalyticsService
             $row['score'] = $available
                 ? round(($weights['timeliness'] * $row['timeliness_percent']) + ($weights['tat_compliance'] * $row['tat_compliance_percent']) + ($weights['volume'] * $row['volume_percent']), 2)
                 : null;
-            $row['score_status'] = $available ? 'Scored' : 'N/A — required component evidence or target is missing.';
+            $row['score_status'] = $available ? 'Scored' : 'Not assessed: required component evidence or target is missing.';
             $row['weights'] = $weights;
             $row['configuration_version'] = $configuration?->version;
             $row['configuration_saved_at'] = $configuration?->created_at?->toIso8601String();
@@ -190,9 +163,9 @@ final class OfficeTatAnalyticsService
             'definitions' => [
                 'timeliness' => 'On-time eligible reports ÷ eligible reports. The deadline and authoritative date come from the source module. Missing required source evidence is counted separately.',
                 'tat' => 'Elapsed calendar time from this office’s accepted receipt to its next accepted handoff. Correction cycles are combined once per document; a later unfinished cycle remains pending.',
-                'tat_compliance' => 'N/A because the current codebase defines no office-specific processing limit for the selected work.',
+                'tat_compliance' => 'Not applicable because the current codebase defines no office-specific processing limit for the selected work.',
                 'documents_received' => 'Distinct source record and receiving office with an accepted first receipt in the selected processing-period cohort.',
-                'volume' => 'Received documents ÷ configured positive office target, capped at 100%. No target is N/A.',
+                'volume' => 'Received documents ÷ configured positive office target, capped at 100%. Without a target, volume is not applicable.',
                 'historical' => 'Manual date-only evidence is projected into separate calendar-day gaps: conducted-to-accomplished, source-authoritative accomplished-to-original CENRO release, and original CENRO release-to-PENRO receipt. Unsupported, missing, invalid, and direct-to-PENRO endpoints are not averaged; no gap is a measured office custody interval.',
             ],
             'source_evidence_rows' => $sourceEvidenceRows,
@@ -466,25 +439,28 @@ final class OfficeTatAnalyticsService
         return [...$base, 'available' => true];
     }
 
-    private function aggregateLiveEvidence(User $user, string $category, CarbonImmutable $periodStart, CarbonImmutable $cohortEndExclusive, CarbonImmutable $asOf, array $filters, array &$rows): void
+    private function aggregateLiveEvidence(User $user, string $category, CarbonImmutable $periodStart, CarbonImmutable $cohortEndExclusive, CarbonImmutable $asOf, array $filters, array &$rows): int
     {
-        foreach (array_keys(self::SOURCE_MODELS) as $source) {
+        $sourceEvidenceRows = 0;
+        foreach (array_keys($this->tracking->reportSourceModels()) as $source) {
             if (! $this->canViewSource($user, $source)) continue;
 
             $this->receiptDocumentIdsQuery($source, $periodStart, $cohortEndExclusive, $filters)
-                ->chunkById($this->documentBatchSize, function (Collection $documents) use ($user, $source, $category, $periodStart, $cohortEndExclusive, $asOf, $filters, &$rows): void {
+                ->chunkById($this->documentBatchSize, function (Collection $documents) use ($user, $source, $category, $periodStart, $cohortEndExclusive, $asOf, $filters, &$rows, &$sourceEvidenceRows): void {
                     $ids = $documents->pluck('source_id')->map(fn ($id): int => (int) $id)->values();
                     if ($ids->isEmpty()) return;
 
                     $records = $this->loadEventRecordBatch($source, $ids, $user, $filters);
                     if ($records === []) return;
 
-                    $cohortDocuments = $this->aggregateReceiptBatch($source, $ids, $records, $category, $periodStart, $cohortEndExclusive, $filters, $rows);
+                    $cohortDocuments = $this->aggregateReceiptBatch($source, $ids, $records, $category, $periodStart, $cohortEndExclusive, $filters, $rows, $sourceEvidenceRows);
                     if ($cohortDocuments !== []) {
                         $this->addLiveTatIntervalBatch($source, $cohortDocuments, $records, $category, $periodStart, $asOf, $rows);
                     }
                 }, 'source_id', 'source_id');
         }
+
+        return $sourceEvidenceRows;
     }
 
     private function receiptDocumentIdsQuery(string $source, CarbonImmutable $from, CarbonImmutable $toExclusive, array $filters): QueryBuilder
@@ -492,7 +468,7 @@ final class OfficeTatAnalyticsService
         $genericIds = DB::table('document_routing_events')
             ->select('source_id')
             ->where('source_type', $source)
-            ->where('event_key', 'received')
+            ->whereIn('event_key', ['received', 'correction_received'])
             ->where('occurred_at', '>=', $from)
             ->where('occurred_at', '<', $toExclusive);
 
@@ -508,7 +484,7 @@ final class OfficeTatAnalyticsService
 
     private function loadEventRecordBatch(string $source, Collection $ids, User $user, array $filters): array
     {
-        $modelClass = self::SOURCE_MODELS[$source] ?? null;
+        $modelClass = $this->sourceModelClass($source);
         if (! $modelClass) return [];
 
         $query = $modelClass::query()->whereIn('id', $ids)->where(function (Builder $query): void {
@@ -545,20 +521,21 @@ final class OfficeTatAnalyticsService
         return $query->where('workflow_key', $workflow);
     }
 
-    /** @param array<int,Model> $records @return array<int,string> */
-    private function aggregateReceiptBatch(string $source, Collection $ids, array $records, string $category, CarbonImmutable $from, CarbonImmutable $toExclusive, array $filters, array &$rows): array
+    /** @param array<int,Model> $records @return array<string,array{source_id:int,office:string,first_receipt_event_key:string,first_receipt_at:string}> */
+    private function aggregateReceiptBatch(string $source, Collection $ids, array $records, string $category, CarbonImmutable $from, CarbonImmutable $toExclusive, array $filters, array &$rows, int &$sourceEvidenceRows): array
     {
         $cohortDocuments = [];
         $countedOffices = [];
         $firstPenroReceipts = [];
 
-        $consume = function (object $event) use ($source, $records, $category, &$rows, &$cohortDocuments, &$countedOffices, &$firstPenroReceipts): void {
+        $consume = function (object $event) use ($source, $records, $category, &$rows, &$cohortDocuments, &$countedOffices, &$firstPenroReceipts, &$sourceEvidenceRows): void {
             $recordId = (int) $event->source_id;
             $record = $records[$recordId] ?? null;
             if (! $record) return;
+            $sourceEvidenceRows++;
 
             $toCategory = $this->eventCategory($event->to_office);
-            $receivingOffice = $this->eventOffice($record, $source, $toCategory);
+            $receivingOffice = $this->eventOffice($record, $source, $toCategory, $event->to_office);
             if ($toCategory === $category && $receivingOffice && isset($rows[$receivingOffice])) {
                 $key = $recordId.':'.$receivingOffice;
                 if (! isset($countedOffices[$key])) {
@@ -566,7 +543,16 @@ final class OfficeTatAnalyticsService
                     $rows[$receivingOffice]['documents_received']++;
                     $rows[$receivingOffice]['event_derived_received']++;
                 }
-                $cohortDocuments[$recordId] = $receivingOffice;
+                $cohortKey = $source.':'.$recordId.':'.$receivingOffice;
+                $occurredAt = (string) $event->occurred_at;
+                if (! isset($cohortDocuments[$cohortKey]) || $occurredAt < $cohortDocuments[$cohortKey]['first_receipt_at']) {
+                    $cohortDocuments[$cohortKey] = [
+                        'source_id' => $recordId,
+                        'office' => $receivingOffice,
+                        'first_receipt_event_key' => (string) $event->event_key,
+                        'first_receipt_at' => $occurredAt,
+                    ];
+                }
             }
 
             if ($toCategory === 'PENRO') {
@@ -577,8 +563,8 @@ final class OfficeTatAnalyticsService
             }
         };
 
-        DocumentRoutingEvent::query()->select(['id', 'source_id', 'to_office', 'occurred_at'])
-            ->where('source_type', $source)->where('event_key', 'received')->whereIn('source_id', $ids)
+        DocumentRoutingEvent::query()->select(['id', 'source_id', 'event_key', 'to_office', 'occurred_at'])
+            ->where('source_type', $source)->whereIn('event_key', ['received', 'correction_received'])->whereIn('source_id', $ids)
             ->where('occurred_at', '>=', $from)
             ->where('occurred_at', '<', $toExclusive)
             ->chunkById($this->eventChunkSize, function (Collection $events) use ($consume): void {
@@ -698,7 +684,7 @@ final class OfficeTatAnalyticsService
         HistoricalReportOrigin::query()->orderBy('id')->chunkById(300, function (Collection $origins) use ($user, $category, $periodStart, $cohortEndDate, $filters, &$rows, &$countedDocuments): void {
             $recordsBySource = [];
             foreach ($origins->groupBy('source') as $source => $sourceOrigins) {
-                $modelClass = self::SOURCE_MODELS[$source] ?? null;
+                $modelClass = $this->sourceModelClass((string) $source);
                 if (! $modelClass || ! $this->canViewSource($user, (string) $source)) continue;
                 $query = $modelClass::query()->where('is_historical', true)->whereIn('id', $sourceOrigins->pluck('source_record_id'));
                 if ($source !== 'engp') $query->with('protectedArea');
@@ -774,17 +760,20 @@ final class OfficeTatAnalyticsService
 
     private function canViewSource(User $user, string $source): bool
     {
-        $ability = match ($source) {
-            'conservation', 'engp', 'ipaf-management', 'revenue' => 'technical-reports.view',
-            'bms' => 'bms.view',
-            'bams' => 'bams.view',
-            'imea', 'imea-maintenance' => 'imea.view',
-            'aws' => 'aws.view',
-            'management-plans' => 'management-plans.view',
-            default => null,
-        };
+        $definition = $this->tracking->source($source);
+        $ability = $definition['ability'] ?? null;
+        if (is_string($ability) && str_ends_with($ability, '.update')) {
+            $ability = substr($ability, 0, -strlen('.update')).'.view';
+        }
         if (! $ability || ! $user->can($ability)) return false;
         return $source !== 'engp' || $this->organization->canAccessUnit($user, OrganizationalAccessService::DEVELOPMENT);
+    }
+
+    /** @return class-string<Model>|null */
+    private function sourceModelClass(string $source): ?string
+    {
+        $modelClass = $this->tracking->source($source)['model'] ?? null;
+        return is_string($modelClass) && is_subclass_of($modelClass, Model::class) ? $modelClass : null;
     }
 
     private function eventCategory(?string $value): ?string
@@ -796,14 +785,26 @@ final class OfficeTatAnalyticsService
         return null;
     }
 
-    private function eventOffice(Model $record, string $source, ?string $category): ?string
+    private function eventOffice(Model $record, string $source, ?string $category, ?string $eventOffice = null): ?string
     {
         return match ($category) {
             'PENRO' => $this->organization->penroOffices()[0] ?? null,
-            'CENRO' => $this->organization->normalizeOffice((string) ($source === 'engp' ? $record->getAttribute('office') : $record->getAttribute('target_office'))),
+            'CENRO' => $source === 'engp'
+                ? $this->organization->normalizeOffice((string) $record->getAttribute('office'))
+                : $this->cenroEventOffice($record, $eventOffice),
             'PAMO' => $this->pamoOffice($record, $record->relationLoaded('protectedArea') ? $record->protectedArea : null),
             default => null,
         };
+    }
+
+    private function cenroEventOffice(Model $record, ?string $eventOffice): ?string
+    {
+        $actualOffice = $this->organization->normalizeOffice($eventOffice);
+        if ($actualOffice && in_array($actualOffice, $this->organization->cenroOffices(), true)) return $actualOffice;
+
+        // Generic role labels such as "CENRO CDS Focal Person" do not name
+        // an office. For those transitions, use the source's assigned CENRO.
+        return $this->organization->normalizeOffice((string) $record->getAttribute('target_office'));
     }
 
     private function pamoOffice(Model $record, ?ProtectedArea $area): ?string
@@ -824,21 +825,25 @@ final class OfficeTatAnalyticsService
         }
     }
 
-    /** @param array<int,string> $cohortDocuments @param array<int,Model> $records */
+    /** @param array<string,array{source_id:int,office:string,first_receipt_event_key:string,first_receipt_at:string}> $cohortDocuments @param array<int,Model> $records */
     private function addLiveTatIntervalBatch(string $source, array $cohortDocuments, array $records, string $category, CarbonImmutable $periodStart, CarbonImmutable $asOf, array &$rows): void
     {
-        $cohortKeys = [];
-        foreach ($cohortDocuments as $recordId => $office) $cohortKeys[$source.':'.$recordId.':'.$office] = true;
+        $cohortKeys = array_fill_keys(array_keys($cohortDocuments), true);
+        $correctionReceiptCohortKeys = [];
+        foreach ($cohortDocuments as $key => $cohort) {
+            if ($cohort['first_receipt_event_key'] === 'correction_received') $correctionReceiptCohortKeys[$key] = true;
+        }
+        $cohortIds = collect($cohortDocuments)->pluck('source_id')->unique()->values()->all();
 
         $pambIds = [];
         if ($source === 'conservation') {
-            $pambIds = $this->pambTimelineQuery(array_keys($cohortDocuments), $periodStart, $asOf)
+            $pambIds = $this->pambTimelineQuery($cohortIds, $periodStart, $asOf)
                 ->distinct()->pluck('conservation_report_submission_id')
                 ->map(fn ($id): int => (int) $id)->all();
         }
 
         $states = [];
-        $consume = function (object $event) use ($source, $records, $category, $cohortKeys, &$states, &$rows): void {
+        $consume = function (object $event) use ($source, $records, $category, $cohortKeys, $correctionReceiptCohortKeys, &$states, &$rows): void {
             $recordId = (int) $event->source_id;
             $record = $records[$recordId] ?? null;
             if (! $record) return;
@@ -846,11 +851,12 @@ final class OfficeTatAnalyticsService
             $documentKey = $source.':'.$recordId;
             $toCategory = $this->eventCategory($event->to_office);
             $fromCategory = $this->eventCategory($event->from_office);
-            $toOffice = $this->eventOffice($record, $source, $toCategory);
-            $fromOffice = $this->eventOffice($record, $source, $fromCategory);
+            $toOffice = $this->eventOffice($record, $source, $toCategory, $event->to_office);
+            $fromOffice = $this->eventOffice($record, $source, $fromCategory, $event->from_office);
 
             if (in_array($event->event_key, ['received', 'correction_received'], true) && $toCategory === $category && $toOffice && isset($rows[$toOffice])) {
                 $key = $documentKey.':'.$toOffice;
+                if (! isset($cohortKeys[$key])) return;
                 $states[$key] ??= ['office' => $toOffice, 'active' => null, 'segments' => 0.0, 'completed' => false, 'invalid' => false, 'started' => false];
                 if ($states[$key]['active'] === null) {
                     $states[$key]['active'] = CarbonImmutable::parse($event->occurred_at, BusinessCalendarService::TIMEZONE);
@@ -866,7 +872,7 @@ final class OfficeTatAnalyticsService
                 && $fromOffice && isset($rows[$fromOffice])) {
                 $key = $documentKey.':'.$fromOffice;
                 if (! isset($states[$key])) {
-                    if (isset($cohortKeys[$key])) {
+                    if (isset($cohortKeys[$key]) && ! isset($correctionReceiptCohortKeys[$key])) {
                         $states[$key] = ['office' => $fromOffice, 'active' => null, 'segments' => 0.0, 'completed' => false, 'invalid' => true, 'started' => false];
                     }
                     return;
@@ -891,7 +897,7 @@ final class OfficeTatAnalyticsService
 
         $genericEvents = DB::table('document_routing_events')
             ->select(['id', 'source_id', 'event_key', 'from_office', 'to_office', 'occurred_at'])
-            ->where('source_type', $source)->whereIn('source_id', array_keys($cohortDocuments))
+            ->where('source_type', $source)->whereIn('source_id', $cohortIds)
             ->where('occurred_at', '>=', $periodStart)
             ->where('occurred_at', '<', $asOf->addDay()->startOfDay());
         if ($pambIds !== []) $genericEvents->whereNotIn('source_id', $pambIds);
@@ -1091,19 +1097,25 @@ final class OfficeTatAnalyticsService
             : $active;
     }
 
-    private function assertCategoryAccess(User $user, string $category): void
+    public function canAccessCategory(User $user, string $category): bool
     {
-        abort_unless(in_array($category, ['PAMO', 'CENRO'], true), 422);
-        if ($this->organization->isGlobal($user)) return;
+        if (! in_array($category, ['PAMO', 'CENRO'], true)) return false;
+        if ($this->organization->isGlobal($user)) return true;
+
         $effective = $this->organization->effectiveCategory($user);
-        $allowed = match ($category) {
+        return match ($category) {
             'PAMO' => ($effective === OrganizationalAccessService::PAMO && $this->organization->canViewPamoPilotWorkflow($user))
                 || ($this->isPenroOfficeTatReviewer($user) && in_array('conservation', $this->organization->effectiveUnits($user), true)),
             'CENRO' => in_array($effective, [OrganizationalAccessService::CENRO_FOCAL, OrganizationalAccessService::CENRO_CHIEF, OrganizationalAccessService::CENRO_RECORDS], true)
                 || ($this->isPenroOfficeTatReviewer($user) && in_array('development', $this->organization->effectiveUnits($user), true)),
             default => false,
         };
-        abort_unless($allowed, 403);
+    }
+
+    private function assertCategoryAccess(User $user, string $category): void
+    {
+        abort_unless(in_array($category, ['PAMO', 'CENRO'], true), 422);
+        abort_unless($this->canAccessCategory($user, $category), 403);
     }
 
     private function isPenroOfficeTatReviewer(User $user): bool
@@ -1122,24 +1134,27 @@ final class OfficeTatAnalyticsService
     private function workflowOptions(User $user): array
     {
         $options = [];
-        if ($user->can('technical-reports.view')) {
+        if ($this->canViewSource($user, 'conservation')) {
             foreach ($this->conservation->all() as $workflow) $options[] = ['value' => 'conservation:'.$workflow['key'], 'label' => $workflow['label']];
+        }
+        if ($this->canViewSource($user, 'engp')) {
             foreach ($this->engp->all() as $workflow) $options[] = ['value' => 'engp:'.$workflow['key'], 'label' => $workflow['label']];
         }
-        foreach ([
-            'bms' => ['bms.view', 'BMS Report'], 'bams' => ['bams.view', 'BAMS Report'], 'imea' => ['imea.view', 'IMEA Report'],
-            'imea-maintenance' => ['imea.view', 'IMEA Facility Maintenance'], 'aws' => ['aws.view', 'AWS Report'],
-            'ipaf-management' => ['technical-reports.view', 'Management of IPAF'], 'revenue' => ['technical-reports.view', 'Revenue Collection'],
-            'management-plans' => ['management-plans.view', 'Management Plans'],
-        ] as $source => [$ability, $label]) {
-            if ($user->can($ability)) $options[] = ['value' => $source.':'.$source, 'label' => $label];
+        foreach ($this->tracking->reportSourceModels() as $source => $modelClass) {
+            if (in_array($source, ['conservation', 'engp'], true) || ! $this->canViewSource($user, $source)) continue;
+            $definition = $this->tracking->source($source);
+            if (! $definition) continue;
+            $record = new $modelClass;
+            $label = $this->tracking->archiveReportMetadata($source, $record, $definition)['module'];
+            $options[] = ['value' => $source.':'.$source, 'label' => $label];
         }
         if ($this->organization->effectiveCategory($user) === OrganizationalAccessService::PAMO
             && (int) $user->protected_area_id > 0) {
             $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+            $registeredSources = $this->tracking->reportSourceModels();
             if ($nativeSources->isSchemaReady()) {
                 foreach ($nativeSources->all() as $workflow => $native) {
-                    if ($nativeSources->isEligible($workflow)) {
+                    if ($nativeSources->isEligible($workflow) && isset($registeredSources[$native['source']])) {
                         $options[] = ['value' => $native['source'].':'.$native['source'], 'label' => $native['label']];
                     }
                 }

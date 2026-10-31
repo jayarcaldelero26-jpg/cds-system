@@ -2,8 +2,8 @@ import CrudSummaryGrid from '@/Components/Crud/CrudSummaryGrid';
 import CrudTable from '@/Components/Crud/CrudTable';
 import { formatMoney } from '@/Utils/moneyFormatters';
 
-const peso = value => value === null || value === undefined ? '—' : `₱${formatMoney(value)}`;
-const percent = value => value === null || value === undefined ? '—' : `${value}%`;
+const peso = value => value === null || value === undefined ? 'No data' : `₱${formatMoney(value)}`;
+const percent = value => value === null || value === undefined ? 'No data' : `${value}%`;
 const areaName = row => <span className={row.is_total ? 'font-extrabold text-green-900 dark:text-green-300' : 'font-semibold'}>{row.protected_area_name}</span>;
 
 export default function AnnualRevenueAccounting({ annual = {} }) {

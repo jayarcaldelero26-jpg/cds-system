@@ -89,6 +89,73 @@ test('new generic modules are appended once when duplicate definitions use relat
     assert.deepEqual(reports.map(item => item.href), ['/conservation-reports/homestay', 'http://cds-smart/conservation-reports/local_module']);
 });
 
+test('authoritative module catalog removes inactive managed links while retaining native utilities', () => {
+    const navigation = [
+        {
+            label: 'Protected Area Management and Development',
+            children: [
+                { label: 'Homestay', href: '/conservation-reports/homestay' },
+                { label: 'BMS Data', href: '/bms' },
+            ],
+        },
+        { label: 'CDS-SMART MONITORING' },
+    ];
+    const catalog = { ready: true, entries: [{ href: '/conservation-reports/homestay', is_active: false, is_retired: false }] };
+    const merged = withGenericModuleNavigation(navigation, [], {}, [], catalog);
+
+    assert.deepEqual(merged.find(item => item.label === 'Protected Area Management and Development').children, [
+        { label: 'BMS Data', href: '/bms' },
+    ]);
+});
+
+test('inactive catalog entries hide all managed static links even when the active module list is empty', () => {
+    const navigation = [
+        {
+            label: 'Protected Area Management and Development',
+            children: [
+                { label: 'Homestay', href: '/conservation-reports/homestay' },
+                { label: 'Local Module', href: '/conservation-reports/local_module' },
+                { label: 'BAMS Data', href: '/bams' },
+            ],
+        },
+        { label: 'Conservation Database', children: [{ label: 'BMS', href: '/bms' }] },
+    ];
+    const catalog = { ready: true, entries: [
+        { href: '/conservation-reports/homestay', is_active: false },
+        { href: '/conservation-reports/local_module', is_active: false, is_retired: true },
+    ] };
+    const merged = withGenericModuleNavigation(navigation, [], {}, [], catalog);
+
+    assert.deepEqual(merged.find(item => item.label === 'Protected Area Management and Development').children, [
+        { label: 'BAMS Data', href: '/bams' },
+    ]);
+    assert.deepEqual(merged.find(item => item.label === 'Conservation Database').children, [{ label: 'BMS', href: '/bms' }]);
+});
+
+test('reactivated managed static modules merge with catalog routes once and stay within the selected unit', () => {
+    const navigation = [
+        { label: 'Protected Area Management and Development', section: 'CDS', unit: 'conservation', children: [{ label: 'Homestay', href: '/conservation-reports/homestay' }] },
+        { label: 'National Greening Program', section: 'CDS', unit: 'development', children: [{ label: 'CBEP', href: '/engp-reports/cbep' }] },
+    ];
+    const modules = [
+        { label: 'CBEP', href: 'http://cds-smart/engp-reports/cbep', program_area: 'engp' },
+        { label: 'CBEP Alias', href: '/engp-reports/cbep', program_area: 'engp' },
+    ];
+    const catalog = { ready: true, entries: [
+        { href: '/conservation-reports/homestay', is_active: false },
+        { href: '/engp-reports/cbep', is_active: true },
+    ] };
+    const visible = buildSidebarNavigation(navigation, modules, {
+        canViewTechnicalReports: true,
+        canBrowseConservationModules: true,
+        canBrowseDevelopmentModules: true,
+    }, [], 'development', catalog);
+
+    assert.equal(visible.some(item => item.label === 'Protected Area Management and Development'), false);
+    const development = visible.find(item => item.label === 'National Greening Program');
+    assert.deepEqual(development.children.map(item => item.href), ['/engp-reports/cbep']);
+});
+
 test('Archives is a single permission-filtered global sibling after Submission Tracking and stays active for selected records', () => {
     const navigation = [
         { label: 'CDS-SMART MONITORING', heading: true, section: 'BOTH' },
@@ -142,19 +209,3 @@ test('PAMO navigation has one global Archives destination and preserves its repo
     });
     assert.equal(unauthorized.some(item => item.href === '/submission-tracking/archives' || item.href === '/pamo/archives'), false);
 });
-test('generic ENGP definitions stay under National Greening Program with ENGP report routes', () => {
-    const navigation = [
-        { label: 'Protected Area Management and Development', children: [] },
-        { label: 'National Greening Program', children: [{ label: 'Static ENGP', href: '/engp-reports/summary' }] },
-        { label: 'CDS-SMART MONITORING' },
-    ];
-    const modules = [
-        { label: 'PA Development', href: '/conservation-reports/pa_development', program_area: protectedArea },
-        { label: 'ENGP RIMS', href: '/engp-reports/rims', program_area: 'engp' },
-    ];
-    const merged = withGenericModuleNavigation(navigation, modules);
-    const paReports = merged.find(item => item.label === 'Protected Area Management and Development').children;
-    const engpReports = merged.find(item => item.label === 'National Greening Program').children;
-
-    assert.deepEqual(paReports.map(item => item.href), ['/conservation-reports/pa_development']);
-    assert.deepEqual(engpReports.map(item => item.href), ['/engp-reports/summary', '/engp-reports/rims']);});

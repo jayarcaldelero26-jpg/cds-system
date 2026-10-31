@@ -285,8 +285,8 @@ export default function HistoricalReports({ catalog = {}, records = [], filters 
     const listColumns = [
         { key: 'report', label: 'Report / Activity', render: record => <div className="min-w-48"><span className="font-bold text-gray-900 dark:text-white">{record.label}</span><div className="mt-1"><HistoricalRecordBadge source={record.source} id={record.id} passive /></div></div> },
         { key: 'module', label: 'Module', render: record => sourceLabels[record.source] || record.source },
-        { key: 'area', label: 'Protected Area / Office', render: record => record.protected_area || record.office || '—' },
-        { key: 'period', label: 'Reporting Period', render: record => record.period || 'Not recorded' },
+        { key: 'area', label: 'Protected Area / Office', render: record => record.protected_area || record.office || 'Not recorded' },
+        { key: 'period', label: 'Reporting Period', render: record => record.period || 'Not provided' },
         { key: 'encoded', label: 'Encoded', render: record => formatDate(record.encoded_at) },
     ];
 
@@ -534,7 +534,7 @@ function PreviewPanel({ preview, workflow, selectedArea }) {
     return <div className="space-y-3">
         <Card padding="p-4" variant="subtle">
             <div className="flex items-center gap-2"><Icon icon="lucide:calendar-clock" width="17" height="17" className="text-green-800 dark:text-green-300" aria-hidden="true" /><h3 className="text-xs font-extrabold text-gray-950 dark:text-white">Deadline preview</h3></div>
-            <p className="mt-2 text-2xl font-extrabold tracking-tight text-gray-950 dark:text-white">{preview?.deadline ? formatDate(preview.deadline) : '—'}</p>
+            <p className="mt-2 text-2xl font-extrabold tracking-tight text-gray-950 dark:text-white">{preview?.deadline ? formatDate(preview.deadline) : 'Not calculated'}</p>
             <p className="mt-2 text-xs leading-5 text-gray-700 dark:text-gray-300">{preview?.deadline_basis || 'Choose a workflow and enter the dates or period used by that source module.'}</p>
             {preview?.period && <p className="mt-2 text-xs font-bold text-gray-800 dark:text-gray-200">Period: {preview.period}</p>}
         </Card>
@@ -552,7 +552,7 @@ function PreviewPanel({ preview, workflow, selectedArea }) {
 }
 
 function formatDate(value) {
-    if (!value) return '—';
+    if (!value) return 'Not recorded';
     const date = new Date(value + (String(value).length === 10 ? 'T00:00:00' : ''));
     return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }

@@ -20,7 +20,7 @@ import Tooltip from '@/Components/Tooltip';
 import ComplianceRichTextEditor from '@/Components/Compliance/ComplianceRichTextEditor';
 import { formatReportDate } from '@/Utils/dateFormatters';
 
-const dateLabel = value => formatReportDate(value, '-');
+const dateLabel = value => formatReportDate(value, 'Not recorded');
 const dateTimeLabel = value => value ? new Date(value).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : 'Not sent';
 
 const PREVIEW_ERROR_MESSAGE = 'Email preview could not be generated. Please try again.';
@@ -138,8 +138,8 @@ export default function ComplianceAlertsIndex({ view = 'operational', groups = [
     ];
     const engpColumns = [{ key: 'office', label: 'Implementing Office', render: row => <div className="font-bold text-gray-900 dark:text-white">{row.target_office}</div> }, { key: 'overdue_count', label: 'Compliance Issues', render: row => <><div>{row.overdue_count} pending submission(s)</div><div className="text-xs text-red-700 dark:text-red-300">Not yet received by PENRO: {row.report_not_submitted}</div>{row.missing_mov > 0 && <div className="text-xs text-amber-700 dark:text-amber-300">Supporting document requirement: {row.missing_mov}</div>}</> }, { key: 'oldest_deadline', label: 'Oldest Deadline', render: row => dateLabel(row.oldest_deadline) }, { key: 'max_days_overdue', label: 'Maximum Days Overdue', render: row => <span className="font-bold text-red-700 dark:text-red-300">{row.max_days_overdue}</span> }, { key: 'notification_status', label: 'Recipient Readiness', render: row => { const readiness = readinessByKey[row.readiness_key]; const label = readiness?.status === 'ready' ? 'READY' : 'UNMAPPED'; return <><span className={label === 'READY' ? 'font-bold text-green-700 dark:text-green-300' : 'font-bold text-red-700 dark:text-red-300'}>{label}</span><div className="mt-1 text-xs text-gray-500 dark:text-gray-400">{readiness?.recipient?.email || 'No valid office recipient'}</div></>; } }, { key: 'last_sent', label: 'Last Sent', render: row => dateTimeLabel(row.last_sent) }];
     const recipientDetailsColumns = [
-        { key: 'recipient_name', label: 'TO Designation', render: row => <>{row.recipient_name || '-'}<div className="text-xs text-gray-500 dark:text-gray-400">{row.attention_line ? `Attention: ${row.attention_line}` : 'No recipient-specific attention line'}</div><div className="text-xs text-gray-500 dark:text-gray-400">{row.recipient_email}</div></> },
-        { key: 'cc_emails', label: 'CC', render: row => (row.cc_emails || []).join(', ') || '-' },
+        { key: 'recipient_name', label: 'TO Designation', render: row => <>{row.recipient_name || 'Not provided'}<div className="text-xs text-gray-500 dark:text-gray-400">{row.attention_line ? `Attention: ${row.attention_line}` : 'No recipient-specific attention line'}</div><div className="text-xs text-gray-500 dark:text-gray-400">{row.recipient_email || 'Not provided'}</div></> },
+        { key: 'cc_emails', label: 'CC', render: row => (row.cc_emails || []).join(', ') || 'Not provided' },
         { key: 'is_active', label: 'Status', render: row => <span className={row.is_active ? 'font-bold text-green-700 dark:text-green-300' : 'font-bold text-gray-500 dark:text-gray-400'}>{row.is_active ? 'Active' : 'Inactive'}</span> },
     ];
     const protectedAreaRecipientColumns = [{ key: 'destination', label: 'Protected Area', render: row => <span className="font-bold text-gray-900 dark:text-white">{row.protected_area_name}</span> }, ...recipientDetailsColumns];

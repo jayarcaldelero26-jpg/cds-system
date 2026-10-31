@@ -2,7 +2,7 @@ import CrudSection from "@/Components/Crud/CrudSection";
 import RoutingAttachmentLink from "@/Components/SubmissionTracking/RoutingAttachmentLink";
 import { formatReportDate, formatReportDateTime } from "@/Utils/dateFormatters";
 
-const FALLBACK = "\u2014";
+const FALLBACK = "Not recorded";
 
 export default function SubmissionReviewHistory({ row }) {
     const mov = row?.mov_processing?.applicable ? row.mov_processing : null;
@@ -15,7 +15,7 @@ export default function SubmissionReviewHistory({ row }) {
             {movEvents.length ? <ol className="mt-2 space-y-2">
                 {movEvents.map((event, index) => <li key={`${event.event_key || event.event_label}-${index}`} className="rounded-lg border border-gray-200 bg-white p-3 text-xs dark:border-gray-700 dark:bg-gray-800">
                     <p className="font-semibold text-gray-900 dark:text-white">{event.event_label || "MOV review event"}</p>
-                    <p className="mt-1 text-gray-600 dark:text-gray-300">{event.recorded_by || "Recorded user"}{event.recorded_role || event.recorded_office ? ` · ${[event.recorded_role, event.recorded_office].filter(Boolean).join(" · ")}` : ""} · {event.recorded_at ? formatReportDateTime(event.recorded_at, FALLBACK) : FALLBACK}</p>
+                    <p className="mt-1 text-gray-600 dark:text-gray-300">{event.recorded_by || "Not recorded"}{event.recorded_role || event.recorded_office ? ` · ${[event.recorded_role, event.recorded_office].filter(Boolean).join(" · ")}` : ""} · {event.recorded_at ? formatReportDateTime(event.recorded_at, FALLBACK) : FALLBACK}</p>
                     {event.remarks && <p className="mt-1 whitespace-pre-wrap text-gray-700 dark:text-gray-200">{event.remarks}</p>}
                 </li>)}
             </ol> : !row.date_conducted && <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">No MOV review events recorded.</p>}

@@ -35,7 +35,7 @@ function accountStatus(user) {
 }
 
 function display(value) {
-    return hasDisplayValue(value) ? value : '—';
+    return hasDisplayValue(value) ? value : 'Not provided';
 }
 
 function hasDisplayValue(value) {
@@ -165,7 +165,7 @@ export default function Index({ users, status, protectedAreaAssignments = [], ca
                             <td className="px-2 py-2">{display(area.pamo_office_name)}</td>
                             <td className="px-2 py-2">{display(area.supervising_office_name)}</td>
                             <td className="px-2 py-2"><span className={area.eligible ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-800 dark:text-amber-300'}>{area.eligible ? 'Eligible' : area.issue}</span></td>
-                            <td className="px-2 py-2">{canManageProtectedAreas ? <Link href={`/protected-areas/${area.id}/edit`} className="font-semibold text-green-800 underline dark:text-green-300">Edit mapping</Link> : display('—')}</td>
+                            <td className="px-2 py-2">{canManageProtectedAreas ? <Link href={`/protected-areas/${area.id}/edit`} className="font-semibold text-green-800 underline dark:text-green-300">Edit mapping</Link> : 'View only'}</td>
                         </tr>)}</tbody>
                     </table>
                     {!protectedAreaAssignments.length && <p className="px-2 py-4 text-xs text-gray-600 dark:text-gray-300">No Protected Area records are available.</p>}

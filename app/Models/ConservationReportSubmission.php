@@ -54,7 +54,7 @@ class ConservationReportSubmission extends Model
         }
 
         if (! $this->date_accomplished) return null;
-        $rule = $this->deadlineRuleUsingModuleDefinition($module);
+        $rule = $this->deadlineRule();
         return app(\App\Services\Modules\PaMonitoringDeadlineService::class)
             ->deadline(CarbonImmutable::parse($this->date_accomplished, BusinessCalendarService::TIMEZONE)->startOfDay(), $rule, $this->target_office);
     }
@@ -95,9 +95,7 @@ class ConservationReportSubmission extends Model
         if (! is_int($days)) return $days;
 
         $module = $this->moduleDefinition();
-        $customModuleDeadline = $module && $module->deadline_mode === ModuleDefinition::DEADLINE_CUSTOM
-            && ($module->requirement_metadata['custom_deadline_from_actual_date'] ?? false);
-        if ($module && ! $customModuleDeadline && ! in_array($module->deadline_mode, [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true)) {
+        if ($module && ! in_array($module->deadline_mode, [ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, ModuleDefinition::DEADLINE_CALENDAR_DAYS], true)) {
             return 'No Data';
         }
         $standard = $module ? (($module->default_deadline_days ?? 0) <= 7 ? 'B' : 'A') : $this->deadlineRule()['timeliness_standard'];
@@ -131,13 +129,7 @@ class ConservationReportSubmission extends Model
     /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
     public function deadlineRule(): array
     {
-        return $this->deadlineRuleUsingModuleDefinition($this->moduleDefinition());
-    }
-
-    /** @return array{deadline_mode:string,deadline_days:int,timeliness_standard:'A'|'B'} */
-    private function deadlineRuleUsingModuleDefinition(?ModuleDefinition $module): array
-    {
-        if ($module) {
+        if ($module = $this->moduleDefinition()) {
             return [
                 'deadline_mode' => $module->deadline_mode,
                 'deadline_days' => (int) ($module->default_deadline_days ?? 0),

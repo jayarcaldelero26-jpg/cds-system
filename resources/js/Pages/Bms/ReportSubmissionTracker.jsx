@@ -29,7 +29,7 @@ import PamoSavedDraftsTable from '@/Components/PamoSavedDraftsTable';
 const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', quarter: '', monitoring_period_start: '', monitoring_period_end: '', date_conducted: '', date_conducted_ranges: [], date_accomplished: '', mov: null, remarks: '' };
 const badgeClass = (value) => ({ 'Pending': 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Historical evidence incomplete': 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200', 'Missing historical evidence': 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
 const dateValue = (value) => value ? String(value).slice(0, 10) : '';
-const display = (value) => formatReportValue(value);
+const display = (value, fallback = 'Not provided') => formatReportValue(value, fallback);
 const hasCompletedMetric = (value) => (typeof value === 'number' && Number.isFinite(value))
   || (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value)));
 export const daysCompliedDisplay = (report, value) => report?.pamo_origin === true && report?.is_historical !== true
@@ -43,54 +43,55 @@ const protectedAreaTableLabel = (protectedArea) => {
   if (shortName) return { label: shortName, fullName: fullName || shortName };
 
   const parentheticalAcronym = fullName.match(/\(([^()]+)\)\s*$/)?.[1]?.trim();
-  return { label: parentheticalAcronym || fullName || '-', fullName: fullName || '-' };
+  return { label: parentheticalAcronym || fullName || 'Not recorded', fullName: fullName || 'Not recorded' };
 };
 const Badge = ({ value }) => <OperationalStatus value={value} renderStatus={status => <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-bold ${badgeClass(status)}`}>{display(status)}</span>} />;
 const Detail = ({ label, children }) => {
   const reportDetails = useReportDetails();
   const inSummary = /^(reporting period|semester|quarter|deadline|deadline for submission to penro|timeliness(?: rating)?|submission status|status of submission|report status)$/i.test(label);
   if (reportDetails && inSummary) return null;
-  const normalizedChildren = label === 'Date Report Released by CENRO Records' && children?.props?.value?.startsWith('Not Applicable')
-    ? <Badge value="N/A — PENRO-managed PA" />
+  const normalizedChildren = label === 'Date Report Released by CENRO Records' && children?.props?.value?.startsWith('Not applicable')
+    ? <Badge value={children.props.value} />
     : children;
   return <div><span className="block text-xs text-gray-500">{label}:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{normalizedChildren}</span></div>;
 };
 
-const pendingRouteStatuses = new Set(['Pending Submission by CENRO', 'Pending Receipt by PENRO', 'Pending Regional Endorsement']);
-
 export function SubmissionTimelineDetails({ report, isMeetingPamb = false, isHistorical = Boolean(report?.is_historical), cenroReleaseApplicable = report?.cenro_release_applicable !== false, penroDelayField = 'total_days_delayed_penro' }) {
   if (!report) return null;
 
-  const routePending = !isHistorical && ((isMeetingPamb && pendingRouteStatuses.has(report.submission_status)) || report.pamo_origin === true);
+  const status = report.submission_status;
+  const releasePending = !isHistorical && status === 'Pending Submission by CENRO';
+  const receiptPending = !isHistorical && status === 'Pending Receipt by PENRO';
+  const regionalPending = !isHistorical && status === 'Pending Regional Endorsement';
   const releaseDate = dateValue(report.date_report_released_cenro);
   const receiptDate = dateValue(report.date_received_penro);
   const endorsementDate = dateValue(report.date_endorsed_regional);
   const delay = report[penroDelayField];
-  const delayPending = routePending && delay === 'Please Update Date Endorsed to Regional Office';
+  const delayPending = regionalPending && delay === 'Please Update Date Endorsed to Regional Office';
+  const delayNotCalculated = delay === 'Please Update Date Endorsed to Regional Office';
   const delayUnavailable = !isHistorical && report.pamo_origin === true && (!receiptDate || !endorsementDate)
     && delay !== 'Missing historical evidence' && !hasCompletedMetric(delay);
   const missingHistoricalEvidence = <Badge value="Missing historical evidence" />;
   const notApplicableRelease = !cenroReleaseApplicable
-    ? <Badge value="Not Applicable — PENRO-managed Protected Area" />
+    ? <Badge value="Not applicable — PENRO-managed protected area" />
     : releaseDate
       ? display(releaseDate)
-      : isHistorical ? missingHistoricalEvidence : routePending ? <Badge value="Pending" /> : display(releaseDate);
-  const receipt = receiptDate ? display(receiptDate) : isHistorical ? missingHistoricalEvidence : routePending ? <Badge value="Pending" /> : display(receiptDate);
+      : isHistorical ? missingHistoricalEvidence : releasePending ? <Badge value="Pending" /> : display(releaseDate, 'Not recorded');
+  const receipt = receiptDate ? display(receiptDate) : isHistorical ? missingHistoricalEvidence : receiptPending ? <Badge value="Pending" /> : display(receiptDate, 'Not recorded');
   const regional = endorsementDate
     ? display(endorsementDate)
     : isHistorical
       ? missingHistoricalEvidence
-    : isMeetingPamb
-      ? routePending ? <Badge value="Pending" /> : display(endorsementDate)
+    : regionalPending ? <Badge value="Pending" />
       : (!cenroReleaseApplicable
-        ? (!receiptDate ? <Badge value="Not Yet Available" /> : <Badge value="For Endorsement" />)
-        : (!releaseDate ? <Badge value="Not Yet Available" /> : receiptDate ? <Badge value="For Endorsement" /> : display(endorsementDate)));
+        ? (receiptDate ? <Badge value="For Endorsement" /> : display(endorsementDate, 'Not recorded'))
+        : (releaseDate && receiptDate ? <Badge value="For Endorsement" /> : display(endorsementDate, 'Not recorded')));
 
   return <CrudSection title={isHistorical ? 'Original Routing Dates — Manual Historical Evidence' : 'Submission Timeline'}><div className="grid grid-cols-1 gap-4 text-xs sm:grid-cols-2">
     <Detail label={isHistorical ? 'Original CENRO Release Date' : 'Date Report Released by CENRO Records'}>{notApplicableRelease}</Detail>
     <Detail label={isHistorical ? 'Original PENRO Receipt Date' : 'Date Received by PENRO Records'}>{receipt}</Detail>
     <Detail label={isHistorical ? 'Original Regional Endorsement Date' : 'Regional Endorsement'}>{regional}</Detail>
-    <Detail label={isHistorical ? 'Original PENRO Delay (days)' : 'Total Number of Days Delayed at PENRO'}>{delay === 'Missing historical evidence' ? missingHistoricalEvidence : delayUnavailable ? 'Not yet available' : delayPending ? <Badge value="Pending" /> : display(delay)}</Detail>
+    <Detail label={isHistorical ? 'Original PENRO Delay (days)' : 'Total Number of Days Delayed at PENRO'}>{delay === 'Missing historical evidence' ? missingHistoricalEvidence : delayUnavailable || (delayNotCalculated && !delayPending) ? 'Not calculated: required dates are missing' : delayPending ? <Badge value="Pending" /> : display(delay, 'Not recorded')}</Detail>
   </div></CrudSection>;
 }
 
@@ -288,7 +289,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
         <div className="cds-card-surface flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900 sm:flex-row sm:items-end sm:justify-between">
             <FilterToolbar chips={appliedFilterChips} onClear={() => applyFilters({ [semesterFilter]: '', [protectedAreaFilter]: '', [pageFilter]: 1 })}><div className="grid gap-3 sm:grid-cols-2"><div className="text-xs font-bold text-gray-600 dark:text-gray-300"><FloatingSelect id="reportsubmissiontracker-semester" label={periodLabel} value={reportingPeriodValue} onChange={(event) => applyFilters({ [semesterFilter]: event.target.value, [pageFilter]: 1 })}><option value="">All {periodLabel}s</option>{periods.map((period) => <option key={period} value={period}>{period}</option>)}</FloatingSelect></div><div className="text-xs font-bold text-gray-600 dark:text-gray-300"><FloatingSelect id="reportsubmissiontracker-protected-area" label="Protected Area" value={protectedAreaValue} onChange={(event) => applyFilters({ [protectedAreaFilter]: event.target.value, [pageFilter]: 1 })}><option value="">All Protected Areas</option>{protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}</FloatingSelect></div></div></FilterToolbar>
             {canCreate && <button type="button" onClick={openCreate} className="rounded-xl bg-green-700 px-5 py-2.5 text-xs font-bold text-white shadow-md transition hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">+ Add Report</button>}
-            {pamoWorkspace === true && <Button type="button" size="compact" variant="primary" className="h-10 shrink-0 rounded-xl px-5 text-xs" onClick={() => pamoDraftRef.current?.startNew()}>New draft</Button>}
+            {pamoWorkspace === true && workflowConfig?.is_active !== false && <Button type="button" size="compact" variant="primary" className="h-10 shrink-0 rounded-xl px-5 text-xs" onClick={() => pamoDraftRef.current?.startNew()}>New draft</Button>}
         </div>
 
         {pamoWorkspace === false && <p role="status" className="text-xs text-amber-800 dark:text-amber-300">Drafts are temporarily unavailable. Contact an administrator.</p>}

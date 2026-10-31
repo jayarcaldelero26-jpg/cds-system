@@ -70,7 +70,9 @@ final class PamoPambDraftController extends Controller
     {
         $actor = $request->user();
         $facts = $this->assertPamoActor($actor);
-        $this->assertConfiguredWorkflow($workflow);
+        $this->assertPilotWorkflow($workflow);
+        $data = $this->partialPayload($request, $workflow);
+        $file = $request->file('mov');
         $token = $request->validate([
             'start_idempotency_key' => ['required', 'uuid'],
             'protected_area_id' => ['prohibited'], 'pamo_office_id' => ['prohibited'],
@@ -84,15 +86,9 @@ final class PamoPambDraftController extends Controller
         $existing = PamoPambDraft::query()->where('start_idempotency_key', $token)->first();
         if ($existing) {
             $this->assertDraftAccess($actor, $existing, $workflow, $facts);
-            $data = $this->partialPayload($request, $workflow);
-            $file = $request->file('mov');
             $this->saveLocked($request, $existing, $workflow, $facts, $data, $file, null);
             return back()->with('success', 'Draft saved.');
         }
-
-        $this->assertPilotWorkflow($workflow);
-        $data = $this->partialPayload($request, $workflow);
-        $file = $request->file('mov');
 
         $uuid = (string) Str::uuid();
         $now = CarbonImmutable::now(BusinessCalendarService::TIMEZONE);
@@ -348,7 +344,7 @@ final class PamoPambDraftController extends Controller
 
     private function partialPayload(Request $request, string $workflow): array
     {
-        $this->assertConfiguredWorkflow($workflow);
+        $this->assertPilotWorkflow($workflow);
         if ($this->nativeSources->find($workflow)) return $this->nativeDrafts->partialPayload($request, $workflow);
         $definition = app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->find($workflow) ?? [];
         $documents = array_values(array_unique(array_merge(...array_values($definition['activity_documents'] ?? ['default' => ($definition['documents'] ?? [])]))));

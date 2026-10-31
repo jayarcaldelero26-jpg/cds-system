@@ -12,55 +12,136 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Storage;
+use Carbon\CarbonImmutable;
 use Inertia\Inertia;
 use Inertia\Response;
 
 final class OfficeTatController extends Controller
 {
-    public function index(Request $request, OfficeTatAnalyticsService $analytics, OfficeTatComplianceAssessmentService $assessments, OfficeTatDocumentTurnaroundService $documentTurnaround): Response|RedirectResponse
+    public function index(Request $request, OfficeTatAnalyticsService $analytics, OfficeTatComplianceAssessmentService $assessments, OfficeTatDocumentTurnaroundService $documentTurnaround): Response
     {
-        $filters = $request->only([
-            'category', 'processing_period', 'as_of_date', 'reporting_period', 'reporting_year',
-            'workflow', 'protected_area_id', 'evidence_type', 'view', 'unit',
-        ]);
-        $periodKey = $analytics->canonicalPeriodKey($filters['processing_period'] ?? null);
-        $legacyAssessmentState = $request->hasAny(['assessment_type', 'assessment_year', 'semester']);
-        if (($filters['processing_period'] ?? null) !== $periodKey || $legacyAssessmentState) {
-            $filters['processing_period'] = $periodKey;
-            unset($filters['assessment_type'], $filters['assessment_year'], $filters['semester']);
-
-            return Redirect::route('office-tat.index', $filters);
-        }
-        $filters['processing_period'] = $periodKey;
-        $data = $analytics->analytics($request->user(), $filters);
-
         $organization = app(OrganizationalAccessService::class);
         $authorizedUnits = $organization->effectiveUnits($request->user());
-        $requestedUnit = in_array(($filters['unit'] ?? null), ['conservation', 'development'], true) ? $filters['unit'] : null;
+        $canViewLiveRoutingAverage = $request->user()->can('office-tat.view')
+            && $analytics->canAccessCategory($request->user(), 'CENRO');
+        $canViewPamoPreparationAverage = $request->user()->can('office-tat.view')
+            && $analytics->canAccessCategory($request->user(), 'PAMO');
+        $requestedUnit = $request->query('unit');
         $selectedUnit = $requestedUnit && in_array($requestedUnit, $authorizedUnits, true)
             ? $requestedUnit
             : ($authorizedUnits[0] ?? 'conservation');
-        $filters['unit'] = $selectedUnit;
-        $filters['view'] = in_array(($filters['view'] ?? null), ['report-performance', 'average-tat'], true)
-            ? $filters['view'] : 'report-performance';
-        $globalAssessmentAccess = $organization->isGlobal($request->user());
-        $officialAssessments = $globalAssessmentAccess ? $assessments->assessments($periodKey, $data['as_of_date']) : null;
-        $recordedAssessment = $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $data['as_of_date']);
+        $periodKey = $analytics->canonicalPeriodKey($request->query('processing_period'));
+        [$today, $asOfDate] = $this->normalizedDateFilter($request);
+        $moduleOptions = $assessments->moduleOptions($selectedUnit);
+        $validWorkflows = array_column($moduleOptions, 'value');
+        $requestedWorkflow = trim((string) $request->query('workflow', 'all'));
+        $workflow = in_array($requestedWorkflow, $validWorkflows, true) ? $requestedWorkflow : 'all';
+        $periodOptions = collect($assessments->periodOptions());
+        if (! $periodOptions->contains(fn (array $option): bool => $option['value'] === $periodKey)) {
+            $periodOptions->prepend(['value' => $periodKey, 'label' => $periodKey]);
+        }
+        $filters = ['unit' => $selectedUnit, 'processing_period' => $periodKey, 'as_of_date' => $asOfDate, 'workflow' => $workflow];
+        $recordedAssessment = $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $asOfDate, $workflow);
         return Inertia::render('Admin/OfficeTat/Index', [
-            'analytics' => $data,
-            'complianceAssessments' => $officialAssessments,
             'recordedAssessment' => $recordedAssessment,
             'documentTurnaround' => $documentTurnaround->forAssessment($request->user(), $recordedAssessment),
             'selectedUnit' => $selectedUnit,
             'authorizedUnits' => $authorizedUnits,
-            'selectedView' => $filters['view'],
+            'periodOptions' => $periodOptions->values()->all(),
+            'moduleOptions' => $moduleOptions,
             'filters' => $filters,
-            'canConfigure' => $request->user()?->can('office-tat.configure') ?? false,
-            'configurationSaved' => $request->session()->get('office_tat_configuration_saved'),
-            'assessmentSaved' => $request->session()->get('office_tat_assessment_saved'),
-            'globalAssessmentAccess' => $globalAssessmentAccess,
-            'obligationSetupCatalogue' => $globalAssessmentAccess ? app(OfficeTatObligationEvidenceSetupService::class)->catalogue() : [],
+            'today' => $today,
+            'canViewLiveRoutingAverage' => $canViewLiveRoutingAverage,
+            'canViewPamoPreparationAverage' => $canViewPamoPreparationAverage,
         ]);
+    }
+
+    public function pamoPreparationAverage(Request $request, OfficeTatAnalyticsService $analytics, OfficeTatComplianceAssessmentService $assessments): Response
+    {
+        $periodKey = $analytics->canonicalPeriodKey($request->query('processing_period'));
+        [$today, $asOfDate] = $this->normalizedDateFilter($request);
+        $result = $analytics->analytics($request->user(), [
+            'category' => 'PAMO',
+            'processing_period' => $periodKey,
+            'as_of_date' => $asOfDate,
+            'evidence_type' => 'live',
+        ]);
+        $preparation = $result['pamo_preparation'] ?? null;
+        $periodOptions = collect($assessments->periodOptions());
+        if (! $periodOptions->contains(fn (array $option): bool => $option['value'] === $periodKey)) {
+            $periodOptions->prepend(['value' => $periodKey, 'label' => $result['processing_period_label']]);
+        }
+
+        return Inertia::render('Admin/OfficeTat/PamoPreparationAverage', [
+            'preparation' => $preparation,
+            'filters' => ['processing_period' => $periodKey, 'as_of_date' => $asOfDate],
+            'periodOptions' => $periodOptions->values()->all(),
+            'today' => $today,
+            'canViewLiveRoutingAverage' => $request->user()->can('office-tat.view')
+                && $analytics->canAccessCategory($request->user(), 'CENRO'),
+        ]);
+    }
+
+    public function liveRoutingAverage(Request $request, OfficeTatAnalyticsService $analytics, OfficeTatComplianceAssessmentService $assessments): Response
+    {
+        $periodKey = $analytics->canonicalPeriodKey($request->query('processing_period'));
+        [$today, $asOfDate] = $this->normalizedDateFilter($request);
+        $result = $analytics->analytics($request->user(), [
+            'category' => 'CENRO',
+            'processing_period' => $periodKey,
+            'as_of_date' => $asOfDate,
+            'evidence_type' => 'live',
+        ]);
+        $periodKey = $result['processing_period'];
+        $asOfDate = $result['as_of_date'];
+        $authorizedUnits = app(OrganizationalAccessService::class)->effectiveUnits($request->user());
+        $requestedReturnUnit = $request->query('return_unit');
+        $returnUnit = is_string($requestedReturnUnit) && in_array($requestedReturnUnit, $authorizedUnits, true)
+            ? $requestedReturnUnit
+            : (in_array('development', $authorizedUnits, true) ? 'development' : ($authorizedUnits[0] ?? 'conservation'));
+        $periodOptions = collect($assessments->periodOptions());
+        if (! $periodOptions->contains(fn (array $option): bool => $option['value'] === $periodKey)) {
+            $periodOptions->prepend(['value' => $periodKey, 'label' => $result['processing_period_label']]);
+        }
+
+        return Inertia::render('Admin/OfficeTat/LiveRoutingAverage', [
+            'liveAnalytics' => [
+                'category' => 'CENRO',
+                'processing_period' => $result['processing_period'],
+                'processing_period_label' => $result['processing_period_label'],
+                'processing_period_start' => $result['processing_period_start'],
+                'processing_period_end' => $result['processing_period_end'],
+                'as_of_date' => $result['as_of_date'],
+                'evidence_type' => 'live',
+                'tat_definition' => $result['definitions']['tat'],
+                'rows' => array_map(static fn (array $row): array => [
+                    'office' => $row['office'],
+                    'documents_received' => $row['documents_received'],
+                    'tat_completed_documents' => $row['tat_completed_documents'],
+                    'tat_elapsed_seconds_total' => $row['tat_elapsed_seconds_total'],
+                    'tat_average_elapsed_seconds' => $row['tat_average_elapsed_seconds'],
+                    'pending' => $row['pending'],
+                    'tat_missing_evidence' => $row['tat_missing_evidence'],
+                ], $result['rows']),
+            ],
+            'filters' => ['processing_period' => $periodKey, 'as_of_date' => $asOfDate, 'return_unit' => $returnUnit],
+            'periodOptions' => $periodOptions->values()->all(),
+            'today' => $today,
+            'canViewPamoPreparationAverage' => $request->user()->can('office-tat.view')
+                && $analytics->canAccessCategory($request->user(), 'PAMO'),
+        ]);
+    }
+
+    /** @return array{0:string,1:string} Manila today and the normalized cutoff date. */
+    private function normalizedDateFilter(Request $request): array
+    {
+        $today = CarbonImmutable::now(\App\Services\BusinessCalendarService::TIMEZONE)->toDateString();
+        $requestedAsOf = $request->query('as_of_date');
+        $asOfDate = is_string($requestedAsOf) && preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $requestedAsOf, $dateParts)
+            && checkdate((int) $dateParts[2], (int) $dateParts[3], (int) $dateParts[1]) && $requestedAsOf <= $today
+            ? $requestedAsOf : $today;
+
+        return [$today, $asOfDate];
     }
 
     public function storeApprovalEvidence(Request $request, OfficeTatObligationEvidenceSetupService $setup): RedirectResponse

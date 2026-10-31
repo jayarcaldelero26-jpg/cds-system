@@ -58,7 +58,7 @@ final class FinalDocumentArchiveService
     /** @return array<string,mixed> */
     public function context(User $actor, string $source, int $recordId, bool $includeEarlierDispatchCopy = false): array
     {
-        [$definition, $record] = $this->authorizedRecord($actor, $source, $recordId);
+        [$definition, $record, $module] = $this->authorizedRecord($actor, $source, $recordId, false);
         $reportMetadata = $this->tracking->archiveReportMetadata($source, $record, $definition);
         $release = $this->releaseEvidence($record, $source);
         $receipt = FinalDocumentReceipt::query()->where('source_type', $source)->where('source_id', $recordId)->first();
@@ -66,7 +66,7 @@ final class FinalDocumentArchiveService
         $latestManifest = $receipt?->manifests()->with('files.archive')->latest('revision')->first();
         $receivingOffice = $this->receivingOfficeFor($record, $source, $definition);
         $officeContext = $this->originOfficeContext($record, $source, $definition);
-        $writer = $this->canReceive($actor, $record, $source);
+        $writer = $module->is_active && ! $module->isRetired() && $this->canReceive($actor, $record, $source);
         $receiptMatches = $receipt && $release
             && $receipt->release_evidence_key === $release['key']
             && $receipt->release_evidence_type === $release['type']
@@ -77,9 +77,11 @@ final class FinalDocumentArchiveService
         $visibleManifest = $latestManifest && ($latestManifest->archive_status === 'ARCHIVED' || $writer) ? $latestManifest : null;
         $canReceiveFinal = $writer && $release !== null && $receipt === null;
         $canArchiveFinal = $writer && $receiptMatches;
-        $finalActionUnavailableReason = $this->finalActionUnavailableReason(
-            $actor, $record, $source, $definition, $release, $receipt, (bool) $receiptMatches, $latestManifest, $writer,
-        );
+        $finalActionUnavailableReason = ! $module->is_active
+            ? 'This report module is inactive. Historical archive files remain available.'
+            : $this->finalActionUnavailableReason(
+                $actor, $record, $source, $definition, $release, $receipt, (bool) $receiptMatches, $latestManifest, $writer,
+            );
         $manifestVerified = $visibleManifest
             ? $this->manifestIsVerifiedForRecord($record, $source, $definition, $visibleManifest)
             : false;
@@ -372,7 +374,7 @@ final class FinalDocumentArchiveService
 
     public function authorizeManifestReader(User $actor, FinalDocumentArchiveManifest $manifest): array
     {
-        [$definition, $record] = $this->authorizedRecord($actor, (string) $manifest->source_type, (int) $manifest->source_id);
+        [$definition, $record] = $this->authorizedRecord($actor, (string) $manifest->source_type, (int) $manifest->source_id, false);
         abort_unless($this->manifestIsVerifiedForRecord($record, (string) $manifest->source_type, $definition, $manifest), 404);
         return [$definition, $record];
     }
@@ -381,7 +383,7 @@ final class FinalDocumentArchiveService
     public function retrieveEarlierDispatchArchive(User $actor, DocumentArchive $candidate): array
     {
         $archive = DocumentArchive::query()->findOrFail($candidate->getKey());
-        [$definition, $record] = $this->authorizedRecord($actor, (string) $archive->source_type, (int) $archive->source_id);
+        [$definition, $record] = $this->authorizedRecord($actor, (string) $archive->source_type, (int) $archive->source_id, false);
         $contract = $this->sourceContracts->forRegisteredSource((string) $archive->source_type, $record, $this->documents);
         abort_unless($contract && $this->isEarlierDispatchArchive($archive, (string) $archive->source_type, (int) $record->getKey(), (string) $contract['slot']), 404);
 
@@ -481,10 +483,11 @@ final class FinalDocumentArchiveService
         $latestCandidates = $scopedCandidates;
         if ($latestCandidates->isEmpty()) return [];
 
-        $moduleCodes = $latestCandidates->map(fn (array $item): ?string =>
-            $this->archiveModuleCode((string) $item['source'], $item['definition'], $item['record'])
-        )->filter()->unique()->values();
-        $activeModuleCodes = ModuleDefinition::query()->active()->notRetired()
+        $moduleCodes = $latestCandidates->map(function (array $item): ?string {
+            $resolver = $item['definition']['archive_module_code'] ?? null;
+            return is_callable($resolver) ? (string) $resolver($item['record']) : null;
+        })->filter()->unique()->values();
+        $activeModuleCodes = ModuleDefinition::query()->notRetired()
             ->whereIn('code', $moduleCodes)->pluck('code')->map(fn ($code) => (string) $code)->all();
 
         // Resolve current route evidence from one batched query per source chunk.
@@ -505,7 +508,9 @@ final class FinalDocumentArchiveService
             $verified = [];
             $receivingOfficeCache = [];
             foreach ($latestCandidates as $identity => $item) {
-                $moduleCode = $this->archiveModuleCode((string) $item['source'], $item['definition'], $item['record']);
+                $moduleCode = is_callable($item['definition']['archive_module_code'] ?? null)
+                    ? (string) $item['definition']['archive_module_code']($item['record'])
+                    : null;
                 if ($moduleCode === null || ! in_array($moduleCode, $activeModuleCodes, true)) continue;
                 $officeAttribute = $item['source'] === 'engp'
                     ? 'office'
@@ -663,7 +668,7 @@ final class FinalDocumentArchiveService
             $archiveUnit = (string) ($sourceDefinition['archive_unit'] ?? '');
             $archiveOffice = $this->archiveOffices->resolveRegionalReturn($sourceDefinition, $record);
             $primaryExtension = strtolower(pathinfo((string) $manifest->files->first()?->original_filename, PATHINFO_EXTENSION)) ?: 'pdf';
-            $this->archivePaths->build($module, $archiveUnit, $archiveOffice, (string) $record->getKey(), $primaryExtension, true, null, true);
+            $this->archivePaths->build($module, $archiveUnit, $archiveOffice, (string) $record->getKey(), $primaryExtension, true);
 
             foreach ($manifest->files as $file) {
                 $alreadyVerified = $file->file_status === 'ARCHIVED'
@@ -729,7 +734,6 @@ final class FinalDocumentArchiveService
                     $archiveOffice,
                     FinalDocumentArchiveManifest::PHASE,
                     $this->sourceContracts->allowedMimeTypes((string) $manifest->source_type),
-                    true,
                 );
 
                 if (($result['status'] ?? null) !== 'archived') {
@@ -858,7 +862,7 @@ final class FinalDocumentArchiveService
         }
     }
 
-    private function authorizedRecord(User $actor, string $source, int $recordId): array
+    private function authorizedRecord(User $actor, string $source, int $recordId, bool $requireActive = true): array
     {
         $this->assertFeatureEnabled();
         abort_unless($actor->is_active && $actor->is_approved, 403);
@@ -873,21 +877,9 @@ final class FinalDocumentArchiveService
         abort_unless($contract, 404);
         $moduleCode = $sourceDefinition['archive_module_code'] ?? null;
         abort_unless(is_callable($moduleCode), 404);
-        $expectedCode = (string) $moduleCode($record);
-        $workflow = (string) $record->getAttribute('workflow_key');
-        $module = match ($source) {
-            'engp' => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, $workflow),
-            'conservation' => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::PA, $workflow),
-            'management-plans' => ModuleDefinition::query()->active()->notRetired()->where('code', $expectedCode)->first(),
-            default => (function () use ($source, $expectedCode): ?ModuleDefinition {
-                $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->findBySource($source);
-                if (! $native || $native['workflow'] !== $expectedCode) return null;
-                return ModuleDefinition::query()->notRetired()->where('implementation_type', ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
-                    ->requirementDomain(\App\Services\Reports\ReportRequirementRegistry::PA)->where('code', $expectedCode)->first();
-            })(),
-        };
-        if ($module && $source !== 'engp' && ! in_array($expectedCode, [$module->code, $module->requirement_key], true)) $module = null;
-        abort_unless($module, 404);
+        $moduleQuery = ModuleDefinition::query()->notRetired()->where('code', (string) $moduleCode($record));
+        if ($requireActive) $moduleQuery->active();
+        $module = $moduleQuery->firstOrFail();
         return [$sourceDefinition, $record, $module];
     }
 
@@ -910,23 +902,6 @@ final class FinalDocumentArchiveService
             && $this->sameOffice($this->organization->normalizeOffice($actor->office_designated), $expectedOffice)
             && $sourceDefinition !== null
             && $this->routingAccess->canView($actor, $record, $source, $sourceDefinition['ability']);
-    }
-
-    /** Resolve the persisted catalogue identity for configurable source modules. */
-    private function archiveModuleCode(string $source, array $definition, Model $record): ?string
-    {
-        $workflow = (string) $record->getAttribute('workflow_key');
-        $module = match ($source) {
-            'engp' => app(\App\Services\Reports\ReportRequirementRegistry::class)
-                ->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, $workflow),
-            'conservation' => app(\App\Services\Reports\ReportRequirementRegistry::class)
-                ->model(\App\Services\Reports\ReportRequirementRegistry::PA, $workflow),
-            default => null,
-        };
-        if ($module) return (string) $module->code;
-
-        $resolver = $definition['archive_module_code'] ?? null;
-        return is_callable($resolver) ? (string) $resolver($record) : null;
     }
 
     /** Actor-only portion of the final receipt writer predicate; release and record gates remain separate. */

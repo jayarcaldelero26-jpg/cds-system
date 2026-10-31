@@ -975,6 +975,14 @@ final class SubmissionTrackingService
         return array_keys($this->sources());
     }
 
+    /** @return array<string, class-string<Model>> */
+    public function reportSourceModels(): array
+    {
+        return collect($this->sources())
+            ->map(fn (array $source): string => $source['model'])
+            ->all();
+    }
+
     /** Build one authorization-first query for a registered active source. */
     private function sourceQuery(string $key, array $source, array $filters = [], bool $withRelations = true)
     {
@@ -1076,7 +1084,7 @@ final class SubmissionTrackingService
     private function sources(): array
     {
         return [
-            'engp' => ['model' => EngpReportSubmission::class, 'archive_unit' => 'Development Unit', 'archive_office_attribute' => 'office', 'archive_module_code' => fn (Model $record) => 'engp_'.(string) $record->workflow_key, 'module' => fn (Model $record) => $this->engpWorkflows->find((string) $record->workflow_key)['label'] ?? 'ENGP Report', 'target_office' => 'office', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'supports_regional_endorsement' => true, 'url' => fn (Model $record) => route('engp-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('engp-reports.mov', [$record->workflow_key, $record]) : $this->safeExternalUrl($record->mov_external_url), 'mov_external' => fn (Model $record) => $this->safeExternalUrl($record->mov_external_url) !== null && empty($record->mov_file_path)],
+            'engp' => ['model' => EngpReportSubmission::class, 'archive_unit' => 'Development Unit', 'archive_office_attribute' => 'office', 'archive_module_code' => fn (Model $record) => app(\App\Services\Reports\ReportRequirementRegistry::class)->model(\App\Services\Reports\ReportRequirementRegistry::ENGP, (string) $record->workflow_key)?->code ?? 'engp_'.(string) $record->workflow_key, 'module' => fn (Model $record) => $this->engpWorkflows->find((string) $record->workflow_key)['label'] ?? 'ENGP Report', 'target_office' => 'office', 'ability' => 'technical-reports.update', 'requires_date_accomplished' => false, 'supports_regional_endorsement' => true, 'url' => fn (Model $record) => route('engp-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('engp-reports.mov', [$record->workflow_key, $record]) : $this->safeExternalUrl($record->mov_external_url), 'mov_external' => fn (Model $record) => $this->safeExternalUrl($record->mov_external_url) !== null && empty($record->mov_file_path)],
             'conservation' => ['model' => ConservationReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn (Model $record) => (string) $record->workflow_key, 'module' => fn (Model $record) => $this->workflows->find((string) $record->workflow_key)['label'] ?? 'Conservation Report', 'ability' => 'technical-reports.update', 'url' => fn (Model $record) => route('conservation-reports.index', $record->workflow_key), 'mov_url' => fn (Model $record) => $record->mov_file_path ? $this->attachments->url('conservation-report', $record, 'mov') : null],
             'bms' => ['model' => BmsReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'bms', 'module' => fn () => 'BMS Report', 'ability' => 'bms.update', 'url' => fn () => route('bms.index', ['tracker' => 1]), 'mov_url' => fn (Model $record) => $record->mov_file_path ? $this->attachments->url('bms-report', $record, 'mov') : null],
             'bams' => ['model' => BamsReportSubmission::class, 'archive_unit' => 'Conservation Unit', 'archive_office_attribute' => 'target_office', 'archive_module_code' => fn () => 'bams', 'module' => fn () => 'BAMS Report', 'ability' => 'bams.update', 'url' => fn () => route('bams.report-submissions.index'), 'mov_url' => fn (Model $record) => $record->mov_file_path ? route('bams.report-submissions.mov', $record) : null],
@@ -1107,7 +1115,9 @@ final class SubmissionTrackingService
             : null;
         $directPenro = ! $isEngp && (($routingState['route_profile'] ?? null) === 'direct'
             || (($routingState['route_profile'] ?? null) !== 'regular' && $this->routingPolicy->isDirectPenro($record)));
-        $releaseDate = $isEngp ? $record->releaseEvents->map(fn (Model $event): ?string => DatePresentationNormalizer::toDateString($event->getRawOriginal('date_report_released_cenro')))->filter()->sort()->last() : $this->date($record, 'date_report_released_cenro');
+        $engpRelease = $isEngp ? EngpRoutingMilestonePresenter::cenroRelease($routingEvents) : null;
+        $releaseEventDate = $isEngp ? $record->releaseEvents->map(fn (Model $event): ?string => DatePresentationNormalizer::toDateString($event->getRawOriginal('date_report_released_cenro')))->filter()->sort()->last() : null;
+        $releaseDate = $isEngp ? ($releaseEventDate ?? $engpRelease['date']) : $this->date($record, 'date_report_released_cenro');
         $dates = $isEngp
             ? ['date_received_penro']
             : ($sourceKey === 'conservation'
@@ -1173,7 +1183,8 @@ final class SubmissionTrackingService
             'mov_external' => isset($source['mov_external']) ? (bool) ($source['mov_external'])($record) : false,
             'source_url' => ($source['url'])($record),
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
-            'cenro_release_applicable' => ! $directPenro,
+            'cenro_release_applicable' => $isEngp ? $engpRelease['applicable'] : ! $directPenro,
+            'cenro_release_state' => $isEngp ? ($releaseDate !== null ? 'recorded' : $engpRelease['state']) : null,
         ];
         foreach ($dates as $field) {
             $data[$field] = $field === 'date_conducted' ? $this->text($record, $field) : $this->date($record, $field);
@@ -1593,6 +1604,10 @@ final class SubmissionTrackingService
         $this->assertNotHistorical($record);
         if ($this->isRoutingComplete($record)) {
             throw ValidationException::withMessages(['submission' => 'Completed submissions are read-only.']);
+        }
+        if ($record instanceof EngpReportSubmission
+            && $this->genericRouting->events($record, 'engp')->last()?->event_key === 'returned_for_correction') {
+            throw ValidationException::withMessages(['routing' => 'Receive Correction before changing or resubmitting this ENGP report.']);
         }
     }
 

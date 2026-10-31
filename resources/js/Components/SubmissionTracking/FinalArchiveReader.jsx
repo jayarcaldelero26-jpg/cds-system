@@ -216,5 +216,6 @@ export default function FinalArchiveReader({
         closeOnEscape={!retrying}
         idPrefix="archive"
         initialFocusSelector="[data-archive-reader-close]"
+        avoidBottomDebugbar
     />;
 }

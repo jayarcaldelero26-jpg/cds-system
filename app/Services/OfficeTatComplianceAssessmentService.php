@@ -3,8 +3,11 @@
 namespace App\Services;
 
 use Brick\Math\BigRational;
+use App\Models\BmsReportSubmission;
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\EngpReportSubmission;
+use App\Models\EngpReportReleaseEvent;
 use App\Models\HistoricalReportOrigin;
 use App\Models\OfficeTatAssessmentScopeVersion;
 use App\Models\OfficeTatTechnicalClassificationVersion;
@@ -12,6 +15,7 @@ use App\Models\OfficeTatTieDecision;
 use App\Models\OfficeTatApplicabilityVersion;
 use App\Models\OfficeTatObligationScheduleVersion;
 use App\Models\OrganizationalOffice;
+use App\Models\PambRoutingEvent;
 use App\Models\ProtectedArea;
 use App\Models\User;
 use App\Services\Engp\EngpReportWorkflowRegistry;
@@ -29,6 +33,8 @@ final class OfficeTatComplianceAssessmentService
 {
     private const EXPECTED_PA_ROSTER = 6;
     private const EXPECTED_CENRO_ROSTER = 4;
+    private const ENGP_CBEP_ALLOWED_CALENDAR_DAYS = 'engp_cbep_allowed_calendar_days';
+    private const CONSERVATION_NATIVE_DAY_MODE = 'conservation_native_working_days';
     public const POLICY_EFFECTIVE_DATE = '2026-10-11';
     /** @var array<int,bool> */
     private array $evidenceValidity = [];
@@ -180,19 +186,19 @@ final class OfficeTatComplianceAssessmentService
     }
 
     /** @return list<array<string,mixed>> */
-    private function recordedConservationRows(array $participants, string $periodKey, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, CarbonImmutable $cutoff, array $classifications): array
+    private function recordedConservationRows(array $participants, string $periodKey, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, CarbonImmutable $cutoff, array $classifications, ?string $workflowFilter = null): array
     {
         $areas = array_map(fn (array $row): int => (int) substr($row['participant_key'], 3), $participants);
-        $pairs = $this->obligationEvidence->catalogue();
+        $pairs = collect($this->obligationEvidence->catalogue())
+            ->when($workflowFilter !== null && $workflowFilter !== '' && $workflowFilter !== 'all', fn ($items) => $items->where('workflow_key', $workflowFilter))
+            ->values()->all();
         $workflows = collect($pairs)->pluck('workflow_key')->unique()->values()->all();
         $sourceRows = $areas !== [] && $workflows !== []
-            ? ConservationReportSubmission::query()->whereIn('protected_area_id', $areas)->whereIn('workflow_key', $workflows)->get()
+            ? ConservationReportSubmission::query()->whereIn('protected_area_id', $areas)->whereIn('workflow_key', $workflows)
+                ->where(fn ($query) => $query->whereNull('is_historical')->orWhere('is_historical', false))->get()
                 ->groupBy(fn (ConservationReportSubmission $record): string => $this->paRecordKey($record))
             : collect();
-        $historicalIds = $sourceRows->flatten()->filter(fn ($row): bool => (bool) $row->getAttribute('is_historical'))->pluck('id')->all();
-        $origins = Schema::hasTable('historical_report_origins') && $historicalIds !== []
-            ? HistoricalReportOrigin::query()->where('source', 'conservation')->whereIn('source_record_id', $historicalIds)->get()->keyBy('source_record_id')
-            : collect();
+        $processedSourceIds = $this->processedSourceIds('conservation', $sourceRows->flatten(), $cutoff);
         $definitions = collect($this->requirements->definitions(ReportRequirementRegistry::PA, true, 'generic'))->keyBy('key');
         $year = (int) substr($periodKey, 0, 4);
         $rows = [];
@@ -202,7 +208,7 @@ final class OfficeTatComplianceAssessmentService
             $obligations = [];
             $incompleteDetails = [];
             $activityCount = $receivedCount = $notYetDueCount = 0;
-            $incompleteDates = $incompleteEvidence = $historicalExcluded = 0;
+            $incompleteDates = $incompleteEvidence = 0;
             $recognizedIdentities = [];
 
             foreach ($pairs as $pair) {
@@ -213,116 +219,176 @@ final class OfficeTatComplianceAssessmentService
                     $recognizedIdentities[$periodIdentity] = true;
                     $matches = $sourceRows->get($periodIdentity, collect())
                         ->filter(fn (ConservationReportSubmission $row): bool => $this->conservationRecordBelongsToYear($row, $year));
-                    if ($matches->isEmpty()) continue;
+                    $liveMatches = $matches;
 
-                    $historicalMatches = $matches->filter(fn (ConservationReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'));
-                    $historicalExcluded += $historicalMatches->count();
-                    $liveMatches = $matches->reject(fn (ConservationReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'));
-                    if ($liveMatches->isEmpty()) continue;
+                    // Registry metadata identifies and dates existing reports;
+                    // it never creates a report row or an assessed target.
+                    foreach ($liveMatches as $record) {
+                        if (! isset($processedSourceIds[(int) $record->getKey()])) continue;
 
-                    $record = $liveMatches->sort(fn (ConservationReportSubmission $a, ConservationReportSubmission $b): int =>
-                        (($a->date_received_penro?->toDateString() ?: '9999-12-31') <=> ($b->date_received_penro?->toDateString() ?: '9999-12-31'))
-                        ?: ((int) $a->getKey() <=> (int) $b->getKey())
-                    )->first();
-                    $start = $this->conservationRecordStart($record);
-                    $deadline = $record->deadline_submission ?: null;
-                    $received = $record->date_received_penro?->toDateString();
-                    $catalogStart = $this->requirements->periodStartDate(ReportRequirementRegistry::PA, $workflow, $year, (string) $sourcePeriod['key']);
-                    $catalogDeadline = $this->requirements->deadline(ReportRequirementRegistry::PA, $workflow, $year, (string) $sourcePeriod['key']);
-                    $catalogPeriodRelevant = $catalogStart !== null && $catalogStart >= $periodStart->toDateString() && $catalogStart <= $periodEnd->toDateString();
-                    if ($start === null || $deadline === null) {
-                        if ($catalogPeriodRelevant || ($catalogDeadline && $this->deadlineInAssessmentPeriod(CarbonImmutable::parse($catalogDeadline, BusinessCalendarService::TIMEZONE), $periodStart, $periodEnd))) {
-                            $activityCount++;
-                            if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                        $received = $record->date_received_penro?->toDateString();
+                        $start = $this->conservationRecordStart($record);
+                        $deadline = $record->deadline_submission
+                            ? CarbonImmutable::parse($record->deadline_submission, BusinessCalendarService::TIMEZONE)->toDateString()
+                            : null;
+                        $registryDeadline = $this->requirements->deadline(ReportRequirementRegistry::PA, $workflow, $year, (string) $sourcePeriod['key']);
+                        $reportPeriodDeadline = $deadline ?? $registryDeadline;
+                        $inAssessmentPeriod = ($reportPeriodDeadline && $this->deadlineInAssessmentPeriod(
+                            CarbonImmutable::parse($reportPeriodDeadline, BusinessCalendarService::TIMEZONE), $periodStart, $periodEnd,
+                        )) || ($start && $start >= $periodStart->toDateString() && $start <= $periodEnd->toDateString());
+                        if (! $inAssessmentPeriod) continue;
+                        $activityCount++;
+                        if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                        if ($start === null || $deadline === null) {
                             $incompleteDates++;
                             $incompleteDetails[] = $this->recordedIncompleteDetail(
                                 $this->recordedPaLabel($pair, $sourcePeriod), 'Incomplete source dates', $start, $deadline, $received,
-                                'A source start or supported deadline is missing; this activity is not scored.',
-                                'Report #'.$record->getKey(), ['source_key' => 'conservation', 'calendar_office' => $record->target_office,
-                                    'workflow_key' => $workflow, 'workflow_label' => $pair['workflow_label'],
-                                    'activity_name' => $pair['activity_name'], 'document_type' => $pair['document_type'],
-                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
-                            );
-                        }
-                        continue;
-                    }
-
-                    $deadlineDate = CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE)->startOfDay();
-                    if (! $this->deadlineInAssessmentPeriod($deadlineDate, $periodStart, $periodEnd)) continue;
-                    $activityCount++;
-                    if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
-                    $historicalReceipt = null;
-                    foreach ($historicalMatches as $historic) {
-                        if ($this->conservationRecordStart($historic) !== $start) continue;
-                        $origin = $origins->get($historic->getKey());
-                        $projection = $origin ? app(ConservationHistoricalEvidenceProjection::class)->project($historic, $origin) : null;
-                        $historicalDate = $projection['milestones']['date_received_penro'] ?? null;
-                        if ($historicalDate && $historicalDate <= $cutoff->toDateString()) {
-                            $historicalReceipt = $historicalReceipt === null ? $historicalDate : min($historicalReceipt, $historicalDate);
-                        }
-                    }
-                    if ($historicalReceipt !== null) {
-                        $incompleteEvidence++;
-                        $incompleteDetails[] = $this->recordedIncompleteDetail(
-                            $this->recordedPaLabel($pair, $sourcePeriod), 'Conflicting historical receipt', $start, $deadline, $received,
-                            'An original historical receipt exists for this source identity; it cannot be credited as live or treated as a verified miss.',
-                            'Report #'.$record->getKey(), ['source_key' => 'conservation', 'calendar_office' => $record->target_office,
-                                'workflow_key' => $workflow, 'workflow_label' => $pair['workflow_label'],
-                                'activity_name' => $pair['activity_name'], 'document_type' => $pair['document_type'],
-                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
-                        );
-                        continue;
-                    }
-
-                    $key = implode('|', ['recorded', 'pa:'.$paId, $workflow, $sourcePeriod['key'], sha1($pair['activity_name']."\0".$pair['document_type'])]);
-                    $technical = $classifications['conservation'][$workflow]['is_highly_technical'] ?? null;
-                    $obligation = $this->makeObligation(
-                        $key, $start, $deadline, $received, $record->deadline_submission, $technical, (int) $record->getKey(), false,
-                        'conservation', (string) ($definition['deadline_mode'] ?? ''), $record->target_office,
-                        $classifications['conservation'][$workflow]['id'] ?? null, $this->recordedPaLabel($pair, $sourcePeriod),
-                    );
-                    $obligation['source_rows_matched'] = $liveMatches->count();
-                    $obligation['source_identity'] = [
-                        'source_key' => 'conservation', 'source_id' => (int) $record->getKey(),
-                        'source_ids' => $liveMatches->pluck('id')->map(static fn ($id): int => (int) $id)->unique()->values()->all(),
-                        'calendar_office' => $record->target_office,
-                        'participant_key' => $participant['participant_key'], 'workflow_key' => $workflow,
-                        'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
-                        'document_type' => $pair['document_type'], 'reporting_year' => $year,
-                        'period_key' => $sourcePeriod['key'], 'occurrence_key' => null,
-                    ];
-                    $obligation['historical_receipt_conflict'] = false;
-                    $obligation['historical_receipt_evidence'] = null;
-                    if ($deadlineDate->lessThanOrEqualTo($cutoff)) {
-                        $nonreceipt = $received === null
-                            ? $this->recordedPaNonReceiptEvidence($paId, $workflow, (string) $pair['activity_name'], (string) $pair['document_type'], $year, (string) $sourcePeriod['key'], $start, $deadline, $cutoff->toDateString())
-                            : null;
-                        $obligation['nonreceipt_verified'] = $nonreceipt !== null && $this->validEvidence((int) $nonreceipt->evidence_id);
-                        $probe = $this->scoreParticipant([$obligation], $cutoff);
-                        if ($probe['score_status'] === 'Coverage incomplete') {
-                            $incompleteEvidence++;
-                            $policyIssue = preg_replace('/^.*?: /', '', $probe['score_issues'][0] ?? '');
-                            $incompleteDetails[] = $this->recordedIncompleteDetail(
-                                $this->recordedPaLabel($pair, $sourcePeriod), 'Evidence incomplete', $start, $deadline, $received,
-                                $policyIssue !== '' ? $policyIssue : 'The source record does not meet the current evidence policy for scoring.',
-                                'Report #'.$record->getKey(), ['source_key' => 'conservation', 'calendar_office' => $record->target_office,
-                                    'workflow_key' => $workflow, 'workflow_label' => $pair['workflow_label'],
-                                    'activity_name' => $pair['activity_name'], 'document_type' => $pair['document_type'],
-                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
+                                'The processed report is missing its authoritative workflow start or deadline.',
+                                $this->recordedSourceReference('conservation', (int) $record->getKey()),
+                                    ['participant_key' => $participant['participant_key'], 'source_key' => 'conservation',
+                                        'source_id' => (int) $record->getKey(), 'workflow_key' => $workflow,
+                                    'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
+                                    'document_type' => $pair['document_type'], 'reporting_year' => $year, 'period_key' => $sourcePeriod['key'],
+                                    'calendar_office' => $record?->target_office],
                             );
                             continue;
                         }
-                    } else {
-                        $notYetDueCount++;
-                    }
+                        if (! $this->deadlineInAssessmentPeriod(CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE), $periodStart, $periodEnd)) continue;
+
+                    $key = implode('|', ['processed', 'pa:'.$paId, 'source:'.$record->getKey()]);
+                    $obligation = $this->makeObligation(
+                        $key, $start, $deadline, $received, $record?->deadline_submission,
+                        $classifications['conservation'][$workflow]['is_highly_technical'] ?? null,
+                        (int) $record->getKey(), false, 'conservation',
+                        (string) ($definition['deadline_mode'] ?? ''), $record?->target_office, null,
+                        $this->recordedPaLabel($pair, $sourcePeriod),
+                    );
+                    $obligation['classification_version_id'] = $classifications['conservation'][$workflow]['id'] ?? null;
+                    $obligation['source_rows_matched'] = 1;
+                    $obligation['source_identity'] = [
+                        'source_key' => 'conservation', 'source_id' => (int) $record->getKey(),
+                        'source_ids' => [(int) $record->getKey()],
+                        'calendar_office' => $record->target_office,
+                        'participant_key' => $participant['participant_key'], 'workflow_key' => $workflow,
+                        'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
+                        'registered_activity_name' => $pair['activity_name'],
+                        'submitted_activity_name' => (string) ($record->activity_name ?? $pair['activity_name']),
+                        'document_type' => $pair['document_type'], 'reporting_year' => $year,
+                        'period_key' => $sourcePeriod['key'], 'period_label' => $sourcePeriod['label'], 'occurrence_key' => null,
+                    ];
+                    if (CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE)->greaterThan($cutoff)
+                        && (! $received || $received > $cutoff->toDateString())) $notYetDueCount++;
                     $obligations[] = $obligation;
                 }
             }
+            }
+            $nativeRegistry = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+            $nativeDefinitions = collect($this->requirements->definitions(ReportRequirementRegistry::PA, true, 'specialized'))
+                ->keyBy('key');
+            foreach ($nativeRegistry->all() as $nativeWorkflow => $nativeSource) {
+                if ($workflowFilter !== null && $workflowFilter !== '' && $workflowFilter !== 'all' && $workflowFilter !== $nativeWorkflow) continue;
+                $nativeDefinition = $nativeDefinitions->get($nativeWorkflow);
+                $modelClass = $nativeSource['model'];
+                $table = (new $modelClass)->getTable();
+                if (! Schema::hasTable($table) || ! Schema::hasColumn($table, 'protected_area_id')) continue;
+                $nativeRows = $modelClass::query()->where('protected_area_id', $paId)
+                    ->where(fn ($query) => $query->whereNull('is_historical')->orWhere('is_historical', false))->get();
+                $nativeProcessedIds = $this->processedSourceIds((string) $nativeSource['source'], $nativeRows, $cutoff);
+                $liveNativeRows = $nativeRows->filter(fn ($row): bool => isset($nativeProcessedIds[(int) $row->getKey()]))->values();
+                $workflowPeriods = $this->requirements->periods(ReportRequirementRegistry::PA, $nativeWorkflow, $year);
 
+                if (! $nativeDefinition) {
+                    foreach ($liveNativeRows as $unsupportedNative) {
+                        $start = $this->nativeRecordStart($unsupportedNative);
+                        $deadline = $this->nativeRecordDate($unsupportedNative, ['deadline_submission']);
+                        $received = $this->nativeRecordDate($unsupportedNative, ['date_received_penro']);
+                        $inPeriod = ($deadline && $this->deadlineInAssessmentPeriod(CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE), $periodStart, $periodEnd))
+                            || ($start && $start >= $periodStart->toDateString() && $start <= $periodEnd->toDateString());
+                        if (! $inPeriod) continue;
+                        $activityCount++;
+                        if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                        $incompleteEvidence++;
+                        $incompleteDetails[] = $this->recordedIncompleteDetail(
+                            trim((string) ($unsupportedNative->getAttribute('activity_name') ?? $nativeSource['label'])),
+                            'Missing or inactive workflow definition', $start, $deadline, $received,
+                            'This native report family is recognized, but its canonical module definition is missing or inactive; the source is excluded from scoring.',
+                            $this->recordedSourceReference($nativeSource['source'], (int) $unsupportedNative->getKey()),
+                            ['participant_key' => $participant['participant_key'], 'source_key' => $nativeSource['source'],
+                                'source_id' => (int) $unsupportedNative->getKey(), 'workflow_key' => $nativeWorkflow,
+                                'workflow_label' => $nativeSource['label'], 'activity_name' => (string) ($unsupportedNative->getAttribute('activity_name') ?? $nativeSource['label']),
+                                'document_type' => (string) ($unsupportedNative->getAttribute('document_type') ?? ''),
+                                'reporting_year' => $year, 'calendar_office' => $unsupportedNative->getAttribute('target_office')],
+                        );
+                    }
+                    continue;
+                }
+
+                foreach ($workflowPeriods as $sourcePeriod) {
+                    $matches = $liveNativeRows->filter(fn ($row): bool => $this->nativeRecordMatchesPeriod($row, $sourcePeriod, $year))->values();
+                    foreach ($matches as $record) {
+                        $received = $this->nativeRecordDate($record, ['date_received_penro']);
+                        $start = $this->nativeRecordStart($record);
+                        $deadline = $this->nativeRecordDate($record, ['deadline_submission']);
+                        $registryDeadline = $this->requirements->deadline(ReportRequirementRegistry::PA, $nativeWorkflow, $year, (string) $sourcePeriod['key']);
+                        $reportPeriodDeadline = $deadline ?? $registryDeadline;
+                        $inAssessmentPeriod = ($reportPeriodDeadline && $this->deadlineInAssessmentPeriod(
+                            CarbonImmutable::parse($reportPeriodDeadline, BusinessCalendarService::TIMEZONE), $periodStart, $periodEnd,
+                        )) || ($start && $start >= $periodStart->toDateString() && $start <= $periodEnd->toDateString());
+                        if (! $inAssessmentPeriod) continue;
+                        $activityCount++;
+                        if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                        if ($start === null || $deadline === null) {
+                            $incompleteDates++;
+                            $incompleteDetails[] = $this->recordedIncompleteDetail(
+                            (string) ($nativeDefinition['label'] ?? $nativeSource['label']), 'Incomplete source dates', $start, $deadline, $received,
+                                'The native source is missing its authoritative workflow start or deadline.',
+                                $this->recordedSourceReference($nativeSource['source'], (int) $record->getKey()),
+                                ['participant_key' => $participant['participant_key'], 'source_key' => $nativeSource['source'],
+                                    'source_id' => (int) $record->getKey(), 'workflow_key' => $nativeWorkflow,
+                                'workflow_label' => $nativeDefinition['label'] ?? $nativeSource['label'],
+                                    'activity_name' => (string) ($record->getAttribute('activity_name') ?? $nativeSource['label']),
+                                    'document_type' => (string) ($record->getAttribute('document_type') ?? ''),
+                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key'],
+                                    'calendar_office' => $record->getAttribute('target_office')],
+                            );
+                            continue;
+                        }
+                        if (! $this->deadlineInAssessmentPeriod(CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE), $periodStart, $periodEnd)) continue;
+
+                    $sourceId = (int) $record->getKey();
+                    $activity = trim((string) ($record->getAttribute('activity_name') ?? $nativeSource['label']));
+                    $document = trim((string) ($record->getAttribute('document_type') ?? ''));
+                    $key = implode('|', ['processed', 'pa:'.$paId, 'source:'.$record->getKey()]);
+                    $obligation = $this->makeObligation(
+                        $key, $start, $deadline, $received, $deadline,
+                        $classifications['conservation'][$nativeWorkflow]['is_highly_technical'] ?? null,
+                        $sourceId, false, $nativeSource['source'], self::CONSERVATION_NATIVE_DAY_MODE,
+                        $record->getAttribute('target_office'), null,
+                        (string) ($nativeDefinition['label'] ?? $nativeSource['label']),
+                    );
+                    $obligation['classification_version_id'] = $classifications['conservation'][$nativeWorkflow]['id'] ?? null;
+                    $obligation['source_rows_matched'] = 1;
+                    $obligation['source_identity'] = [
+                        'source_key' => $nativeSource['source'], 'source_id' => $sourceId,
+                        'source_ids' => [$sourceId],
+                        'calendar_office' => $record->getAttribute('target_office'),
+                        'participant_key' => $participant['participant_key'], 'workflow_key' => $nativeWorkflow,
+                        'workflow_label' => $nativeDefinition['label'] ?? $nativeSource['label'],
+                        'activity_name' => $activity, 'registered_activity_name' => $nativeDefinition['label'] ?? $nativeSource['label'],
+                        'submitted_activity_name' => $activity, 'document_type' => $document,
+                        'reporting_year' => $year, 'period_key' => $sourcePeriod['key'], 'period_label' => $sourcePeriod['label'], 'occurrence_key' => null,
+                    ];
+                    if (CarbonImmutable::parse($deadline, BusinessCalendarService::TIMEZONE)->greaterThan($cutoff)
+                        && (! $received || $received > $cutoff->toDateString())) $notYetDueCount++;
+                    $obligations[] = $obligation;
+                }
+            }
+            }
             foreach ($sourceRows as $identity => $matches) {
                 if (isset($recognizedIdentities[$identity])) continue;
-                $liveMatches = $matches->reject(fn (ConservationReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'));
-                $unmapped = $liveMatches->filter(function (ConservationReportSubmission $row) use ($periodStart, $periodEnd): bool {
+                $liveMatches = $matches;
+                $unmapped = $liveMatches->filter(function (ConservationReportSubmission $row) use ($periodStart, $periodEnd, $processedSourceIds, $paId): bool {
+                    if ((int) $row->protected_area_id !== $paId || ! isset($processedSourceIds[(int) $row->getKey()])) return false;
                     $start = $this->conservationRecordStart($row);
                     $deadline = $row->deadline_submission;
                     return ($start && $start >= $periodStart->toDateString() && $start <= $periodEnd->toDateString())
@@ -330,15 +396,41 @@ final class OfficeTatComplianceAssessmentService
                 });
                 if ($unmapped->isNotEmpty() && (int) $unmapped->first()->protected_area_id === $paId) {
                     $incompleteEvidence++;
-                    $incompleteDetails[] = $this->recordedIncompleteDetail('Unmapped Conservation source activity', 'Unsupported source identity', null, null, null,
-                        'The source activity/document is not in the active reporting registry; it is not included in the score.');
+                    foreach ($unmapped as $sourceRecord) {
+                        $activityCount++;
+                        $start = $this->conservationRecordStart($sourceRecord);
+                        $deadline = $sourceRecord->deadline_submission
+                            ? CarbonImmutable::parse($sourceRecord->deadline_submission, BusinessCalendarService::TIMEZONE)->toDateString()
+                            : null;
+                        $received = $sourceRecord->date_received_penro?->toDateString();
+                        if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                        $registeredActivity = $this->registeredPaActivityFor($sourceRecord, $pairs, $year);
+                        $activity = trim((string) $sourceRecord->activity_name);
+                        $issue = $registeredActivity !== null
+                            ? 'Source activity “'.$activity.'” does not match registered activity “'.$registeredActivity.'”; this report is excluded from live scoring.'
+                            : 'The source workflow, activity or document is not in the active reporting registry; this report is excluded from live scoring.';
+                        $incompleteDetails[] = $this->recordedIncompleteDetail(
+                            $activity !== '' ? $activity : 'Unsupported Conservation report',
+                            'Unsupported source identity', $start, $deadline, $received, $issue,
+                            $this->recordedSourceReference('conservation', (int) $sourceRecord->getKey()),
+                            [
+                                'source_key' => 'conservation', 'source_id' => (int) $sourceRecord->getKey(),
+                                'workflow_key' => (string) $sourceRecord->workflow_key,
+                                'reporting_period' => (string) $sourceRecord->reporting_period,
+                                'activity_name' => $activity,
+                                'registered_activity_name' => $registeredActivity,
+                                'document_type' => (string) $sourceRecord->document_type,
+                                'reporting_year' => $year, 'calendar_office' => $sourceRecord->target_office,
+                            ],
+                        );
+                    }
                 }
             }
 
             $rows[] = $this->recordedParticipantRow($participant, $obligations, $cutoff, [
                 'activity_count' => $activityCount, 'received_activity_count' => $receivedCount,
                 'not_yet_due_count' => $notYetDueCount, 'incomplete_date_count' => $incompleteDates,
-                'incomplete_evidence_count' => $incompleteEvidence, 'historical_excluded_count' => $historicalExcluded,
+                'incomplete_evidence_count' => $incompleteEvidence,
                 'incomplete_details' => $incompleteDetails,
             ]);
         }
@@ -347,17 +439,19 @@ final class OfficeTatComplianceAssessmentService
     }
 
     /** @return list<array<string,mixed>> */
-    private function recordedDevelopmentRows(array $participants, string $periodKey, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, CarbonImmutable $cutoff, array $classifications, User $user): array
+    private function recordedDevelopmentRows(array $participants, string $periodKey, CarbonImmutable $periodStart, CarbonImmutable $periodEnd, CarbonImmutable $cutoff, array $classifications, User $user, ?string $workflowFilter = null): array
     {
         $year = (int) substr($periodKey, 0, 4);
-        $records = EngpReportSubmission::query()->where('reporting_year', $year);
+        $records = EngpReportSubmission::query()->where('reporting_year', $year)
+            ->where(fn ($query) => $query->whereNull('is_historical')->orWhere('is_historical', false));
         $this->organization->scopeDevelopmentQuery($records, $user);
-        $records = $records->get()->groupBy(fn (EngpReportSubmission $record): string => $this->engpRecordKey($record));
-        $historicalIds = $records->flatten()->filter(fn ($row): bool => (bool) $row->getAttribute('is_historical'))->pluck('id')->all();
-        $origins = Schema::hasTable('historical_report_origins') && $historicalIds !== []
-            ? HistoricalReportOrigin::query()->where('source', 'engp')->whereIn('source_record_id', $historicalIds)->get()->keyBy('source_record_id')
-            : collect();
-        $definitions = collect($this->engp->all())->keyBy('key');
+        $sourceRecords = $records->get();
+        $processedSourceIds = $this->processedSourceIds('engp', $sourceRecords, $cutoff);
+        $records = $sourceRecords->groupBy(fn (EngpReportSubmission $record): string => $this->engpRecordKey($record));
+
+        $definitions = collect($this->engp->all())
+            ->when($workflowFilter !== null && $workflowFilter !== '' && $workflowFilter !== 'all', fn ($items) => $items->filter(fn (array $definition, string $key): bool => $key === $workflowFilter))
+            ->keyBy('key');
         $rows = [];
 
         foreach ($participants as $participant) {
@@ -366,7 +460,7 @@ final class OfficeTatComplianceAssessmentService
             $obligations = [];
             $incompleteDetails = [];
             $activityCount = $receivedCount = $notYetDueCount = 0;
-            $incompleteDates = $incompleteEvidence = $historicalExcluded = 0;
+            $incompleteDates = $incompleteEvidence = 0;
             $recognizedIdentities = [];
 
             foreach ($definitions as $workflow => $definition) {
@@ -380,111 +474,64 @@ final class OfficeTatComplianceAssessmentService
 
                     $identity = $this->engpPeriodRecordKey((string) $workflow, $office, $year, (string) $sourcePeriod['key']);
                     $recognizedIdentities[$identity] = true;
-                    $matches = $records->get($identity, collect());
-                    if ($matches->isEmpty()) continue;
-                    $historicalMatches = $matches->filter(fn (EngpReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'));
-                    $historicalExcluded += $historicalMatches->count();
-                    $liveMatches = $matches->reject(fn (EngpReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'));
-                    if ($liveMatches->isEmpty()) continue;
-
-                    $record = $liveMatches->sort(fn (EngpReportSubmission $a, EngpReportSubmission $b): int =>
-                        (($a->date_received_penro?->toDateString() ?: '9999-12-31') <=> ($b->date_received_penro?->toDateString() ?: '9999-12-31'))
-                        ?: ((int) $a->getKey() <=> (int) $b->getKey())
-                    )->first();
+                    $matches = $records->get($identity, collect())->filter(fn (EngpReportSubmission $row): bool => isset($processedSourceIds[(int) $row->getKey()]));
+                    foreach ($matches as $record) {
                     $received = $record->date_received_penro?->toDateString();
-                    $activityCount++;
-                    if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                    if ($record) {
+                        $activityCount++;
+                        if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                    }
                     $storedDeadline = $record->deadline_submission?->toDateString();
-                    if ($storedDeadline === null) {
+                    if ($record && $storedDeadline === null) {
                         $incompleteDates++;
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
-                            (string) $definition['label'].' · '.$sourcePeriod['label'], 'Incomplete source dates', $expectedStart, $expectedDeadline, $received,
+                            (string) $definition['label'], 'Incomplete source dates', $expectedStart, $expectedDeadline, $received,
                             'The ENGP source deadline is missing; this activity is not scored.',
-                            'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
-                                'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
-                                'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
-                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
+                            $this->recordedSourceReference('engp', (int) $record->getKey()),
+                            ['source_key' => 'engp', 'source_id' => (int) $record->getKey(), 'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'], 'period_key' => $sourcePeriod['key'], 'period_label' => $sourcePeriod['label'], 'reporting_year' => $year, 'calendar_office' => $record->office],
                         );
                         continue;
                     }
-                    if ($storedDeadline !== $expectedDeadline) {
+                    if ($record && $storedDeadline !== $expectedDeadline) {
                         $incompleteEvidence++;
                         $incompleteDetails[] = $this->recordedIncompleteDetail(
-                            (string) $definition['label'].' · '.$sourcePeriod['label'], 'Unsupported deadline evidence', $expectedStart, $expectedDeadline, $received,
+                            (string) $definition['label'], 'Unsupported deadline evidence', $expectedStart, $expectedDeadline, $received,
                             'The stored ENGP source deadline does not match the active Report Requirement Registry rule.',
-                            'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
-                                'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
-                                'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
-                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
+                            $this->recordedSourceReference('engp', (int) $record->getKey()),
+                            ['source_key' => 'engp', 'source_id' => (int) $record->getKey(), 'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'], 'period_key' => $sourcePeriod['key'], 'period_label' => $sourcePeriod['label'], 'reporting_year' => $year, 'calendar_office' => $record->office],
                         );
                         continue;
                     }
 
-                    $historicalReceipt = $historicalMatches->map(function (EngpReportSubmission $row) use ($origins): ?string {
-                        $value = data_get($origins->get($row->getKey())?->original_milestones, 'milestones.date_received_penro');
-                        return is_string($value) ? $value : null;
-                    })->filter(fn ($value): bool => $value !== null && $value <= $cutoff->toDateString())->sort()->first();
-                    if ($historicalReceipt !== null) {
-                        $incompleteEvidence++;
-                        $incompleteDetails[] = $this->recordedIncompleteDetail(
-                            (string) $definition['label'].' · '.$sourcePeriod['label'], 'Conflicting historical receipt', $expectedStart, $expectedDeadline, $received,
-                            'An original historical receipt exists for this source identity; it cannot be credited as live or treated as a verified miss.',
-                            'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
-                                'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
-                                'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
-                                'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
-                        );
-                        continue;
-                    }
-
-                    $technical = $classifications['engp'][(string) $workflow]['is_highly_technical'] ?? null;
-                    $key = implode('|', ['cenro:'.$officeId, $workflow, $year, $sourcePeriod['key']]);
-                    $obligation = $this->makeObligation($key, $expectedStart, $expectedDeadline, $received, $storedDeadline, $technical, (int) $record->getKey(), false,
-                        'engp', $this->engpDayMode($definition), null, $classifications['engp'][(string) $workflow]['id'] ?? null,
-                        (string) $definition['label'].' · '.$sourcePeriod['label']);
-                    $obligation['source_rows_matched'] = $liveMatches->count();
+                    $key = implode('|', ['processed', 'cenro:'.$officeId, 'source:'.$record->getKey()]);
+                    $obligation = $this->makeObligation(
+                        $key, $expectedStart, $expectedDeadline, $received, $storedDeadline,
+                        $classifications['engp'][$workflow]['is_highly_technical'] ?? null,
+                        (int) $record->getKey(), false, 'engp', $this->engpDayMode((string) $workflow, $definition),
+                        null, null, (string) $definition['label'],
+                    );
+                    $obligation['classification_version_id'] = $classifications['engp'][$workflow]['id'] ?? null;
+                    $obligation['source_rows_matched'] = 1;
                     $obligation['source_identity'] = [
                         'source_key' => 'engp', 'source_id' => (int) $record->getKey(),
-                        'source_ids' => $liveMatches->pluck('id')->map(static fn ($id): int => (int) $id)->unique()->values()->all(),
+                        'source_ids' => [(int) $record->getKey()],
                         'calendar_office' => $record->office,
                         'participant_key' => $participant['participant_key'], 'workflow_key' => (string) $workflow,
                         'workflow_label' => $definition['label'], 'activity_name' => $definition['activity'],
                         'document_type' => $definition['document'], 'reporting_year' => $year,
-                        'period_key' => $sourcePeriod['key'], 'occurrence_key' => null,
+                        'period_key' => $sourcePeriod['key'], 'period_label' => $sourcePeriod['label'], 'occurrence_key' => null,
                     ];
-                    $obligation['historical_receipt_conflict'] = false;
-                    $obligation['historical_receipt_evidence'] = null;
-                    if ($deadlineDate->lessThanOrEqualTo($cutoff)) {
-                        $nonreceipt = $received === null
-                            ? $this->obligationEvidence->nonReceiptEvidence($participant['participant_key'], $key, $expectedDeadline, $cutoff->toDateString())
-                            : null;
-                        $obligation['nonreceipt_verified'] = $nonreceipt !== null && $this->validEvidence((int) $nonreceipt->evidence_id);
-                        $probe = $this->scoreParticipant([$obligation], $cutoff);
-                        if ($probe['score_status'] === 'Coverage incomplete') {
-                            $incompleteEvidence++;
-                            $policyIssue = preg_replace('/^.*?: /', '', $probe['score_issues'][0] ?? '');
-                            $incompleteDetails[] = $this->recordedIncompleteDetail(
-                                (string) $definition['label'].' · '.$sourcePeriod['label'], 'Evidence incomplete', $expectedStart, $expectedDeadline, $received,
-                                $policyIssue !== '' ? $policyIssue : 'The source record does not meet the current evidence policy for scoring.',
-                                'Report #'.$record->getKey(), ['source_key' => 'engp', 'calendar_office' => $record->office,
-                                    'workflow_key' => (string) $workflow, 'workflow_label' => $definition['label'],
-                                    'activity_name' => $definition['activity'], 'document_type' => $definition['document'],
-                                    'reporting_year' => $year, 'period_key' => $sourcePeriod['key']],
-                            );
-                            continue;
-                        }
-                    } else {
-                        $notYetDueCount++;
-                    }
+                    if ($deadlineDate->greaterThan($cutoff) && (! $received || $received > $cutoff->toDateString())) $notYetDueCount++;
                     $obligations[] = $obligation;
+                    }
                 }
             }
-
             $supportedWorkflows = $definitions->keys()->all();
-            $unsupported = $records->flatten()->filter(function (EngpReportSubmission $record) use ($office, $supportedWorkflows, $periodStart, $periodEnd): bool {
+            $unsupported = $records->flatten()->filter(function (EngpReportSubmission $record) use ($office, $supportedWorkflows, $periodStart, $periodEnd, $workflowFilter, $processedSourceIds): bool {
                 if (mb_strtolower(trim((string) $record->office)) !== mb_strtolower(trim($office))
-                    || (bool) $record->getAttribute('is_historical')
-                    || in_array((string) $record->workflow_key, $supportedWorkflows, true)) return false;
+                    || ($workflowFilter !== null && $workflowFilter !== '' && $workflowFilter !== 'all' && (string) $record->workflow_key !== $workflowFilter)
+                    || in_array((string) $record->workflow_key, $supportedWorkflows, true)
+                    || ! isset($processedSourceIds[(int) $record->getKey()])) return false;
 
                 $dates = [
                     $record->deadline_submission?->toDateString(),
@@ -492,17 +539,38 @@ final class OfficeTatComplianceAssessmentService
                 ];
                 return collect($dates)->filter()->contains(fn (string $date): bool =>
                     $date >= $periodStart->toDateString() && $date <= $periodEnd->toDateString());
-            })->unique(fn (EngpReportSubmission $record): string => $this->engpRecordKey($record));
+            })->unique(fn (EngpReportSubmission $record): int => (int) $record->getKey());
             foreach ($unsupported as $source) {
+                $activityCount++;
                 $incompleteEvidence++;
-                $incompleteDetails[] = $this->recordedIncompleteDetail('Unmapped ENGP source activity', 'Unsupported source identity', null, null,
-                    $source->date_received_penro?->toDateString(), 'The source workflow is not in the active ENGP registry; it is not included in the score.');
+                $deadline = $source->deadline_submission?->toDateString();
+                $received = $source->date_received_penro?->toDateString();
+                if ($received !== null && $received <= $cutoff->toDateString()) $receivedCount++;
+                $registeredWorkflow = $this->engp->defaultFind((string) $source->workflow_key);
+                $status = $registeredWorkflow === null ? 'Unsupported source identity' : 'Missing or inactive workflow definition';
+                $issue = $registeredWorkflow === null
+                    ? 'The source workflow key is not registered in the ENGP workflow registry; this report is excluded from live scoring.'
+                    : 'This ENGP workflow is recognized, but its canonical module definition is missing or inactive; the source is excluded from live scoring.';
+                $incompleteDetails[] = $this->recordedIncompleteDetail(
+                    (string) ($source->activity_name ?: 'Unsupported ENGP report'), $status, null, $deadline, $received,
+                    $issue,
+                    $this->recordedSourceReference('engp', (int) $source->getKey()),
+                    [
+                        'source_key' => 'engp', 'source_id' => (int) $source->getKey(),
+                        'workflow_key' => (string) $source->workflow_key,
+                        'reporting_period' => (string) $source->period_key,
+                        'activity_name' => (string) $source->activity_name,
+                        'document_type' => (string) $source->document_type,
+                        'reporting_year' => (int) $source->reporting_year,
+                        'calendar_office' => $source->office,
+                    ],
+                );
             }
 
             $rows[] = $this->recordedParticipantRow($participant, $obligations, $cutoff, [
                 'activity_count' => $activityCount, 'received_activity_count' => $receivedCount,
                 'not_yet_due_count' => $notYetDueCount, 'incomplete_date_count' => $incompleteDates,
-                'incomplete_evidence_count' => $incompleteEvidence, 'historical_excluded_count' => $historicalExcluded,
+                'incomplete_evidence_count' => $incompleteEvidence,
                 'incomplete_details' => $incompleteDetails,
             ]);
         }
@@ -510,10 +578,59 @@ final class OfficeTatComplianceAssessmentService
         return $rows;
     }
 
+    /** @param iterable<\Illuminate\Database\Eloquent\Model> $records @return array<int,true> */
+    private function processedSourceIds(string $sourceKey, iterable $records, CarbonImmutable $cutoff): array
+    {
+        $ids = [];
+        $processed = [];
+        foreach ($records as $record) {
+            $id = (int) $record->getKey();
+            if ($id <= 0) continue;
+            $ids[] = $id;
+            foreach (['date_received_penro', 'date_report_released_cenro'] as $field) {
+                $date = $this->nativeRecordDate($record, [$field]);
+                if ($date !== null && $date <= $cutoff->toDateString()) $processed[$id] = true;
+            }
+        }
+
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) return $processed;
+
+        if (Schema::hasTable('document_routing_events')) {
+            $eventSourceIds = DocumentRoutingEvent::query()
+                ->where('source_type', $sourceKey)
+                ->whereIn('source_id', $ids)
+                ->whereNotNull('occurred_at')
+                ->where('occurred_at', '<=', $cutoff->endOfDay())
+                ->whereIn('event_key', ['forwarded', 'received', 'endorsed', 'recommended', 'approved', 'released', 'returned_for_correction', 'correction_received'])
+                ->whereNotNull('to_stage')
+                ->distinct()->pluck('source_id');
+            foreach ($eventSourceIds as $id) $processed[(int) $id] = true;
+        }
+
+        if ($sourceKey === 'conservation' && Schema::hasTable('pamb_routing_events')) {
+            $eventSourceIds = PambRoutingEvent::query()
+                ->whereIn('conservation_report_submission_id', $ids)
+                ->whereNotNull('occurred_at')->where('occurred_at', '<=', $cutoff->endOfDay())
+                ->whereNotNull('stage_key')->distinct()->pluck('conservation_report_submission_id');
+            foreach ($eventSourceIds as $id) $processed[(int) $id] = true;
+        }
+
+        if ($sourceKey === 'engp' && Schema::hasTable('engp_report_release_events')) {
+            $eventSourceIds = EngpReportReleaseEvent::query()
+                ->whereIn('engp_report_submission_id', $ids)
+                ->whereDate('date_report_released_cenro', '<=', $cutoff->toDateString())
+                ->distinct()->pluck('engp_report_submission_id');
+            foreach ($eventSourceIds as $id) $processed[(int) $id] = true;
+        }
+
+        return $processed;
+    }
+
     /** @return array<string,mixed> */
     private function recordedParticipantRow(array $participant, array $obligations, CarbonImmutable $cutoff, array $counts): array
     {
-        $score = $this->scoreParticipant($obligations, $cutoff);
+        $score = $this->scoreRecordedParticipant($obligations, $cutoff);
         $score['obligation_details'] = array_map(function (array $item) use ($cutoff): array {
             if (($item['status'] ?? null) === 'Non-receipt evidence is not verified'
                 && (! ($item['received'] ?? null) || $item['received'] > $cutoff->toDateString())
@@ -524,41 +641,98 @@ final class OfficeTatComplianceAssessmentService
             return $item;
         }, $score['obligation_details']);
         $score['obligation_details'] = [...$score['obligation_details'], ...($counts['incomplete_details'] ?? [])];
+        $score['obligation_details'] = array_map(function (array $item) use ($cutoff): array {
+            $item['due_as_of_date'] = $cutoff->toDateString();
+            $validDeadline = is_string($item['deadline'] ?? null) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $item['deadline']);
+            $receivedByCutoff = is_string($item['received'] ?? null) && $item['received'] <= $item['due_as_of_date'];
+            $receivedAssessedBeforeDeadline = ($item['issue'] ?? null) === null && $receivedByCutoff && $validDeadline && $item['deadline'] > $item['due_as_of_date'];
+            $item['due_status'] = $receivedAssessedBeforeDeadline
+                ? 'received_before_deadline'
+                : ($validDeadline ? ($item['deadline'] <= $item['due_as_of_date'] ? 'due' : 'not_yet_due') : 'unavailable');
+
+            return $item;
+        }, $score['obligation_details']);
         return [
             ...$participant, ...$score,
             'activity_count' => (int) ($counts['activity_count'] ?? 0),
+            'processed_count' => (int) ($counts['activity_count'] ?? 0),
             'received_activity_count' => (int) ($counts['received_activity_count'] ?? 0),
+            'received_by_penro_count' => (int) ($counts['received_activity_count'] ?? 0),
+            'assessed_count' => (int) ($score['due_count'] ?? 0),
             'not_yet_due_count' => (int) ($counts['not_yet_due_count'] ?? 0),
             'incomplete_date_count' => (int) ($counts['incomplete_date_count'] ?? 0),
             'incomplete_evidence_count' => (int) ($counts['incomplete_evidence_count'] ?? 0),
-            'historical_excluded_count' => (int) ($counts['historical_excluded_count'] ?? 0),
         ];
     }
 
     /** @return array<string,mixed> */
-    private function recordedIncompleteDetail(string $label, string $status, ?string $start, ?string $deadline, ?string $received, string $issue, ?string $sourceReference = null, ?array $sourceIdentity = null): array
-    {
+    private function recordedIncompleteDetail(
+        string $label,
+        string $status,
+        ?string $start,
+        ?string $deadline,
+        ?string $received,
+        string $issue,
+        ?string $sourceReference = null,
+        ?array $sourceIdentity = null,
+    ): array {
         if ($sourceReference !== null && preg_match('/^Report #(\d+)$/i', $sourceReference, $match)) {
             $sourceId = (int) $match[1];
             $sourceIdentity = array_replace($sourceIdentity ?? [], ['source_id' => $sourceId, 'source_ids' => [$sourceId]]);
+        }
+        if (isset($sourceIdentity['source_id']) && ! isset($sourceIdentity['source_ids'])) {
+            $sourceIdentity['source_ids'] = [(int) $sourceIdentity['source_id']];
         }
 
         return [
             'label' => $label, 'status' => $status, 'start_date' => $start,
             'deadline' => $deadline, 'received' => $received, 'receipt_endpoint' => 'date_received_penro',
             'allowed_days' => null, 'days_used' => null, 'technical' => null, 'issue' => $issue,
-            'source_rows_matched' => 0,
             'source_reference' => $sourceReference, 'source_identity' => $sourceIdentity,
+            'source_rows_matched' => $sourceReference === null ? 0 : 1,
         ];
+    }
+
+    private function recordedSourceReference(string $source, int $recordId): string
+    {
+        return 'Report #'.$recordId;
+    }
+
+    /** @param list<array<string,mixed>> $pairs */
+    private function registeredPaActivityFor(ConservationReportSubmission $record, array $pairs, int $year): ?string
+    {
+        $workflow = (string) $record->workflow_key;
+        $document = mb_strtolower(trim((string) $record->document_type));
+        $recordPeriod = mb_strtolower(trim((string) $record->reporting_period));
+        $candidates = collect($pairs)->filter(fn (array $pair): bool =>
+            (string) $pair['workflow_key'] === $workflow
+            && mb_strtolower(trim((string) $pair['document_type'])) === $document
+        )->values();
+        $normalize = static fn (string $value): string => preg_replace('/\s+/u', ' ', mb_strtolower(trim($value))) ?? mb_strtolower(trim($value));
+        $activity = $normalize((string) $record->activity_name);
+        if ($candidates->contains(fn (array $pair): bool => $normalize((string) $pair['activity_name']) === $activity)) return null;
+        $periods = $this->requirements->periods(ReportRequirementRegistry::PA, $workflow, $year);
+        $periodIsRegistered = collect($periods)->contains(fn (array $period): bool =>
+            mb_strtolower(trim((string) $period['label'])) === $recordPeriod
+            || mb_strtolower(trim((string) $period['key'])) === $recordPeriod
+        );
+        if (! $periodIsRegistered) return null;
+        if ($candidates->count() === 1) return (string) $candidates->first()['activity_name'];
+
+        $matchingCandidates = $candidates->filter(function (array $pair) use ($activity, $normalize): bool {
+            $registeredActivity = $normalize((string) $pair['activity_name']);
+            if ($registeredActivity === '') return false;
+            $pattern = '/(?<![\pL\pN])'.preg_quote($registeredActivity, '/').'(?![\pL\pN])/u';
+            return preg_match($pattern, $activity) === 1;
+        });
+
+        return $matchingCandidates->count() === 1 ? (string) $matchingCandidates->first()['activity_name'] : null;
     }
 
     /** @param array<string,mixed> $pair @param array<string,mixed> $period */
     private function recordedPaLabel(array $pair, array $period): string
     {
-        return trim(implode(' · ', array_filter([
-            $pair['workflow_label'] ?? null, $period['label'] ?? null,
-            $pair['activity_name'] ?? null, $pair['document_type'] ?? null,
-        ], fn ($value): bool => is_string($value) && trim($value) !== '')));
+        return trim((string) ($pair['workflow_label'] ?? $pair['activity_name'] ?? 'Report'));
     }
 
     private function recordedPaNonReceiptEvidence(int $paId, string $workflow, string $activity, string $document, int $year, string $period, string $start, string $deadline, string $cutoff): ?\App\Models\OfficeTatNonReceiptRegisterVersion
@@ -701,7 +875,9 @@ final class OfficeTatComplianceAssessmentService
                         );
                         $obligation['source_identity'] = [
                             'participant_key' => $participant['participant_key'], 'workflow_key' => $workflow,
-                            'workflow_label' => $pair['workflow_label'], 'activity_name' => $pair['activity_name'],
+                            'workflow_label' => $pair['workflow_label'],
+                        'activity_name' => $pair['activity_name'], 'registered_activity_name' => $pair['activity_name'],
+                        'submitted_activity_name' => (string) ($record?->activity_name ?? $pair['activity_name']),
                             'document_type' => $pair['document_type'], 'reporting_year' => $year,
                             'period_key' => $sourcePeriod['key'], 'occurrence_key' => (string) ($occurrence['occurrence_key'] ?? ''),
                         ];
@@ -753,6 +929,82 @@ final class OfficeTatComplianceAssessmentService
         return $id > 0 && ($this->evidenceValidity[$id] ??= $this->obligationEvidence->evidenceFileIsValid($id));
     }
 
+    private function nativeRecordDate(\Illuminate\Database\Eloquent\Model $record, array $fields): ?string
+    {
+        foreach ($fields as $field) {
+            $value = $record->getAttribute($field);
+            if ($value instanceof \Carbon\CarbonInterface) return $value->toDateString();
+            if (! is_string($value) || trim($value) === '') continue;
+            try {
+                return CarbonImmutable::parse($value, BusinessCalendarService::TIMEZONE)->toDateString();
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    private function nativeRecordStart(\Illuminate\Database\Eloquent\Model $record): ?string
+    {
+        return $this->nativeRecordDate($record, ['date_accomplished', 'start_date', 'monitoring_period_start', 'date_conducted']);
+    }
+
+    private function nativeRecordMatchesPeriod(\Illuminate\Database\Eloquent\Model $record, array $period, int $year): bool
+    {
+        $recordYear = $record->getAttribute('reporting_year')
+            ?? $record->getAttribute('prepared_year')
+            ?? $record->getAttribute('year');
+        $sourceStart = $this->nativeRecordStart($record);
+        if (is_numeric($recordYear) && (int) $recordYear !== $year) return false;
+        if (! is_numeric($recordYear) && $sourceStart && (int) substr($sourceStart, 0, 4) !== $year) return false;
+
+        $normalize = static fn (mixed $value): string => strtolower((string) preg_replace('/[^a-z0-9]/i', '', trim((string) $value)));
+        $periodKey = (string) ($period['key'] ?? '');
+        $periodLabel = (string) ($period['label'] ?? '');
+        $key = $normalize($periodKey);
+        $label = $normalize($periodLabel);
+        $markers = [
+            $record->getAttribute('period_key'), $record->getAttribute('period_label'),
+            $record->getAttribute('reporting_period'), $record->getAttribute('semester'),
+            $record->getAttribute('quarter'), $record->getAttribute('reporting_month'),
+            $record->getAttribute('month'),
+        ];
+        $hasMarker = false;
+        foreach ($markers as $marker) {
+            if ($marker === null || trim((string) $marker) === '') continue;
+            $hasMarker = true;
+            $normalized = $normalize($marker);
+            if ($normalized === $key || ($label !== '' && $normalized === $label)) return true;
+            if (preg_match('/^([qhs]?)([12])$/', $key, $match)) {
+                $ordinal = (int) $match[2];
+                if (($ordinal === 1 && in_array($normalized, ['s1', 'h1', 'semester1', '1stsemester', 'firstsemester'], true))
+                    || ($ordinal === 2 && in_array($normalized, ['s2', 'h2', 'semester2', '2ndsemester', 'secondsemester'], true))) return true;
+            }
+            if (preg_match('/^q([1-4])$/', $key, $match)) {
+                $quarter = (int) $match[1];
+                if ($normalized === 'quarter'.$quarter || $normalized === $quarter.'thquarter'
+                    || ($quarter === 1 && in_array($normalized, ['1stquarter', 'firstquarter'], true))
+                    || ($quarter === 2 && in_array($normalized, ['2ndquarter', 'secondquarter'], true))
+                    || ($quarter === 3 && in_array($normalized, ['3rdquarter', 'thirdquarter'], true))
+                    || ($quarter === 4 && in_array($normalized, ['4thquarter', 'fourthquarter'], true))) return true;
+            }
+            if (preg_match('/^(\d{4})-(\d{2})$/', $periodKey, $match)) {
+                $month = (int) $match[2];
+                $monthName = strtolower(CarbonImmutable::create((int) $match[1], $month, 1)->format('F'));
+                if (in_array($normalized, [(string) $month, str_pad((string) $month, 2, '0', STR_PAD_LEFT), $monthName], true)) return true;
+            }
+        }
+        if ($hasMarker || ! $sourceStart) return false;
+
+        $month = (int) substr($sourceStart, 5, 2);
+        if (preg_match('/^(?:s|h)([12])$/', $key, $match)) return ((int) $match[1] === 1) === ($month <= 6);
+        if (preg_match('/^q([1-4])$/', $key, $match)) return (int) ceil($month / 3) === (int) $match[1];
+        if (preg_match('/^(\d{4})-(\d{2})$/', $periodKey, $match)) return substr($sourceStart, 0, 7) === $periodKey;
+        if (preg_match('/^\d{4}$/', $periodKey)) return (int) substr($sourceStart, 0, 4) === $year;
+
+        return false;
+    }
     private function conservationRecordStart(ConservationReportSubmission $record): ?string
     {
         if (in_array($record->workflow_key, PambComplianceCalculator::MEETING_WORKFLOWS, true)) {
@@ -887,7 +1139,7 @@ final class OfficeTatComplianceAssessmentService
                     $historicalReceipt = $matches->filter(fn (EngpReportSubmission $row): bool => (bool) $row->getAttribute('is_historical'))
                         ->map(fn (EngpReportSubmission $row) => data_get($engpOrigins->get($row->id)?->original_milestones, 'milestones.date_received_penro'))
                         ->filter(fn ($date) => $date && $date <= $cutoff->toDateString())->sort()->first();
-                    $obligation = $this->makeObligation($obligationKey, $startValue, $deadlineValue, $record?->date_received_penro?->toDateString(), $record?->deadline_submission?->toDateString(), $technical, $record?->id, false, 'engp', $this->engpDayMode($workflow), null, $classifications['engp'][$workflowKey]['id'] ?? null,
+                    $obligation = $this->makeObligation($obligationKey, $startValue, $deadlineValue, $record?->date_received_penro?->toDateString(), $record?->deadline_submission?->toDateString(), $technical, $record?->id, false, 'engp', $this->engpDayMode((string) $workflowKey, $workflow), null, $classifications['engp'][$workflowKey]['id'] ?? null,
                         (string) $workflow['label'].' · '.$sourcePeriod['label']);
                     $obligation['source_identity'] = [
                         'participant_key' => $participant['participant_key'], 'workflow_key' => $workflowKey,
@@ -935,7 +1187,7 @@ final class OfficeTatComplianceAssessmentService
      *
      * @return array<string,mixed>
      */
-    public function recordedAssessments(User $user, string $unit, string $periodKey, string $asOfDate): array
+    public function recordedAssessments(User $user, string $unit, string $periodKey, string $asOfDate, ?string $workflowFilter = null): array
     {
         abort_unless($user->can('office-tat.view'), 403);
         abort_unless(in_array($unit, $this->organization->effectiveUnits($user), true), 403);
@@ -956,7 +1208,7 @@ final class OfficeTatComplianceAssessmentService
                     $area->pamoOfficeAssignment?->office?->name, (string) ($area->status ?? 'Unknown')),
                 'registration_eligibility' => null,
             ])->all();
-            $rows = $this->recordedConservationRows($participants, $periodKey, $periodStart, $periodEnd, $cutoff, $classifications);
+            $rows = $this->recordedConservationRows($participants, $periodKey, $periodStart, $periodEnd, $cutoff, $classifications, $workflowFilter);
             $expectedRoster = self::EXPECTED_PA_ROSTER;
             $label = 'Conservation';
         } else {
@@ -966,14 +1218,21 @@ final class OfficeTatComplianceAssessmentService
             $participants = $offices->map(fn (OrganizationalOffice $office): array => $this->participant(
                 'development', 'cenro:'.$office->getKey(), (string) $office->name, null, 'Active',
             ))->all();
-            $rows = $this->recordedDevelopmentRows($participants, $periodKey, $periodStart, $periodEnd, $cutoff, $classifications, $user);
+            $rows = $this->recordedDevelopmentRows($participants, $periodKey, $periodStart, $periodEnd, $cutoff, $classifications, $user, $workflowFilter);
             $expectedRoster = self::EXPECTED_CENRO_ROSTER;
             $label = 'Development';
         }
 
         $rosterComplete = count($participants) === $expectedRoster;
         foreach ($rows as &$row) {
-            $row['score_status'] = $row['due_count'] > 0 ? 'Scored' : ($row['incomplete_date_count'] + $row['incomplete_evidence_count'] > 0 ? 'No assessable due reports' : 'No due reports');
+            if ($row['due_count'] > 0) {
+                $row['score_status'] = ($row['incomplete_date_count'] + $row['incomplete_evidence_count'] + ($row['excluded_report_count'] ?? 0)) > 0
+                    ? 'Scored with data issues' : 'Scored';
+            } elseif (($row['incomplete_date_count'] + $row['incomplete_evidence_count'] + ($row['excluded_report_count'] ?? 0)) > 0) {
+                $row['score_status'] = 'No assessable reports';
+            } else {
+                $row['score_status'] = 'No assessed reports';
+            }
             $row['rank'] = null;
             $row['rank_status'] = $rosterComplete ? $row['score_status'] : 'Comparison limited by organizational access';
         }
@@ -986,48 +1245,220 @@ final class OfficeTatComplianceAssessmentService
                 $row['participant_key'], $row['activity_count'], $row['received_activity_count'], $row['due_count'],
                 $row['not_yet_due_count'], $row['incomplete_date_count'], $row['incomplete_evidence_count'],
                 $row['tc_numerator'], $row['tc_denominator'], $row['se_ratio'], $row['early_count'],
-                $row['volume_count'], $row['technical_on_time_count'],
+                $row['volume_count'], $row['technical_on_time_count'], $row['evidence_fingerprint'],
             ], $rows),
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
 
-        $ties = $rosterComplete ? $this->rankRows($rows, $unit, $periodKey, $fingerprint) : [];
-        if (! $rosterComplete) {
-            foreach ($rows as &$row) {
-                $row['rank'] = null;
-                $row['rank_status'] = 'Comparison limited by organizational access';
-            }
-            unset($row);
+        $ties = [];
+        foreach ($rows as &$row) {
+            $row['rank'] = null;
+            $row['rank_status'] = $rosterComplete
+                ? 'Source activity details are available; full group results are not ready.'
+                : 'Comparison limited by organizational access';
         }
+        unset($row);
 
-        $pooled = $this->pooledScore($rows);
-        $assessableDue = (int) collect($rows)->sum('due_count');
-        $activityCount = (int) collect($rows)->sum('activity_count');
+        $activityCount = (int) collect($rows)->sum('processed_count');
         $receivedCount = (int) collect($rows)->sum('received_activity_count');
         $notYetDueCount = (int) collect($rows)->sum('not_yet_due_count');
         $incompleteDates = (int) collect($rows)->sum('incomplete_date_count');
         $incompleteEvidence = (int) collect($rows)->sum('incomplete_evidence_count');
-        $eligibleRows = collect($rows)->filter(fn (array $row): bool => $row['due_count'] > 0);
-        $onTimeCount = (int) $eligibleRows->sum('on_time_count');
-        $earlyCount = (int) $eligibleRows->sum('early_count');
+        $assessableDue = (int) collect($rows)->sum('assessed_count');
+        $onTimeCount = (int) collect($rows)->sum('on_time_count');
+        $earlyCount = (int) collect($rows)->sum('early_count');
+        $pooled = $this->pooledScore($rows);
+        $coverageReasons = [];
+        if (! $rosterComplete) $coverageReasons[] = 'The authorized view does not include the complete group roster.';
+        if ($incompleteDates > 0) $coverageReasons[] = $incompleteDates.' source records have missing or invalid dates.';
+        if ($incompleteEvidence > 0) $coverageReasons[] = $incompleteEvidence.' source identity or schedule issues remain.';
+        if (collect($rows)->contains(fn (array $row): bool => $row['score_status'] === 'Coverage incomplete')) $coverageReasons[] = 'At least one participant has invalid scoring dates or chronology.';
+        $allModulesSelected = $workflowFilter === null || $workflowFilter === '' || $workflowFilter === 'all';
+        $supportedRankingStatuses = ['Scored', 'No assessed reports'];
+        $rankingDataComplete = $rosterComplete
+            && count($rows) === $expectedRoster
+            && collect($rows)->every(fn (array $row): bool => in_array($row['score_status'], $supportedRankingStatuses, true))
+            && $incompleteDates === 0
+            && $incompleteEvidence === 0;
+        $hasRankedRows = collect($rows)->contains(fn (array $row): bool => $row['score_status'] === 'Scored');
+        $periodClosed = $cutoff->greaterThanOrEqualTo($periodEnd->startOfDay());
+        $unresolvedTieGroups = $rankingDataComplete && $allModulesSelected
+            ? $this->rankRows($rows, $unit, $periodKey, $fingerprint)
+            : [];
+        foreach ($rows as &$row) {
+            if (! $rankingDataComplete || ! $allModulesSelected) {
+                $row['rank'] = null;
+                $row['rank_status'] = ! $rosterComplete
+                    ? 'Comparison limited by organizational access'
+                    : (! $allModulesSelected ? 'Rank available with all modules selected' : 'Not ranked yet');
+                unset($row['reserved_rank_start'], $row['reserved_rank_end']);
+            } elseif ($row['rank'] !== null) {
+                $row['rank_status'] = $periodClosed ? 'Final rank' : 'Current as-of rank';
+            }
+            $row['recorded_obligation_details'] = $row['obligation_details'] ?? [];
+            $row['required_count_status'] = $row['assessed_count'] > 0 ? 'known' : 'no_assessed_reports';
+            $row['participant_results_complete'] = $row['assessed_count'] > 0;
+            $row['result_reason'] = $row['assessed_count'] > 0
+                ? null
+                : ($row['processed_count'] > 0
+                    ? 'Processed reports are pending or have dates that cannot be assessed by the selected date.'
+                    : 'No processed reports are recorded for this participant in the selected period.');
+            $row['result_basis'] = 'Existing processed reports with persisted receipt or routing evidence';
+        }
+        unset($row);
+        $unitRows = $rows;
+        $rankingIsFinal = $rankingDataComplete && $hasRankedRows && $allModulesSelected && $periodClosed && $unresolvedTieGroups === [];
+        $assessmentReasons = array_values(array_unique($coverageReasons));
+        if (! $allModulesSelected) $assessmentReasons[] = 'Select all modules to compare group ranks.';
+        if ($rankingDataComplete && ! $periodClosed) $assessmentReasons[] = 'Figures are current as of the selected date; the reporting period is open.';
+        $assessmentReasons = array_values(array_unique($assessmentReasons));
+        $metricDueCount = $assessableDue;
+        $metricSubmittedCount = (int) collect($rows)->sum('submitted_count');
+        $metricOnTimeCount = $onTimeCount;
+        $metricEarlyCount = $earlyCount;
+        $metricVolumeCount = (int) collect($rows)->sum('volume_count');
+        $metricTc = $metricDueCount > 0 ? $pooled['tc_percent'] : null;
+        $metricSe = $metricDueCount > 0 ? $pooled['se_percent'] : null;
+        $metricOtps = $metricTc !== null && $metricSe !== null ? round(($metricTc * 0.80) + ($metricSe * 0.20), 2) : null;
 
+        $unitAssessment = [
+            'unit' => $unit,
+            'period_key' => $periodKey,
+            'as_of_date' => $cutoff->toDateString(),
+            'basis' => 'processed_reports_only',
+            'basis_label' => $unit === 'development'
+                ? 'Recorded ENGP reports with persisted submission, routing or PENRO receipt evidence'
+                : 'Recorded PA reports with persisted submission, routing or PENRO receipt evidence',
+            'roster_count' => count($participants),
+            'expected_roster_count' => $expectedRoster,
+            'roster_complete' => $rosterComplete,
+            'coverage_complete' => $rankingDataComplete,
+            'ranking_is_final' => $rankingIsFinal,
+            'ranking_is_provisional' => $rankingDataComplete && $hasRankedRows && $allModulesSelected && ! $periodClosed,
+            'ranking_is_awaiting_tie_resolution' => $rankingDataComplete && $allModulesSelected && $unresolvedTieGroups !== [],
+            'ranking_scope' => $rosterComplete ? 'unit_roster' : 'authorized_participants_only',
+            'coverage_reasons' => $assessmentReasons,
+            'processed_count' => $activityCount,
+            'received_by_penro_count' => $receivedCount,
+            'assessed_count' => $metricDueCount,
+            'due_count' => $metricDueCount,
+            'submitted_count' => $metricSubmittedCount,
+            'on_time_count' => $metricOnTimeCount,
+            'early_count' => $metricEarlyCount,
+            'volume_count' => $metricVolumeCount,
+            'tc_percent' => $metricTc,
+            'se_percent' => $metricSe,
+            'otps' => $metricOtps,
+            'early_percent' => $metricDueCount > 0 ? 100 * $metricEarlyCount / $metricDueCount : null,
+            'metric_fingerprint' => $fingerprint,
+            'tie_groups' => $unresolvedTieGroups,
+            'rows' => $unitRows,
+        ];
         return [
-            'unit' => $unit, 'label' => $label, 'basis' => 'recorded_live_source',
-            'basis_label' => 'Based on recorded reports', 'period_key' => $periodKey,
+            'unit' => $unit, 'label' => $label, 'basis' => 'processed_reports_only',
+            'basis_label' => 'Recorded report sources with persisted submission, routing or PENRO receipt evidence.', 'period_key' => $periodKey,
             'period_start' => $periodStart->toDateString(), 'period_end' => $periodEnd->toDateString(),
-            'as_of_date' => $cutoff->toDateString(), 'full_period_coverage' => 'not_established_by_recorded_population',
+            'as_of_date' => $cutoff->toDateString(), 'ranking_is_final' => $rankingIsFinal, 'coverage_reasons' => $assessmentReasons,
             'roster_count' => count($participants), 'expected_roster_count' => $expectedRoster,
-            'roster_complete' => $rosterComplete, 'ranking_scope' => $rosterComplete ? 'unit_roster' : 'authorized_participants_only',
-            'activity_count' => $activityCount, 'received_activity_count' => $receivedCount,
-            'due_count' => $assessableDue, 'on_time_count' => $assessableDue > 0 ? $onTimeCount : null,
-            'early_count' => $assessableDue > 0 ? $earlyCount : null,
+            'roster_complete' => $rosterComplete, 'ranking_scope' => $rosterComplete ? 'unit_roster' : 'authorized_participants_only', 'coverage_complete' => $rankingDataComplete,
+            'activity_count' => $activityCount, 'processed_count' => $activityCount,
+            'received_activity_count' => $receivedCount, 'received_by_penro_count' => $receivedCount,
+            'due_count' => $metricDueCount, 'submitted_count' => $metricSubmittedCount,
+            'assessed_count' => $metricDueCount,
+            'on_time_count' => $metricOnTimeCount,
+            'early_count' => $metricEarlyCount,
             'not_yet_due_count' => $notYetDueCount, 'incomplete_date_count' => $incompleteDates,
             'incomplete_evidence_count' => $incompleteEvidence,
-            'tc_percent' => $assessableDue > 0 ? $pooled['tc_percent'] : null,
-            'se_percent' => $assessableDue > 0 ? $pooled['se_percent'] : null,
-            'otps' => $assessableDue > 0 ? round(($pooled['tc_percent'] * 0.80) + ($pooled['se_percent'] * 0.20), 2) : null,
-            'early_percent' => $assessableDue > 0 ? 100 * $earlyCount / $assessableDue : null,
-            'result_identity' => $fingerprint, 'tie_groups' => $ties, 'rows' => $rows,
+            'tc_percent' => $metricTc,
+            'se_percent' => $metricSe,
+            'otps' => $metricOtps,
+            'early_percent' => $metricDueCount > 0 ? 100 * $metricEarlyCount / $metricDueCount : null,
+            'result_identity' => $unitAssessment['metric_fingerprint'] ?? $fingerprint, 'tie_groups' => $unitAssessment['tie_groups'], 'rows' => $rows, 'office_tat_assessment' => $unitAssessment, 'recorded_source_coverage_reasons' => $coverageReasons,
         ];
+    }
+
+    /** Registry-backed report performance filters; Management Plans are deliberately omitted. */
+    public function moduleOptions(string $unit): array
+    {
+        abort_unless(in_array($unit, ['conservation', 'development'], true), 422);
+
+        if ($unit === 'development') {
+            return collect($this->engp->all())->map(fn (array $definition): array => [
+                'value' => (string) $definition['key'], 'label' => (string) $definition['label'],
+            ])->values()->all();
+        }
+
+        $generic = $this->requirements->definitions(ReportRequirementRegistry::PA, true, 'generic')
+            ->reject(fn (array $definition): bool => ($definition['module_type'] ?? null) === \App\Models\ModuleDefinition::TYPE_PLAN)
+            ->map(fn (array $definition): array => ['value' => (string) $definition['key'], 'label' => (string) $definition['label']]);
+        $nativeDefinitions = $this->requirements->definitions(ReportRequirementRegistry::PA, true, 'specialized')->keyBy('key');
+        $native = collect(app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->all())
+            ->map(function (array $source, string $workflow) use ($nativeDefinitions): ?array {
+                $definition = $nativeDefinitions->get($workflow);
+                if (! $definition || ($definition['module_type'] ?? null) === \App\Models\ModuleDefinition::TYPE_PLAN) return null;
+                return ['value' => $workflow, 'label' => (string) ($definition['label'] ?? $source['label'])];
+            })->filter();
+
+        return $generic->concat($native)->unique('value')->sortBy('label', SORT_NATURAL | SORT_FLAG_CASE)->values()->all();
+    }
+
+    /** @return list<array{value:string,label:string}> */
+    public function periodOptions(): array
+    {
+        $years = collect([
+            ...$this->requirements->availableYears(ReportRequirementRegistry::PA),
+            ...$this->requirements->availableYears(ReportRequirementRegistry::ENGP),
+        ])->unique()->sortDesc();
+
+        return $years->flatMap(function (int $year): array {
+            $periods = [
+                ['value' => (string) $year, 'label' => 'Annual '.$year],
+                ['value' => $year.'-H1', 'label' => '1st Semester '.$year],
+                ['value' => $year.'-H2', 'label' => '2nd Semester '.$year],
+            ];
+            return $periods;
+        })->values()->all();
+    }
+
+    /**
+     * Keep participant measurements separate from full-unit award readiness.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function participantResultState(array $row, bool $requiredCountKnown, ?string $reason = null): array
+    {
+        $due = $row['due_count'] ?? null;
+        $scoreStatus = (string) ($row['score_status'] ?? '');
+
+        if (! $requiredCountKnown || ($due === 0 && $scoreStatus === 'Coverage incomplete')) {
+            $row['known_on_time_count'] = $row['on_time_count'] ?? null;
+            $row['required_count_status'] = 'unknown';
+            $row['participant_results_complete'] = false;
+            $row['result_reason'] = $reason ?? 'Required report count is not available yet.';
+            $row['due_count'] = null;
+            $row['submitted_count'] = null;
+            $row['tc_numerator'] = null;
+            $row['tc_denominator'] = null;
+            $row['se_ratio'] = null;
+            $row['tc_percent'] = null;
+            $row['se_percent'] = null;
+            $row['otps'] = null;
+            $row['early_count'] = null;
+            $row['early_percent'] = null;
+            $row['volume_count'] = null;
+            $row['technical_on_time_count'] = null;
+            $row['score_status'] = 'Coverage incomplete';
+
+            return $row;
+        }
+
+        $row['required_count_status'] = $due === 0 && $scoreStatus === 'No due reports' ? 'confirmed_zero' : 'known';
+        $row['participant_results_complete'] = in_array($scoreStatus, ['Scored', 'No due reports'], true);
+        $row['result_reason'] = $due === 0 && $scoreStatus === 'No due reports'
+            ? 'No reports due for this period.'
+            : ($row['participant_results_complete'] ? null : ($reason ?? 'A report date or schedule needs checking.'));
+
+        return $row;
     }
 
     /** @return array<string,mixed> */
@@ -1037,7 +1468,18 @@ final class OfficeTatComplianceAssessmentService
         if (! $rosterComplete) $coverageReasons[] = 'Directory roster contains '.count($participants).' participants; the approved roster size is '.$expectedRoster.'.';
         $rows = [];
         foreach ($participants as $participant) {
-            $rows[] = [...$participant, ...$this->scoreParticipant($obligationsByParticipant[$participant['participant_key']] ?? [], $cutoff)];
+            $participantReasons = array_values(array_filter(
+                $coverageReasons,
+                fn (string $reason): bool => str_starts_with($reason, (string) $participant['name'].':'),
+            ));
+            $score = $this->scoreParticipant($obligationsByParticipant[$participant['participant_key']] ?? [], $cutoff);
+            $score['participant_coverage_reasons'] = $participantReasons;
+            $score = $this->participantResultState(
+                $score,
+                $participantReasons === [],
+                $participantReasons === [] ? null : 'Required report count is not available yet.',
+            );
+            $rows[] = [...$participant, ...$score];
         }
         $coverageReasons = array_values(array_unique($coverageReasons));
         $complete = $rosterComplete && $coverageReasons === [] && collect($rows)->every(fn (array $row): bool => in_array($row['score_status'], ['Scored', 'No due reports'], true));
@@ -1050,23 +1492,12 @@ final class OfficeTatComplianceAssessmentService
                 $row['technical_on_time_count'], $row['score_status'], $row['evidence_fingerprint'],
             ], $rows),
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
-        $ties = $this->rankRows($rows, $unit, $periodKey, $baseFingerprint);
+        $ties = $complete ? $this->rankRows($rows, $unit, $periodKey, $baseFingerprint) : [];
         if (! $complete) {
             foreach ($rows as &$row) {
                 $row['rank'] = null;
-                $row['rank_status'] = 'Coverage incomplete';
-                $row['tc_percent'] = null;
-                $row['se_percent'] = null;
-                $row['otps'] = null;
-                $row['early_percent'] = null;
-                $row['due_count'] = null;
-                $row['submitted_count'] = null;
-                $row['volume_count'] = null;
-                $row['on_time_count'] = null;
-                $row['early_count'] = null;
-                $row['technical_on_time_count'] = null;
+                $row['rank_status'] = 'Not ranked yet';
                 unset($row['reserved_rank_start'], $row['reserved_rank_end']);
-                $row['score_status'] = 'Coverage incomplete';
             }
             unset($row);
             $ties = [];
@@ -1110,7 +1541,7 @@ final class OfficeTatComplianceAssessmentService
     /** @param list<array<string,mixed>> $rows @return array{tc_percent:?float,se_percent:?float} */
     private function pooledScore(array $rows): array
     {
-        $scored = collect($rows)->filter(fn (array $row): bool => $row['score_status'] === 'Scored');
+        $scored = collect($rows)->filter(fn (array $row): bool => in_array($row['score_status'], ['Scored', 'Scored with data issues'], true));
         $due = (int) $scored->sum('due_count');
         if ($due === 0) return ['tc_percent' => null, 'se_percent' => null];
 
@@ -1268,20 +1699,172 @@ final class OfficeTatComplianceAssessmentService
         ];
     }
 
-    private function obligationDetail(array $obligation, int $allowedDays, ?int $daysUsed, string $status, ?string $issue): array
+    private function recordedIssueReference(array $obligation): string
     {
+        $sourceId = $obligation['source_identity']['source_id'] ?? $obligation['record_id'] ?? null;
+        return $sourceId !== null ? 'Report #'.(int) $sourceId.': ' : '';
+    }
+
+    private function scoreRecordedParticipant(array $obligations, CarbonImmutable $cutoff): array
+    {
+        $due = $submitted = $onTime = $early = $volumeCount = $technicalOnTime = 0;
+        $technicalCountKnown = true;
+        $seSum = BigRational::zero();
+        $excludedIssues = [];
+        $evidence = [];
+        $details = [];
+
+        foreach ($obligations as $obligation) {
+            if (! empty($obligation['historical'])) continue;
+
+            $validDate = static function (mixed $value): bool {
+                if (! is_string($value) || ! preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $match)) return false;
+                return checkdate((int) $match[2], (int) $match[3], (int) $match[1]);
+            };
+            $startValue = $obligation['start'] ?? null;
+            $deadlineValue = $obligation['deadline'] ?? null;
+            if (! $validDate($startValue) || ! $validDate($deadlineValue)) {
+                $issue = 'The authoritative workflow start or deadline is missing or invalid.';
+                $excludedIssues[] = $this->recordedIssueReference($obligation).$issue;
+                $details[] = $this->obligationDetail($obligation, 0, null, 'Invalid source dates', $issue, null);
+                continue;
+            }
+
+            $start = CarbonImmutable::parse($startValue, BusinessCalendarService::TIMEZONE)->startOfDay();
+            $deadline = CarbonImmutable::parse($deadlineValue, BusinessCalendarService::TIMEZONE)->startOfDay();
+            $allowedDays = $this->durationDays($start, $deadline, $obligation);
+            if ($allowedDays <= 0) {
+                $issue = 'Allowed period must be positive and chronological.';
+                $excludedIssues[] = $this->recordedIssueReference($obligation).$issue;
+                $details[] = $this->obligationDetail($obligation, $allowedDays, null, 'Invalid allowed period', $issue, null);
+                continue;
+            }
+            $receivedValue = $obligation['received'] ?? null;
+            if ($receivedValue !== null && ! $validDate($receivedValue)) {
+                $issue = 'Accepted PENRO receipt date is invalid.';
+                $excludedIssues[] = $this->recordedIssueReference($obligation).$issue;
+                $details[] = $this->obligationDetail($obligation, $allowedDays, null, 'Invalid receipt date', $issue, null);
+                continue;
+            }
+
+            $received = $receivedValue
+                ? CarbonImmutable::parse($receivedValue, BusinessCalendarService::TIMEZONE)->startOfDay()
+                : null;
+            $receivedByCutoff = $received !== null && $received->lessThanOrEqualTo($cutoff);
+
+            $sourceIssue = isset($obligation['invalid_reason']) ? (string) $obligation['invalid_reason'] : null;
+            if ($sourceIssue === null && $obligation['record_id'] !== null
+                && ($obligation['source_deadline'] ?? null) !== $obligation['deadline']) {
+                $sourceIssue = 'Source deadline does not match the authoritative workflow schedule.';
+            }
+            if ($sourceIssue === null && $receivedByCutoff && $received->lessThan($start)) {
+                $sourceIssue = 'Accepted PENRO receipt precedes the authoritative workflow start.';
+            }
+            if ($sourceIssue !== null) {
+                $excludedIssues[] = $this->recordedIssueReference($obligation).$sourceIssue;
+                $details[] = $this->obligationDetail($obligation, $allowedDays, null, 'Not assessed: source evidence needs checking', $sourceIssue, null);
+                continue;
+            }
+
+            if ($deadline->greaterThan($cutoff) && ! $receivedByCutoff) {
+                $details[] = $this->obligationDetail(
+                    $obligation, $allowedDays, null,
+                    $received ? 'Receipt after cutoff; excluded from this assessment' : 'Not yet due; excluded from N',
+                    null, null,
+                );
+                continue;
+            }
+
+            // The current as-of cohort contains obligations already due and valid
+            // accepted receipts already received, including receipts before deadline.
+            $due++;
+            $issue = null;
+            $daysUsed = null;
+            $individualEfficiency = 0.0;
+            $status = 'No accepted PENRO receipt by cutoff';
+
+            if ($receivedByCutoff) {
+                $daysUsed = $this->durationDays($start, $received, $obligation);
+                if ($daysUsed < 0) {
+                    // The chronology was checked above; keep this defensive
+                    // branch local to this report if a custom calendar disagrees.
+                    $excludedIssues[] = $this->recordedIssueReference($obligation).'Invalid elapsed report duration.';
+                    $details[] = $this->obligationDetail($obligation, $allowedDays, null, 'Not assessed: source dates need checking', 'Invalid elapsed report duration.', null);
+                    $due--;
+                    continue;
+                } else {
+                    $volumeCount++;
+                    $submitted++;
+                    if ($received->lessThanOrEqualTo($deadline)) {
+                        $onTime++;
+                        if ($received->lessThan($deadline)) $early++;
+                        if (($obligation['technical'] ?? null) === true) $technicalOnTime++;
+                        elseif (($obligation['technical'] ?? null) === null) $technicalCountKnown = false;
+                        $status = $received->lessThan($deadline) ? 'Submitted early' : 'Submitted on deadline';
+                    } else {
+                        $status = 'Submitted late';
+                    }
+
+                    $remaining = max(0, $allowedDays - $daysUsed);
+                    $seSum = $seSum->plus(BigRational::ofFraction(100 * $remaining, $allowedDays));
+                    $individualEfficiency = 100 * $remaining / $allowedDays;
+                }
+            }
+
+            $obligation['individual_efficiency_percent'] = $individualEfficiency;
+            $details[] = $this->obligationDetail($obligation, $allowedDays, $daysUsed, $status, $issue, $individualEfficiency);
+            $evidence[] = [
+                $obligation['key'], $obligation['start'], $obligation['deadline'], $obligation['record_id'],
+                $obligation['received'], $obligation['source_deadline'], $obligation['day_mode'],
+                $obligation['technical'] ?? null, $obligation['classification_version_id'] ?? null,
+            ];
+        }
+
+        $seRatio = $due > 0 ? $seSum->dividedBy($due) : BigRational::zero();
+        $tc = $due > 0 ? 100 * $onTime / $due : null;
+        $se = $due > 0 ? $seRatio->toFloat() : null;
+        $earlyPercent = $due > 0 ? 100 * $early / $due : null;
+
+        return [
+            'due_count' => $due, 'submitted_count' => $submitted, 'on_time_count' => $onTime, 'early_count' => $early,
+            'volume_count' => $volumeCount,
+            'tc_numerator' => $onTime, 'tc_denominator' => $due,
+            'se_sum_numerator' => $seSum->getNumerator()->__toString(),
+            'se_sum_denominator' => $seSum->getDenominator()->__toString(),
+            'se_ratio' => $seRatio->getNumerator()->__toString().'/'.$seRatio->getDenominator()->__toString(),
+            'tc_percent' => $tc, 'se_percent' => $se,
+            'otps' => $tc !== null && $se !== null ? round(($tc * 0.80) + ($se * 0.20), 2) : null,
+            'early_percent' => $earlyPercent, 'technical_on_time_count' => $technicalCountKnown ? $technicalOnTime : null,
+            'obligation_details' => $details,
+            'score_status' => $due === 0 ? 'No assessed reports' : 'Scored',
+            'score_issues' => array_values(array_unique($excludedIssues)),
+            'excluded_report_count' => count($excludedIssues),
+            'rank' => null, 'rank_status' => $due === 0 ? 'N/A' : 'Pending comparison',
+            'evidence_fingerprint' => hash('sha256', json_encode($evidence, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE)),
+        ];
+    }
+    private function obligationDetail(array $obligation, int $allowedDays, ?int $daysUsed, string $status, ?string $issue, ?float $efficiency = null): array
+    {
+        $sourceIds = array_values(array_unique(array_map('intval', $obligation['source_identity']['source_ids'] ?? [])));
+        if ($sourceIds === [] && $obligation['record_id'] !== null) $sourceIds = [(int) $obligation['record_id']];
+        $sourceReference = $sourceIds === [] ? null : 'Report #'.implode(', #', $sourceIds);
+
         return [
             'key' => $obligation['key'], 'label' => $obligation['label'], 'status' => $status, 'start_date' => $obligation['start'],
             'deadline' => $obligation['deadline'], 'received' => $obligation['received'],
             'allowed_days' => $allowedDays > 0 ? $allowedDays : null, 'days_used' => $daysUsed,
+            'individual_efficiency_percent' => $efficiency,
             'day_convention' => match ($obligation['day_mode']) {
                 'calendar_days' => 'Calendar days',
+                self::ENGP_CBEP_ALLOWED_CALENDAR_DAYS => 'CBEP allowed calendar days (period start through deadline, inclusive)',
                 'engp_standard_working_days' => 'Standard working days (shared holiday calendar)',
                 \App\Models\ModuleDefinition::DEADLINE_PAMB_WORKING_DAYS => 'PAMB working days (Monday–Thursday shared calendar)',
                 \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => 'Conservation working days (Monday–Thursday shared calendar)',
+                self::CONSERVATION_NATIVE_DAY_MODE => 'Conservation working days (Monday to Thursday shared calendar)',
                 default => 'Source-defined day convention',
             },
             'receipt_endpoint' => 'date_received_penro', 'technical' => $obligation['technical'],
+            'source_reference' => $sourceReference,
             'source_rows_matched' => (int) ($obligation['source_rows_matched'] ?? ($obligation['record_id'] === null ? 0 : 1)),
             'issue' => $issue,
             'nonreceipt_verified' => (bool) ($obligation['nonreceipt_verified'] ?? false),
@@ -1410,6 +1993,58 @@ final class OfficeTatComplianceAssessmentService
         return $ties;
     }
 
+    private function rankRecordedRows(array &$rows, string $unit, string $periodKey, string $baseFingerprint): array
+    {
+        usort($rows, function (array $a, array $b): int {
+            $aScored = in_array(($a['score_status'] ?? null), ['Scored', 'Scored with data issues'], true)
+                && is_numeric($a['tc_numerator'] ?? null) && is_numeric($a['tc_denominator'] ?? null)
+                && is_string($a['se_ratio'] ?? null);
+            $bScored = in_array(($b['score_status'] ?? null), ['Scored', 'Scored with data issues'], true)
+                && is_numeric($b['tc_numerator'] ?? null) && is_numeric($b['tc_denominator'] ?? null)
+                && is_string($b['se_ratio'] ?? null);
+            if ($aScored !== $bScored) return $aScored ? -1 : 1;
+            if ($aScored && $bScored) {
+                $tc = $this->compareRatios(
+                    (int) $a['tc_numerator'], max(1, (int) $a['tc_denominator']),
+                    (int) $b['tc_numerator'], max(1, (int) $b['tc_denominator']),
+                );
+                if ($tc !== 0) return -$tc;
+                $se = $this->compareSeRatios((string) $a['se_ratio'], (string) $b['se_ratio']);
+                if ($se !== 0) return -$se;
+            }
+            return strnatcasecmp((string) $a['name'], (string) $b['name']);
+        });
+
+        $position = 0;
+        $rank = null;
+        $previous = null;
+        foreach ($rows as &$row) {
+            $rankable = in_array(($row['score_status'] ?? null), ['Scored', 'Scored with data issues'], true)
+                && is_numeric($row['tc_numerator'] ?? null) && is_numeric($row['tc_denominator'] ?? null)
+                && is_string($row['se_ratio'] ?? null);
+            if (! $rankable) {
+                $row['rank'] = null;
+                $row['rank_status'] = $row['score_status'] ?? 'Not applicable';
+                continue;
+            }
+
+            $position++;
+            $sameScore = $previous !== null
+                && $this->compareRatios(
+                    (int) $previous['tc_numerator'], max(1, (int) $previous['tc_denominator']),
+                    (int) $row['tc_numerator'], max(1, (int) $row['tc_denominator']),
+                ) === 0
+                && $this->compareSeRatios((string) $previous['se_ratio'], (string) $row['se_ratio']) === 0;
+            if (! $sameScore) $rank = $position;
+
+            $row['rank'] = $rank;
+            $row['rank_status'] = 'Current as-of rank';
+            $previous = $row;
+        }
+        unset($row);
+
+        return [];
+    }
     private function sameFirstFour(array $a, array $b): bool
     {
         return $this->compareRatios($a['tc_numerator'], $a['tc_denominator'], $b['tc_numerator'], $b['tc_denominator']) === 0
@@ -1454,9 +2089,13 @@ final class OfficeTatComplianceAssessmentService
 
     private function durationDays(CarbonImmutable $start, CarbonImmutable $end, array $obligation): int
     {
+        if ($obligation['day_mode'] === self::ENGP_CBEP_ALLOWED_CALENDAR_DAYS) {
+            return (int) $start->diffInDays($end, false) + 1;
+        }
         if ($obligation['day_mode'] === 'calendar_days') return (int) $start->diffInDays($end, false);
         $weekdays = match ($obligation['day_mode']) {
             'engp_standard_working_days' => BusinessCalendarService::STANDARD_WORKING_WEEKDAYS,
+            self::CONSERVATION_NATIVE_DAY_MODE => BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS,
             \App\Models\ModuleDefinition::DEADLINE_PAMB_WORKING_DAYS => BusinessCalendarService::PAMB_WORKING_WEEKDAYS,
             \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => BusinessCalendarService::CONSERVATION_WORKING_WEEKDAYS,
             default => null,
@@ -1491,6 +2130,9 @@ final class OfficeTatComplianceAssessmentService
                     \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS => 'Conservation working days: Monday–Thursday with the shared calendar',
                     default => 'Workflow rule or stored deadline; requires source evidence',
                 };
+                if ($domain === 'engp' && $key === 'cbep') {
+                    $dayConvention = 'CBEP allowed calendar days, counting the period start as day 1 through the deadline';
+                }
                 $items[] = ['domain' => $domain, 'workflow_key' => $key, 'label' => (string) $definition['label'],
                     'is_highly_technical' => $classification['is_highly_technical'] ?? null, 'version' => $classification['version'] ?? null,
                     'stored_version' => Schema::hasTable('office_tat_technical_classification_versions')
@@ -1502,15 +2144,17 @@ final class OfficeTatComplianceAssessmentService
                     'effective_to' => $classification['effective_to'] ?? null,
                     'evidence_reference' => isset($classification['evidence_id']) ? \App\Models\OfficeTatApprovalEvidence::query()->find($classification['evidence_id'])?->public_id : null,
                     'start_basis' => $startBasis, 'deadline_basis' => $deadlineBasis, 'day_convention' => $dayConvention,
-                    'submission_endpoint' => 'date_received_penro', 'allowed_days' => $definition['default_deadline_days'] ?? null,
+                    'submission_endpoint' => 'date_received_penro',
+                    'allowed_days' => $domain === 'engp' && $key === 'cbep' ? 20 : ($definition['default_deadline_days'] ?? null),
                     'frequency' => $definition['reporting_frequency'] ?? $definition['period'] ?? null];
             }
         }
         return $items;
     }
 
-    private function engpDayMode(array $workflow): string
+    private function engpDayMode(string $workflowKey, array $workflow): string
     {
+        if ($workflowKey === 'cbep') return self::ENGP_CBEP_ALLOWED_CALENDAR_DAYS;
         return ($workflow['deadline_mode'] ?? null) === \App\Models\ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS
             ? 'engp_standard_working_days'
             : 'calendar_days';
@@ -1553,6 +2197,16 @@ final class OfficeTatComplianceAssessmentService
 
     private function paRecordKey(ConservationReportSubmission $record): string
     {
-        return $this->paPeriodRecordKey((int) $record->protected_area_id, (string) $record->workflow_key, (string) $record->reporting_period, (string) $record->activity_name, (string) $record->document_type);
+        $sourceDate = $this->conservationRecordStart($record)
+            ?: ($record->deadline_submission ?: $record->created_at?->timezone(BusinessCalendarService::TIMEZONE)->toDateString());
+        $year = $sourceDate ? CarbonImmutable::parse($sourceDate, BusinessCalendarService::TIMEZONE)->year : 0;
+        $registeredActivity = $year > 0
+            ? $this->registeredPaActivityFor($record, $this->obligationEvidence->catalogue(), $year)
+            : null;
+
+        return $this->paPeriodRecordKey(
+            (int) $record->protected_area_id, (string) $record->workflow_key, (string) $record->reporting_period,
+            $registeredActivity ?? (string) $record->activity_name, (string) $record->document_type,
+        );
     }
 }

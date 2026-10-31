@@ -254,7 +254,7 @@ export default function FacilitiesReport({
                     onClick={() => openFacilityModal(row)}
                     className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
 
-                                                <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'N/A'}</td>
+                                                <td className="px-4 py-3 font-semibold text-gray-900 dark:text-white">{row.protected_area?.name || 'Not recorded'}</td>
                                                 <td className="px-4 py-3 font-medium text-gray-800 dark:text-gray-200">{row.facility_type}</td>
                                                 <td className="px-4 py-3">{row.unit_no}</td>
                                                 <td className="px-4 py-3">{row.year_established || 'â€”'}</td>
@@ -291,7 +291,7 @@ export default function FacilitiesReport({
                                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">ðŸ—ï¸</span>
                                 <div>
                                     <h3 className="font-bold text-gray-900 dark:text-white">Facility Full Details</h3>
-                                    <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'N/A'} â€” {selectedFacility.facility_type}</p>
+                                    <p className="text-xs text-gray-500">{selectedFacility.protected_area?.name || 'Not recorded'} â€” {selectedFacility.facility_type || 'Not provided'}</p>
                                 </div>
                             </div>
                             <button type="button" onClick={closeFacilityModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">âœ•</button>

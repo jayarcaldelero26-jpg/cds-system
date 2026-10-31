@@ -114,7 +114,7 @@ final class PambSubmissionAccessService
             return $user->protected_area_id === null
                 ? $query->whereRaw('1 = 0')
                 : $query->where($query->getModel()->getTable().'.protected_area_id', (int) $user->protected_area_id)
-                    ->whereIn($query->getModel()->getTable().'.workflow_key', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys());
+                    ->whereIn($query->getModel()->getTable().'.workflow_key', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys(false));
         }
         return $query;
     }

@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use App\Services\Archive\GoogleDriveDocumentArchiveGateway;
+use App\Services\Archive\GoogleDriveArchiveException;
 use App\Services\Storage\GoogleDriveStorageCapacityProvider;
 use App\Services\Storage\ServerStorageCapacityProvider;
 use App\Services\Storage\StorageCapacityFormatter;
@@ -133,6 +134,24 @@ test('only exact Super Admin can open Storage settings', function (): void {
     $admin = User::factory()->create(['section' => 'CDS', 'is_active' => true, 'is_approved' => true]);
     $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
     $this->actingAs($admin)->get(route('settings.storage.index'))->assertForbidden();
+});
+
+test('archive root validation is read-only, exposes only safe failure context, and remains Super Admin only', function (): void {
+    $gateway = Mockery::mock(GoogleDriveDocumentArchiveGateway::class);
+    $gateway->shouldReceive('validateRootFolder')->once()->andThrow(new GoogleDriveArchiveException('do not expose this message', 0, 'invalid_client'));
+    $gateway->shouldReceive('rootValidationStage')->once()->andReturn('oauth_refresh');
+    $this->app->instance(GoogleDriveDocumentArchiveGateway::class, $gateway);
+
+    $super = settingsSuperAdmin();
+    $this->actingAs($super)->post(route('settings.storage.verify-archive-root'))
+        ->assertRedirect()
+        ->assertSessionHas('archive_root_verification', [
+            'status' => 'unavailable', 'stage' => 'oauth_refresh', 'http_status' => null, 'category' => 'invalid_client',
+        ]);
+
+    $admin = User::factory()->create(['section' => 'CDS', 'is_active' => true, 'is_approved' => true]);
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $this->actingAs($admin)->post(route('settings.storage.verify-archive-root'))->assertForbidden();
 });
 
 test('server provider returns dynamic normalized filesystem capacity without claiming hosting quota', function (): void {

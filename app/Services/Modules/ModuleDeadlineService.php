@@ -26,9 +26,7 @@ final class ModuleDeadlineService
             ModuleDefinition::DEADLINE_CALENDAR_DAYS => $reference && $module->default_deadline_days
                 ? $reference->addDays($module->default_deadline_days)->toDateString()
                 : null,
-            ModuleDefinition::DEADLINE_CUSTOM => ($module->requirement_metadata['custom_deadline_from_actual_date'] ?? false)
-                ? ($reference && $module->default_deadline_days ? $this->calendar->addConservationWorkingDays($reference, $module->default_deadline_days, $office)->toDateString() : null)
-                : $this->date($customDeadline)?->toDateString(),
+            ModuleDefinition::DEADLINE_CUSTOM => $this->date($customDeadline)?->toDateString(),
             ModuleDefinition::DEADLINE_CUSTOM_STORED => $this->date($customDeadline)?->toDateString(),
             default => null,
         };

@@ -274,7 +274,7 @@ export default function BamsIndex({
                                                     </td>
 
                                                     <td className="border border-gray-300 p-3">
-                                                        {record.protected_area?.name || 'N/A'}
+                                                        {record.protected_area?.name || 'Not recorded'}
                                                     </td>
 
                                                     <td className="border border-gray-300 p-3 italic">

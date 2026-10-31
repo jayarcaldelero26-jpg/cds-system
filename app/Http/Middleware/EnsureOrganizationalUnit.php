@@ -31,12 +31,19 @@ final class EnsureOrganizationalUnit
                 'pamo-native-reports.*',
             );
         $workflow = (string) $request->route('workflow');
-        $pamoWorkflow = app(ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow, false);
+        $workflowRegistry = app(ConservationReportWorkflowRegistry::class);
+        $configuredPamoWorkflow = $workflowRegistry->supportsPamoSubmission($workflow, false);
+        $pamoWorkflow = $configuredPamoWorkflow && (
+            $workflowRegistry->supportsPamoSubmission($workflow)
+            || $this->hasPamoWorkflowHistory($workflow, $user)
+        );
         $nativeSources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
         $nativeDraftWorkflow = $request->routeIs('conservation-reports.pamo-drafts.*')
-            && $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow);
+            && $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow)
+            && ($nativeSources->isEligible($workflow) || $this->hasPamoWorkflowHistory($workflow, $user));
         $nativePageWorkflow = $request->routeIs('pamo-native-reports.*')
-            && $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow);
+            && $nativeSources->isSchemaReady() && $nativeSources->isConfigured($workflow)
+            && ($nativeSources->isEligible($workflow) || $this->hasPamoWorkflowHistory($workflow, $user));
         $pamoWorkspaceRoute = $request->routeIs('pamo-reports.index', 'pamo-archives.index', 'pamo-archives.file');
         $pamoPilotRequest = $unit === OrganizationalAccessService::CONSERVATION
             && ($pilotRoute || $pamoWorkspaceRoute)
@@ -46,5 +53,23 @@ final class EnsureOrganizationalUnit
 
         abort_unless($pamoPilotRequest || $organization->canBrowseModuleUnit($user, $unit), 403);
         return $next($request);
+    }
+
+    private function hasPamoWorkflowHistory(string $workflow, \App\Models\User $user): bool
+    {
+        if ($user->protected_area_id === null) return false;
+
+        if (app(ConservationReportWorkflowRegistry::class)->supportsPamoSubmission($workflow, false)) {
+            return \App\Models\ConservationReportSubmission::query()
+                ->where('workflow_key', $workflow)
+                ->where('protected_area_id', $user->protected_area_id)
+                ->exists();
+        }
+
+        $source = app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->find($workflow);
+        if (! $source) return false;
+
+        $model = $source['model'];
+        return $model::query()->where('protected_area_id', $user->protected_area_id)->exists();
     }
 }

@@ -18,7 +18,7 @@ import HistoricalRecordBadge from '@/Components/HistoricalRecordBadge';
 import RecordTypeBadge from '@/Components/RecordTypeBadge';
 import OperationalStatus from '@/Components/OperationalStatus';
 
-const show = (value) => value === null || value === undefined || value === '' ? '—' : value;
+const show = (value) => value === null || value === undefined || value === '' ? 'Not provided' : value;
 const badgeClass = (value) => ({ 'Report Submitted': 'bg-emerald-600 text-white', 'Completed': 'bg-emerald-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white' })[value] || 'bg-gray-500 text-white';
 const Badge = ({ value }) => <OperationalStatus value={value} renderStatus={status => isTimelinessValue(status) ? <TimelinessBadge value={status} /> : <span className={`inline-flex max-w-52 whitespace-normal rounded-full px-2.5 py-1 text-xs font-bold leading-5 ${badgeClass(status)}`}>{show(status)}</span>} />;
 const Detail = ({ label, children }) => {

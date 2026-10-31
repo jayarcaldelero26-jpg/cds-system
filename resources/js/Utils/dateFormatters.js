@@ -25,7 +25,7 @@ export function dateOnlyTimestamp(value) {
     return parseDateOnly(value)?.getTime() ?? Number.NaN;
 }
 
-export function formatReportDate(value, fallback = '\u2014') {
+export function formatReportDate(value, fallback = 'Not recorded') {
     if (!value) return fallback;
 
     const date = parseDateOnly(value);
@@ -34,12 +34,26 @@ export function formatReportDate(value, fallback = '\u2014') {
     return new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).format(date);
 }
 
-export function formatReportValue(value, fallback = '\u2014') {
+export function formatReportValue(value, fallback = 'Not provided') {
     if (value === null || value === undefined || value === '') return fallback;
     return REPORT_DATE_PATTERN.test(String(value)) ? formatReportDate(value, fallback) : value;
 }
 
-export function formatReportDateTime(value, fallback = '\u2014') {
+export function formatReportTime(value, fallback = 'Not recorded') {
+    if (value === null || value === undefined || value === '') return fallback;
+
+    const match = String(value).trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (!match) return value;
+
+    const hour = Number(match[1]);
+    const minutes = match[2];
+    const meridiem = hour >= 12 ? 'PM' : 'AM';
+    const displayHour = hour % 12 || 12;
+
+    return `${String(displayHour).padStart(2, '0')}:${minutes} ${meridiem}`;
+}
+
+export function formatReportDateTime(value, fallback = 'Not recorded') {
     if (!value) return fallback;
 
     const date = new Date(value);
@@ -62,7 +76,7 @@ export function formatReportDateTime(value, fallback = '\u2014') {
 }
 
 /** Format persisted workflow timestamps in the established Manila display format. */
-export function formatManila(value, fallback = '\u2014') {
+export function formatManila(value, fallback = 'Not recorded') {
     if (!value) return fallback;
     const date = new Date(value);
     return Number.isNaN(date.getTime())

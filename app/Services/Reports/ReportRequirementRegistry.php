@@ -101,10 +101,10 @@ final class ReportRequirementRegistry
     }
 
     /** @return list<array{key:string,label:string,deadline?:string}> */
-    public function periods(string $domain, string $key, int $year): array
+    public function periods(string $domain, string $key, int $year, bool $activeOnly = true): array
     {
         $definition = $this->find($domain, $key);
-        if (! $definition || ! $this->isActiveForYear($definition, $year)) {
+        if (! $definition || ($activeOnly && ! $this->isActiveForYear($definition, $year)) || (! $activeOnly && ! $this->isEffectiveForYear($definition, $year))) {
             return [];
         }
 
@@ -129,14 +129,14 @@ final class ReportRequirementRegistry
         return array_values(array_filter($periods, fn (array $period): bool => $this->periodIsEffective($definition, $year, $period['key'])));
     }
 
-    public function period(string $domain, string $key, int $year, string $periodKey): ?array
+    public function period(string $domain, string $key, int $year, string $periodKey, bool $activeOnly = true): ?array
     {
-        return collect($this->periods($domain, $key, $year))->firstWhere('key', $periodKey);
+        return collect($this->periods($domain, $key, $year, $activeOnly))->firstWhere('key', $periodKey);
     }
 
-    public function deadline(string $domain, string $key, int $year, string $periodKey): ?string
+    public function deadline(string $domain, string $key, int $year, string $periodKey, bool $activeOnly = true): ?string
     {
-        $period = $this->period($domain, $key, $year, $periodKey);
+        $period = $this->period($domain, $key, $year, $periodKey, $activeOnly);
         $definition = $this->find($domain, $key);
         if (! $period || ! $definition) {
             return null;
@@ -307,7 +307,7 @@ final class ReportRequirementRegistry
     private function definitionFromModel(ModuleDefinition $module): array
     {
         $metadata = is_array($module->requirement_metadata) ? $module->requirement_metadata : [];
-        $domain = $module->requirement_domain ?: ($module->program_area?->value === 'engp' ? self::ENGP : self::PA);
+        $domain = $module->requirement_domain ?: (in_array($module->program_area?->value, ['engp', 'development'], true) ? self::ENGP : self::PA);
         $key = $module->requirement_key ?: ($domain === self::ENGP && str_starts_with((string) $module->code, 'engp_') ? substr((string) $module->code, 5) : (string) $module->code);
         $frequency = $module->reporting_frequency ?: ($metadata['period'] ?? null);
 
@@ -348,6 +348,13 @@ final class ReportRequirementRegistry
             return false;
         }
         return ! ($year !== null && filled($definition['effective_from']) && $definition['effective_from'] > sprintf('%d-12-31', $year));
+    }
+
+    private function isEffectiveForYear(array $definition, int $year): bool
+    {
+        if (isset($definition['first_applicable_year']) && $definition['first_applicable_year'] > $year) return false;
+        if (filled($definition['effective_to']) && $definition['effective_to'] < sprintf('%d-01-01', $year)) return false;
+        return ! (filled($definition['effective_from']) && $definition['effective_from'] > sprintf('%d-12-31', $year));
     }
 
     private function periodIsEffective(array $definition, int $year, string $periodKey): bool

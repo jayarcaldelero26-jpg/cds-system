@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { registerModalLayer } from './modalLayer.mjs';
 import { focusInitialModalTarget } from './initialFocus.mjs';
+import { restoreModalFocusTarget } from './focusReturn.mjs';
 
 export const MODAL_MOTION_DURATION = 240;
 
@@ -112,16 +113,14 @@ export function useModalMotion(open, {
         }
         const previous = returnFocusRef.current;
         returnFocusRef.current = null;
-        if (previous && document.contains(previous)) queueMicrotask(() => {
-            if (document.contains(previous)) previous.focus?.();
-        });
+        restoreModalFocusTarget(previous, document);
         return undefined;
     }, [present, panelRef, layerRef, closeOnEscape, suspendKeyboardHandling]);
 
     useEffect(() => () => {
         const previous = returnFocusRef.current;
         returnFocusRef.current = null;
-        if (previous && document.contains(previous)) previous.focus?.();
+        restoreModalFocusTarget(previous, document, callback => callback());
     }, []);
 
     const onTransitionEnd = event => {

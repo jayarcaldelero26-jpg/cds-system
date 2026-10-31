@@ -3,7 +3,7 @@ import PambMovActions from '@/Components/SubmissionTracking/PambMovActions';
 import PambMovCorrectionNotice from '@/Components/SubmissionTracking/PambMovCorrectionNotice';
 import { movActionAvailability } from '@/Utils/submissionDetailContext';
 
-const FALLBACK = '\u2014';
+const FALLBACK = 'Not recorded';
 
 function MilestoneMarker({ item }) {
     if (item.current) {

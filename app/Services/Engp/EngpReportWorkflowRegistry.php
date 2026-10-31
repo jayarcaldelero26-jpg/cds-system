@@ -3,18 +3,11 @@
 namespace App\Services\Engp;
 
 use Carbon\CarbonImmutable;
-use App\Models\ModuleDefinition;
 use App\Services\Reports\ReportRequirementRegistry;
 
 final class EngpReportWorkflowRegistry
 {
     private const OFFICES = ['CENRO Baganga', 'CENRO Manay', 'CENRO Mati', 'CENRO Lupon'];
-
-    /** @return list<string> */
-    public function availableOffices(): array
-    {
-        return self::OFFICES;
-    }
 
     /** @var array<string, array<string, mixed>> */
     private const WORKFLOWS = [
@@ -34,21 +27,27 @@ final class EngpReportWorkflowRegistry
 
     public function find(string $key): ?array
     {
-        $canonical = app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $key);
-        if (! $canonical) return $this->defaultFind($key);
+        $definition = app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $key);
+        if (! $definition) return $this->defaultFind($key);
 
-        return $this->normalize([...($this->defaultFind($key) ?? []), ...$canonical]);
-    }
+        $defaults = $this->defaultFind($key) ?? [];
+        $activities = $definition['activities'] ?? array_values(array_filter([$definition['default_activity'] ?? $definition['activity'] ?? null]));
+        $documents = $definition['documents'] ?? array_values(array_filter([$definition['document'] ?? null]));
 
-    public function isActive(string $key): bool
-    {
-        $module = ModuleDefinition::query()->generic()->notRetired()->requirementDomain(ReportRequirementRegistry::ENGP)
-            ->where(fn ($query) => $query->where('requirement_key', $key)->orWhereIn('code', [$key, 'engp_'.$key]))->first();
-        if ($module) return (bool) $module->is_active;
-        $bound = ModuleDefinition::query()->generic()->requirementDomain(ReportRequirementRegistry::ENGP)
-            ->where(fn ($query) => $query->where('requirement_key', $key)->orWhereIn('code', [$key, 'engp_'.$key]))->exists();
-
-        return ! $bound && $this->defaultFind($key) !== null;
+        return [
+            ...$defaults,
+            ...$definition,
+            'key' => $definition['key'] ?? $key,
+            'period' => $definition['reporting_frequency'] ?? $definition['period'] ?? ($defaults['period'] ?? 'custom'),
+            'activities' => $activities,
+            'activity' => $definition['activity'] ?? $definition['default_activity'] ?? ($activities[0] ?? ''),
+            'default_activity' => $definition['default_activity'] ?? ($activities[0] ?? ''),
+            'documents' => $documents,
+            'document' => $definition['document'] ?? ($documents[0] ?? ''),
+            'activity_documents' => $definition['activity_documents'] ?? array_fill_keys($activities, $documents),
+            'offices' => $definition['offices'] ?? ($defaults['offices'] ?? self::OFFICES),
+            'reminder_offices' => $definition['reminder_offices'] ?? [],
+        ];
     }
 
     /** Static defaults used only when seeding/backfilling canonical definitions. */
@@ -90,40 +89,29 @@ final class EngpReportWorkflowRegistry
         return array_keys(self::WORKFLOWS);
     }
 
+    /** @return list<string> */
+    public function availableOffices(): array
+    {
+        return self::OFFICES;
+    }
+
+    public function isActive(string $workflowKey): bool
+    {
+        $requirements = app(ReportRequirementRegistry::class);
+        $definition = $requirements->find(ReportRequirementRegistry::ENGP, $workflowKey);
+        return $definition
+            ? $requirements->find(ReportRequirementRegistry::ENGP, $workflowKey, true) !== null
+            : $this->defaultFind($workflowKey) !== null;
+    }
+
     /** @return list<array<string, mixed>> */
     public function all(): array
     {
-        $definitions = app(ReportRequirementRegistry::class)
-            ->definitions(ReportRequirementRegistry::ENGP, true);
+        $definitions = app(ReportRequirementRegistry::class)->definitions(ReportRequirementRegistry::ENGP, true)->all();
 
-        return $definitions->isNotEmpty()
-            ? $definitions->map(fn (array $definition): array => $this->normalize([...($this->defaultFind((string) $definition['key']) ?? []), ...$definition]))->all()
+        return $definitions !== []
+            ? array_values(array_filter(array_map(fn (array $definition): ?array => $this->find((string) ($definition['key'] ?? '')), $definitions)))
             : array_map(fn (string $key): array => $this->defaultFind($key), $this->defaultKeys());
-    }
-
-    /** Convert shared registry metadata to the fields consumed by the ENGP form and tracker. */
-    private function normalize(array $definition): array
-    {
-        $activities = $definition['activities'] ?? array_values(array_filter([$definition['activity'] ?? $definition['default_activity'] ?? null]));
-        $documents = $definition['documents'] ?? array_values(array_filter([$definition['document'] ?? null]));
-        $activity = $definition['activity'] ?? $definition['default_activity'] ?? $activities[0] ?? $definition['label'] ?? 'Report';
-        $document = $definition['document'] ?? $documents[0] ?? 'Report';
-        $frequency = $definition['reporting_frequency'] ?? $definition['period'] ?? 'monthly';
-
-        return [
-            ...$definition,
-            'key' => $definition['key'] ?? $definition['code'] ?? '',
-            'label' => $definition['label'] ?? 'Development Report',
-            'activity' => $activity,
-            'document' => $document,
-            'activities' => $activities ?: [$activity],
-            'documents' => $documents ?: [$document],
-            'activity_documents' => $definition['activity_documents'] ?? [$activity => ($documents ?: [$document])],
-            'period' => $frequency,
-            'offices' => $definition['offices'] ?? self::OFFICES,
-            'configured_generic_flow' => (bool) ($definition['configured_generic_flow'] ?? false),
-            'reminder_offices' => $definition['reminder_offices'] ?? (($definition['configured_generic_flow'] ?? false) ? [] : ($definition['offices'] ?? self::OFFICES)),
-        ];
     }
 
     /** @return list<string> */
@@ -137,9 +125,9 @@ final class EngpReportWorkflowRegistry
     }
 
     /** @return list<array{key: string, label: string}> */
-    public function periods(string $workflowKey, int $year): array
+    public function periods(string $workflowKey, int $year, bool $activeOnly = true): array
     {
-        $periods = app(ReportRequirementRegistry::class)->periods(ReportRequirementRegistry::ENGP, $workflowKey, $year);
+        $periods = app(ReportRequirementRegistry::class)->periods(ReportRequirementRegistry::ENGP, $workflowKey, $year, $activeOnly);
         if ($periods !== [] || app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
             return $periods;
         }
@@ -154,31 +142,31 @@ final class EngpReportWorkflowRegistry
         };
     }
 
-    public function period(string $workflowKey, int $year, string $periodKey): ?array
+    public function period(string $workflowKey, int $year, string $periodKey, bool $activeOnly = true): ?array
     {
-        $period = app(ReportRequirementRegistry::class)->period(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey);
+        $period = app(ReportRequirementRegistry::class)->period(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey, $activeOnly);
         if ($period !== null || app(ReportRequirementRegistry::class)->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
             return $period;
         }
 
-        return collect($this->periods($workflowKey, $year))->firstWhere('key', $periodKey);
+        return collect($this->periods($workflowKey, $year, $activeOnly))->firstWhere('key', $periodKey);
     }
 
-    public function deadline(string $workflowKey, int $year, string $periodKey): ?string
+    public function deadline(string $workflowKey, int $year, string $periodKey, bool $activeOnly = true): ?string
     {
         $canonical = app(ReportRequirementRegistry::class);
         if ($canonical->find(ReportRequirementRegistry::ENGP, $workflowKey)) {
-            return $canonical->deadline(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey);
+            return $canonical->deadline(ReportRequirementRegistry::ENGP, $workflowKey, $year, $periodKey, $activeOnly);
         }
 
-        if (! $this->period($workflowKey, $year, $periodKey)) return null;
+        if (! $this->period($workflowKey, $year, $periodKey, $activeOnly)) return null;
         $workflow = $this->defaultFind($workflowKey);
         if ($workflow['period'] === 'monthly') {
             [$periodYear, $month] = array_map('intval', explode('-', $periodKey));
             return CarbonImmutable::create($periodYear, $month, $workflowKey === 'rims' && $month === 1 ? 29 : 20)->toDateString();
         }
         if ($workflow['period'] === 'quarterly') return CarbonImmutable::create($year, ((int) substr($periodKey, 1)) * 3, 10)->toDateString();
-        return data_get(collect($this->periods($workflowKey, $year))->firstWhere('key', $periodKey), 'deadline');
+        return data_get(collect($this->periods($workflowKey, $year, $activeOnly))->firstWhere('key', $periodKey), 'deadline');
     }
 
     /** @return list<array{key: string, label: string}> */
@@ -190,7 +178,7 @@ final class EngpReportWorkflowRegistry
         }
 
         $workflow = $this->defaultFind($workflowKey);
-        if (! $workflow || ! $this->period($workflowKey, $year, $periodKey)) return [];
+        if (! $workflow || ! $this->period($workflowKey, $year, $periodKey, false)) return [];
         if ($workflow['period'] !== 'quarterly') {
             $period = $this->period($workflowKey, $year, $periodKey);
             return [['key' => 'period', 'label' => $period['label']]];

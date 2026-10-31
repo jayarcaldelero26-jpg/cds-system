@@ -8,16 +8,12 @@ use App\Models\User;
 use App\Services\CalendarMovEventService;
 use App\Services\BusinessCalendarService;
 use App\Services\Modules\ModuleDeadlineService;
-use App\Services\Engp\EngpReportWorkflowRegistry;
+use App\Services\Modules\CanonicalModuleDefinitionService;
 use Database\Seeders\ModuleDefinitionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
 
 uses(RefreshDatabase::class);
-
-beforeEach(function (): void {
-    $this->withoutVite();
-});
 
 function moduleManager(): User
 {
@@ -34,13 +30,17 @@ function moduleManager(): User
 function modulePayload(array $overrides = []): array
 {
     return [...[
-        'unit' => 'conservation', 'name' => 'Regular PAMB Meeting', 'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
+        'name' => 'Regular PAMB Meeting', 'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
         'implementation_type' => ModuleDefinition::IMPLEMENTATION_GENERIC,
         'module_type' => ModuleDefinition::TYPE_REGULAR_TARGET, 'reporting_frequency' => 'quarterly',
-        'activity_name' => 'Regular PAMB Meeting', 'document_types' => 'Progress Report, Final Report',
         'deadline_mode' => ModuleDefinition::DEADLINE_STANDARD_WORKING_DAYS, 'default_deadline_days' => 15,
         'allow_deadline_override' => false, 'description' => 'Registry test', 'is_active' => true,
     ], ...$overrides];
+}
+
+function moduleFormPayload(array $overrides = []): array
+{
+    return [...modulePayload(), 'unit' => 'conservation', 'activity_name' => 'Registry activity', 'document_types' => 'Progress Report, Final Report', ...$overrides];
 }
 
 test('module definition management requires its explicit permissions', function () {
@@ -53,61 +53,114 @@ test('a manager can create regular target plan custom and no deadline module def
     $manager = moduleManager();
     $this->actingAs($manager)->get(route('module-definitions.index'))->assertOk()->assertInertia(fn ($page) => $page->component('Admin/Settings/ModuleManagement'));
 
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload())->assertSessionHas('success');
+    $this->actingAs($manager)->post(route('module-definitions.store'), moduleFormPayload())->assertSessionHas('success');
     $regular = ModuleDefinition::query()->firstOrFail();
-    expect($regular->code)->toBe('regular_pamb_meeting')->and($regular->implementation_type)->toBe(ModuleDefinition::IMPLEMENTATION_GENERIC)
-        ->and($regular->requirement_domain)->toBe('pa')->and($regular->requirement_key)->toBe($regular->code)
-        ->and($regular->requirement_metadata['activities'])->toBe(['Regular PAMB Meeting']);
+    expect($regular->code)->toBe('regular_pamb_meeting')->and($regular->implementation_type)->toBe(ModuleDefinition::IMPLEMENTATION_GENERIC);
 
-    $this->actingAs($manager)->put(route('module-definitions.update', $regular), modulePayload(['name' => 'Regular PAMB Meeting Updated']))->assertSessionHas('success');
+    $this->actingAs($manager)->put(route('module-definitions.update', $regular), moduleFormPayload(['name' => 'Regular PAMB Meeting Updated']))->assertSessionHas('success');
     expect($regular->fresh()->code)->toBe('regular_pamb_meeting')->and($regular->fresh()->name)->toBe('Regular PAMB Meeting Updated');
 
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload([
+    $this->actingAs($manager)->post(route('module-definitions.store'), moduleFormPayload([
         'name' => 'Protected Area Management Plan', 'module_type' => ModuleDefinition::TYPE_PLAN,
-        'reporting_frequency' => 'annual',
-        'deadline_mode' => ModuleDefinition::DEADLINE_CUSTOM, 'default_deadline_days' => 15, 'allow_deadline_override' => true,
+        'reporting_frequency' => null,
+        'deadline_mode' => ModuleDefinition::DEADLINE_CUSTOM, 'default_deadline_days' => null, 'allow_deadline_override' => true,
     ]))->assertSessionHas('success');
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload([
+    $this->actingAs($manager)->post(route('module-definitions.store'), moduleFormPayload([
         'name' => 'Reference Plan', 'deadline_mode' => ModuleDefinition::DEADLINE_NONE, 'default_deadline_days' => null,
     ]))->assertSessionHas('success');
     expect(ModuleDefinition::query()->count())->toBe(3);
 });
 
-test('module definition validation requires a reporting frequency for both module types and valid deadlines', function () {
+test('module definition validation requires reporting frequency for regular modules but not plan duration', function () {
     $manager = moduleManager();
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['reporting_frequency' => null]))->assertSessionHasErrors('reporting_frequency');
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['module_type' => ModuleDefinition::TYPE_PLAN, 'reporting_frequency' => null]))->assertSessionHasErrors('reporting_frequency');
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload(['default_deadline_days' => 0]))->assertSessionHasErrors('default_deadline_days');
+    $this->actingAs($manager)->post(route('module-definitions.store'), moduleFormPayload(['reporting_frequency' => null]))->assertSessionHasErrors('reporting_frequency');
+    $this->actingAs($manager)->post(route('module-definitions.store'), moduleFormPayload([
+        'name' => 'Plan Without Duration', 'module_type' => ModuleDefinition::TYPE_PLAN,
+        'reporting_frequency' => null,
+    ]))->assertSessionHasNoErrors();
+    $plan = ModuleDefinition::query()->where('name', 'Plan Without Duration')->firstOrFail();
+    expect($plan->module_type)->toBe(ModuleDefinition::TYPE_PLAN)->and($plan->plan_duration_years)->toBeNull();
+    $this->actingAs($manager)->post(route('module-definitions.store'), moduleFormPayload(['default_deadline_days' => 0]))->assertSessionHasErrors('default_deadline_days');
 });
 
-test('Create Module uses the Development ENGP registry and edits cannot move it into Conservation', function () {
+test('the canonical Development CBEP definition uses registry metadata and the ensure operation is idempotent', function () {
+    expect(ModuleDefinition::query()->where('code', 'engp_cbep')->count())->toBe(0);
+
+    [$definition, $created] = app(CanonicalModuleDefinitionService::class)->ensureDevelopmentCbep();
+    expect($created)->toBeTrue()
+        ->and($definition->code)->toBe('engp_cbep')
+        ->and($definition->name)->toBe('Community-Based Employment Program (CBEP)')
+        ->and($definition->program_area)->toBe(ProgramArea::ENGP)
+        ->and($definition->requirement_domain)->toBe('engp')
+        ->and($definition->requirement_key)->toBe('cbep')
+        ->and($definition->existing_route_name)->toBe('engp-reports.index')
+        ->and($definition->existing_source_key)->toBe('engp')
+        ->and($definition->is_active)->toBeTrue();
+
+    [$existing, $createdAgain] = app(CanonicalModuleDefinitionService::class)->ensureDevelopmentCbep();
+    expect($createdAgain)->toBeFalse()
+        ->and($existing->id)->toBe($definition->id)
+        ->and(ModuleDefinition::query()->where('code', 'engp_cbep')->count())->toBe(1);
+});
+
+test('the canonical Development CBEP admin action requires create permission and repeats safely', function () {
+    $viewer = User::factory()->create();
+    $this->actingAs($viewer)->post(route('module-definitions.ensure-development-cbep'))->assertForbidden();
+
     $manager = moduleManager();
-    $this->actingAs($manager)->post(route('module-definitions.store'), modulePayload([
-        'name' => 'Dynamic Development Module', 'unit' => 'development', 'program_area' => ProgramArea::ENGP->value,
-    ]))->assertSessionHas('success');
-    $created = ModuleDefinition::query()->where('code', 'dynamic_development_module')->firstOrFail();
-    expect($created->requirement_domain)->toBe('engp')
-        ->and($created->requirement_key)->toBe('dynamic_development_module')
-        ->and(app(EngpReportWorkflowRegistry::class)->find($created->requirement_key)['activity'])->toBe('Regular PAMB Meeting');
+    $this->actingAs($manager)->post(route('module-definitions.ensure-development-cbep'))->assertSessionHas('success');
+    $definition = ModuleDefinition::query()->where('code', 'engp_cbep')->firstOrFail();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-development-cbep'))->assertSessionHas('success');
 
-    $definition = ModuleDefinition::query()->create([...modulePayload([
-        'name' => 'Existing ENGP Workflow', 'program_area' => ProgramArea::ENGP->value,
-        'unit' => 'development',
-    ]), 'code' => 'engp_existing_workflow', 'requirement_domain' => 'engp', 'requirement_key' => 'existing_workflow']);
+    expect(ModuleDefinition::query()->where('code', 'engp_cbep')->count())->toBe(1)
+        ->and(ModuleDefinition::query()->where('code', 'engp_cbep')->first()->id)->toBe($definition->id);
+});
 
-    $this->actingAs($manager)->put(route('module-definitions.update', $definition), modulePayload([
-        'name' => 'Existing ENGP Workflow Updated', 'program_area' => ProgramArea::ENGP->value,
-        'unit' => 'development',
-    ]))->assertSessionHas('success');
-    expect($definition->fresh()->name)->toBe('Existing ENGP Workflow Updated')
-        ->and($definition->fresh()->code)->toBe('engp_existing_workflow');
+test('canonical ENGP definitions follow registered metadata and preserve existing inactive settings', function () {
+    $registry = app(\App\Services\Engp\EngpReportWorkflowRegistry::class);
+    $keys = $registry->defaultKeys();
+    $result = app(CanonicalModuleDefinitionService::class)->ensureCanonicalEngpDefinitions();
 
-    $this->actingAs($manager)->put(route('module-definitions.update', $definition), modulePayload([
-        'name' => 'Existing ENGP Workflow Updated',
-        'program_area' => ProgramArea::PROTECTED_AREA_MANAGEMENT_AND_DEVELOPMENT->value,
-        'unit' => 'conservation',
-    ]))->assertSessionHasErrors('unit');
-    expect($definition->fresh()->program_area)->toBe(ProgramArea::ENGP);
+    expect($result['created'])->toHaveCount(count($keys))
+        ->and($result['present'])->toBeEmpty()
+        ->and($result['inactive'])->toBeEmpty()
+        ->and($result['conflicts'])->toBeEmpty();
+
+    $elcac = ModuleDefinition::query()->where('code', 'engp_elcac')->firstOrFail();
+    expect($elcac->name)->toBe('End Local Communist Armed Conflict (ELCAC)')
+        ->and($elcac->program_area)->toBe(ProgramArea::ENGP)
+        ->and($elcac->requirement_domain)->toBe('engp')
+        ->and($elcac->requirement_key)->toBe('elcac')
+        ->and($elcac->implementation_type)->toBe(ModuleDefinition::IMPLEMENTATION_SPECIALIZED)
+        ->and($elcac->existing_source_key)->toBe('engp')
+        ->and($elcac->requirement_metadata['document'])->toBe('Monthly Report');
+
+    $elcac->update(['name' => 'Owner Maintained ELCAC', 'description' => 'Keep this text', 'is_active' => false]);
+    $again = app(CanonicalModuleDefinitionService::class)->ensureCanonicalEngpDefinitions();
+
+    expect($again['created'])->toBeEmpty()
+        ->and($again['inactive'])->toBe(['engp_elcac'])
+        ->and($again['conflicts'])->toBeEmpty()
+        ->and(ModuleDefinition::query()->whereIn('code', array_map(fn (string $key): string => 'engp_'.$key, $keys))->count())->toBe(count($keys))
+        ->and($elcac->fresh()->name)->toBe('Owner Maintained ELCAC')
+        ->and($elcac->fresh()->description)->toBe('Keep this text')
+        ->and($elcac->fresh()->is_active)->toBeFalse();
+});
+
+test('canonical ENGP setup action requires module create permission and repeats safely', function () {
+    $viewer = User::factory()->create();
+    $this->actingAs($viewer)->post(route('module-definitions.ensure-canonical-engp'))->assertForbidden();
+    expect(ModuleDefinition::query()->count())->toBe(0);
+
+    $manager = moduleManager();
+    $keys = app(\App\Services\Engp\EngpReportWorkflowRegistry::class)->defaultKeys();
+    $codes = array_map(fn (string $key): string => 'engp_'.$key, $keys);
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-engp'))->assertSessionHas('success');
+    $firstIds = ModuleDefinition::query()->whereIn('code', $codes)->pluck('id')->sort()->values()->all();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-engp'))->assertSessionHas('success');
+
+    expect(ModuleDefinition::query()->whereIn('code', $codes)->count())->toBe(count($codes))
+        ->and(ModuleDefinition::query()->whereIn('code', $codes)->pluck('id')->sort()->values()->all())->toBe($firstIds);
 });
 
 test('module definitions deactivate rather than delete and existing registration seeding is idempotent', function () {
@@ -187,4 +240,58 @@ test('dynamic custom and no-deadline reports do not fabricate deadline or timeli
         $record = ConservationReportSubmission::query()->create(['workflow_key' => $definition->code, 'activity_name' => 'General Report', 'document_type' => 'Progress Report', 'date_accomplished' => '2026-08-03', 'date_received_penro' => '2026-08-24']);
         expect($record->deadline_submission)->toBeNull()->and($record->timeliness)->toBe('No Data');
     }
+});
+
+test('canonical Conservation definitions use registered metadata, preserve conflicting saved entries, and exclude retired plans', function () {
+    $existing = ModuleDefinition::query()->create([
+        ...modulePayload(['name' => 'Owner Maintained PAMB', 'description' => 'Keep this text', 'is_active' => false]),
+        'code' => 'regular_pamb',
+        'requirement_domain' => 'pa',
+        'requirement_key' => 'regular_pamb',
+        'existing_route_name' => 'conservation-reports.index',
+        'existing_source_key' => 'conservation-reports',
+        'requirement_metadata' => ['key' => 'regular_pamb', 'activities' => ['Owner-defined activity']],
+    ]);
+
+    $result = app(CanonicalModuleDefinitionService::class)->ensureCanonicalConservationDefinitions();
+
+    expect($result['created'])->toHaveCount(28)
+        ->and($result['conflicts'])->toHaveKey('regular_pamb')
+        ->and($existing->fresh()->name)->toBe('Owner Maintained PAMB')
+        ->and($existing->fresh()->description)->toBe('Keep this text')
+        ->and($existing->fresh()->is_active)->toBeFalse()
+        ->and(ModuleDefinition::query()->where('code', 'management_plans')->exists())->toBeFalse()
+        ->and(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys())->toContain('cepa_plan');
+
+    $cepa = ModuleDefinition::query()->where('code', 'cepa_plan')->firstOrFail();
+    expect($cepa->requirement_metadata['activity_documents']['Submission of Final CEPA Plan'])->toBe(['Final Report'])
+        ->and(app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->deadlineRule('cepa_plan', 'Submission of Final CEPA Plan', 'Final Report')['deadline_days'])->toBe(15);
+
+    $native = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
+    expect(array_filter(array_keys($native->all()), fn ($code) => $native->isEligible($code)))->toHaveCount(7)
+        ->and(ModuleDefinition::query()->where('code', 'automated_weather_station')->value('existing_source_key'))->toBe('aws')
+        ->and(ModuleDefinition::query()->where('code', 'revenue_collection')->value('existing_source_key'))->toBe('revenue');
+
+    $again = app(CanonicalModuleDefinitionService::class)->ensureCanonicalConservationDefinitions();
+    expect($again['created'])->toBeEmpty()
+        ->and($again['conflicts'])->toHaveKey('regular_pamb')
+        ->and(ModuleDefinition::query()->where('code', 'management_plans')->exists())->toBeFalse();
+});
+
+test('the canonical Conservation catalog action requires module create permission and repeats safely', function () {
+    $viewer = User::factory()->create();
+    $this->actingAs($viewer)->post(route('module-definitions.ensure-canonical-conservation'))->assertForbidden();
+    expect(ModuleDefinition::query()->count())->toBe(0);
+
+    $manager = moduleManager();
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-conservation'))->assertSessionHas('success');
+    $codes = [
+        ...app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->defaultKeys(),
+        ...array_keys(app(\App\Services\Pamo\PamoNativeSourceRegistry::class)->all()),
+    ];
+    expect(ModuleDefinition::query()->whereIn('code', $codes)->count())->toBe(29);
+
+    $this->actingAs($manager)->post(route('module-definitions.ensure-canonical-conservation'))->assertSessionHas('success');
+    expect(ModuleDefinition::query()->whereIn('code', $codes)->count())->toBe(29)
+        ->and(ModuleDefinition::query()->where('code', 'management_plans')->exists())->toBeFalse();
 });

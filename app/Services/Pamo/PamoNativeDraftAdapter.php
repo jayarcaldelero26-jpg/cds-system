@@ -38,7 +38,7 @@ final class PamoNativeDraftAdapter
     /** @return array<string,mixed> */
     public function partialPayload(Request $request, string $workflow): array
     {
-        $source = $this->requiredSource($workflow, false);
+        $source = $this->requiredSource($workflow);
         $protectedFields = [
             'protected_area_id' => ['prohibited'], 'pamo_office_id' => ['prohibited'], 'target_office' => ['prohibited'],
             'source' => ['prohibited'], 'source_key' => ['prohibited'], 'source_id' => ['prohibited'],
@@ -241,10 +241,10 @@ final class PamoNativeDraftAdapter
         });
     }
 
-    private function requiredSource(string $workflow, bool $requireActive = true): array
+    private function requiredSource(string $workflow, bool $activeOnly = true): array
     {
         $source = $this->sources->find($workflow);
-        abort_unless($source && ($requireActive ? $this->sources->isEligible($workflow) : $this->sources->isConfigured($workflow)), 404);
+        abort_unless($source && ($activeOnly ? $this->sources->isEligible($workflow) : $this->sources->isConfigured($workflow)), 404);
         $this->sources->assertSchemaReady();
         return $source;
     }

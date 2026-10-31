@@ -11,6 +11,7 @@ export class PreviewLoadError extends Error {
             session: 'Your session has expired or requires sign-in. Sign in again, then retry.',
             forbidden: 'You do not have access to this document with your current account.',
             missing: 'The current document is no longer available. Refresh the submission details.',
+            server: 'The server could not load this document. Retry in a moment.',
             response: 'The server did not return a supported document. Refresh the submission details and retry.',
             network: 'The preview could not be loaded. Check your connection or session and retry.',
         };
@@ -59,6 +60,7 @@ export async function loadProtectedPreview(url, {
     if (response.status === 401 || response.status === 419) throw new PreviewLoadError('session');
     if (response.status === 403) throw new PreviewLoadError('forbidden');
     if (response.status === 404) throw new PreviewLoadError('missing');
+    if (response.status >= 500) throw new PreviewLoadError('server');
     // Preview consumers need the complete document body. A successful partial
     // response can start with a valid signature while still being truncated.
     if (response.status !== 200 || response.redirected) throw new PreviewLoadError('response');

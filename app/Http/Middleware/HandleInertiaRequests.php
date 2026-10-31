@@ -252,37 +252,62 @@ class HandleInertiaRequests extends Middleware
                     ->orderBy('name')
                     ->get(['id', 'name', 'slug'])
                 : []),
-            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', function () use ($user, $organization, $canBrowseConservation, $canBrowseDevelopment, $canViewPamoReports, $isMes, $can): array {
-                if (! $user || $isMes) return [];
-                $isPamo = $canViewPamoReports && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO;
-                if (! $can('technical-reports.view') && ! $isPamo) return [];
-
-                $modules = collect();
-                if ($canBrowseConservation || $isPamo) {
-                    $modules = ModuleDefinition::query()->active()->generic()->notRetired()
-                        ->requirementDomain(\App\Services\Reports\ReportRequirementRegistry::PA)
-                        ->when($isPamo, fn ($query) => $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys()))
-                        ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
-                        ->get(['name', 'code', 'program_area', 'display_order'])
-                        ->map(fn (ModuleDefinition $module): array => [
+            'genericModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_module_nav', fn () => ($canBrowseConservation || $canViewPamoReports) && ! $isMes && ($can('technical-reports.view') || $canViewPamoReports)
+                ? ModuleDefinition::query()->active()->generic()->notRetired()
+                    ->where(function ($query) use ($canBrowseConservation, $canBrowseDevelopment, $canViewPamoReports, $organization, $user): void {
+                        if ($canBrowseConservation || $canViewPamoReports) {
+                            $query->orWhere(fn ($domain) => $domain->requirementDomain('pa'));
+                        }
+                        if ($canBrowseDevelopment) {
+                            $query->orWhere(fn ($domain) => $domain->requirementDomain('engp'));
+                        }
+                        if ($canViewPamoReports && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO) {
+                            $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys());
+                        }
+                    })
+                    ->when($canViewPamoReports && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO, fn ($query) => $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys()))
+                    ->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
+                    ->get(['name', 'code', 'program_area', 'requirement_domain', 'display_order'])
+                    ->map(function (ModuleDefinition $module): array {
+                        $development = ($module->requirement_domain ?: (in_array($module->program_area?->value, ['engp', 'development'], true) ? 'engp' : 'pa')) === 'engp';
+                        return [
                             'label' => $module->name,
-                            'href' => route('conservation-reports.index', $module->code, false),
-                            'program_area' => $module->program_area->value === 'development' ? 'protected_area_management_and_development' : $module->program_area->value,
+                            'href' => route($development ? 'engp-reports.index' : 'conservation-reports.index', $module->code, false),
+                            'program_area' => $development ? 'engp' : ($module->program_area?->value ?? 'conservation'),
                             'display_order' => $module->display_order,
-                        ]);
-                }
-                if ($canBrowseDevelopment && $can('technical-reports.view')) {
-                    $modules = $modules->concat(app(\App\Services\Reports\ReportRequirementRegistry::class)
-                        ->definitions(\App\Services\Reports\ReportRequirementRegistry::ENGP, true, ModuleDefinition::IMPLEMENTATION_GENERIC)
-                        ->map(fn (array $definition): array => [
-                            'label' => $definition['label'],
-                            'href' => route('engp-reports.index', $definition['key'], false),
-                            'program_area' => 'engp',
-                            'display_order' => $definition['display_order'] ?? null,
-                        ]));
+                        ];
+                    })
+                    ->values()
+                : []),
+            'moduleNavigationCatalog' => fn () => LocalNavigationTrace::measure($request, 'shared_module_catalog', function () use ($canBrowseConservation, $canBrowseDevelopment, $canViewPamoReports, $can, $isMes, $organization, $user): array {
+                $canSeePa = ! $isMes && ($canBrowseConservation || $canViewPamoReports) && ($can('technical-reports.view') || $canViewPamoReports);
+                $canSeeEngp = ! $isMes && $canBrowseDevelopment && $can('technical-reports.view');
+                if (! $canSeePa && ! $canSeeEngp) return ['ready' => true, 'entries' => []];
+
+                $query = ModuleDefinition::query()->generic()
+                    ->where(function ($domains) use ($canSeePa, $canSeeEngp): void {
+                        if ($canSeePa) $domains->orWhere(fn ($domain) => $domain->requirementDomain('pa'));
+                        if ($canSeeEngp) $domains->orWhere(fn ($domain) => $domain->requirementDomain('engp'));
+                    });
+                if ($canViewPamoReports && $organization->effectiveCategory($user) === OrganizationalAccessService::PAMO) {
+                    $query->whereIn('code', app(\App\Services\Conservation\ConservationReportWorkflowRegistry::class)->pamoSubmissionKeys(false));
                 }
 
-                return $modules->values()->all();
+                $entries = $query->orderByRaw('display_order IS NULL')->orderBy('display_order')->orderBy('name')
+                    ->get(['name', 'code', 'program_area', 'requirement_domain', 'is_active'])
+                    ->map(function (ModuleDefinition $module): array {
+                        $development = ($module->requirement_domain ?: (in_array($module->program_area?->value, ['engp', 'development'], true) ? 'engp' : 'pa')) === 'engp';
+                        return [
+                            'label' => $module->name,
+                            'href' => route($development ? 'engp-reports.index' : 'conservation-reports.index', $module->code, false),
+                            'program_area' => $development ? 'engp' : ($module->program_area?->value ?? 'conservation'),
+                            'requirement_domain' => $development ? 'engp' : 'pa',
+                            'is_active' => (bool) $module->is_active,
+                            'is_retired' => $module->isRetired(),
+                        ];
+                    })->values()->all();
+
+                return ['ready' => true, 'entries' => $entries];
             }),
             'pamoNativeModuleNavigation' => fn () => LocalNavigationTrace::measure($request, 'shared_pamo_native_module_nav', function () use ($user, $canViewPamoReports, $isMes): array {
                 $sources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
@@ -332,6 +357,7 @@ class HandleInertiaRequests extends Middleware
                 'archive_status' => fn () => $request->session()->get('archive_status'),
                 'archive_manifest_id' => fn () => $request->session()->get('archive_manifest_id'),
                 'archive_error_code' => fn () => $request->session()->get('archive_error_code'),
+                'archive_root_verification' => fn () => $request->session()->get('archive_root_verification'),
                 'registration_success' => fn () => $request->session()->get('registration_success'),
                 'pending_approval' => fn () => $request->session()->get('pending_approval'),
                 'account_inactive' => fn () => $request->session()->get('account_inactive'),

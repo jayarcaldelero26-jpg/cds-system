@@ -24,10 +24,15 @@ import FinalArchiveRecordLink from "@/Components/SubmissionTracking/FinalArchive
 import CorrectionReferenceAttachment from "@/Components/SubmissionTracking/CorrectionReferenceAttachment";
 import PamoReportPendingAnimation from "@/Components/PamoReportPendingAnimation";
 import { archiveCheckpointPendingNotice } from "@/Utils/archiveCheckpointNotice";
-import { custodyContext, movPrerequisiteFor, nextSubmissionAction, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
+import { custodyContext, movPrerequisiteFor, nextSubmissionAction, presentCurrentRoutingStatus, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
 import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
-import { visibleTimelineForCapturedRoute } from "@/Utils/submissionTrackingPresentation";
+import {
+    finalArchiveStatusNoticeForTrackingRow,
+    protectedAreaLabelForTrackingRow,
+    submissionReferenceLabelForTrackingRow,
+    visibleTimelineForCapturedRoute,
+} from "@/Utils/submissionTrackingPresentation";
 import DocumentRoutingTimeline from "@/Components/SubmissionTracking/DocumentRoutingTimeline";
 import SubmissionReportContext from "@/Components/SubmissionTracking/SubmissionReportContext";
 import DocumentPreviewDialog from "@/Components/SubmissionTracking/DocumentPreviewDialog";
@@ -101,7 +106,7 @@ const monitoringViewDescriptions = {
     history:
         "Completed routing records across your authorized monitoring scope.",
 };
-const FALLBACK = "\u2014";
+const FALLBACK = "Not recorded";
 function createArchiveTraceId() {
     if (!globalThis.crypto?.getRandomValues) return null;
     const bytes = new Uint8Array(16);
@@ -191,7 +196,7 @@ const routingStatusFor = (row) => {
         !/awaiting receipt|received/i.test(String(routing.current_status || ""))
     )
         return "Awaiting Receipt by " + routing.in_transit_to;
-    return (
+    return presentCurrentRoutingStatus(row,
         routing.current_status ||
         row?.current_processing_status ||
         row?.submission_status ||
@@ -200,9 +205,27 @@ const routingStatusFor = (row) => {
 };
 const responsibleOfficeFor = (row) =>
     routingFor(row).responsible_office || row?.target_office || null;
+const OfficeAreaCell = ({ row }) => {
+    const protectedArea = protectedAreaLabelForTrackingRow(row);
+    const office = responsibleOfficeFor(row) || row?.target_office || "Not recorded";
+
+    return (
+        <div className="min-w-0">
+            {protectedArea && (
+                <p className="break-words font-semibold text-gray-900 dark:text-white">
+                    {protectedArea}
+                </p>
+            )}
+            <p className={`${protectedArea ? "mt-0.5 " : ""}break-words text-[11px] text-gray-500`}>
+                {office}
+            </p>
+        </div>
+    );
+};
 const responsibleCategoryFor = (row) =>
     routingFor(row).responsible_user_category || null;
 const nextActionFor = nextSubmissionAction;
+const nextActionDisplayFor = row => nextActionFor(row) || (row?.routing_complete === true ? "No action pending" : "Not recorded");
 const compactRoutingStatusFor = (row) => {
     const status = String(routingStatusFor(row) || "");
     const receipt = status.match(/^Awaiting Receipt by (.+)$/i);
@@ -270,9 +293,9 @@ const compactStatusFor = (row) => {
     if (/approval|approve/i.test(status)) return "For Approval";
     if (/forward|transit/i.test(status)) return "For Forwarding";
     if (/complete|regional/i.test(status)) return "Completed";
-    return status || "In Progress";
+    return status || "Not recorded";
 };
-const lastActionFor = (row) => routingFor(row).last_action?.label || "—";
+const lastActionFor = (row) => routingFor(row).last_action?.label || "Not recorded";
 const actionDateFor = (row) =>
     routingFor(row).last_action?.occurred_at ||
     routingFor(row).last_updated ||
@@ -280,7 +303,7 @@ const actionDateFor = (row) =>
     null;
 const formatActionDate = (value) =>
     !value
-        ? "—"
+        ? "Not recorded"
         : String(value).length <= 10
           ? plainDate(value)
           : formatReportDateTime(value, FALLBACK);
@@ -297,6 +320,8 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
             </aside>
         );
     const routing = routingFor(row);
+    const archiveStatusNotice =
+        finalArchiveStatusNoticeForTrackingRow(row);
     const custody = custodyContext(row);
     const timeline =
         (row.pamb_routing_applicable && !row.canonical_custody_applicable
@@ -324,6 +349,11 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                         <p className="text-[10px] font-bold uppercase tracking-wide text-green-800 dark:text-green-300">Current Status</p>
                         <Badge value={routingStatusFor(row) || "In Progress"} />
                     </div>
+                    {archiveStatusNotice && (
+                        <p role="status" className="mt-2 text-[11px] font-semibold leading-4 text-amber-800 dark:text-amber-200">
+                            {archiveStatusNotice}
+                        </p>
+                    )}
                     <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-1">
                         {custody.holder && <div>
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{custody.holderLabel}</p>
@@ -331,11 +361,11 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
                         </div>}
                         <div>
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">Deadline</p>
-                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{plainDate(row.deadline_submission) || "—"}</p>
+                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{plainDate(row.deadline_submission) || "Not recorded"}</p>
                         </div>
                         <div className="sm:col-span-2 xl:col-span-1">
                             <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500">{pamoWorkspace && context?.view === 'outgoing' ? "Recipient's Next Expected Action" : 'Next Expected Action'}</p>
-                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{nextActionFor(row) || "No action pending"}</p>
+                            <p className="mt-0.5 font-semibold text-gray-900 dark:text-white">{nextActionDisplayFor(row)}</p>
                             {pamoWorkspace && context?.view === 'outgoing' && <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Shown for reference at the destination office.</p>}
                         </div>
                     </div>
@@ -729,9 +759,7 @@ export default function Index({
                                           "Submission"}
                                   </p>
                                   <p className="mt-0.5 text-[11px] text-gray-500">
-                                      {row.tracking_number || (row.source
-                                          ? row.source + " #" + row.source_id
-                                          : null)}
+                                      {submissionReferenceLabelForTrackingRow(row)}
                                   </p>
                                   <p className="mt-0.5 truncate text-[11px] text-gray-500">
                                       {row.activity_name || row.document_type || row.report_type || row.reporting_period || null}
@@ -744,18 +772,7 @@ export default function Index({
                           label: "Office / Protected Area",
                           headerClassName: "min-w-[190px]",
                           cellClassName: "min-w-[190px]",
-                          render: (row) => (
-                              <div className="min-w-0">
-                                  <p className="break-words font-semibold text-gray-900 dark:text-white">
-                                      {row.protected_area || "—"}
-                                  </p>
-                                  <p className="mt-0.5 break-words text-[11px] text-gray-500">
-                                      {responsibleOfficeFor(row) ||
-                                          row.target_office ||
-                                          "—"}
-                                  </p>
-                              </div>
-                          ),
+                          render: (row) => <OfficeAreaCell row={row} />,
                       },
                       {
                           key: "activity",
@@ -768,10 +785,10 @@ export default function Index({
                                       {row.activity_name ||
                                           row.document_type ||
                                           row.report_type ||
-                                          "—"}
+                                          "Not provided"}
                                   </p>
                                   <p className="mt-0.5 text-[11px] text-gray-500">
-                                      {row.reporting_period || "—"}
+                                      {row.reporting_period || "Not provided"}
                                   </p>
                               </div>
                           ),
@@ -808,7 +825,7 @@ export default function Index({
                                   {routingFor(row).current_location ||
                                       routingFor(row).responsible_office ||
                                       row.target_office ||
-                                      "—"}
+                                      "Not recorded"}
                               </span>
                           ),
                       },
@@ -817,7 +834,20 @@ export default function Index({
                           label: "Status",
                           headerClassName: "min-w-[120px]",
                           cellClassName: "min-w-[120px]",
-                          render: (row) => <Badge value="Completed" />,
+                          render: (row) => {
+                              const archiveNotice =
+                                  finalArchiveStatusNoticeForTrackingRow(row);
+                              return (
+                                  <div className="flex flex-col items-start gap-1">
+                                      <Badge value="Completed" />
+                                      {archiveNotice && (
+                                          <span className="max-w-[170px] text-[11px] font-semibold leading-4 text-amber-800 dark:text-amber-200">
+                                              {archiveNotice}
+                                          </span>
+                                      )}
+                                  </div>
+                              );
+                          },
                       },
                       {
                           key: "open",
@@ -846,9 +876,7 @@ export default function Index({
                                             "Submission"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] text-gray-500">
-                                        {row.tracking_number || (row.source
-                                            ? `${row.source} #${row.source_id}`
-                                            : null)}
+                                        {submissionReferenceLabelForTrackingRow(row)}
                                     </p>
                                     <p className="mt-0.5 truncate text-[11px] text-gray-500">
                                         {row.activity_name || row.document_type || row.report_type || row.reporting_period || null}
@@ -861,18 +889,7 @@ export default function Index({
                             label: "Office / Protected Area",
                             headerClassName: "min-w-[190px]",
                             cellClassName: "min-w-[190px]",
-                            render: (row) => (
-                                <div className="min-w-0">
-                                    <p className="break-words font-semibold text-gray-900 dark:text-white">
-                                        {row.protected_area || "—"}
-                                    </p>
-                                    <p className="mt-0.5 break-words text-[11px] text-gray-500">
-                                        {responsibleOfficeFor(row) ||
-                                            row.target_office ||
-                                            "—"}
-                                    </p>
-                                </div>
-                            ),
+                            render: (row) => <OfficeAreaCell row={row} />,
                         },
                         {
                             key: "activity",
@@ -885,10 +902,10 @@ export default function Index({
                                         {row.activity_name ||
                                             row.document_type ||
                                             row.report_type ||
-                                            "—"}
+                                            "Not provided"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] text-gray-500">
-                                        {row.reporting_period || "—"}
+                                        {row.reporting_period || "Not provided"}
                                     </p>
                                 </div>
                             ),
@@ -923,7 +940,7 @@ export default function Index({
                             render: (row) => (
                                 <div className="min-w-0">
                                     <p className="break-words text-xs font-semibold text-gray-800 dark:text-gray-200">
-                                        {pamoWorkspace ? `Recipient action: ${nextActionFor(row) || "Not specified"}` : nextActionFor(row) || "Next action not specified"}
+                                        {pamoWorkspace ? `Recipient action: ${nextActionFor(row) || "Not recorded"}` : nextActionFor(row) || "Not recorded"}
                                     </p>
                                     <p className="mt-0.5 break-words text-[11px] text-gray-500 dark:text-gray-400">
                                         {routingFor(row).current_location || routingFor(row).responsible_office || row.target_office || "Destination not assigned"}
@@ -966,9 +983,7 @@ export default function Index({
                                             "Submission"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] text-gray-500">
-                                    {row.tracking_number || (row.source
-                                            ? `${row.source} #${row.source_id}`
-                                            : null)}
+                                    {submissionReferenceLabelForTrackingRow(row)}
                                     </p>
                                     <p className="mt-0.5 truncate text-[11px] text-gray-500">
                                         {row.activity_name || row.document_type || row.report_type || row.reporting_period || null}
@@ -981,18 +996,7 @@ export default function Index({
                             label: "Office / Protected Area",
                             headerClassName: "min-w-[190px]",
                             cellClassName: "min-w-[190px]",
-                            render: (row) => (
-                                <div className="min-w-0">
-                                    <p className="break-words font-semibold text-gray-900 dark:text-white">
-                                        {row.protected_area || "—"}
-                                    </p>
-                                    <p className="mt-0.5 break-words text-[11px] text-gray-500">
-                                        {responsibleOfficeFor(row) ||
-                                            row.target_office ||
-                                            "—"}
-                                    </p>
-                                </div>
-                            ),
+                            render: (row) => <OfficeAreaCell row={row} />,
                         },
                         {
                             key: "activity",
@@ -1005,10 +1009,10 @@ export default function Index({
                                         {row.activity_name ||
                                             row.document_type ||
                                             row.report_type ||
-                                            "—"}
+                                            "Not provided"}
                                     </p>
                                     <p className="mt-0.5 text-[11px] text-gray-500">
-                                        {row.reporting_period || "—"}
+                                        {row.reporting_period || "Not provided"}
                                     </p>
                                 </div>
                             ),
@@ -1041,7 +1045,7 @@ export default function Index({
                             render: (row) => (
                                 <div className="min-w-0">
                                     <p className="whitespace-nowrap text-xs font-semibold text-gray-800 dark:text-gray-200">
-                                        {plainDate(row.deadline_submission) || "—"}
+                                        {plainDate(row.deadline_submission) || "Not recorded"}
                                     </p>
                                     {routingFor(row).compliance_status && (
                                         <p className="mt-1"><Badge value={routingFor(row).compliance_status} /></p>
@@ -1611,9 +1615,14 @@ export default function Index({
                             <h2 className="text-sm font-bold text-gray-900 dark:text-slate-100">Current Status &amp; Processing</h2>
                             <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Routing Status</span>
-                                <Badge value={details.routing?.current_status || details.routing_summary?.current_status || details.submission_status || "Unknown"} />
+                                <Badge value={routingStatusFor(details) || "Unknown"} />
                             </div>
                         </div>
+                        {finalArchiveStatusNoticeForTrackingRow(details) && (
+                            <p role="status" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                                {finalArchiveStatusNoticeForTrackingRow(details)}
+                            </p>
+                        )}
                         <dl className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                             {detailsCustody.holder && <div className="min-w-0">
                                 <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{detailsCustody.holderLabel}</dt>
@@ -1625,17 +1634,17 @@ export default function Index({
                             </div>}
                             <div>
                                 <dt className="text-[10px] font-bold uppercase tracking-wide text-gray-600 dark:text-gray-300">Deadline</dt>
-                                <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "—"}</dd>
+                                <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{plainDate(details.routing?.deadline || details.deadline_submission) || "Not recorded"}</dd>
                             </div>
                             <div>
                                 <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">{pamoWorkspace && tab === "outgoing" ? "Recipient's Next Expected Action" : "Next Expected Action"}</dt>
-                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{nextActionFor(details) || "No action pending"}</dd>
+                                <dd className="mt-0.5 break-words text-sm font-semibold text-gray-900 dark:text-white">{nextActionDisplayFor(details)}</dd>
                                 {pamoWorkspace && tab === "outgoing" && <dd className="mt-1 text-xs text-gray-500 dark:text-gray-400">Shown for reference at the destination office.</dd>}
                             </div>
                             {(details.routing?.pending_since || details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined) && (
                                 <div>
                                     <dt className="text-[10px] font-semibold uppercase tracking-wide text-gray-500 dark:text-slate-400">Pending Since</dt>
-                                    <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.pending_since ? plainDate(details.routing.pending_since) : "—"}{details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined ? ` · ${details.routing.working_days_pending} working days` : ""}</dd>
+                                    <dd className="mt-0.5 text-sm font-semibold text-gray-900 dark:text-white">{details.routing?.pending_since ? plainDate(details.routing.pending_since) : "Not recorded"}{details.routing?.working_days_pending !== null && details.routing?.working_days_pending !== undefined ? ` · ${details.routing.working_days_pending} working days` : ""}</dd>
                                 </div>
                             )}
                             {(details.routing?.compliance_status || details.timeliness) && (

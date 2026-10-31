@@ -74,11 +74,11 @@ export default function ImeaReport({
   };
 
   const chartData = assessmentsList.map((item) => ({
-    name: item.protected_area?.name ? item.protected_area.name.replace('Protected Landscape', 'PL').replace('Range Wildlife Sanctuary', 'RWS') : 'N/A',
+    name: item.protected_area?.name ? item.protected_area.name.replace('Protected Landscape', 'PL').replace('Range Wildlife Sanctuary', 'RWS') : 'Not recorded',
     periodLabel: `${item.assessment_year} (${item.assessment_period})`,
     visitors: Number(item.visitor_arrivals || 0),
     waste: Number(item.solid_waste_generation_kg || 0),
-    satisfaction: Number(item.visitor_satisfaction_rate || 0)
+    satisfaction: item.visitor_satisfaction_rate === null || item.visitor_satisfaction_rate === undefined || item.visitor_satisfaction_rate === '' ? null : Number(item.visitor_satisfaction_rate)
   }));
 
   return (
@@ -301,7 +301,7 @@ export default function ImeaReport({
                     <Card className="dashboard-card-item border border-gray-100 dark:border-gray-800 shadow-lg rounded-2xl bg-white dark:bg-gray-900 p-6 border-l-4 border-l-green-600">
                         <div className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">Avg. Visitor Satisfaction</div>
                         <div className="text-3xl font-extrabold text-green-800 dark:text-green-400 mt-2">
-                            {avgSatisfaction ? `${avgSatisfaction}%` : 'N/A'}
+                            {avgSatisfaction === null || avgSatisfaction === undefined || avgSatisfaction === '' ? 'No completed samples' : `${avgSatisfaction}%`}
                         </div>
                         <p className="text-xs text-gray-400 mt-1">Rating average</p>
                     </Card>
@@ -399,15 +399,15 @@ export default function ImeaReport({
                     className="cursor-pointer transition hover:bg-green-50/60 dark:hover:bg-green-950/30">
 
                                                 <td className="px-6 py-4 font-semibold text-gray-900 dark:text-white">
-                                                    <div>{row.protected_area?.name || 'N/A'}</div>
+                                                    <div>{row.protected_area?.name || 'Not recorded'}</div>
                                                     <div className="text-xs text-gray-500 font-normal">{row.pamo_name}</div>
                                                 </td>
                                                 <td className="px-6 py-4 text-gray-700 dark:text-gray-300">
                                                     {row.assessment_year} ({row.assessment_period})
                                                 </td>
                                                 <td className="px-6 py-4 text-xs text-gray-700 dark:text-gray-300 space-y-1">
-                                                    <div><strong className="text-gray-900 dark:text-white">Trail:</strong> {row.trail_condition || 'N/A'}</div>
-                                                    <div><strong className="text-gray-900 dark:text-white">Water:</strong> {row.water_quality || 'N/A'}</div>
+                                                    <div><strong className="text-gray-900 dark:text-white">Trail:</strong> {row.trail_condition || 'Not provided'}</div>
+                                                    <div><strong className="text-gray-900 dark:text-white">Water:</strong> {row.water_quality || 'Not provided'}</div>
                                                 </td>
                                                 <td className="px-6 py-4 text-xs text-gray-700 dark:text-gray-300 max-w-xs truncate">
                                                     <div><strong className="text-gray-900 dark:text-white">Biodiversity:</strong> {row.biodiversity_impact_notes || 'None'}</div>
@@ -442,7 +442,7 @@ export default function ImeaReport({
                                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400">📋</span>
                                 <div>
                                     <h3 className="font-bold text-gray-900 dark:text-white">Assessment Full Details</h3>
-                                    <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name} — {selectedRecord.pamo_name}</p>
+                                    <p className="text-xs text-gray-500">{selectedRecord.protected_area?.name || 'Not recorded'} — {selectedRecord.pamo_name || 'Not recorded'}</p>
                                 </div>
                             </div>
                             <button type="button" onClick={closeModal} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">✕</button>
@@ -464,17 +464,17 @@ export default function ImeaReport({
                                 </div>
                                 <div>
                                     <span className="text-xs text-gray-500 block">Satisfaction Rate</span>
-                                    <span className="font-semibold text-green-700 dark:text-green-400">{selectedRecord.visitor_satisfaction_rate ? `${selectedRecord.visitor_satisfaction_rate}%` : 'N/A'}</span>
+                                    <span className="font-semibold text-green-700 dark:text-green-400">{selectedRecord.visitor_satisfaction_rate === null || selectedRecord.visitor_satisfaction_rate === undefined || selectedRecord.visitor_satisfaction_rate === '' ? 'Not provided' : `${selectedRecord.visitor_satisfaction_rate}%`}</span>
                                 </div>
                             </div>
 
                             <div>
                                 <h4 className="text-xs font-bold uppercase tracking-wider text-green-800 dark:text-green-400 mb-2">Indicators & Status</h4>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-gray-50 dark:bg-gray-800/30 p-4 rounded-xl">
-                                    <div><strong className="text-gray-900 dark:text-white">Trail Condition:</strong> {selectedRecord.trail_condition || 'N/A'}</div>
-                                    <div><strong className="text-gray-900 dark:text-white">Wildlife Disturbance:</strong> {selectedRecord.wildlife_disturbance || 'N/A'}</div>
-                                    <div><strong className="text-gray-900 dark:text-white">Vegetation Damage:</strong> {selectedRecord.vegetation_damage || 'N/A'}</div>
-                                    <div><strong className="text-gray-900 dark:text-white">Water Quality:</strong> {selectedRecord.water_quality || 'N/A'}</div>
+                                    <div><strong className="text-gray-900 dark:text-white">Trail Condition:</strong> {selectedRecord.trail_condition || 'Not provided'}</div>
+                                    <div><strong className="text-gray-900 dark:text-white">Wildlife Disturbance:</strong> {selectedRecord.wildlife_disturbance || 'Not provided'}</div>
+                                    <div><strong className="text-gray-900 dark:text-white">Vegetation Damage:</strong> {selectedRecord.vegetation_damage || 'Not provided'}</div>
+                                    <div><strong className="text-gray-900 dark:text-white">Water Quality:</strong> {selectedRecord.water_quality || 'Not provided'}</div>
                                     <div><strong className="text-gray-900 dark:text-white">Carrying Capacity:</strong> {selectedRecord.carrying_capacity_compliance ? 'Compliant' : 'Exceeded'}</div>
                                 </div>
                             </div>

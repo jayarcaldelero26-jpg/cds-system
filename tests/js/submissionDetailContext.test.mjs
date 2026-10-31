@@ -5,6 +5,7 @@ import {
     movActionAvailability,
     movPrerequisiteFor,
     nextSubmissionAction,
+    presentCurrentRoutingStatus,
     refreshSubmissionSelection,
     reportContextFields,
 } from '../../resources/js/Utils/submissionDetailContext.js';
@@ -17,7 +18,8 @@ for (const source of sourceKeys) {
         assert.equal(fields.get('Report / Document Type'), 'Progress Report');
         assert.equal(fields.get('Workflow / Module'), 'Workflow');
         const missing = new Map(reportContextFields({ module: 'Workflow', activity_name: 'Field visit', document_type: '' }));
-        assert.equal(missing.has('Report / Document Type'), false);
+        assert.equal(missing.has('Report / Document Type'), true);
+        assert.equal(missing.get('Report / Document Type'), null);
         assert.equal(missing.get('Activity'), 'Field visit');
     });
 }
@@ -33,6 +35,30 @@ test('same originating/current office is represented once, while a different cur
     assert.equal(custodyContext(moved).officeMatchesOrigin, false);
     assert.equal(custodyContext(moved).office, 'PENRO Davao Oriental');
     assert.equal(new Map(reportContextFields(moved)).get('Originating Office'), 'CENRO Baganga');
+});
+
+test('current routing status names the accountable document holder and keeps the office field separate', () => {
+    const row = {
+        target_office: 'CENRO Baganga',
+        routing: {
+            current_status: 'At PENRO Davao Oriental',
+            responsible_office: 'PENRO Davao Oriental',
+            responsible_user_category: 'PENRO_RECORDS',
+        },
+    };
+    assert.equal(presentCurrentRoutingStatus(row, row.routing.current_status), 'At PENRO Records Unit');
+    assert.equal(custodyContext(row).office, 'PENRO Davao Oriental');
+    assert.equal(presentCurrentRoutingStatus(row, 'Awaiting Receipt by Office of the PENRO'), 'Awaiting Receipt by Office of the PENRO');
+
+    const pamo = {
+        target_office: 'CENRO Baganga',
+        routing: {
+            current_status: 'At CENRO Baganga',
+            responsible_office: 'PAMO-MHRWS',
+            responsible_user_category: 'PAMO',
+        },
+    };
+    assert.equal(presentCurrentRoutingStatus(pamo, pamo.routing.current_status), 'At PAMO-MHRWS');
 });
 
 test('PAMO route context keeps captured origin, protected area, and receiving/current office separate', () => {
@@ -60,12 +86,13 @@ test('PAMO route context keeps captured origin, protected area, and receiving/cu
     assert.equal(receivedFields.get('Current Office'), 'CENRO Baganga');
 });
 
-test('duplicate activity is omitted and ENGP absent PA/receipt are not invented', () => {
-    const fields = new Map(reportContextFields({ module: 'Regular PAMB', activity_name: 'Regular PAMB', document_type: 'Minutes' }, true));
+test('duplicate activity and inapplicable ENGP area are hidden while missing dates remain explicit', () => {
+    const fields = new Map(reportContextFields({ source: 'engp', module: 'Regular PAMB', activity_name: 'Regular PAMB', document_type: 'Minutes' }, true));
     assert.equal(fields.has('Activity'), false);
     assert.equal(fields.get('Report / Document Type'), 'Minutes');
     assert.equal(fields.has('Protected Area'), false);
-    assert.equal(fields.has('PENRO Receipt'), false);
+    assert.equal(fields.has('PENRO Receipt'), true);
+    assert.equal(fields.get('PENRO Receipt'), null);
 });
 
 test('a fresh selected record wins over an older linked row and refreshes actions/document metadata', () => {
