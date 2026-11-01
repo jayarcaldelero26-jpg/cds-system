@@ -429,7 +429,14 @@ class ComplianceAlertDeliveryService
                     'target_office' => $first->targetOffice,
                     'protected_area_name' => $first->protectedAreaName,
                     'readiness_key' => $this->recipients->logicalKey($first),
-                    'reports' => $items->sortBy('deadline')->map(fn (OverdueReport $report) => $report->toArray())->values()->all(),
+                    'reports' => $items->sortBy('deadline')->map(function (OverdueReport $report): array {
+                        $presentation = $report->toArray();
+                        if ($report->daysRemaining !== null) {
+                            $presentation['days_remaining'] = $report->daysRemaining;
+                        }
+
+                        return $presentation;
+                    })->values()->all(),
                 ];
              })->values()->all();
     }

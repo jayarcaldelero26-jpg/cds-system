@@ -157,12 +157,19 @@ test('inactive office mappings are excluded from canonical recipient resolution'
 });
 
 test('CDS Admin can change automatic delivery only with the current password and the change is audited', function () {
+    Mail::fake();
     config()->set('compliance_alerts.enabled', true);
     $admin = User::factory()->create(['password' => 'secret-password']);
     $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
     ComplianceAlertSetting::create(['alerts_enabled' => true, 'automatic_send_enabled' => false, 'send_time' => '08:00', 'timezone' => 'Asia/Manila']);
     $payload = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective();
     $payload['automatic_send_enabled'] = true;
+
+    $missingPasswordResponse = $this->actingAs($admin)->put(route('compliance-alerts.settings.update'), $payload);
+    expect($missingPasswordResponse->status())->toBe(302);
+    $missingPasswordResponse->assertSessionHasErrors('current_password');
+    expect(ComplianceAlertSetting::query()->first()->automatic_send_enabled)->toBeFalse();
+
     $payload['current_password'] = 'wrong-password';
 
     $wrongPasswordResponse = $this->actingAs($admin)->put(route('compliance-alerts.settings.update'), $payload);
@@ -185,6 +192,56 @@ test('CDS Admin can change automatic delivery only with the current password and
     $payload['current_password'] = 'manager-password';
     $nonAdminResponse = $this->actingAs($manager)->put(route('compliance-alerts.settings.update'), $payload);
     expect($nonAdminResponse->status())->toBe(403);
+});
+
+test('unchanged automatic delivery remains visibly rejected when the server gate is off', function () {
+    $admin = User::factory()->create();
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    ComplianceAlertSetting::create(['alerts_enabled' => true, 'automatic_send_enabled' => true, 'send_time' => '08:00', 'timezone' => 'Asia/Manila']);
+    config()->set('compliance_alerts.enabled', false);
+    $payload = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective();
+
+    $response = $this->actingAs($admin)->from(route('settings.compliance-alerts'))
+        ->put(route('compliance-alerts.settings.update'), $payload);
+
+    $response->assertRedirect(route('settings.compliance-alerts'))
+        ->assertSessionHasErrors(['automatic_send_enabled' => 'Automatic delivery cannot be enabled because the server delivery gate is disabled.']);
+    expect(ComplianceAlertSetting::query()->first()->automatic_send_enabled)->toBeTrue();
+});
+
+test('unchanged automatic delivery remains visibly rejected when mail configuration is invalid', function () {
+    $admin = User::factory()->create();
+    $admin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    ComplianceAlertSetting::create(['alerts_enabled' => true, 'automatic_send_enabled' => true, 'send_time' => '08:00', 'timezone' => 'Asia/Manila']);
+    config()->set('compliance_alerts.enabled', true);
+    config()->set('mail.default', 'smtp');
+    config()->set('mail.from.address', 'invalid-from');
+    config()->set('mail.mailers.smtp.host', null);
+    config()->set('mail.mailers.smtp.port', null);
+    config()->set('mail.mailers.smtp.username', null);
+    config()->set('mail.mailers.smtp.password', null);
+    $payload = app(\App\Services\Compliance\ComplianceAlertSettingsService::class)->effective();
+
+    $response = $this->actingAs($admin)->from(route('settings.compliance-alerts'))
+        ->put(route('compliance-alerts.settings.update'), $payload);
+
+    $response->assertRedirect(route('settings.compliance-alerts'))
+        ->assertSessionHasErrors(['automatic_send_enabled' => 'Automatic delivery cannot be enabled because the mail configuration is unavailable or invalid.']);
+    expect(ComplianceAlertSetting::query()->first()->automatic_send_enabled)->toBeTrue();
+});
+
+test('settings provide the global-user capability and a configured weekday run time', function () {
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-28 08:01:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    $global = User::factory()->create();
+    $global->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+
+    $this->actingAs($manager)->get(route('settings.compliance-alerts'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->where('canChangeAutomaticDelivery', false)
+            ->where('configuredNextRun', '2026-08-31T08:00:00+08:00'));
+    $this->actingAs($global)->get(route('settings.compliance-alerts'))
+        ->assertInertia(fn (Assert $page) => $page->where('canChangeAutomaticDelivery', true));
 });
 
 /** @return array<class-string, \Illuminate\Database\Eloquent\Model> */
@@ -655,6 +712,56 @@ test('due-soon uses an upcoming calendar-date window and keeps today and overdue
         ->and($dueToday->pluck('sourceId')->all())->toBe([$reports['today']->id])
         ->and($overdue->pluck('sourceId')->all())->toContain($reports['overdue']->id)
         ->not->toContain($reports['today']->id);
+});
+
+test('due-soon memoranda show each report deadline, match preview and mail rendering, and keep manual claims stable', function () {
+    Mail::fake();
+    config()->set('compliance_alerts.enabled', true);
+    CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-06 09:00:00', 'Asia/Manila'));
+    $manager = complianceManager(complianceUser());
+    $area = complianceArea($manager);
+    bmsForDeadline($area, $manager, '2026-09-07', ['activity_name' => 'One-day report']);
+    bmsForDeadline($area, $manager, '2026-09-08', ['activity_name' => 'Two-day report', 'semester' => '2nd Semester']);
+    bmsForDeadline($area, $manager, '2026-09-09', ['activity_name' => 'Three-day report', 'semester' => 'Annual']);
+    ComplianceAlertRecipient::create(['protected_area_id' => $area->id, 'recipient_email' => 'due-soon@example.test', 'is_active' => true]);
+    enabledComplianceSettings();
+
+    $reports = app(OverdueReportService::class)->dueSoonReports(3, CarbonImmutable::parse('2026-09-06 23:59:00', 'Asia/Manila'));
+    expect($reports->map(fn (OverdueReport $report): ?int => $report->daysRemaining)->sort()->values()->all())->toBe([1, 2, 3])
+        ->and($reports->first()->toArray())->not->toHaveKey('days_remaining');
+
+    $preview = $this->actingAs($manager)->getJson(route('compliance-alerts.preview', [
+        'destination_key' => 'pa:'.$area->id,
+        'alert_type' => ComplianceNotificationRun::ALERT_DUE_SOON,
+    ]))->assertOk();
+    $previewHtml = $preview->json('html');
+    expect($previewHtml)->toContain('>1</td>', '>2</td>', '>3</td>');
+
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect();
+    Mail::assertSent(OverdueComplianceMemorandum::class, fn (OverdueComplianceMemorandum $mail): bool => $mail->render() === $previewHtml);
+    $claim = ComplianceDeliveryClaim::query()->where('run_type', ComplianceNotificationRun::TYPE_MANUAL)->firstOrFail();
+    $fingerprint = $claim->delivery_fingerprint;
+    $claimCount = ComplianceDeliveryClaim::query()->count();
+
+    $this->actingAs($manager)->post(route('compliance-alerts.send'))->assertRedirect();
+    Mail::assertSent(OverdueComplianceMemorandum::class, 1);
+    expect(ComplianceDeliveryClaim::query()->count())->toBe($claimCount)
+        ->and(ComplianceDeliveryClaim::query()->whereKey($claim->id)->value('delivery_fingerprint'))->toBe($fingerprint);
+});
+
+test('days remaining use one Asia Manila evaluation date across the UTC midnight boundary', function () {
+    $manager = complianceUser();
+    $area = complianceArea($manager);
+    $beforeBoundary = bmsForDeadline($area, $manager, '2026-09-03', ['activity_name' => 'Boundary report']);
+    $service = app(OverdueReportService::class);
+    $utcBeforeManilaMidnight = CarbonImmutable::parse('2026-08-31 15:59:59', 'UTC');
+    $utcAfterManilaMidnight = CarbonImmutable::parse('2026-08-31 16:00:00', 'UTC');
+
+    $before = $service->dueSoonReports(3, $utcBeforeManilaMidnight)->keyBy('sourceId');
+    $after = $service->dueSoonReports(3, $utcAfterManilaMidnight)->keyBy('sourceId');
+
+    expect($before->get($beforeBoundary->id)?->daysRemaining)->toBe(3)
+        ->and($after->get($beforeBoundary->id)?->daysRemaining)->toBe(2);
 });
 
 test('PENRO-managed PAMB reports with no PENRO receipt remain eligible for the due-soon window', function () {

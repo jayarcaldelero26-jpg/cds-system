@@ -181,6 +181,7 @@ class OverdueReportService
                     moduleName: $metadata['module_name'],
                     workflowKey: $metadata['workflow_key'],
                     programArea: $metadata['program_area'],
+                    daysRemaining: (int) $today->diffInDays($deadline),
                 ));
         }
 
@@ -515,6 +516,7 @@ class OverdueReportService
                 workflowKey: $workflow['key'],
                 programArea: ReportRequirementRegistry::ENGP,
                 logicalIdentity: $identity,
+                daysRemaining: $bucket === 'overdue' ? null : (int) $today->diffInDays($deadline),
             ));
         }
 

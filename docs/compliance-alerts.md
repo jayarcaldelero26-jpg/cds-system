@@ -1,42 +1,31 @@
 # Compliance Alerts
 
-Compliance Alerts scans the enrolled report trackers and prepares one memorandum per resolved destination office. Each memorandum groups the office's overdue reports by Protected Area. It does not change tracker deadlines or compliance calculations.
+Compliance Alerts evaluates the report sources enrolled in its source registry. It prepares memoranda by resolved recipient destination and does not change tracker deadlines or compliance calculations.
 
-## Eligibility and Records audit workflow
+## Eligibility and receipt state
 
-An active overdue alert means the authoritative source deadline is before today **and** that source's authoritative PENRO receipt/submission field is empty. A populated authoritative receipt immediately removes the report from the Overview, Preview Memorandum, Send Now, and automatic memorandum eligibility—even if the report was late and even if Records has not yet confirmed it.
+Eligibility uses the authoritative deadline and receipt fields from the report source, evaluated on the `Asia/Manila` calendar date. A recorded PENRO receipt closes an overdue-submission alert even when the receipt is late. Due-soon reminders use the configured calendar-day window; Due Today and Overdue remain separate alert buckets.
 
-
-Submitted reports without a current Records confirmation appear in **History → Pending Records Verification**. Confirmation creates an immutable event with a source snapshot. Revocation creates a second immutable event, preserves the original evidence, and returns the report to Pending Records Verification. It never reopens an overdue-submission memorandum while the authoritative receipt remains populated.
-
-This aligns the memorandum with the boss Apps Script meaning: **report not yet submitted and overdue → notify; report submitted → stop the overdue-submission memorandum**. Laravel Records confirmation remains an additional audit control, not an email-eligibility condition.
-
-## Local operation
-
-Preview current mapped data in CDS at **Compliance Alerts**. Production delivery
-is owned by the scheduled `compliance:send-overdue-alerts` command.
+Submission Tracking is the operational source for report receipt state. Compliance Alerts does not need a second manual Records confirmation or history workflow to decide whether a report has been received. Source-specific missing-MOV obligations can remain separately visible where that tracker requires supporting evidence.
 
 ## Recipient resolution
 
-Recipients are resolved in this order:
+Recipient resolution requires an active exact mapping for the report's identity:
 
-1. Active exact Protected Area mapping
-2. Active exact target-office mapping
-3. Configured fallback recipient
+- Protected Area reports use the exact Protected Area mapping.
+- Office-scoped Development and ENGP reports use the canonical target-office mapping.
 
-Groups without a valid mapping are skipped and logged. They remain visible in the dashboard; manual Send Now is blocked until their mapping is supplied. A mapping can also provide a recipient-specific TO title and optional ATTENTION line; these take precedence over the general memorandum settings.
+There is no Protected Area-to-office escalation or configured fallback recipient. Inactive mappings do not resolve. A mapping may supply the recipient's TO designation and optional ATTENTION line; the mapping also supplies the email and CC list.
 
-## Safe delivery controls
+The authenticated production delivery endpoint processes mapped destination groups when its delivery gates permit. Unmapped groups are recorded as skipped; their absence does not cancel other mapped groups. The current web UI does not expose a Send Now action. The production endpoint is not a preview or a diagnostic operation.
 
-Automatic external delivery requires all of the following:
+## Delivery controls and evidence
 
-- `COMPLIANCE_ALERTS_ENABLED=true`
-- Compliance Alert settings: Alerts enabled
-- Compliance Alert settings: Automatic send enabled
+Automatic external delivery requires the server delivery gate, the saved Alerts flag, the saved Automatic Email Delivery flag, and valid mail configuration. The defaults are disabled. The settings page reports configuration presence; it does not test SMTP authentication, transport connectivity, message acceptance, or recipient inbox delivery.
 
-The default is disabled. Settings do not store SMTP credentials; normal Laravel `MAIL_*` configuration remains environment-only.
+The bell notification channel writes database notifications. A successful database notification is not proof of email delivery or inbox receipt.
 
-Manual and automatic production destinations acquire a database-backed idempotency claim before mail transport is invoked. Repeated identical manual snapshots skip already successful destinations; a partial retry reacquires only failed claims. Automatic workers competing for the same business-date/destination delivery group cannot both send.
+Manual and automatic production destinations acquire database-backed idempotency claims before mail transport is invoked. Repeated identical manual snapshots skip successful destinations; a partial retry reacquires failed claims. Competing automatic workers cannot both send the same business-date/destination delivery group.
 
 Useful environment settings include:
 
@@ -46,16 +35,12 @@ COMPLIANCE_ALERTS_SEND_TIME=08:00
 COMPLIANCE_ALERTS_TIMEZONE=Asia/Manila
 ```
 
-Database settings override the safe operational defaults where applicable. Compliance Alerts timezone is fixed to `Asia/Manila` so eligibility, business dates, idempotency, next-run display, and the scheduler agree. The Laravel scheduler reads the configured send time when it starts; restart a long-running scheduler worker after changing it.
+Database settings override safe operational defaults where applicable. The Compliance Alerts timezone is fixed to `Asia/Manila`. The Laravel scheduler reads the configured send time when it starts; restart a long-running scheduler worker after changing that time.
 
-When a fallback recipient is configured and its CC list differs from the approved production CC configuration, Settings displays **FALLBACK CC REQUIRES REVIEW**. The warning does not block exact READY mappings and does not overwrite the administrator value.
+## Schedule and host availability
 
-## Production scheduler
+Laravel registers `compliance:send-overdue-alerts` on weekdays at the configured time in `Asia/Manila`. The configured next-run display follows that weekday schedule. It is a schedule projection, not a guarantee that a host scheduler is running or that an email will be delivered.
 
-Laravel-side scheduling is registered Monday through Friday at the configured time (default `08:00`) in `Asia/Manila`. The command also safely skips automatic weekend delivery if invoked outside the scheduler. Production infrastructure must run:
+The local Windows audit on 2026-11-01 found no registered scheduled task. This is a dated laptop observation; the application does not probe Windows Task Scheduler. Production infrastructure must run `php artisan schedule:run` once per minute or provide an equivalent host scheduler.
 
-```text
-php artisan schedule:run
-```
-
-once per minute, or provide an equivalent hosting cron/scheduler configuration. This repository does not assume any specific hosting setup.
+The command itself has a separate invocation contract: it does not add a weekend guard. An explicit command invocation can synchronize database bell notifications and process delivery/history, so it must be treated as an operational action.

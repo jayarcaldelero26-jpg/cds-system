@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import {
     compliancePreviewErrorMessage,
     NO_PREVIEW_REPORTS_MESSAGE,
@@ -18,6 +20,13 @@ test('compliance preview accepts the real JSON contract and preserves the useful
     assert.equal(compliancePreviewErrorMessage(new Error(NO_PREVIEW_REPORTS_MESSAGE)), NO_PREVIEW_REPORTS_MESSAGE);
 });
 
+test('the actual Compliance Alerts page delegates preview response parsing to the shared safe helper', async () => {
+    const source = await readFile(resolve('resources/js/Pages/ComplianceAlerts/Index.jsx'), 'utf8');
+    assert.match(source, /import \{ compliancePreviewErrorMessage, readCompliancePreviewResponse \} from ['"]@\/Utils\/compliancePreview\.mjs['"]/);
+    assert.match(source, /readCompliancePreviewResponse\(response\)/);
+    assert.doesNotMatch(source, /readPreviewResponse|console\.error\([^\n]*(payload|body)/);
+});
+
 test('malformed or failed preview responses never log or surface raw recipient and memorandum content', async () => {
     const original = { error: console.error, warn: console.warn, log: console.log };
     const logged = [];
@@ -33,6 +42,14 @@ test('malformed or failed preview responses never log or surface raw recipient a
         );
         await assert.rejects(
             readCompliancePreviewResponse(new Response('<html>private provider detail</html>', { status: 200 })),
+            { message: PREVIEW_ERROR_MESSAGE },
+        );
+        await assert.rejects(
+            readCompliancePreviewResponse(new Response('', { status: 200 })),
+            { message: PREVIEW_ERROR_MESSAGE },
+        );
+        await assert.rejects(
+            readCompliancePreviewResponse(new Response(JSON.stringify({ subject: 7, html: '<p>private content</p>' }), { status: 200 })),
             { message: PREVIEW_ERROR_MESSAGE },
         );
 

@@ -12,6 +12,7 @@ let server;
 const load = async path => {
     server ??= await createServer({
         configFile: false,
+        cacheDir: process.env.CDS_TEST_VITE_CACHE_DIR || undefined,
         plugins: [viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
         server: { middlewareMode: true },
@@ -23,12 +24,33 @@ const load = async path => {
 
 test.after(async () => { await server?.close(); });
 
-test('recipient coverage action only changes to Cancel for the exact edited mapping', async () => {
+test('recipient coverage marks only the exact active mapping as editing', async () => {
     const { coverageRowAction } = await load('Pages/ComplianceAlerts/Index.jsx');
-    assert.equal(coverageRowAction(12, 12), 'cancel');
-    assert.equal(coverageRowAction(12, '12'), 'cancel');
+    assert.equal(coverageRowAction(12, 12), 'editing');
+    assert.equal(coverageRowAction(12, '12'), 'editing');
     assert.equal(coverageRowAction(13, 12), 'edit');
     assert.equal(coverageRowAction(12, null), 'edit');
+});
+
+test('Compliance Alert settings show accessible errors and keep delivery state tied to saved server values', async () => {
+    const source = await readFile(new URL('../..//resources/js/Pages/ComplianceAlerts/Index.jsx', import.meta.url), 'utf8');
+    assert.match(source, /role="alert" aria-live="assertive" aria-atomic="true"/);
+    assert.match(source, /settingsErrorSummaryRef\.current\?\.focus\(\)/);
+    assert.match(source, /settingsForm\.errors\.alerts_enabled/);
+    assert.match(source, /settingsForm\.errors\.automatic_send_enabled/);
+    assert.match(source, /settingsForm\.errors\.send_time/);
+    assert.match(source, /disabled=\{!canChangeAutomaticDelivery\}/);
+    assert.match(source, /Configured weekday schedule/);
+    assert.match(source, /unsaved form changes do not enable delivery/);
+});
+
+test('recipient editor has an in-form scope-preserving cancellation path and bounded mobile grid tracks', async () => {
+    const source = await readFile(new URL('../..//resources/js/Pages/ComplianceAlerts/Index.jsx', import.meta.url), 'utf8');
+    assert.match(source, /grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-\[minmax\(0,1\.35fr\)_minmax\(0,0\.85fr\)\]/);
+    assert.match(source, /recipientForm\.reset\(\); recipientForm\.clearErrors\(\);/);
+    assert.match(source, /setRecipientScope\(scope\); recipientForm\.reset\(\)/);
+    assert.match(source, /Cancel Edit.*Cancel Configure.*Clear Form/);
+    assert.match(source, /disabled=\{recipientForm\.processing\}/);
 });
 
 test('Compliance Alerts retains its operational scopes without a duplicate history or confirmation UI', async () => {

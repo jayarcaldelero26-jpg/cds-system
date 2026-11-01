@@ -9,6 +9,7 @@ use App\Models\NonWorkingDay;
 use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Services\Compliance\ComplianceAlertDeliveryService;
+use App\Services\Compliance\ComplianceAlertSchedule;
 use App\Services\Compliance\ComplianceAlertSettingsService;
 use App\Services\Compliance\ComplianceConfirmationService;
 use App\Services\Compliance\ComplianceAlertTemplateResolver;
@@ -68,10 +69,10 @@ class ComplianceAlertController extends Controller
         $requestUser = request()->user()?->can('compliance-alerts.manage');
         $oldestDeadline = $overdue->min('deadline');
         $maximumDaysOverdue = $overdue->max('daysOverdue') ?? 0;
-        $nextRun = CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE)->setTimeFromTimeString($effectiveSettings['send_time']);
-        if ($nextRun->lessThanOrEqualTo(CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE))) {
-            $nextRun = $nextRun->addDay()->setTimeFromTimeString($effectiveSettings['send_time']);
-        }
+        $nextRun = ComplianceAlertSchedule::nextWeekdayRun(
+            CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE),
+            $effectiveSettings['send_time'],
+        );
         $activeOverdueSources = $overdue->groupBy('module')
             ->map(fn ($items, string $module): array => ['module' => $module, 'overdue_count' => $items->count(), 'report_not_submitted' => $items->where('complianceIssue', 'Report Not Yet Submitted')->count(), 'missing_mov' => $items->where('complianceIssue', 'MOV Not Yet Submitted')->count()])
             ->sortBy('module')->values();
@@ -165,12 +166,19 @@ class ComplianceAlertController extends Controller
             'sender_display_name', 'to_label', 'attention_line', 'fallback_recipient_email', 'fallback_cc_emails',
             'recipients', 'cc_recipients', 'attention',
         ]);
+        $user = request()->user();
+        $configuredNextRun = ComplianceAlertSchedule::nextWeekdayRun(
+            CarbonImmutable::now(ComplianceAlertSettingsService::TIMEZONE),
+            $effectiveSettings['send_time'],
+        );
 
         return Inertia::render('ComplianceAlerts/Index', [
             'view' => 'settings',
             'settings' => [...$settingsPayload, 'mail_from_name' => config('mail.from.name')],
             'monitoredSources' => collect($reports->sourceDefinitions())->map(fn (array $definition, string $sourceType): array => ['source_type' => $sourceType, 'module' => $definition['module']])->values(),
             'automaticDeliveryState' => $deliveryService->automaticDeliveryState(),
+            'canChangeAutomaticDelivery' => $user !== null && app(OrganizationalAccessService::class)->isGlobal($user),
+            'configuredNextRun' => $configuredNextRun->toIso8601String(),
             'recipientReadiness' => $deliveryService->recipientReadiness($dueSoon->merge($overdue)->values()),
             'destinationCards' => $destinationCards,
             'mappingCoverage' => $coverage['coverage'],
