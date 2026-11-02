@@ -149,7 +149,8 @@ test('warning actions use the warning variant while preserving compact button si
     const html = renderToStaticMarkup(React.createElement(Button, { variant: 'warning', size: 'compact' }, 'Deactivate'));
     assert.match(html, /data-cds-action-variant="warning"/);
     assert.match(html, /Deactivate/);
-    assert.match(html, /min-h-0/);
+    assert.match(html, /min-h-8/);
+    assert.match(html, /data-cds-size="compact"/);
 });
 
 test('Module Management renders Edit and Deactivate with matching compact size and warning color', async () => {

@@ -18,6 +18,7 @@ import Threats from './Threats';
 import MapView from './MapView';
 import ReportSubmissionTracker from './ReportSubmissionTracker';
 import ConfirmDialog from '@/Components/ConfirmDialog';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import { normalizeSpatialFile } from '@/Utils/spatialUpload';
 import CrudTable from '@/Components/Crud/CrudTable';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
@@ -187,6 +188,8 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
   const [deleteProcessing, setDeleteProcessing] = useState(false);
   const [bulkDeleteProcessing, setBulkDeleteProcessing] = useState(false);
   const [showEditHeaderModal, setShowEditHeaderModal] = useState(false);
+  const [geoJsonPreparing, setGeoJsonPreparing] = useState(false);
+  const [headerSaveError, setHeaderSaveError] = useState('');
   const headerModalOverlayRef = useRef(null);
   const headerModalPanelRef = useRef(null);
   const { present: headerModalPresent, phase: headerModalPhase, onTransitionEnd: headerModalTransitionEnd } = useModalMotion(showEditHeaderModal, {
@@ -405,21 +408,24 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
 
   const submitHeaderEdit = (e) => {
     e.preventDefault();
-    router.post(route('bms.bulk-update-header'), {
+    if (annexHeaderForm.processing) return;
+    setHeaderSaveError('');
+    annexHeaderForm.transform((data) => ({
       protected_area_id: filters?.protected_area_id || null,
       category: filters?.category || null,
       start_date: filters?.start_date || null,
       end_date: filters?.end_date || null,
-      ...annexHeaderForm.data,
+      ...data,
       species_observed: annexSpeciesObserved
-    }, {
+    }));
+    annexHeaderForm.post(route('bms.bulk-update-header'), {
       preserveScroll: true,
       onSuccess: () => {
         setShowEditHeaderModal(false);
       },
-      onError: () => {
-        alert("Failed to update header details.");
-      }
+      onError: () => setHeaderSaveError('Header details could not be saved. Your changes remain available; review them and try again.'),
+      onHttpException: () => setHeaderSaveError('The server could not save the header details. Your changes remain available; try again.'),
+      onNetworkError: () => setHeaderSaveError('The request did not reach the server. Your changes remain available; check the connection and try again.'),
     });
   };
 
@@ -463,21 +469,34 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
   const submitImport = (e) => {
     e.preventDefault();
     importForm.post(route('bms.import'), {
+      preserveScroll: true,
       onSuccess: () => {
         importForm.reset();
         setActiveTab('list');
-      }
+      },
+      onHttpException: () => importForm.setError('file', 'The server could not import this file. Your selection remains available; review it and try again.'),
+      onNetworkError: () => importForm.setError('file', 'The request did not reach the server. Your selection remains available; check the connection and try again.'),
     });
   };
 
   const submitGeoJsonImport = async (e) => {
     e.preventDefault();
+    setGeoJsonPreparing(true);
     try {
       const normalized = await normalizeSpatialFile(geoJsonForm.data.file);
       geoJsonForm.transform(() => ({ protected_area_id: geoJsonForm.data.protected_area_id, layer_name: geoJsonForm.data.layer_name, spatial_geojson: JSON.stringify(normalized.geojson), source_format: normalized.source_format, original_filename: normalized.original_filename }));
+      setGeoJsonPreparing(false);
       geoJsonForm.post(route('bms.import-geojson'), { preserveScroll: true, onSuccess: () => { geoJsonForm.reset(); setActiveTab('map'); } });
-    } catch (error) { geoJsonForm.setError('file', error.message); }
+    } catch (error) {
+      setGeoJsonPreparing(false);
+      geoJsonForm.setError('file', error.message);
+      geoJsonSubmitGate.releaseRequest();
+    }
   };
+
+  const importSubmitGate = useConfirmedFormSubmit({ processing: importForm.processing, onSubmit: submitImport });
+  const geoJsonSubmitGate = useConfirmedFormSubmit({ processing: geoJsonForm.processing, onSubmit: submitGeoJsonImport });
+  const headerSubmitGate = useConfirmedFormSubmit({ processing: annexHeaderForm.processing, onSubmit: submitHeaderEdit });
 
   const getSemestralAggregates = () => {
     const map = {};
@@ -743,26 +762,26 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     {/* Navigation Tabs */}
 {activeTab !== 'report-tracker' && (
                     <div className="no-print flex flex-col gap-2 border-b border-gray-200 pb-3 dark:border-gray-700 xl:flex-row xl:items-center xl:justify-between">
-                        <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 xl:pb-0">
-                        <button onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
+                        <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-1 xl:pb-0" role="group" aria-label="BMS views">
+                        <button type="button" aria-pressed={activeTab === 'list'} onClick={() => setActiveTab('list')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'list' ? 'cds-tab-active shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📄 Species Records
                         </button>
-                        <button onClick={() => setActiveTab('semestral')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
+                        <button type="button" aria-pressed={activeTab === 'semestral'} onClick={() => setActiveTab('semestral')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'semestral' ? 'cds-tab-active shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📊 Semestral Population Trends
                         </button>
-                        <button onClick={() => setActiveTab('threats')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'bg-red-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="danger">
+                        <button type="button" aria-pressed={activeTab === 'threats'} onClick={() => setActiveTab('threats')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'threats' ? 'cds-tab-active shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             ⚠️ Threats
                         </button>
-                        <button onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
+                        <button type="button" aria-pressed={activeTab === 'map'} onClick={() => setActiveTab('map')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'map' ? 'cds-tab-active shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️ Map View
                         </button>
 
                         </div>
                         {(canCreateBms || canManageBmsSpatial) && <div className="flex shrink-0 items-center gap-2 overflow-x-auto xl:justify-end">
-                        {canCreateBms && <button onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'bg-green-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
+                        {canCreateBms && <button type="button" aria-pressed={activeTab === 'import'} onClick={() => setActiveTab('import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'import' ? 'cds-tab-active shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             📁 Excel / CSV Bulk Import
                         </button>}
-                        {canManageBmsSpatial && <button onClick={() => setActiveTab('geojson-import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'bg-emerald-700 text-white shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`} data-cds-action="true" data-cds-action-variant="primary">
+                        {canManageBmsSpatial && <button type="button" aria-pressed={activeTab === 'geojson-import'} onClick={() => setActiveTab('geojson-import')} className={`shrink-0 whitespace-nowrap px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${activeTab === 'geojson-import' ? 'cds-tab-active shadow-md' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`}>
                             🗺️📁 Import GeoJSON Spatial File
                         </button>}
                         </div>}
@@ -1254,10 +1273,10 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
           <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Bulk Import Transect Data</h3>
                             <p className="text-sm text-gray-500 mb-6">Upload a CSV or TXT file following the Annex summary template format (maximum 50 MB). Each imported observation must include a valid monitoring date; rows without one are skipped.</p>
-                            <form onSubmit={submitImport} className="space-y-5">
+                            <form ref={importSubmitGate.formRef} onSubmit={importSubmitGate.handleSubmit} inert={importSubmitGate.confirmationOpen || undefined} aria-hidden={importSubmitGate.confirmationOpen || undefined} className="space-y-5">
                                 <div>
 
-                                    <FloatingSelect id="index-protected-area" label="Protected Area" value={importForm.data.protected_area_id} onChange={(e) => importForm.setData('protected_area_id', e.target.value)} required>
+                                    <FloatingSelect id="index-protected-area" name="protected_area_id" label="Protected Area" value={importForm.data.protected_area_id} onChange={(e) => importForm.setData('protected_area_id', e.target.value)} required>
                                         <option value="">Select Protected Area</option>
                                         {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                     </FloatingSelect>
@@ -1266,11 +1285,12 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 <div>
 
                                     <label className="mb-1 block text-sm font-bold text-gray-700 dark:text-gray-300">CSV / TXT Data File <span className="text-red-600">*</span></label>
-                                    <FileInput id="index-csv-excel-file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} required />
+                                    <FileInput id="index-csv-excel-file" name="file" type="file" accept=".csv,.txt,text/csv,text/plain" onChange={(e) => importForm.setData('file', e.target.files[0])} required />
                                     {importForm.errors.file && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{importForm.errors.file}</p>}
                                 </div>
                                 <button type="submit" disabled={importForm.processing} className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">🚀 Upload and Process Data</button>
                             </form>
+                            <ConfirmedSubmitDialog gate={importSubmitGate} title="Import this BMS file?" message="This processes the selected CSV or TXT file and may add multiple observation records." confirmLabel="Import records" processing={importForm.processing} />
                         </div>
           }
 
@@ -1279,10 +1299,10 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
           <div className="max-w-2xl mx-auto bg-white dark:bg-gray-800 shadow-xl rounded-2xl p-8 border border-gray-100 dark:border-gray-700">
                             <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">🗺️📁 Import Spatial Boundaries / Transects (GeoJSON)</h3>
                             <p className="text-sm text-gray-500 mb-6">Upload a `.geojson` or `.json` spatial file to render park boundaries, zones, or transect lines directly on the map.</p>
-                            <form onSubmit={submitGeoJsonImport} className="space-y-5">
+                            <form ref={geoJsonSubmitGate.formRef} onSubmit={geoJsonSubmitGate.handleSubmit} inert={geoJsonSubmitGate.confirmationOpen || undefined} aria-hidden={geoJsonSubmitGate.confirmationOpen || undefined} className="space-y-5">
                                 <div>
 
-                                    <FloatingSelect id="index-protected-area" label="Protected Area" value={geoJsonForm.data.protected_area_id} onChange={(e) => geoJsonForm.setData('protected_area_id', e.target.value)} required>
+                                    <FloatingSelect id="index-geojson-protected-area" name="protected_area_id" label="Protected Area" value={geoJsonForm.data.protected_area_id} onChange={(e) => geoJsonForm.setData('protected_area_id', e.target.value)} required>
                                         <option value="">Select Protected Area</option>
                                         {protectedAreas.map((pa) => <option key={pa.id} value={pa.id}>{pa.name}</option>)}
                                     </FloatingSelect>
@@ -1290,13 +1310,14 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                                 </div>
                                 <div>
 
-                                    <FloatingInput id="index-spatial-layer-name" label="Layer Name (optional)" value={geoJsonForm.data.layer_name} onChange={(e) => geoJsonForm.setData('layer_name', e.target.value)} />
+                                    <FloatingInput id="index-spatial-layer-name" name="layer_name" label="Layer Name (optional)" value={geoJsonForm.data.layer_name} onChange={(e) => geoJsonForm.setData('layer_name', e.target.value)} />
                                     <label className="mb-1 block text-sm font-bold text-gray-700 dark:text-gray-300">Spatial File <span className="text-red-600">*</span></label>
-                                    <FileInput id="index-geojson-json-spatial-file" type="file" accept=".geojson, .json, .zip" onChange={(e) => geoJsonForm.setData('file', e.target.files[0])} required />
+                                    <FileInput id="index-geojson-json-spatial-file" name="file" type="file" accept=".geojson, .json, .zip" onChange={(e) => geoJsonForm.setData('file', e.target.files[0])} required />
                                     {(geoJsonForm.errors.file || geoJsonForm.errors.spatial_file) && <p className="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{geoJsonForm.errors.file || geoJsonForm.errors.spatial_file}</p>}
                                 </div>
                                 <button type="submit" disabled={geoJsonForm.processing} className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-4 rounded-xl transition shadow-sm" data-cds-action="true" data-cds-action-variant="primary">🚀 Upload and Map Spatial Boundaries</button>
                             </form>
+                            <ConfirmedSubmitDialog gate={geoJsonSubmitGate} title="Import these spatial boundaries?" message="This validates and stores the selected spatial layer for the chosen Protected Area." confirmLabel="Import spatial layer" processing={geoJsonForm.processing || geoJsonPreparing} />
                         </div>
           }
                 </div>
@@ -1310,7 +1331,9 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                             <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">✏️ Edit Annex Header Details</h3><p className="text-xs text-gray-500">Update the summary metadata at the top of the Annex report.</p></div>
                             <button onClick={() => setShowEditHeaderModal(false)} className="text-gray-400 hover:text-gray-600 font-bold text-lg" data-cds-action="true" data-cds-action-variant="primary">✕</button>
                         </div>
-                        <form onSubmit={submitHeaderEdit} className="space-y-4 text-sm">
+                        <form ref={headerSubmitGate.formRef} onSubmit={headerSubmitGate.handleSubmit} inert={headerSubmitGate.confirmationOpen || undefined} aria-hidden={headerSubmitGate.confirmationOpen || undefined} className="space-y-4 text-sm">
+                            {headerSaveError && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">{headerSaveError}</p>}
+                            {Object.values(annexHeaderForm.errors || {}).length > 0 && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">{Object.values(annexHeaderForm.errors)[0]}</p>}
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div><FloatingInput id="index-location" label="Location" type="text" value={annexHeaderForm.data.location} onChange={(e) => annexHeaderForm.setData('location', e.target.value)} /></div>
                                 <div><DatePicker id="index-date-conducted" label="Date Conducted" actualDate value={annexHeaderForm.data.date_conducted} onChange={(value) => annexHeaderForm.setData('date_conducted', value)} /></div>
@@ -1340,6 +1363,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     </div>
                 </div>
       }
+            <ConfirmedSubmitDialog gate={headerSubmitGate} title="Save these report header details?" message="This updates the header metadata for the current BMS report selection." confirmLabel="Save header changes" processing={annexHeaderForm.processing} />
 
             <CrudDetailsModal open={Boolean(editingRecord) && !isEditingRecord} icon="🌿" title="Species Observation Details" subtitle={editingRecord ? `${editingRecord.species_scientific_name} · ${editingRecord.protected_area?.name || 'Protected area unavailable'}` : ''} onClose={closeRecordModal} canEdit={canUpdateBms} canDelete={canDeleteBms} onEdit={beginEditingRecord} onDelete={() => setShowDeleteConfirm(true)} summary={editingRecord && <CrudSummaryGrid items={[{ label: 'Monitoring Date', value: editingRecord.monitoring_date || 'Not recorded' }, { label: 'Category', value: editingRecord.category || 'Not provided' }, { label: 'Station', value: editingRecord.station || 'Not provided' }, { label: 'Count', value: editingRecord.count ?? 'Not recorded' }]} />}>
                 {editingRecord && <div className="space-y-4">

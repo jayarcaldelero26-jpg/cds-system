@@ -12,6 +12,7 @@ export default function FloatingInput({
     variant = 'calendar',
     className = '',
     leadingIcon = null,
+    trailingAdornment = null,
     showFocusRing = true,
     ...props
 }) {
@@ -51,6 +52,7 @@ export default function FloatingInput({
                     nativeSurface,
                     placeholderClasses,
                     leadingIcon ? 'pl-10' : '',
+                    trailingAdornment ? 'pr-12' : '',
                     sizeClasses,
                 ].filter(Boolean).join(' ');
 
@@ -58,6 +60,7 @@ export default function FloatingInput({
                     <>
                         {leadingIcon && <span className="pointer-events-none absolute inset-y-0 left-3 z-10 flex items-center text-emerald-700 dark:text-emerald-400">{leadingIcon}</span>}
                         <input {...props} {...nativeProps} ref={ref} className={inputClasses} />
+                        {trailingAdornment && <span className="absolute inset-y-0 right-1 z-10 flex items-center">{trailingAdornment}</span>}
                     </>
                 );
             }}

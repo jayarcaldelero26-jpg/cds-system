@@ -24,7 +24,13 @@ export default function SettingsShell({ children, active }) {
             <nav aria-label="Settings navigation" className="rounded-2xl border border-gray-200 bg-white p-2 shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <p className="px-3 pb-2 pt-2 text-[10px] font-extrabold uppercase tracking-[0.16em] text-gray-500 dark:text-gray-400">Settings</p>
                 <div className="flex gap-1 overflow-x-auto lg:block lg:space-y-1 lg:overflow-visible">
-                    {visible.map(item => { const selected = active === item.title; return <Link key={item.href} href={item.href} aria-current={selected ? 'page' : undefined} className={`group flex min-w-[190px] items-center gap-3 rounded-xl border-l-2 px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-1 lg:min-w-0 ${selected ? 'border-green-600 bg-green-50 text-green-800 dark:border-green-400 dark:bg-green-950/30 dark:text-green-200' : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'}`}><Icon icon={item.icon} width="17" height="17" className={selected ? 'text-green-700 dark:text-green-300' : 'text-gray-400 group-hover:text-green-600'} aria-hidden="true" /><span className="min-w-0"><span className="block text-xs font-bold">{item.title}</span><span className="mt-0.5 block truncate text-[11px] text-gray-500 dark:text-gray-400">{item.subtitle}</span></span></Link>; })}
+                {visible.map(item => {
+                    const selected = active === item.title;
+                    return <Link key={item.href} href={item.href} aria-current={selected ? 'page' : undefined} className={`group flex min-w-[190px] items-center gap-3 rounded-xl border-l-2 px-3 py-3 text-left transition focus:outline-none focus:ring-2 focus:ring-green-600 focus:ring-offset-1 lg:min-w-0 ${selected ? 'cds-tab-active border-white/30' : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white'}`}>
+                        <Icon icon={item.icon} width="17" height="17" className={selected ? 'text-white' : 'text-gray-400 group-hover:text-green-600'} aria-hidden="true" />
+                        <span className="min-w-0"><span className="block text-xs font-bold">{item.title}</span><span className={`mt-0.5 block truncate text-[11px] ${selected ? 'text-white/80' : 'text-gray-500 dark:text-gray-400'}`}>{item.subtitle}</span></span>
+                    </Link>;
+                })}
                 </div>
             </nav>
             <main className="min-w-0 rounded-2xl border border-gray-200 bg-white p-5 shadow-sm sm:p-6 dark:border-gray-800 dark:bg-gray-900">{children}</main>

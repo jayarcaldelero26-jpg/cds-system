@@ -11,33 +11,54 @@ test("shared buttons preserve variant semantics and apply restrained interaction
         new URL("../../resources/css/app.css", import.meta.url),
         "utf8",
     );
+    const [dashboard, bms, bams, meaTabs, settingsShell] = await Promise.all([
+        "../../resources/js/Pages/Dashboard.jsx",
+        "../../resources/js/Pages/Bms/Index.jsx",
+        "../../resources/js/Pages/Bams/Index.jsx",
+        "../../resources/js/Pages/Imea/WorkflowTabs.jsx",
+        "../../resources/js/Components/Admin/SettingsShell.jsx",
+    ].map((path) => readFile(new URL(path, import.meta.url), "utf8")));
 
     assert.match(component, /const actionGradient = 'bg-gradient-to-b from-green-800 to-green-950 text-white/);
     for (const variantLine of [
         "primary: actionGradient",
-        "secondary: `border border-green-950 ${actionGradient}`",
+        "secondary: secondaryAction",
         "danger: `border border-red-800 ${dangerGradient}`",
-        "warning: 'border border-orange-800 bg-gradient-to-b from-orange-600 to-orange-900 text-white hover:from-orange-500 hover:to-orange-800'",
-        "ghost: actionGradient",
+        "warning: 'border border-orange-900 bg-gradient-to-b from-orange-700 to-orange-900 text-white hover:from-orange-800 hover:to-orange-950'",
+        "ghost: ghostAction",
         "cancel: neutralAction",
         "back: neutralAction",
     ]) assert.ok(component.includes(variantLine));
-    assert.match(component, /secondary: `border border-green-950 \$\{actionGradient\}`/);
+    assert.match(component, /secondary: secondaryAction/);
     assert.match(component, /danger: `border border-red-800 \$\{dangerGradient\}`/);
-    assert.match(component, /data-cds-action="true" data-cds-action-variant=\{variant\}/);
+    assert.match(component, /const neutral = \['secondary', 'ghost', 'cancel', 'back'\]/);
+    assert.match(component, /data-cds-action="true" data-cds-action-variant=\{variant\} data-cds-size=\{size\}/);
     assert.match(component, /type=\{type\}[^\n]*\{\.\.\.props\}/);
+    assert.match(component, /compact: 'min-h-8 rounded-ui px-2\.5 py-1 text-xs'/);
     assert.match(component, /focus-visible:ring-2/);
     assert.match(styles, /\.cds-button-interaction:not\(:disabled\):not\(\[aria-disabled="true"\]\):hover/);
     assert.match(styles, /\.cds-button-interaction:not\(:disabled\):not\(\[aria-disabled="true"\]\):active/);
     assert.match(styles, /\.cds-button-interaction:disabled,[\s\S]*?transform: none/);
     assert.match(styles, /prefers-reduced-motion: reduce\)[\s\S]*?\.cds-button-interaction,[\s\S]*?\[data-cds-action="true"\]\s*\{\s*transform: none !important;\s*transition: none !important;/);
-    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="danger"\][\s\S]*?linear-gradient\(180deg, #b91c1c 0%, #f87171 100%\)/);
+    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="danger"\][\s\S]*?linear-gradient\(180deg, #991b1b 0%, #7f1d1d 100%\)/);
+    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="secondary"\][\s\S]*?background-image: none;[\s\S]*?color: #14532d;/);
+    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="ghost"\][\s\S]*?background-image: none;[\s\S]*?color: #166534;/);
+    assert.match(styles, /\[data-cds-action="true"\]\[data-cds-size="prominent"\][\s\S]*?min-height: 44px;/);
     assert.match(styles, /\[data-cds-action="true"\]\[data-cds-action-variant="cancel"\],[\s\S]*?background-image: none;[\s\S]*?color: #374151;/);
     assert.match(styles, /\.dark \[data-cds-action="true"\]\[data-cds-action-variant="cancel"\][\s\S]*?background-color: #1f2937;[\s\S]*?color: #f3f4f6;/);
-    assert.match(styles, /--cds-selected-tab-gradient:\s*linear-gradient\(105deg, #16a34a 0%, #86efac 100%\)/);
+    assert.match(styles, /--cds-selected-tab-gradient:\s*linear-gradient\(90deg, #15803d 0%, #1e3a8a 100%\)/);
+    assert.match(styles, /--cds-selected-tab-color:\s*#ffffff/);
     assert.match(styles, /button\[role="tab"\]\[aria-selected="true"\][\s\S]*?background-image: var\(--cds-selected-tab-gradient\)/);
     assert.match(styles, /nav\[aria-label="Dashboard program tabs"\] button\[aria-current="page"\]/);
     assert.match(styles, /\.cds-submission-tracking-nav-tab\[aria-current="page"\][\s\S]*?background-image: var\(--cds-selected-tab-gradient\)/);
+    assert.match(dashboard, /aria-pressed=\{active === tab\}/);
+    assert.match(dashboard, /active === tab \? 'cds-tab-active'/);
+    assert.match(bms, /role="group" aria-label="BMS views"/);
+    assert.match(bms, /aria-pressed=\{activeTab === 'threats'\}[\s\S]*?'cds-tab-active shadow-md'/);
+    assert.match(bams, /role="group" aria-label="BAMS views"/);
+    assert.match(bams, /aria-pressed=\{activeTab === 'map'\}[\s\S]*?'cds-tab-active shadow-md'/);
+    assert.match(meaTabs, /active \? 'cds-tab-active shadow-sm'/);
+    assert.match(settingsShell, /selected \? 'cds-tab-active border-white\/30'/);
 });
 
 test("shared modal, confirmation, export, and PAMB action controls retain their handlers through Button", async () => {
@@ -103,7 +124,7 @@ test("shared modal, confirmation, export, and PAMB action controls retain their 
     assert.match(diagnostics, /<Button[^>]*onClick=\{copy\}/);
     assert.match(layout, /<Button[^>]*onClick=\{\(\) => router\.post\('\/logout'\)\}/);
     assert.match(layout, /isTrackingViewLink = child\.href\?\.startsWith\('\/submission-tracking\?view='/);
-    assert.match(layout, /cds-submission-tracking-nav-tab border-l-2/);
+    assert.match(layout, /cds-submission-tracking-nav-tab cds-tab-active border-l-2/);
     assert.match(managementForm, /<Button type="submit" size="compact" disabled=\{form\.processing\}/);
     assert.match(managementForm, /data-cds-action="true" data-cds-action-variant="cancel"/);
     assert.match(managementIndex, /const actionClass = 'cds-button-interaction rounded-xl bg-gradient-to-b from-green-800 to-green-950/);

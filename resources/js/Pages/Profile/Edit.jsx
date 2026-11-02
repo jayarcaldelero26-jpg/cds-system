@@ -1,6 +1,7 @@
 import { useForm } from '@inertiajs/react';
 import { Passkeys } from '@laravel/passkeys';
 import { useState } from 'react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '../../Components/Crud/useConfirmedFormSubmit';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import ConfirmDialog from '../../Components/ConfirmDialog';
@@ -15,6 +16,8 @@ export default function Edit({ user, passkeys = [], canManagePasskeys = false, p
     const profile = useForm({ name: user.name, email: user.email });
     const password = useForm({ current_password: '', password: '', password_confirmation: '' });
     const remove = useForm({ password: '' });
+    const profileSubmitGate = useConfirmedFormSubmit({ processing: profile.processing, onSubmit: event => { event.preventDefault(); profile.patch('/profile'); } });
+    const passwordSubmitGate = useConfirmedFormSubmit({ processing: password.processing, onSubmit: event => { event.preventDefault(); password.put('/password'); } });
     const [confirmingDeletion, setConfirmingDeletion] = useState(false);
     const [passkeyName, setPasskeyName] = useState('');
     const [passkeyError, setPasskeyError] = useState('');
@@ -124,9 +127,9 @@ export default function Edit({ user, passkeys = [], canManagePasskeys = false, p
         <div className="mt-6 max-w-3xl space-y-6">
             <Card>
                 <FormSection title="Profile information" description="Update your name and email address.">
-                    <form onSubmit={(event) => { event.preventDefault(); profile.patch('/profile'); }} className="mt-5 grid gap-5 sm:grid-cols-2">
-                        <FormField id="profile-name" label="Name" value={profile.data.name} onChange={(event) => profile.setData('name', event.target.value)} error={profile.errors.name} required />
-                        <FormField id="profile-email" label="Email address" type="email" value={profile.data.email} onChange={(event) => profile.setData('email', event.target.value)} error={profile.errors.email} required />
+                    <form ref={profileSubmitGate.formRef} onSubmit={profileSubmitGate.handleSubmit} inert={profileSubmitGate.confirmationOpen || undefined} aria-hidden={profileSubmitGate.confirmationOpen || undefined} className="mt-5 grid gap-5 sm:grid-cols-2">
+                        <FormField id="profile-name" name="name" label="Name" value={profile.data.name} onChange={(event) => profile.setData('name', event.target.value)} error={profile.errors.name} required />
+                        <FormField id="profile-email" name="email" label="Email address" type="email" value={profile.data.email} onChange={(event) => profile.setData('email', event.target.value)} error={profile.errors.email} required />
                         <div className="sm:col-span-2"><PrimaryButton className="mt-4" type="submit" disabled={profile.processing}>{profile.processing ? 'Saving...' : 'Save changes'}</PrimaryButton></div>
                     </form>
                 </FormSection>
@@ -152,11 +155,11 @@ export default function Edit({ user, passkeys = [], canManagePasskeys = false, p
 
             <Card>
                 <FormSection title="Update password" description="Use a strong password that you do not use elsewhere.">
-                    <form onSubmit={(event) => { event.preventDefault(); password.put('/password'); }} className="mt-5 grid gap-5 sm:grid-cols-2">
-                        <FormField id="current-password" label="Current password" type="password" value={password.data.current_password} onChange={(event) => password.setData('current_password', event.target.value)} error={password.errors.current_password} required />
+                    <form ref={passwordSubmitGate.formRef} onSubmit={passwordSubmitGate.handleSubmit} inert={passwordSubmitGate.confirmationOpen || undefined} aria-hidden={passwordSubmitGate.confirmationOpen || undefined} className="mt-5 grid gap-5 sm:grid-cols-2">
+                        <FormField id="current-password" name="current_password" label="Current password" type="password" value={password.data.current_password} onChange={(event) => password.setData('current_password', event.target.value)} error={password.errors.current_password} required />
                         <div className="hidden sm:block" />
-                        <FormField id="new-password" label="New password" type="password" value={password.data.password} onChange={(event) => password.setData('password', event.target.value)} error={password.errors.password} required />
-                        <FormField id="confirm-new-password" label="Confirm new password" type="password" value={password.data.password_confirmation} onChange={(event) => password.setData('password_confirmation', event.target.value)} error={password.errors.password_confirmation} required />
+                        <FormField id="new-password" name="password" label="New password" type="password" value={password.data.password} onChange={(event) => password.setData('password', event.target.value)} error={password.errors.password} required />
+                        <FormField id="confirm-new-password" name="password_confirmation" label="Confirm new password" type="password" value={password.data.password_confirmation} onChange={(event) => password.setData('password_confirmation', event.target.value)} error={password.errors.password_confirmation} required />
                         <div className="sm:col-span-2"><PrimaryButton className="mt-4" type="submit" disabled={password.processing}>{password.processing ? 'Saving...' : 'Save password'}</PrimaryButton></div>
                     </form>
                 </FormSection>
@@ -171,6 +174,8 @@ export default function Edit({ user, passkeys = [], canManagePasskeys = false, p
         <ConfirmDialog open={confirmingDeletion} title="Delete your account?" message="This action permanently deletes your account. Enter your current password to confirm." confirmLabel="Delete account" onCancel={() => setConfirmingDeletion(false)} onConfirm={() => remove.delete('/profile', { onSuccess: () => setConfirmingDeletion(false) })} processing={remove.processing}>
             <FormField id="delete-password" label="Current password" type="password" value={remove.data.password} onChange={(event) => remove.setData('password', event.target.value)} error={remove.errors.password} required />
         </ConfirmDialog>
+        <ConfirmedSubmitDialog gate={profileSubmitGate} title="Save profile information?" message="This updates the displayed name and email address for your account." confirmLabel="Save changes" processing={profile.processing} />
+        <ConfirmedSubmitDialog gate={passwordSubmitGate} title="Update your password?" message="This applies the new password after the current password and confirmation are validated." confirmLabel="Save password" processing={password.processing} />
         <ConfirmDialog
             open={Boolean(passkeyRevokeConfirmation)}
             title="Revoke passkey"

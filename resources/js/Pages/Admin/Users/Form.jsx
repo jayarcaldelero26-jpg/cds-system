@@ -7,6 +7,7 @@ import Card from '../../../Components/Card';
 import PageHeader from '../../../Components/PageHeader';
 import PrimaryButton from '../../../Components/PrimaryButton';
 import FormField from '../../../Components/FormField';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 
 export default function Form({ title, user, operationalGroups = [], protectedAreas = [], offices = [], accountRoles = [], canManageProtectedAreas = false }) {
     const isEdit = Boolean(user);
@@ -36,6 +37,13 @@ export default function Form({ title, user, operationalGroups = [], protectedAre
     }
     const selectedPamoArea = pamoAreaOptions.find((area) => String(area.id) === String(form.data.protected_area_id));
 
+    const submit = event => {
+        event.preventDefault();
+        if (form.processing) return;
+        isEdit ? form.patch('/admin/users/' + user.id) : form.post('/admin/users');
+    };
+    const submitGate = useConfirmedFormSubmit({ processing: form.processing, onSubmit: submit });
+
     const setOperationalGroup = (groupValue) => {
         const group = operationalGroups.find((item) => item.value === groupValue);
         form.setData((current) => ({
@@ -59,7 +67,7 @@ export default function Form({ title, user, operationalGroups = [], protectedAre
             <PageHeader title={title} description={isEdit ? 'Update the account role, user category, and organizational scope.' : 'Create a User or Super Admin account with explicit organizational scope.'} />
             <div className="cds-action-row">{isEdit && <><span className={user.is_approved ? 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800' : 'inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800'}>{user.is_approved ? 'Approved' : 'Pending approval'}</span><span className={user.is_active ? 'inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800' : 'inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700'}>{user.is_active ? 'Active' : 'Inactive'}</span></>}<Link href="/admin/users" className="cds-page-action inline-flex items-center border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100">Back to users</Link></div>
             <Card className="mt-6 max-w-3xl">
-                <form onSubmit={(event) => { event.preventDefault(); isEdit ? form.patch('/admin/users/' + user.id) : form.post('/admin/users'); }} className="space-y-6">
+                <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-6">
                     <div className="grid gap-5 sm:grid-cols-2">
                         <FormField id="name" label="Name" value={form.data.name} onChange={(event) => form.setData('name', event.target.value)} error={form.errors.name} required />
                         <FormField id="email" label="Email address" type="email" value={form.data.email} onChange={(event) => form.setData('email', event.target.value)} error={form.errors.email} required />
@@ -112,6 +120,7 @@ export default function Form({ title, user, operationalGroups = [], protectedAre
                     </div>
                 </form>
             </Card>
+            <ConfirmedSubmitDialog gate={submitGate} title={isEdit ? 'Save account and access changes?' : 'Create this user account?'} message="This saves the displayed account details and assigned organizational access." confirmLabel={isEdit ? 'Save Account' : 'Create User'} processing={form.processing} />
         </AuthenticatedLayout>
     );
 }

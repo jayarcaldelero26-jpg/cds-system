@@ -1,7 +1,7 @@
 import { Icon } from '@iconify/react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
-import AuthField from '../../Components/AuthField';
+import AuthField, { PasswordVisibilityToggle } from '../../Components/AuthField';
 import AuthLayout from '../../Layouts/AuthLayout';
 import SuccessDialog from '../../Components/SuccessDialog';
 
@@ -70,14 +70,7 @@ export default function Login() {
                             autoComplete="current-password"
                             required
                         >
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword((visible) => !visible)}
-                                className="inline-flex rounded-lg p-1.5 text-emerald-800 transition hover:bg-emerald-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-emerald-700 dark:text-emerald-300 dark:hover:bg-emerald-950"
-                                aria-label={showPassword ? 'Hide password' : 'Show password'}
-                             data-cds-action="true" data-cds-action-variant="primary">
-                                <Icon icon={showPassword ? 'lucide:eye-off' : 'lucide:eye'} width="18" height="18" aria-hidden="true" />
-                            </button>
+                            <PasswordVisibilityToggle visible={showPassword} onToggle={() => setShowPassword(value => !value)} />
                         </AuthField>
                         <div className="mt-1.5 flex justify-end">
                             <Link href="/forgot-password" className="rounded text-xs font-semibold text-emerald-800 transition hover:text-emerald-950 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300">

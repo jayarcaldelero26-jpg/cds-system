@@ -238,6 +238,7 @@ class HandleInertiaRequests extends Middleware
 
                 // Reports (CDS ra)
                 'canViewReports' => ($canBrowseConservation || $canBrowseDevelopment) && !$isMes && $can('reports.view'),
+                'canViewCalendar' => $can('calendar.view'),
                 'canViewSubmissionTracking' => $organization->canViewSubmissionTracking($user),
                 'canBrowseConservationModules' => $canBrowseConservation,
                 'canBrowseDevelopmentModules' => $canBrowseDevelopment,

@@ -5,6 +5,7 @@ import FloatingSelect from '@/Components/Form/FloatingSelect';
 import UtilityIconButton from '@/Components/UtilityIconButton';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import { groupTasksByDate, groupTasksByMonth } from '@/Components/Calendar/calendarTaskRanges.mjs';
 
 const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
@@ -35,10 +36,11 @@ const PROGRAM_AREA_GROUPS = {
 
 export default function BusinessCalendarMonth({
     view = 'month', year, month, filters = {}, modules = [], protectedAreas = [], movEvents = [],
-    yearSummary = null, nonWorkingDays = [], onSelectMov, onSelectHoliday, onAdd, canManage = false,
+    yearSummary = null, nonWorkingDays = [], tasks = [], taskStorageReady = false, onSelectMov, onSelectHoliday, onSelectTask, onAdd, onAddTask, canManage = false,
 }) {
     const [showMovs, setShowMovs] = useState(true);
     const [showHistorical, setShowHistorical] = useState(true);
+    const [showTasks, setShowTasks] = useState(true);
     const [moreDate, setMoreDate] = useState(null);
     const parsedMonth = parseMonth(month);
     const selectedYear = Number(year || parsedMonth.year);
@@ -46,6 +48,8 @@ export default function BusinessCalendarMonth({
     const days = useMemo(() => monthDays(parsedMonth.year, parsedMonth.index), [parsedMonth.year, parsedMonth.index]);
     const movByDate = useMemo(() => groupBy(movEvents, 'event_date'), [movEvents]);
     const holidaysByDate = useMemo(() => groupBy(nonWorkingDays, 'date'), [nonWorkingDays]);
+    const tasksByDate = useMemo(() => days.length ? groupTasksByDate(tasks, days[0].key, days[days.length - 1].key) : {}, [tasks, days]);
+    const tasksByMonth = useMemo(() => groupTasksByMonth(tasks, selectedYear), [tasks, selectedYear]);
     const today = dateKey(new Date());
 
     const navigate = next => {
@@ -63,7 +67,7 @@ export default function BusinessCalendarMonth({
             preserveState: true,
             preserveScroll: true,
             replace: true,
-            only: ['view', 'year', 'month', 'filters', 'movEvents', 'yearSummary', 'nonWorkingDays'],
+            only: ['view', 'year', 'month', 'filters', 'movEvents', 'yearSummary', 'nonWorkingDays', 'tasks', 'taskStorageReady', 'taskRangeReady'],
         });
     };
     const openMonth = targetMonth => navigate({ view: 'month', month: `${selectedYear}-${String(targetMonth).padStart(2, '0')}` });
@@ -79,11 +83,15 @@ export default function BusinessCalendarMonth({
                     setShowMovs={setShowMovs}
                     showHistorical={showHistorical}
                     setShowHistorical={setShowHistorical}
+                    showTasks={showTasks}
+                    setShowTasks={setShowTasks}
                     chooseModule={module => navigate({ module })}
                     chooseProtectedArea={protected_area_id => navigate({ protected_area_id })}
                     clearFilters={() => navigate({ module: '', protected_area_id: '' })}
                     canManage={canManage}
                     onAdd={onAdd}
+                    canCreateTasks={taskStorageReady}
+                    onAddTask={onAddTask}
                 />
             </aside>
             <div className="min-w-0 flex-1 bg-slate-50/45 px-3 py-3 dark:bg-gray-950/20 sm:px-4 sm:py-4">
@@ -98,8 +106,8 @@ export default function BusinessCalendarMonth({
                         setView={targetView => navigate(targetView === 'year' ? { view: 'year', year: selectedYear } : { view: 'month', month })}
                     />
                     {view === 'year'
-                        ? <YearView year={selectedYear} selectedMonth={selectedMonth} summary={yearSummary} nonWorkingDays={nonWorkingDays} showMovs={showMovs} showHistorical={showHistorical} onOpenMonth={openMonth} />
-                        : <MonthView days={days} today={today} movByDate={movByDate} holidaysByDate={holidaysByDate} showMovs={showMovs} showHistorical={showHistorical} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={setMoreDate} />}
+                        ? <YearView year={selectedYear} selectedMonth={selectedMonth} summary={yearSummary} nonWorkingDays={nonWorkingDays} tasksByMonth={tasksByMonth} showMovs={showMovs} showHistorical={showHistorical} showTasks={showTasks} onOpenMonth={openMonth} onSelectTask={onSelectTask} />
+                        : <MonthView days={days} today={today} movByDate={movByDate} holidaysByDate={holidaysByDate} tasksByDate={tasksByDate} showMovs={showMovs} showHistorical={showHistorical} showTasks={showTasks} canManage={canManage} canCreateTasks={taskStorageReady} onAdd={onAdd} onAddTask={onAddTask} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onSelectTask={onSelectTask} onMore={setMoreDate} />}
                 </div>
             </div>
         </div>
@@ -107,7 +115,7 @@ export default function BusinessCalendarMonth({
     </section>;
 }
 
-export function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, showHistorical, setShowHistorical, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd }) {
+export function FilterRail({ modules, filters, protectedAreas, showMovs, setShowMovs, showHistorical, setShowHistorical, showTasks, setShowTasks, chooseModule, chooseProtectedArea, clearFilters, canManage, onAdd, canCreateTasks, onAddTask }) {
     return <div className="flex w-full flex-col sm:grid sm:grid-cols-2 sm:gap-5 xl:min-h-[520px] xl:flex-1 xl:flex xl:flex-col xl:gap-0">
         <div className="xl:mb-6">
             <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-900/65 dark:text-emerald-300/70">Show on calendar</p>
@@ -119,6 +127,10 @@ export function FilterRail({ modules, filters, protectedAreas, showMovs, setShow
                 <input type="checkbox" checked={showHistorical} onChange={event => setShowHistorical(event.target.checked)} className="h-3.5 w-3.5 rounded border-amber-400 text-amber-700 focus:ring-amber-600 dark:border-amber-700 dark:bg-gray-800" />
                 Historical reports
             </label>
+            {canCreateTasks && <label className="mt-2 flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-slate-700 dark:text-gray-200">
+                <input type="checkbox" checked={showTasks} onChange={event => setShowTasks(event.target.checked)} className="h-3.5 w-3.5 rounded border-sky-400 text-sky-700 focus:ring-sky-600 dark:border-sky-700 dark:bg-gray-800" />
+                Calendar tasks
+            </label>}
         </div>
         <div className="mt-5 sm:col-span-2 xl:mb-6 xl:mt-0">
             <FilterToolbar label="Calendar filters" chips={[
@@ -137,11 +149,9 @@ export function FilterRail({ modules, filters, protectedAreas, showMovs, setShow
                 </div>
             </FilterToolbar>
         </div>
-        {canManage && <div className="mt-6 border-t border-emerald-100/90 pt-4 sm:col-span-2 xl:mt-auto">
-            <button type="button" onClick={() => onAdd('')} title="Add Non-Working Day" aria-label="Add Non-Working Day" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-md transition hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary">
-                <PlusIcon />
-            </button>
-            <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-900/65 dark:text-emerald-300/70">Non-Working Day</span>
+        {(canManage || canCreateTasks) && <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-emerald-100/90 pt-4 sm:col-span-2 xl:mt-auto">
+            {canCreateTasks && <div><button type="button" onClick={() => onAddTask('')} title="Create Calendar Task" aria-label="Create Calendar Task" className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-sky-700 bg-white text-sky-800 shadow-sm transition hover:bg-sky-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 focus-visible:ring-offset-2 dark:border-sky-500 dark:bg-gray-900 dark:text-sky-300 dark:hover:bg-sky-950/40"><TaskIcon /></button><span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-[0.1em] text-sky-900/70 dark:text-sky-300">Task / Schedule</span></div>}
+            {canManage && <div><button type="button" onClick={() => onAdd('')} title="Add Non-Working Day" aria-label="Add Non-Working Day" className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-md transition hover:brightness-110 hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 focus-visible:ring-offset-2" data-cds-action="true" data-cds-action-variant="primary"><PlusIcon /></button><span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-900/65 dark:text-emerald-300/70">Non-Working Day</span></div>}
         </div>}
     </div>;
 }
@@ -159,13 +169,13 @@ function CalendarToolbar({ view, month, year, shiftMonth, shiftYear, goToday, se
         </div>
         <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={goToday} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${neutralViewClass}`}>Today</button>
-            <button type="button" onClick={() => setView('month')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${monthMode ? 'cds-tab-active border border-green-700 bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Month</button>
-            <button type="button" onClick={() => setView('year')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${!monthMode ? 'cds-tab-active border border-green-700 bg-gradient-to-r from-emerald-600 to-green-700 text-white shadow-sm' : neutralViewClass}`}>Year</button>
+            <button type="button" aria-pressed={monthMode} onClick={() => setView('month')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${monthMode ? 'cds-tab-active shadow-sm' : neutralViewClass}`}>Month</button>
+            <button type="button" aria-pressed={!monthMode} onClick={() => setView('year')} className={`h-10 rounded-lg px-3.5 text-xs font-bold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${!monthMode ? 'cds-tab-active shadow-sm' : neutralViewClass}`}>Year</button>
         </div>
     </header>;
 }
 
-function MonthView({ days, today, movByDate, holidaysByDate, showMovs, showHistorical, canManage, onAdd, onSelectMov, onSelectHoliday, onMore }) {
+function MonthView({ days, today, movByDate, holidaysByDate, tasksByDate, showMovs, showHistorical, showTasks, canManage, canCreateTasks, onAdd, onAddTask, onSelectMov, onSelectHoliday, onSelectTask, onMore }) {
     return <>
         <div className="overflow-x-auto px-2 pb-2 custom-table-scrollbar sm:px-3 sm:pb-3">
             <div className="min-w-[840px]">
@@ -173,7 +183,7 @@ function MonthView({ days, today, movByDate, holidaysByDate, showMovs, showHisto
                     {WEEKDAYS.map(day => <div key={day} className="px-2 py-1.5 text-center text-[10px] font-semibold tracking-[0.12em] text-slate-700 dark:text-gray-300">{day}</div>)}
                 </div>
                 <div className="grid grid-cols-7 gap-1.5 sm:gap-2">
-                    {days.map(day => <CalendarDay key={day.key} day={day} today={today === day.key} movEvents={(movByDate[day.key] || []).filter(event => event.is_historical ? showHistorical : showMovs)} holidays={holidaysByDate[day.key] || []} canManage={canManage} onAdd={onAdd} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onMore={() => onMore(day.key)} />)}
+                    {days.map(day => <CalendarDay key={day.key} day={day} today={today === day.key} movEvents={(movByDate[day.key] || []).filter(event => event.is_historical ? showHistorical : showMovs)} holidays={holidaysByDate[day.key] || []} tasks={showTasks ? tasksByDate[day.key] || [] : []} canManage={canManage} canCreateTasks={canCreateTasks} onAdd={onAdd} onAddTask={onAddTask} onSelectMov={onSelectMov} onSelectHoliday={onSelectHoliday} onSelectTask={onSelectTask} onMore={() => onMore(day.key)} />)}
                 </div>
             </div>
         </div>
@@ -181,7 +191,7 @@ function MonthView({ days, today, movByDate, holidaysByDate, showMovs, showHisto
     </>;
 }
 
-function CalendarDay({ day, today, movEvents, holidays, canManage, onAdd, onSelectMov, onSelectHoliday, onMore }) {
+function CalendarDay({ day, today, movEvents, holidays, tasks = [], canManage, canCreateTasks, onAdd, onAddTask, onSelectMov, onSelectHoliday, onSelectTask, onMore }) {
     const visible = movEvents.slice(0, 3);
     const remaining = movEvents.length - visible.length;
     const surface = day.inMonth ? 'border-slate-200/80 bg-white/80 shadow-sm hover:shadow-md dark:border-gray-700 dark:bg-gray-900/85' : 'border-slate-200/55 bg-slate-100/65 opacity-80 dark:border-gray-800 dark:bg-gray-950/55';
@@ -189,10 +199,11 @@ function CalendarDay({ day, today, movEvents, holidays, canManage, onAdd, onSele
     return <div className={`group relative min-h-[118px] rounded-xl border p-2.5 transition duration-150 ${surface} ${today ? 'border-emerald-400 bg-emerald-50/75 shadow-[0_0_0_1px_rgba(16,185,129,0.12)] dark:border-emerald-700 dark:bg-emerald-950/20' : ''}`}>
         <div className="mb-2 flex items-center justify-between">
             <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-xs font-semibold ${today ? 'bg-gradient-to-br from-emerald-600 to-green-700 text-white shadow-sm' : day.inMonth ? 'text-slate-800 dark:text-gray-100' : 'text-slate-400 dark:text-gray-600'}`}>{day.number}</span>
-            {canManage && day.inMonth && <CalendarAddButton onAdd={onAdd} date={day.key} label={`Add non-working day on ${formatReportDate(day.key)}`} compact="tight" className="invisible rounded-md text-emerald-700 group-hover:visible focus:visible hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40"><PlusIcon /></CalendarAddButton>}
+            {day.inMonth && <div className="flex items-center gap-0.5">{canCreateTasks && <CalendarAddButton onAdd={onAddTask} date={day.key} label={`Create task on ${formatReportDate(day.key)}`} compact="tight" className="invisible rounded-md text-sky-700 group-hover:visible focus:visible hover:bg-sky-50 hover:text-sky-800 dark:text-sky-300 dark:hover:bg-sky-950/40"><TaskIcon /></CalendarAddButton>}{canManage && <CalendarAddButton onAdd={onAdd} date={day.key} label={`Add non-working day on ${formatReportDate(day.key)}`} compact="tight" className="invisible rounded-md text-emerald-700 group-hover:visible focus:visible hover:bg-emerald-50 hover:text-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/40"><PlusIcon /></CalendarAddButton>}</div>}
         </div>
         <div className="space-y-1">
             {holidays.map(holiday => <HolidayChip key={holiday.id} holiday={holiday} onSelect={onSelectHoliday} />)}
+            {tasks.map(task => <CalendarTaskChip key={task.id} task={task} onSelect={onSelectTask} />)}
             {visible.map(event => <MovChip key={event.source_key} event={event} onSelect={onSelectMov} />)}
             {remaining > 0 && <button type="button" onClick={onMore} className="block px-1 text-[10px] font-semibold text-emerald-800 transition hover:text-emerald-950 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-emerald-300">+{remaining} more</button>}
         </div>
@@ -211,7 +222,19 @@ function MovChip({ event, onSelect }) {
     return <button type="button" onClick={() => onSelect(event)} title={`${label} — ${event.title}${event.calendar_basis ? ` · ${event.calendar_basis}` : ''}`} aria-label={`${event.is_historical ? 'Historical report' : 'Submitted MOV'}: ${event.title}; ${event.calendar_basis || 'PENRO receipt date'} ${formatReportDate(event.event_date)}`} className={`block h-[22px] w-full truncate rounded-md bg-gradient-to-r px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 hover:shadow focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 ${style.chip}`}>{label}</button>;
 }
 
-function YearView({ year, selectedMonth, summary, nonWorkingDays, showMovs, showHistorical, onOpenMonth }) {
+function CalendarTaskChip({ task, onSelect }) {
+    const office = task.creator_attribution?.office_name || 'Office not assigned';
+    const time = task.is_all_day ? 'All day' : [task.start_time, task.end_time].filter(Boolean).join('–');
+    const label = [task.status === 'done' ? 'Done' : task.status === 'cancelled' ? 'Cancelled' : 'Task', time, task.title, office].filter(Boolean).join(' - ');
+    const statusStyle = task.status === 'done' ? 'bg-slate-600' : task.status === 'cancelled' ? 'bg-slate-600 line-through' : 'bg-sky-700';
+    return <button type="button" onClick={() => onSelect(task)} title={label + ' - ' + office} aria-label={`Calendar task: ${label}; ${office}`} className={`block h-[22px] w-full truncate rounded-md px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 ${statusStyle}`}>{label} <span className="sr-only">{office}</span></button>;
+}
+
+function TaskIcon() {
+    return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2" /><path d="M8 3.5v3M16 3.5v3M3.5 9.5h17M8 14h3M8 17h7" /></svg>;
+}
+
+export function YearView({ year, selectedMonth, summary, nonWorkingDays, tasksByMonth = {}, showMovs, showHistorical, showTasks, onOpenMonth, onSelectTask }) {
     const months = summary?.months || {};
     const overview = summary?.overview || {};
     const holidaysByMonth = groupHolidaysByMonth(nonWorkingDays);
@@ -227,13 +250,19 @@ function YearView({ year, selectedMonth, summary, nonWorkingDays, showMovs, show
             </div>
         </div>
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {Array.from({ length: 12 }, (_, index) => <YearMiniCalendar key={index} year={year} month={index + 1} selected={selectedMonth === index + 1} eventDays={months[String(index + 1).padStart(2, '0')]?.days || {}} holidayDays={holidaysByMonth[index + 1] || {}} showMovs={showMovs} showHistorical={showHistorical} onOpenMonth={onOpenMonth} />)}
+            {Array.from({ length: 12 }, (_, index) => {
+                const monthKey = String(index + 1).padStart(2, '0');
+                return <YearMiniCalendar key={index} year={year} month={index + 1} selected={selectedMonth === index + 1} eventDays={months[monthKey]?.days || {}} holidayDays={holidaysByMonth[index + 1] || {}} tasks={tasksByMonth[monthKey] || []} showMovs={showMovs} showHistorical={showHistorical} showTasks={showTasks} onOpenMonth={onOpenMonth} onSelectTask={onSelectTask} />;
+            })}
         </div>
     </div>;
 }
 
-export function YearMiniCalendar({ year, month, selected = false, eventDays, holidayDays, showMovs, showHistorical = false, onOpenMonth }) {
+export function YearMiniCalendar({ year, month, selected = false, eventDays, holidayDays, tasks = [], showMovs, showHistorical = false, showTasks = true, onOpenMonth, onSelectTask }) {
     const calendarDays = miniMonthDays(year, month - 1);
+    const monthStartKey = `${year}-${String(month).padStart(2, '0')}-01`;
+    const monthEndDay = new Date(year, month, 0).getDate();
+    const taskDays = groupTasksByDate(tasks, monthStartKey, `${year}-${String(month).padStart(2, '0')}-${String(monthEndDay).padStart(2, '0')}`);
     const title = new Intl.DateTimeFormat('en-US', { month: 'long' }).format(new Date(year, month - 1, 1)).toUpperCase();
     const readableTitle = `${title[0]}${title.slice(1).toLowerCase()}`;
     const headingStyle = selected
@@ -250,8 +279,9 @@ export function YearMiniCalendar({ year, month, selected = false, eventDays, hol
                 if (!day) return <span key={`blank-${index}`} className="min-h-[28px]" aria-hidden="true" />;
                 const key = String(day).padStart(2, '0');
                 const markers = [
-                    ...(eventDays[key] || []).filter(event => event.is_historical ? showHistorical : showMovs).map(getCalendarEventGroup),
-                    ...(holidayDays[key] || []).map(getCalendarEventGroup),
+                    ...(eventDays[key] || []).filter(event => event.is_historical ? showHistorical : showMovs).map(group => ({ group: getCalendarEventGroup(group) })),
+                    ...(holidayDays[key] || []).map(holiday => ({ group: getCalendarEventGroup(holiday) })),
+                    ...(showTasks ? (taskDays[`${year}-${String(month).padStart(2, '0')}-${key}`] || []).map(() => ({ kind: 'task' })) : []),
                 ];
                 const visible = markers.slice(0, 3);
                 const remaining = markers.length - visible.length;
@@ -260,12 +290,21 @@ export function YearMiniCalendar({ year, month, selected = false, eventDays, hol
                 return <button key={key} type="button" disabled={!active} onClick={() => onOpenMonth(month)} title={active ? `Open ${title} ${day}` : undefined} className={`flex min-h-[28px] flex-col items-center rounded-md pt-0.5 text-[10px] font-medium transition ${active ? 'cursor-pointer text-slate-800 hover:bg-emerald-50 hover:text-emerald-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-100 dark:hover:bg-emerald-950/30' : 'cursor-default text-slate-500 dark:text-gray-500'}`}>
                     <span>{day}</span>
                     {active && <span className="mt-0.5 flex h-2.5 items-center justify-center gap-0.5">
-                        {visible.map((group, markerIndex) => <i key={`${group}-${markerIndex}`} className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br ${getCalendarGroupStyle(group).chip}`} aria-hidden="true" />)}
+                        {visible.map((marker, markerIndex) => marker.kind === 'task'
+                            ? <i key={`task-${markerIndex}`} className="h-1.5 w-1.5 rounded-sm bg-sky-700" aria-hidden="true" />
+                            : <i key={`${marker.group}-${markerIndex}`} className={`h-1.5 w-1.5 rounded-full bg-gradient-to-br ${getCalendarGroupStyle(marker.group).chip}`} aria-hidden="true" />)}
                         {remaining > 0 && <span className="text-[7px] font-bold leading-none text-slate-500 dark:text-gray-400">+{remaining}</span>}
                     </span>}
                 </button>;
             })}
         </div>
+        {showTasks && tasks.length > 0 && <div role="group" aria-label={`${tasks.length} Calendar tasks in ${readableTitle}`} className="mt-3 border-t border-slate-100 pt-2.5 dark:border-gray-800">
+            <p className="mb-1.5 text-[10px] font-semibold text-sky-800 dark:text-sky-300">{tasks.length} Calendar task{tasks.length === 1 ? '' : 's'}</p>
+            <div className="space-y-1">
+                {tasks.slice(0, 4).map(task => <CalendarTaskChip key={task.id} task={task} onSelect={onSelectTask} />)}
+                {tasks.length > 4 && <button type="button" onClick={() => onOpenMonth(month)} className="block w-full rounded-md px-2 py-1 text-left text-[10px] font-semibold text-sky-800 transition hover:bg-sky-50 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 dark:text-sky-300 dark:hover:bg-sky-950/40">Open month for all {tasks.length} tasks</button>}
+            </div>
+        </div>}
     </article>;
 }
 
@@ -273,6 +312,7 @@ export function CalendarLegend() {
     return <div role="group" aria-label="Calendar legend" className="mx-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-[11px] font-medium leading-4 text-slate-700 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/80 dark:text-gray-200 sm:mx-3 sm:mb-3">
         <span className="shrink-0 font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-gray-400">Legend</span>
         <ul aria-label="Calendar event categories" className="flex min-w-0 flex-1 list-none flex-wrap items-center gap-x-3 gap-y-1 p-0">
+            <li aria-label="Calendar task" title="Private task or schedule created by you" className="inline-flex min-w-0 items-center gap-1.5"><span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-sky-700" aria-hidden="true" /><span>Calendar task</span></li>
             {LEGEND_GROUPS.map(group => {
                 const style = getCalendarGroupStyle(group);
                 return <li key={group} aria-label={style.description ? `Non-working-day group: ${style.description}` : style.label} title={style.description || style.label} className="inline-flex min-w-0 items-center gap-1.5"><span className={`h-2.5 w-2.5 shrink-0 rounded-full bg-gradient-to-br ${style.chip}`} aria-hidden="true" /><span>{style.label}</span></li>;

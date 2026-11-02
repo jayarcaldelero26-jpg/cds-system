@@ -61,6 +61,10 @@ class AppServiceProvider extends ServiceProvider
         Gate::define('submission-tracking.view', fn ($user) =>
             app(\App\Services\Authorization\OrganizationalAccessService::class)->canViewSubmissionTracking($user));
 
+        Gate::define('calendar.view', fn ($user): bool =>
+            app(\App\Services\Authorization\OrganizationalAccessService::class)->canViewCalendar($user));
+        Gate::policy(\App\Models\CalendarTask::class, \App\Policies\CalendarTaskPolicy::class);
+
         Gate::define('pamo-native-reports.view', function ($user): bool {
             $workflow = (string) request()->route('workflow');
             $sources = app(\App\Services\Pamo\PamoNativeSourceRegistry::class);
@@ -95,6 +99,9 @@ class AppServiceProvider extends ServiceProvider
             app(\App\Services\Authorization\OrganizationalAccessService::class)->isGlobal($user));
 
         Gate::before(function ($user, $ability, array $arguments) {
+            if ($ability === 'calendar.view' && (! $user->is_active || ! $user->is_approved)) {
+                return false;
+            }
             // User deletion and deactivation have non-bypassable policy
             // invariants (self-action and administrator safety). Let the
             // UserPolicy methods decide these actions.

@@ -1,4 +1,5 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { Link, useForm } from '@inertiajs/react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
@@ -23,6 +24,8 @@ export default function Edit({ issue, protectedAreas, statuses }) {
   };
 
   const errorClass = "text-xs text-red-600 dark:text-red-400 mt-1";
+    const submitGate = useConfirmedFormSubmit({ processing, onSubmit: submit });
+
 
   return (
     <AuthenticatedLayout title="Edit Issue Monitoring Record">
@@ -38,7 +41,7 @@ export default function Edit({ issue, protectedAreas, statuses }) {
 
             <div className="mt-6 max-w-3xl">
                 <Card>
-                    <form onSubmit={submit} className="space-y-6">
+                    <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-6">
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Protected Area */}
                             <div className="md:col-span-2">
@@ -108,6 +111,7 @@ export default function Edit({ issue, protectedAreas, statuses }) {
                     </form>
                 </Card>
             </div>
-        </AuthenticatedLayout>);
+                <ConfirmedSubmitDialog gate={submitGate} title="Save issue record changes?" message="This submits the displayed issue record changes for server validation." confirmLabel="Save Changes" processing={processing} />
+</AuthenticatedLayout>);
 
 }

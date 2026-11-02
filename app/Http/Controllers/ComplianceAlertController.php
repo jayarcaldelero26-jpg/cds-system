@@ -17,6 +17,7 @@ use App\Services\Compliance\ComplianceRichTextSanitizer;
 use App\Services\Compliance\OverdueReport;
 use App\Services\Compliance\OverdueReportService;
 use App\Services\CalendarMovEventService;
+use App\Services\Calendar\CalendarTaskService;
 use App\Services\BusinessCalendarService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
@@ -199,7 +200,7 @@ class ComplianceAlertController extends Controller
         ]);
     }
 
-    public function businessCalendar(Request $request, CalendarMovEventService $calendarEvents): Response
+    public function businessCalendar(Request $request, CalendarMovEventService $calendarEvents, CalendarTaskService $calendarTasks): Response
     {
         $view = $request->string('view')->toString() === 'year' ? 'year' : 'month';
         $monthValue = $request->string('month')->toString();
@@ -248,6 +249,13 @@ class ComplianceAlertController extends Controller
         if ($yearSummary !== null) {
             $yearSummary['overview']['non_working_days'] = $nonWorkingDays->count();
         }
+        $taskStart = $view === 'year'
+            ? CarbonImmutable::create($year, 1, 1, 0, 0, 0, BusinessCalendarService::TIMEZONE)
+            : $month->startOfMonth()->startOfWeek();
+        $taskEnd = $view === 'year'
+            ? CarbonImmutable::create($year, 12, 31, 0, 0, 0, BusinessCalendarService::TIMEZONE)
+            : $month->endOfMonth()->endOfWeek();
+        $tasks = $calendarTasks->forRange($request->user(), $taskStart, $taskEnd);
 
         return Inertia::render('Calendar/Index', [
             'view' => $view,
@@ -259,6 +267,9 @@ class ComplianceAlertController extends Controller
             'movEvents' => $view === 'month' ? $calendarEvents->events($request->user(), $month, $module, $protectedAreaId) : [],
             'yearSummary' => $yearSummary,
             'nonWorkingDays' => $nonWorkingDays,
+            'tasks' => $tasks,
+            'taskStorageReady' => $calendarTasks->isReady(),
+            'taskRangeReady' => $calendarTasks->rangeReady(),
         ]);
     }
 

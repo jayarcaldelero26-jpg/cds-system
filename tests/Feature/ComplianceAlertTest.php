@@ -619,9 +619,11 @@ test('Compliance Alerts No Recipient Mapping card counts current candidates and 
         ->where('summary.overdue_reports', 2)
         ->where('summary.unmapped_recipients', 1));
     $jsx = file_get_contents(resource_path('js/Pages/ComplianceAlerts/Index.jsx'));
-    preg_match('/<Card label="No Recipient Mapping"[^>]*\/>/', $jsx, $card);
+    preg_match('/<Card label="Unmapped Destinations"[\s\S]*?\/>/', $jsx, $card);
     expect($card[0] ?? '')
-        ->toContain('value={activeScope.summary?.unmapped_destinations ?? 0}')
+        ->toContain('value={summary.unmapped_destinations ?? 0}')
+        ->toContain('Current {isEngpScope ?')
+        ->toContain('activeScope.summary?.unmapped_destinations ?? 0')
         ->toContain('tone="red"')
         ->not->toMatch('/\bhelp\s*=/');
 });

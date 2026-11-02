@@ -5,7 +5,8 @@ import MapView from './Components/MapView';
 import { Head, Link, router, useForm } from '@inertiajs/react';
 import { normalizeSpatialFile } from '@/Utils/spatialUpload';
 import DatePicker from '@/Components/DatePicker';
-import ConfirmDialog from '@/Components/ConfirmDialog';
+import ConfirmDialog from '@/Components/ConfirmDialog';import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
+
 
 export default function BamsIndex({
   auth,
@@ -74,6 +75,7 @@ export default function BamsIndex({
     });
   };
 
+  const recordSubmitGate = useConfirmedFormSubmit({ processing: form.processing, onSubmit: submitRecord });
   const submitExcelImport = (e) => {
     e.preventDefault();
 
@@ -87,9 +89,10 @@ export default function BamsIndex({
       const normalized = await normalizeSpatialFile(spatialForm.data.spatial_file);
       spatialForm.transform(() => ({ protected_area_id: spatialForm.data.protected_area_id, layer_name: spatialForm.data.layer_name, spatial_geojson: JSON.stringify(normalized.geojson), source_format: normalized.source_format, original_filename: normalized.original_filename }));
       spatialForm.post(route('bams.store-spatial'), { preserveScroll: true, onSuccess: () => { spatialForm.reset(); setActiveTab('map'); } });
-    } catch (error) { spatialForm.setError('spatial_file', error.message); }
+    } catch (error) { spatialForm.setError('spatial_file', error.message); spatialImportGate.releaseRequest(); }
   };
 
+  const spatialImportGate = useConfirmedFormSubmit({ processing: spatialForm.processing, onSubmit: submitSpatialImport });
   const confirmDelete = () => {
     setShowDeleteConfirm(false);
     setRecordToDelete(null);
@@ -131,59 +134,59 @@ export default function BamsIndex({
 
 
                     {/* NAVIGATION TABS */}
-                    <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-3 no-print">
+                    <div className="flex flex-wrap gap-2 border-b border-gray-200 dark:border-gray-700 pb-3 no-print" role="group" aria-label="BAMS views">
 
-                        <button
-              onClick={() => setActiveTab('list')}
+                            <button
+              type="button" aria-pressed={activeTab === 'list'} onClick={() => setActiveTab('list')}
               className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
               activeTab === 'list' ?
-              'bg-green-700 text-white shadow-md' :
+              'cds-tab-active shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              } data-cds-action="true" data-cds-action-variant="primary">
+              }>
 
                             ðŸ“„ Database Records
                         </button>
 
                         {canCreate && <button
-              onClick={() => setActiveTab('add')}
+              type="button" aria-pressed={activeTab === 'add'} onClick={() => setActiveTab('add')}
               className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
               activeTab === 'add' ?
-              'bg-green-700 text-white shadow-md' :
+              'cds-tab-active shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              } data-cds-action="true" data-cds-action-variant="primary">
+              }>
 
                             âž• Encode Field Sheet
                         </button>}
 
                         <button
-              onClick={() => setActiveTab('map')}
+              type="button" aria-pressed={activeTab === 'map'} onClick={() => setActiveTab('map')}
               className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
               activeTab === 'map' ?
-              'bg-green-700 text-white shadow-md' :
+              'cds-tab-active shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              } data-cds-action="true" data-cds-action-variant="primary">
+              }>
 
                             ðŸ—ºï¸ Map View
                         </button>
 
                         {canCreate && <button
-              onClick={() => setActiveTab('excel-import')}
+              type="button" aria-pressed={activeTab === 'excel-import'} onClick={() => setActiveTab('excel-import')}
               className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
               activeTab === 'excel-import' ?
-              'bg-green-700 text-white shadow-md' :
+              'cds-tab-active shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              } data-cds-action="true" data-cds-action-variant="primary">
+              }>
 
                             ðŸ“Š Excel / CSV Import
                         </button>}
 
                         {canManageSpatial && <button
-              onClick={() => setActiveTab('spatial-import')}
+              type="button" aria-pressed={activeTab === 'spatial-import'} onClick={() => setActiveTab('spatial-import')}
               className={`px-4 py-2.5 rounded-xl font-bold text-xs transition-all shadow-xs ${
               activeTab === 'spatial-import' ?
-              'bg-green-700 text-white shadow-md' :
+              'cds-tab-active shadow-md' :
               'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700'}`
-              } data-cds-action="true" data-cds-action-variant="primary">
+              }>
 
                             ðŸŒ Spatial File Import
                         </button>}
@@ -334,7 +337,7 @@ export default function BamsIndex({
                                 </p>
                             </div>
 
-                            <form onSubmit={submitRecord} className="space-y-6">
+                            <form ref={recordSubmitGate.formRef} onSubmit={recordSubmitGate.handleSubmit} inert={recordSubmitGate.confirmationOpen || undefined} aria-hidden={recordSubmitGate.confirmationOpen || undefined} className="space-y-6">
 
                                 <div className="border border-gray-300 dark:border-gray-700 rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900/50 p-4 space-y-4">
 
@@ -884,7 +887,7 @@ export default function BamsIndex({
                             </p>
 
                             <form
-              onSubmit={submitSpatialImport}
+              ref={spatialImportGate.formRef} onSubmit={spatialImportGate.handleSubmit} inert={spatialImportGate.confirmationOpen || undefined} aria-hidden={spatialImportGate.confirmationOpen || undefined}
               className="space-y-5">
 
 
@@ -974,6 +977,8 @@ export default function BamsIndex({
 
                 </div>
             </div>
-        </AuthenticatedLayout>);
+                    <ConfirmedSubmitDialog gate={recordSubmitGate} title="Save this BAMS field record?" message="This submits the displayed field record for server validation." confirmLabel="Save Record" processing={form.processing} />
+            <ConfirmedSubmitDialog gate={spatialImportGate} title="Import this spatial layer?" message="This processes the selected spatial file and submits the normalized layer for server validation." confirmLabel="Import Layer" processing={spatialForm.processing} />
+</AuthenticatedLayout>);
 
 }

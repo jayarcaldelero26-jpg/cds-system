@@ -136,7 +136,7 @@ const allNavigation = [
     },
     finalArchivesNavigationItem,
     { label: 'Alerts', href: '/compliance-alerts', icon: 'alerts', permission: 'canViewComplianceAlerts', section: 'CDS' },
-    { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewReports', section: 'BOTH' },
+    { label: 'Calendar', href: '/admin/business-calendar', icon: 'calendar', permission: 'canViewCalendar', section: 'BOTH' },
 
     { label: 'Administration', heading: true, permission: 'canAccessAdministrationSection', section: 'BOTH' },
     { label: 'Office TAT', href: '/admin/office-tat', icon: 'chart', permission: 'canViewOfficeTat', section: 'BOTH' },
@@ -300,7 +300,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
         const isTrackingViewLink = child.href?.startsWith('/submission-tracking?view=');
         const childCommon = `${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
-            isChildActive ? isTrackingViewLink ? 'cds-submission-tracking-nav-tab border-l-2 border-green-200 shadow-md' : 'border-l-2 border-green-200 bg-gradient-to-r from-green-700 to-blue-900 text-white shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
+            isChildActive ? isTrackingViewLink ? 'cds-submission-tracking-nav-tab cds-tab-active border-l-2 border-green-200 shadow-md' : 'cds-tab-active border-l-2 border-green-200 shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
         }`;
         const href = child.externalConfig === 'engpIacGeneratorUrl' ? engpIacGeneratorUrl : child.href;
 
@@ -395,7 +395,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
                         const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-transform duration-150 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
                             active
-                                ? 'bg-gradient-to-r from-green-700 to-blue-900 text-white font-semibold ring-1 ring-inset ring-white/25'
+                                ? 'cds-tab-active font-semibold ring-1 ring-inset ring-white/25'
                                 : 'text-green-100/85 hover:bg-white/8 hover:text-white hover:-translate-y-px'
                         }`;
 

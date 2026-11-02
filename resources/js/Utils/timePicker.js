@@ -66,14 +66,15 @@ export function draftFromValue(value) {
 }
 
 /** Initialize a temporary picker draft without changing the committed value. */
-export function initialDraft(value, now = new Date()) {
-    return String(value ?? '').trim() ? draftFromValue(value) : currentDraft(value, now);
+export function initialDraft(value, now = new Date(), dateContext = '') {
+    return String(value ?? '').trim() ? draftFromValue(value) : currentDraft(value, now, dateContext);
 }
 
-export function currentDraft(value, now = new Date()) {
+export function currentDraft(value, now = new Date(), dateContext = '') {
     const current = applicationTimeParts(now);
     const original = parseTimeValue(value);
-    return { date: original.hasDate ? original.date : '', hasDate: original.hasDate, hour: hour12(current.hour24), minute: current.minute, period: current.hour24 >= 12 ? 'PM' : 'AM' };
+    const date = original.hasDate ? original.date : String(dateContext || '');
+    return { date, hasDate: original.hasDate || Boolean(date), hour: hour12(current.hour24), minute: current.minute, period: current.hour24 >= 12 ? 'PM' : 'AM' };
 }
 
 export function localDateTimeInputValue(value) {

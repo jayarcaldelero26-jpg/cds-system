@@ -6,7 +6,8 @@ import { useForm, router, usePage } from '@inertiajs/react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
-import ConfirmDialog from '../../Components/ConfirmDialog';
+import ConfirmDialog from '../../Components/ConfirmDialog';import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
+
 import AwsTable from './AwsTable';
 import AwsGraph from './AwsGraph';
 import AwsReportSubmissionTracker from './AwsReportSubmissionTracker';
@@ -53,6 +54,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
   const [previewUrl, setPreviewUrl] = useState(null);
   const [existingFile, setExistingFile] = useState(null);
+  const [reportMutationProcessing, setReportMutationProcessing] = useState(false);
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
@@ -165,12 +167,14 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
         _method: 'PUT'
       }, {
         forceFormData: true,
+        onStart: () => setReportMutationProcessing(true),
         onSuccess: () => {
           reset();
           setPreviewUrl(null);
           setExistingFile(null);
           setIsEditModalOpen(false);
-        }
+        },
+        onFinish: () => setReportMutationProcessing(false),
       });
     } else {
       post(route('aws.store'), {
@@ -185,6 +189,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
     }
   };
 
+  const reportSubmitGate = useConfirmedFormSubmit({ processing, onSubmit: submit });
   const handleImportSubmit = (e) => {
     e.preventDefault();
     importForm.post(route('aws.import'), {
@@ -196,6 +201,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
     });
   };
 
+  const importSubmitGate = useConfirmedFormSubmit({ processing: importForm.processing, onSubmit: handleImportSubmit });
   const promptDelete = (id) => {
     setDeletingId(id);
     setShowDeleteConfirm(true);
@@ -403,7 +409,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                         <div className="lg:col-span-7">
                             <Card padding="p-6 sm:p-8" className="border border-gray-100 dark:border-gray-800 shadow-xl rounded-2xl bg-white dark:bg-gray-900">
-                                <form onSubmit={submit} id="awsForm" className="space-y-6">
+                                <form ref={reportSubmitGate.formRef} onSubmit={reportSubmitGate.handleSubmit} inert={reportSubmitGate.confirmationOpen || undefined} aria-hidden={reportSubmitGate.confirmationOpen || undefined} id="awsForm" className="space-y-6">
                                     {Object.keys(errors).length > 0 &&
                 <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 space-y-1">
                                             <p className="font-bold">Please fix the following error(s):</p>
@@ -609,7 +615,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             <button type="button" onClick={() => setIsImportModalOpen(false)} className="rounded-lg p-1.5 text-xl text-gray-400 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:hover:bg-gray-800" aria-label="Close import modal">Ã—</button>
                         </div>
 
-                        <form onSubmit={handleImportSubmit} className="space-y-4">
+                        <form ref={importSubmitGate.formRef} onSubmit={importSubmitGate.handleSubmit} inert={importSubmitGate.confirmationOpen || undefined} aria-hidden={importSubmitGate.confirmationOpen || undefined} className="space-y-4">
                             <p className="text-xs text-gray-500">Upload CSV or XLSX monitoring data, up to 50 MB, 250,000 rows, 256 columns, 1 MB per cell, 4 MB per row, and 20,000 daily records.</p>
 
                             <div>
@@ -751,7 +757,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
 
                         <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 overflow-y-auto custom-table-scrollbar">
                             <div className="lg:col-span-6 space-y-5">
-                                <form onSubmit={submit} id="edit-aws-form" className="space-y-4">
+                                <form ref={reportSubmitGate.formRef} onSubmit={reportSubmitGate.handleSubmit} inert={reportSubmitGate.confirmationOpen || undefined} aria-hidden={reportSubmitGate.confirmationOpen || undefined} id="edit-aws-form" className="space-y-4">
                                     <div>
 
                                         <FloatingSelect id="aws-protected-area" label="Protected Area"
@@ -864,6 +870,8 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             {/* DELETE CONFIRMATION */}
             <ConfirmDialog open={showDeleteConfirm} variant="danger" title="Are you sure?" message="Do you really want to delete this record? This process cannot be undone." confirmLabel="Yes, Delete" onConfirm={confirmDelete} onCancel={() => setShowDeleteConfirm(false)} />
 
-        </AuthenticatedLayout>);
+            <ConfirmedSubmitDialog gate={reportSubmitGate} title={selectedRecord ? "Save AWS report changes?" : "Save this AWS report?"} message="This saves the displayed AWS report and selected attachment for server validation." confirmLabel={selectedRecord ? "Save Changes" : "Save Report"} processing={processing || reportMutationProcessing} />
+            <ConfirmedSubmitDialog gate={importSubmitGate} title="Import this AWS data file?" message="This uploads the selected data file for import under the displayed protected area." confirmLabel="Import Data" processing={importForm.processing} />
+</AuthenticatedLayout>);
 
 }

@@ -27,7 +27,7 @@ function fixtureEvents(count) {
         const day = String(index % 28 + 1).padStart(2, '0');
         return {
             source_key: `fixture:${index}`,
-            submission_date: `2026-08-${day}`,
+            event_date: `2026-08-${day}`,
             module: 'BMS',
             source_name: 'Fixture Office',
             title: `Fixture event ${index + 1}`,
@@ -45,7 +45,7 @@ function fixtureMetrics(markup, eventCount) {
         dayCardBackdropFilters: dayCards.filter(([, classes]) => classes.includes('backdrop-blur-sm')).length,
         dayCardHoverTransforms: dayCards.filter(([, classes]) => classes.includes('hover:-translate-y-px')).length,
         allCalendarBackdropFilters: (markup.match(/\bbackdrop-blur-sm\b/g) || []).length,
-        renderedMovChips: (markup.match(/title="BMS • Fixture Office — Fixture event /g) || []).length,
+        renderedMovChips: (markup.match(/aria-label="Submitted MOV: Fixture event /g) || []).length,
         moreButtons: (markup.match(/>\+\d+ more<\/button>/g) || []).length,
         markupBytes: Buffer.byteLength(markup),
     };

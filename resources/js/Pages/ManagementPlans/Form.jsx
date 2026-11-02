@@ -1,4 +1,5 @@
 import { FloatingInput, FloatingSelect, FloatingTextarea } from "@/Components/Form";import { Link, useForm } from '@inertiajs/react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import CrudSection from '../../Components/Crud/CrudSection';
@@ -28,11 +29,13 @@ export default function Form({ title, managementPlan, managementPlanType, protec
   const calculated = managementPlan ? [['Deadline for Submission to PENRO', formatReportDate(managementPlan.deadline_submission)], ['Number of Days Complied', managementPlan.number_days_complied], ['Timeliness', managementPlan.timeliness], ['Status of Submission', managementPlan.submission_status], ['Total Number of Days Delayed at PENRO', managementPlan.total_days_delayed_penro]] : [];
   const trackerRoute = route('management-plans.types.show', managementPlanType.slug);
   const submit = (event) => {event.preventDefault();if (form.processing) return;const options = { forceFormData: true, preserveScroll: true };if (isEdit) {form.transform((data) => ({ ...data, _method: 'patch' }));form.post(route('management-plans.types.reports.update', [managementPlanType.slug, managementPlan.id]), options);} else {form.transform((data) => data);form.post(route('management-plans.types.reports.store', managementPlanType.slug), options);}};
+  const submitGate = useConfirmedFormSubmit({ processing: form.processing, onSubmit: submit });
+
 
   return <AuthenticatedLayout title={title || (isEdit ? 'Edit Management Plan Submission' : 'Add Management Plan Submission')}>
         <PageHeader title={isEdit ? `Edit ${managementPlanType.name} Report Submission` : `Add ${managementPlanType.name} Report Submission`} description={isEdit ? 'Update submission details and review supporting documents side-by-side.' : `Record a report submission for ${managementPlanType.name}.`} actions={<Link href={trackerRoute} data-cds-action="true" data-cds-action-variant="back" className="cds-button-interaction rounded-xl px-4 py-2.5 text-xs font-bold">← Back to {managementPlanType.name}</Link>} />
         <div className="mt-6 grid items-start gap-6 xl:grid-cols-12">
-            <Card className="xl:col-span-7"><form onSubmit={submit} className="space-y-5"><SaveProgressIndicator processing={form.processing} progress={form.progress} />
+            <Card className="xl:col-span-7"><form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-5"><SaveProgressIndicator processing={form.processing} progress={form.progress} />
                 <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-xs text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-300"><span className="font-semibold">Plan:</span> <span className="font-bold">{managementPlanType.name}</span></div>
                 <CrudSection title="General / Report Information"><div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className={labelClass}><TargetOfficeSelect id="form-target-office" value={form.data.target_office} options={targetOffices} required onChange={value => form.setData({ ...form.data, target_office: value, protected_area_id: '' })} error={form.errors.target_office} /></div>
@@ -48,5 +51,6 @@ export default function Form({ title, managementPlan, managementPlanType, protec
             </form></Card>
             <div className="sticky top-6 hidden xl:col-span-5 xl:block"><ManagementPlanAttachments manager={attachments} canRemoveExisting={false} previewOnly /></div>
         </div>
-    </AuthenticatedLayout>;
+            <ConfirmedSubmitDialog gate={submitGate} title={isEdit ? "Save Management Plan report changes?" : "Submit this Management Plan report?"} message="This submits the displayed report details and selected attachment for server validation." confirmLabel={isEdit ? "Save Changes" : "Submit Report"} processing={form.processing} />
+</AuthenticatedLayout>;
 }

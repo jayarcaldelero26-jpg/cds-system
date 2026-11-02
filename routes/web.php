@@ -141,7 +141,10 @@ Route::middleware('auth')->group(function () {
     Route::patch('settings/module-management/{moduleDefinition}/status', [ModuleDefinitionController::class, 'toggle'])->middleware('can:module-definitions.activate')->name('module-definitions.status');
     Route::get('settings/compliance-alerts', [ComplianceAlertController::class, 'settings'])->middleware('can:compliance-alerts.manage')->name('settings.compliance-alerts');
     Route::get('admin/recipient-mapping', [ComplianceAlertController::class, 'recipientMapping'])->middleware('can:compliance-alerts.manage')->name('compliance-alert-recipients.index');
-    Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:reports.view')->name('business-calendar.index');
+    Route::get('admin/business-calendar', [ComplianceAlertController::class, 'businessCalendar'])->middleware('can:calendar.view')->name('business-calendar.index');
+    Route::post('admin/business-calendar/tasks', [\App\Http\Controllers\CalendarTaskController::class, 'store'])->middleware('can:calendar.view')->name('calendar.tasks.store');
+    Route::put('admin/business-calendar/tasks/{task}', [\App\Http\Controllers\CalendarTaskController::class, 'update'])->middleware('can:calendar.view')->name('calendar.tasks.update');
+    Route::patch('admin/business-calendar/tasks/{task}/status', [\App\Http\Controllers\CalendarTaskController::class, 'updateStatus'])->middleware('can:calendar.view')->name('calendar.tasks.status');
     Route::get('compliance-alerts/preview', [ComplianceAlertController::class, 'preview'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.preview');
     Route::post('compliance-alerts/send', [ComplianceAlertController::class, 'send'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.send');
     Route::post('compliance-alerts/recipients', [ComplianceAlertController::class, 'storeRecipient'])->middleware('can:compliance-alerts.manage')->name('compliance-alerts.recipients.store');

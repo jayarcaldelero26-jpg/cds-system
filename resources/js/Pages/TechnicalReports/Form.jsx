@@ -7,6 +7,8 @@ import FilePreviewPanel from '../../Components/Crud/FilePreviewPanel';
 import PageHeader from '../../Components/PageHeader';
 import { FloatingInput, FloatingSelect, FloatingTextarea } from '../../Components/Form';
 import DatePicker from '../../Components/DatePicker';
+import ConfirmDialog from '../../Components/ConfirmDialog';
+import { useConfirmedFormSubmit } from '../../Components/Crud/useConfirmedFormSubmit';
 import { canonicalDateConductedValue, legacyDateConductedHelper } from '../../Utils/dateConductedRanges';
 import { isTimelinessValue, timelinessClass } from '../../Components/TimelinessBadge';
 
@@ -31,6 +33,7 @@ export default function Form({ technicalReport, protectedAreas, reportTypes }) {
   });
   const existingFile = technicalReport?.attachment || null;
   const [preview, setPreview] = useState(existingFile);
+  const [submitNotice, setSubmitNotice] = useState('');
   const objectUrlRef = useRef(null);
 
   useEffect(() => () => {if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);}, []);
@@ -55,21 +58,28 @@ export default function Form({ technicalReport, protectedAreas, reportTypes }) {
   const submit = (event) => {
     event.preventDefault();
     if (form.processing) return;
+    setSubmitNotice('');
+    const options = {
+      forceFormData: true,
+      onHttpException: () => setSubmitNotice('The server could not save this General Report. Your form and selected file remain available; review the values and try again.'),
+      onNetworkError: () => setSubmitNotice('The request did not reach the server. Your form and selected file remain available; check the connection and try again.'),
+    };
     if (isEdit) {
       form.transform((data) => ({ ...data, _method: 'patch' }));
-      form.post(route('technical-reports.update', technicalReport.id), { forceFormData: true });
+      form.post(route('technical-reports.update', technicalReport.id), options);
     } else {
       form.transform((data) => data);
-      form.post(route('technical-reports.store'), { forceFormData: true });
+      form.post(route('technical-reports.store'), options);
     }
   };
+  const submitGate = useConfirmedFormSubmit({ processing: form.processing, onSubmit: submit });
   const field = (name, label, type = 'text', required = false) => <FloatingInput id={`technical-${name}`} label={label} type={type} value={form.data[name] || ''} onChange={(event) => form.setData(name, event.target.value)} error={form.errors[name]} required={required} />;
   const calculations = technicalReport ? [['Deadline', technicalReport.deadline_submission], ['Days Complied', technicalReport.number_days_complied], ['Timeliness', technicalReport.timeliness], ['Submission Status', technicalReport.submission_status], ['PENRO Delay', technicalReport.total_days_delayed_penro]] : [];
 
   return <AuthenticatedLayout title={isEdit ? 'Edit General Report' : 'Add General Report'}>
         <PageHeader title={isEdit ? 'Edit General / Other Report' : 'Add General / Other Report'} description="Track submission compliance using the 7-working-day General/Other Reports standard." actions={<Link href={route('technical-reports.index')} data-cds-action="true" data-cds-action-variant="back" className="cds-button-interaction rounded-xl px-4 py-2.5 text-xs font-bold">← Back to tracker</Link>} />
         <div className="mt-6 grid items-start gap-6 xl:grid-cols-12">
-            <Card className="xl:col-span-7"><form onSubmit={submit} className="space-y-7"><SaveProgressIndicator processing={form.processing} progress={form.progress} />
+            <Card className="xl:col-span-7"><form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-7"><SaveProgressIndicator processing={form.processing} progress={form.progress} />{submitNotice && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm leading-5 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">{submitNotice}</p>}
                 <Section title="General Information & Report Details"><div className="grid gap-4 sm:grid-cols-2">
                     {field('target_office', 'Target Office')}
                     <FloatingSelect id="technical-pa" label="Protected Area" required value={form.data.protected_area_id} onChange={(event) => form.setData('protected_area_id', event.target.value)} error={form.errors.protected_area_id}><option value="">Select protected area</option>{protectedAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</FloatingSelect>
@@ -85,6 +95,7 @@ export default function Form({ technicalReport, protectedAreas, reportTypes }) {
             </form></Card>
             <div className="sticky top-6 xl:col-span-5"><FilePreviewPanel file={preview} title="MOV / Supporting Document" heightClass="h-[650px]" /></div>
         </div>
+        <ConfirmDialog open={submitGate.confirmationOpen} title={isEdit ? 'Save General Report changes?' : 'Submit this General Report?'} message="This submits the displayed report details and selected attachment for server validation. It does not change report workflow verdicts." confirmLabel={isEdit ? 'Save Changes' : 'Submit Report'} cancelLabel="Go Back" processing={form.processing || submitGate.confirmationSubmitting} onConfirm={submitGate.confirmSubmit} onCancel={submitGate.cancelConfirmation} />
     </AuthenticatedLayout>;
 }
 

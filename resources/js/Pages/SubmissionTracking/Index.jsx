@@ -2072,6 +2072,14 @@ export default function Index({
                         ? "Return MOV to CENRO Focal for Correction"
                         : "Ready for Release"
                 }
+                confirmation={{
+                    title: reviewForm.data.decision === "needs_correction" ? "Confirm return for correction?" : "Confirm Ready for Release verdict?",
+                    message: reviewForm.data.decision === "needs_correction"
+                        ? "This records the Chief's correction verdict and custody handoff to CENRO CDS Focal. The current official document remains unchanged."
+                        : "This records the Chief review decision for operational monitoring. It is not an electronic approval chain.",
+                    confirmLabel: reviewForm.data.decision === "needs_correction" ? "Return for Correction" : "Mark Ready for Release",
+                    cancelLabel: "Go Back",
+                }}
                 saveVariant={reviewForm.data.decision === "needs_correction" ? "warning" : "primary"}
                 maxWidth="max-w-xl"
             >

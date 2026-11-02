@@ -5,6 +5,7 @@ import PageHeader from '@/Components/PageHeader';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { FloatingInput } from '@/Components/Form';
 import Button from '@/Components/Button';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 import CrudTable from '@/Components/Crud/CrudTable';
 import LaravelPaginationLinks from '@/Components/Crud/LaravelPaginationLinks';
 import PamoPambDraftWorkspace from '@/Components/PamoPambDraftWorkspace';
@@ -14,6 +15,9 @@ export default function Index({ workflow, reports, pamoDrafts = [], assignedProt
     const page = usePage();
     const draftWorkspace = useRef(null);
     const [search, setSearch] = useState(filters.search || '');
+    const [pendingResubmission, setPendingResubmission] = useState(null);
+    const [resubmitting, setResubmitting] = useState(false);
+    const [resubmissionError, setResubmissionError] = useState('');
     useEffect(() => {
         const timer = window.setTimeout(() => {
             const current = new URLSearchParams((page.url || '').split('?')[1] || '');
@@ -26,6 +30,20 @@ export default function Index({ workflow, reports, pamoDrafts = [], assignedProt
     }, [search, page.url, workflow.key]);
 
     const rows = reports?.data || [];
+    const confirmResubmission = () => {
+        const row = pendingResubmission;
+        if (!row || resubmitting) return;
+        setResubmissionError('');
+        setResubmitting(true);
+        router.post(route('submission-tracking.transition', [workflow.source, row.id, row.resubmit_action]), { stage: row.resubmit_action }, {
+            preserveScroll: true,
+            onSuccess: () => setPendingResubmission(null),
+            onError: () => setResubmissionError('The corrected copy could not be resubmitted. Your report remains available; review it and try again.'),
+            onHttpException: () => setResubmissionError('The server could not resubmit this corrected copy. Your report remains available; review it and try again.'),
+            onNetworkError: () => setResubmissionError('The request did not reach the server. Your report remains available; check the connection and try again.'),
+            onFinish: () => setResubmitting(false),
+        });
+    };
     const period = row => row.reporting_period || row.document_type || (row.reporting_month ? `${row.reporting_month}/${row.reporting_year}` : row.semester || row.quarter || row.report_period_type || 'Not provided');
     const columns = [
         { key: 'protected_area_name', label: 'Protected Area', render: row => formatReportValue(row.protected_area_name, 'Not recorded') },
@@ -36,7 +54,7 @@ export default function Index({ workflow, reports, pamoDrafts = [], assignedProt
         { key: 'target_office', label: 'Receiving office', render: row => formatReportValue(row.target_office, 'Not recorded') },
         { key: 'workflow_stage', label: 'Routing stage', render: row => formatReportValue(row.workflow_stage, 'Not recorded') },
         { key: 'mov_url', label: 'Report file', render: row => row.mov_url ? <a className="font-semibold text-emerald-800 underline dark:text-emerald-300" href={row.mov_url} onClick={event => event.stopPropagation()}>Protected preview</a> : <span className="text-xs text-gray-500 dark:text-gray-400" role="status">File unavailable</span> },
-        { key: 'can_edit_correction', label: 'Correction', render: row => row.can_edit_correction ? <div className="flex flex-wrap gap-2"><Button type="button" size="compact" variant="secondary" onClick={event => { event.stopPropagation(); draftWorkspace.current?.openCorrection(row); }}>Edit correction</Button><Button type="button" size="compact" variant="primary" onClick={event => { event.stopPropagation(); router.post(route('submission-tracking.transition', [workflow.source, row.id, row.resubmit_action]), { stage: row.resubmit_action }, { preserveScroll: true }); }}>Resubmit corrected copy</Button></div> : 'No correction action available' },
+        { key: 'can_edit_correction', label: 'Correction', render: row => row.can_edit_correction ? <div className="flex flex-wrap gap-2"><Button type="button" size="compact" variant="secondary" onClick={event => { event.stopPropagation(); draftWorkspace.current?.openCorrection(row); }}>Edit correction</Button><Button type="button" size="compact" variant="primary" onClick={event => { event.stopPropagation(); setResubmissionError(''); setPendingResubmission(row); }}>Resubmit corrected copy</Button></div> : 'No correction action available' },
     ];
     const draftColumns = [
         { key: 'started_at', label: 'Preparation started', render: row => formatReportDate(row.started_at) },
@@ -60,5 +78,6 @@ export default function Index({ workflow, reports, pamoDrafts = [], assignedProt
             <CrudTable compact title="Saved drafts" subtitle="Saved drafts stay private until you forward a complete report." columns={draftColumns} rows={pamoDrafts} rowKey="id" onRowClick={draft => draftWorkspace.current?.openDraft(draft)} emptyTitle="No saved drafts" emptyDescription="Choose New draft when preparation begins." />
         </div>
         {pamoWorkspace && <PamoPambDraftWorkspace ref={draftWorkspace} workflow={workflow} drafts={pamoDrafts} assignedProtectedArea={assignedProtectedArea} pamoContext={pamoContext} />}
+        <ConfirmDialog open={Boolean(pendingResubmission)} title="Confirm resubmission?" message={<><span>Resubmit the corrected copy for {pendingResubmission?.activity_name || pendingResubmission?.document_type || workflow.label} through its existing review route?</span>{resubmissionError && <span role="alert" className="mt-3 block rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-left text-xs leading-5 text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">{resubmissionError}</span>}</>} confirmLabel="Resubmit corrected copy" cancelLabel="Go Back" processing={resubmitting} onConfirm={confirmResubmission} onCancel={() => { if (!resubmitting) { setPendingResubmission(null); setResubmissionError(''); } }} />
     </AuthenticatedLayout>;
 }

@@ -1,4 +1,5 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingInput, FloatingSelect, FloatingTextarea } from "@/Components/Form";import { Link, useForm } from '@inertiajs/react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
@@ -25,6 +26,8 @@ export default function Create({ protectedAreas, categories, statuses }) {
 
   const labelClass = "block text-sm font-medium text-gray-700 dark:text-gray-300";
   const errorClass = "text-xs text-red-600 dark:text-red-400 mt-1";
+    const submitGate = useConfirmedFormSubmit({ processing, onSubmit: submit });
+
 
   return (
     <AuthenticatedLayout title="Record PPA">
@@ -40,7 +43,7 @@ export default function Create({ protectedAreas, categories, statuses }) {
 
             <div className="mt-6 max-w-3xl">
                 <Card>
-                    <form onSubmit={submit} className="space-y-6">
+                    <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-6">
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Title */}
                             <div className="md:col-span-2">
@@ -144,6 +147,7 @@ export default function Create({ protectedAreas, categories, statuses }) {
                     </form>
                 </Card>
             </div>
-        </AuthenticatedLayout>);
+                <ConfirmedSubmitDialog gate={submitGate} title="Save this PPA record?" message="This submits the displayed program or project details for server validation." confirmLabel="Save PPA" processing={processing} />
+</AuthenticatedLayout>);
 
 }

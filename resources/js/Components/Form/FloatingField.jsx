@@ -91,7 +91,14 @@ export default function FloatingField({
             <div className={'relative min-w-0 border shadow-none transition-colors duration-150 ' + (calendarStyle ? 'rounded-lg' : 'rounded-ui') + focusRingClass + ' ' + background + ' ' + border}>
                 {children({
                     ref,
-                    nativeProps: { id: fieldId, disabled, readOnly, required, 'aria-invalid': invalid || undefined, 'aria-describedby': error ? fieldId + '-error' : hint ? fieldId + '-hint' : undefined },
+                    nativeProps: {
+                        id: fieldId,
+                        disabled,
+                        readOnly,
+                        required,
+                        'aria-invalid': invalid || undefined,
+                        'aria-describedby': [hint && fieldId + '-hint', error && fieldId + '-error'].filter(Boolean).join(' ') || undefined,
+                    },
                     fieldId,
                     floated,
                     focused,
@@ -101,8 +108,8 @@ export default function FloatingField({
                     fieldShapeClass: calendarStyle ? 'rounded-lg' : 'rounded-ui',
                 })}
             </div>
-            {hint && <p id={fieldId + '-hint'} className="mt-1 text-xs text-gray-500 dark:text-gray-400">{hint}</p>}
-            {error && <p id={fieldId + '-error'} className="mt-1 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
+            {hint && <p id={fieldId + '-hint'} className="mt-1 break-words text-xs leading-5 text-gray-500 dark:text-gray-400">{hint}</p>}
+            {error && <p id={fieldId + '-error'} className="mt-1 break-words text-sm leading-5 text-red-700 dark:text-red-300" role="alert">{error}</p>}
         </div>
     );
 }

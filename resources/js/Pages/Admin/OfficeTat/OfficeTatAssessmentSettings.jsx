@@ -2,6 +2,7 @@ import { router, useForm } from '@inertiajs/react';
 import { Icon } from '@iconify/react';
 import { useEffect, useMemo, useState } from 'react';
 import Button from '@/Components/Button';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudTable from '@/Components/Crud/CrudTable';
@@ -17,7 +18,9 @@ export default function OfficeTatAssessmentSettings({ data, recordedAssessment, 
     const [appEvidence, setAppEvidence] = useState('');
     const [scheduleEvidence, setScheduleEvidence] = useState('');
     const [evidenceError, setEvidenceError] = useState('');
+    const [pendingUpload, setPendingUpload] = useState(null);
     const [uploadingEvidence, setUploadingEvidence] = useState(false);
+    const [pendingEvidence, setPendingEvidence] = useState(null);
     const applicabilityForm = useForm({ protected_area_id: '', workflow_key: '', activity_name: '', document_type: '', status: 'unknown', effective_from: '', effective_to: '', approving_authority: '', approval_reference: '', rationale: '', evidence_reference: '', expected_version: 0 });
     const scheduleForm = useForm({ protected_area_id: '', workflow_key: '', activity_name: '', document_type: '', reporting_year: Number((periodKey || '').slice(0, 4)) || new Date().getFullYear(), period_key: '', schedule_kind: 'recurring', occurrences: [{ occurrence_key: '', start_date: '', deadline: '' }], inventory_complete: true, approving_authority: '', approval_reference: '', rationale: '', evidence_reference: '', expected_version: 0 });
     if (!data) return <section className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"><h2 className="font-extrabold">Compliance-first unit standings</h2><p className="mt-1">The full Conservation and Development roster is available only to users with global Office TAT access.</p></section>;
@@ -64,10 +67,17 @@ export default function OfficeTatAssessmentSettings({ data, recordedAssessment, 
                 if (kind === 'applicability') { setAppEvidence(reference); applicabilityForm.setData('evidence_reference', reference); }
                 if (kind === 'schedule') { setScheduleEvidence(reference); scheduleForm.setData('evidence_reference', reference); }
                 setEvidenceError(reference ? '' : 'The server did not return a registered evidence reference.');
+                setPendingEvidence(null);
             },
-            onError: errors => setEvidenceError(Object.values(errors || {})[0] || 'Approval evidence could not be registered.'),
+            onError: errors => {
+                setEvidenceError(Object.values(errors || {})[0] || 'Approval evidence could not be registered.');
+                setPendingEvidence(null);
+            },
             onFinish: () => setUploadingEvidence(false),
         });
+    };
+    const requestEvidenceUpload = (kind, identity, file) => {
+        if (file) setPendingEvidence({ kind, identity, file });
     };
     const saveSetup = event => {
         event.preventDefault();
@@ -103,7 +113,7 @@ export default function OfficeTatAssessmentSettings({ data, recordedAssessment, 
             {scopeRow && <div className="space-y-4">
                 <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">Record exact owner-approved PA facts with their effective dates and stored source document. Applicability and occurrence schedules are separate. A catalogue cadence does not create a duty, and the prior completeness checkbox no longer affects coverage.</p>
                 <div className="flex flex-wrap gap-2" role="tablist" aria-label="Obligation setup facts">
-                    {['applicability', 'schedule'].map(tab => <button key={tab} type="button" role="tab" aria-selected={setupTab === tab} onClick={() => setSetupTab(tab)} className={`rounded-lg px-3 py-2 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${setupTab === tab ? 'bg-emerald-800 text-white' : 'border border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200'}`}>{tab === 'applicability' ? 'Applicability' : 'Schedules & occurrences'}</button>)}
+                    {['applicability', 'schedule'].map(tab => <button key={tab} type="button" role="tab" aria-selected={setupTab === tab} onClick={() => setSetupTab(tab)} className={`rounded-lg px-3 py-2 text-xs font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 ${setupTab === tab ? 'cds-tab-active' : 'border border-gray-300 bg-white text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200'}`}>{tab === 'applicability' ? 'Applicability' : 'Schedules & occurrences'}</button>)}
                 </div>
                 <ScopedOptionSelect id="office-tat-pair" label="Workflow · activity · document" value={pairChoice} options={pairOptions} onChange={choosePair} required placeholder="Search active catalogue pair" disabled={!configurationReady} />
                 {!selectedPair && <p className="text-xs text-amber-800 dark:text-amber-200">No active PA activity/document pairs are available.</p>}
@@ -114,7 +124,7 @@ export default function OfficeTatAssessmentSettings({ data, recordedAssessment, 
                     <Field label="Approving authority"><input maxLength={180} value={applicabilityForm.data.approving_authority} onChange={e => applicabilityForm.setData('approving_authority', e.target.value)} className={fieldClass} /></Field>
                     <Field label="Written approval reference"><input maxLength={180} value={applicabilityForm.data.approval_reference} onChange={e => applicabilityForm.setData('approval_reference', e.target.value)} className={fieldClass} /></Field>
                     <Field label="Why this status applies"><textarea required minLength={10} rows={2} value={applicabilityForm.data.rationale} onChange={e => applicabilityForm.setData('rationale', e.target.value)} className={fieldClass} /></Field>
-                    {applicabilityForm.data.status !== 'unknown' && <Field label="Approval source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={e => uploadEvidence('applicability', { protected_area_id: applicabilityForm.data.protected_area_id, workflow_key: applicabilityForm.data.workflow_key, activity_name: applicabilityForm.data.activity_name, document_type: applicabilityForm.data.document_type }, e.target.files?.[0])} className={fieldClass} /><span className="mt-1 block text-[11px] text-gray-500">{appEvidence ? `Stored evidence ${appEvidence}` : 'Upload the supporting approved document before saving.'}</span></Field>}
+                    {applicabilityForm.data.status !== 'unknown' && <Field label="Approval source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={e => requestEvidenceUpload('applicability', { protected_area_id: applicabilityForm.data.protected_area_id, workflow_key: applicabilityForm.data.workflow_key, activity_name: applicabilityForm.data.activity_name, document_type: applicabilityForm.data.document_type }, e.target.files?.[0])} className={fieldClass} /><span className="mt-1 block text-[11px] text-gray-500">{appEvidence ? `Stored evidence ${appEvidence}` : 'Upload the supporting approved document before saving.'}</span></Field>}
                     <div className="sm:col-span-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200">Current saved evidence: {setupState.applicability.filter(item => item.workflow_key === selectedPair.workflow_key && item.activity_name === selectedPair.activity_name && item.document_type === selectedPair.document_type).map(item => `${item.status} from ${item.effective_from}${item.effective_to ? ` to ${item.effective_to}` : ''} (v${item.version})`).join(' · ') || 'No version yet'}.</div>
                 </div>}
                 {setupTab === 'schedule' && selectedPair && <div className="space-y-3">
@@ -134,13 +144,14 @@ export default function OfficeTatAssessmentSettings({ data, recordedAssessment, 
                         <Field label="Approving authority"><input required maxLength={180} value={scheduleForm.data.approving_authority} onChange={e => scheduleForm.setData('approving_authority', e.target.value)} className={fieldClass} /></Field>
                         <Field label="Written approval reference"><input required maxLength={180} value={scheduleForm.data.approval_reference} onChange={e => scheduleForm.setData('approval_reference', e.target.value)} className={fieldClass} /></Field>
                         <Field label="Why this schedule is complete"><textarea required minLength={10} rows={2} value={scheduleForm.data.rationale} onChange={e => scheduleForm.setData('rationale', e.target.value)} className={fieldClass} /></Field>
-                        <Field label="Approved schedule source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={e => uploadEvidence('schedule', { protected_area_id: scheduleForm.data.protected_area_id, workflow_key: scheduleForm.data.workflow_key, activity_name: scheduleForm.data.activity_name, document_type: scheduleForm.data.document_type, reporting_year: scheduleForm.data.reporting_year, period_key: scheduleForm.data.period_key }, e.target.files?.[0])} className={fieldClass} /><span className="mt-1 block text-[11px] text-gray-500">{scheduleEvidence ? `Stored evidence ${scheduleEvidence}` : 'Upload the approved occurrence or schedule source.'}</span></Field>
+                        <Field label="Approved schedule source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" onChange={e => requestEvidenceUpload('schedule', { protected_area_id: scheduleForm.data.protected_area_id, workflow_key: scheduleForm.data.workflow_key, activity_name: scheduleForm.data.activity_name, document_type: scheduleForm.data.document_type, reporting_year: scheduleForm.data.reporting_year, period_key: scheduleForm.data.period_key }, e.target.files?.[0])} className={fieldClass} /><span className="mt-1 block text-[11px] text-gray-500">{scheduleEvidence ? `Stored evidence ${scheduleEvidence}` : 'Upload the approved occurrence or schedule source.'}</span></Field>
                     </div>
                     <p className="text-xs text-gray-600 dark:text-gray-300">Saved period inventory: {setupState.schedules.filter(item => item.workflow_key === scheduleForm.data.workflow_key && item.activity_name === scheduleForm.data.activity_name && item.document_type === scheduleForm.data.document_type && Number(item.reporting_year) === Number(scheduleForm.data.reporting_year) && item.period_key === scheduleForm.data.period_key).map(item => `v${item.version} · ${item.occurrences.length} occurrence(s)`).join(' · ') || 'No version yet'}.</p>
                 </div>}
                 {evidenceError && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/40 dark:text-red-200">{evidenceError}</p>}
             </div>}
         </CrudFormModal>
+        <ConfirmDialog open={Boolean(pendingEvidence)} title="Upload this approval evidence?" message={pendingEvidence?.file?.name ? `Upload ${pendingEvidence.file.name} to the protected approval-evidence store?` : 'Upload this file to the protected approval-evidence store?'} confirmLabel="Upload evidence" cancelLabel="Go Back" processing={uploadingEvidence} onCancel={() => { if (!uploadingEvidence) setPendingEvidence(null); }} onConfirm={() => { if (pendingEvidence && !uploadingEvidence) uploadEvidence(pendingEvidence.kind, pendingEvidence.identity, pendingEvidence.file); }} />
     </section>;
 }
 
@@ -235,6 +246,7 @@ function HistoricalNonReceiptPanel({ participants, registers, periodKey, asOfDat
     const [evidenceError, setEvidenceError] = useState('');
     const [selectedKeys, setSelectedKeys] = useState([]);
     const [approval, setApproval] = useState({ approving_authority: '', approval_reference: '', rationale: '' });
+    const [pendingRegister, setPendingRegister] = useState(null);
     const form = useForm({ participant_key: '', period_key: periodKey, as_of_date: asOfDate, cutoff_date: asOfDate, obligation_keys: [], ...approval, evidence_reference: '', expected_version: 0 });
     const options = participants.map(row => ({ id: row.participant_key, label: `${row.name} (${row.participant_key})` }));
     const selected = participants.find(row => row.participant_key === participantKey);
@@ -255,15 +267,30 @@ function HistoricalNonReceiptPanel({ participants, registers, periodKey, asOfDat
                 const reference = page?.props?.assessmentSaved?.evidence_reference || '';
                 setEvidenceReference(reference); form.setData('evidence_reference', reference);
                 setEvidenceError(reference ? '' : 'The server did not return a registered evidence reference.');
+                setPendingUpload(null);
             },
-            onError: errors => setEvidenceError(Object.values(errors || {})[0] || 'Approval evidence could not be registered.'),
+            onError: errors => {
+                setEvidenceError(Object.values(errors || {})[0] || 'Approval evidence could not be registered.');
+                setPendingUpload(null);
+            },
             onFinish: () => setUploading(false),
         });
     };
-    const submit = event => {
-        event.preventDefault();
-        form.transform(current => ({ ...current, participant_key: participantKey, period_key: periodKey, as_of_date: asOfDate, cutoff_date: cutoff, obligation_keys: selectedKeys, ...approval, evidence_reference: evidenceReference, expected_version: currentRegisterVersion }));
-        form.post('/admin/office-tat/non-receipt-register', { preserveScroll: true, onSuccess: () => { setSelectedKeys([]); setEvidenceReference(''); } });
+    const requestUpload = file => {
+        if (file && participantKey && cutoff && !uploading) setPendingUpload({ file, participantKey, cutoff });
+    };
+    const requestSubmit = () => {
+        if (form.processing || !participantKey || selectedKeys.length === 0 || !evidenceReference || !approval.approving_authority.trim() || !approval.approval_reference.trim() || approval.rationale.trim().length < 10) return;
+        setPendingRegister({ participant_key: participantKey, period_key: periodKey, as_of_date: asOfDate, cutoff_date: cutoff, obligation_keys: [...selectedKeys], ...approval, evidence_reference: evidenceReference, expected_version: currentRegisterVersion });
+    };
+    const submit = () => {
+        if (!pendingRegister || form.processing) return;
+        form.transform(() => pendingRegister);
+        form.post('/admin/office-tat/non-receipt-register', {
+            preserveScroll: true,
+            onSuccess: () => { setSelectedKeys([]); setEvidenceReference(''); setPendingRegister(null); },
+            onError: () => setPendingRegister(null),
+        });
     };
     return <section className="rounded-2xl border border-amber-200 bg-white shadow-sm dark:border-amber-900 dark:bg-gray-900" aria-labelledby="nonreceipt-evidence-heading">
         <header className="border-b border-amber-100 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/25"><h2 id="nonreceipt-evidence-heading" className="text-sm font-extrabold text-amber-950 dark:text-amber-100">Historical non-receipt evidence</h2><p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-200">A register resolves only checked, exact obligation identities before the policy effective date. The server rejects cross-participant keys and any verified or conflicting receipt evidence.</p></header>
@@ -274,9 +301,10 @@ function HistoricalNonReceiptPanel({ participants, registers, periodKey, asOfDat
                 <Field label="Approving authority"><input required maxLength={180} value={approval.approving_authority} onChange={event => setApproval(current => ({ ...current, approving_authority: event.target.value }))} className={fieldClass} /></Field>
                 <Field label="Written approval reference"><input required maxLength={180} value={approval.approval_reference} onChange={event => setApproval(current => ({ ...current, approval_reference: event.target.value }))} className={fieldClass} /></Field>
                 <Field label="Rationale"><textarea required minLength={10} rows={3} value={approval.rationale} onChange={event => setApproval(current => ({ ...current, rationale: event.target.value }))} className={fieldClass} /></Field>
-                <Field label="Register source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" disabled={!participantKey || !cutoff || uploading} onChange={event => upload(event.target.files?.[0])} className={fieldClass} /><span className="mt-1 block text-[11px] text-gray-500">{evidenceReference ? `Stored evidence ${evidenceReference}` : 'Upload the signed inventory or authorized register.'}</span></Field>
+                <Field label="Register source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" disabled={!participantKey || !cutoff || uploading} onChange={event => requestUpload(event.target.files?.[0])} className={fieldClass} /><span className="mt-1 block text-[11px] text-gray-500">{evidenceReference ? `Stored evidence ${evidenceReference}` : 'Upload the signed inventory or authorized register.'}</span></Field>
                 {evidenceError && <p role="alert" className="text-xs text-red-700 dark:text-red-300">{evidenceError}</p>}
-                <Button type="button" variant="primary" size="compact" disabled={form.processing || uploading || !participantKey || selectedKeys.length === 0 || !evidenceReference || !approval.approving_authority.trim() || !approval.approval_reference.trim() || approval.rationale.trim().length < 10} onClick={submit} className="rounded-lg px-4 py-2 text-xs">Append exact non-receipt register</Button>
+                <Button type="button" variant="primary" size="compact" disabled={form.processing || uploading || !participantKey || selectedKeys.length === 0 || !evidenceReference || !approval.approving_authority.trim() || !approval.approval_reference.trim() || approval.rationale.trim().length < 10} onClick={requestSubmit} className="rounded-lg px-4 py-2 text-xs">Append exact non-receipt register</Button>
+                {Object.values(form.errors || {}).length > 0 && <p role="alert" className="text-xs text-red-700 dark:text-red-300">{Object.values(form.errors)[0]}</p>}
             </div>
             <div className="max-h-[30rem] space-y-2 overflow-auto rounded-xl border border-gray-200 p-3 dark:border-gray-700">
                 {candidates.length === 0 ? <p className="text-xs text-gray-600 dark:text-gray-300">Choose a participant with pre-effective scheduled obligation evidence to view exact candidates.</p> : candidates.map(item => <label key={item.key} className={`flex cursor-pointer gap-3 rounded-lg border p-3 text-xs ${item.historical_receipt_evidence ? 'border-red-300 bg-red-50 dark:border-red-900 dark:bg-red-950/30' : 'border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950'}`}>
@@ -285,6 +313,8 @@ function HistoricalNonReceiptPanel({ participants, registers, periodKey, asOfDat
                 </label>)}
             </div>
         </div>
+        <ConfirmDialog open={Boolean(pendingRegister)} title="Append this non-receipt register?" message="This records an append-only historical register for the selected participant, cutoff, and obligation identities." confirmLabel="Append register" cancelLabel="Go Back" processing={form.processing} onCancel={() => { if (!form.processing) setPendingRegister(null); }} onConfirm={submit} />
+        <ConfirmDialog open={Boolean(pendingUpload)} title="Upload this register evidence?" message={pendingUpload?.file?.name ? `Upload ${pendingUpload.file.name} to the protected approval-evidence store?` : 'Upload this file to the protected approval-evidence store?'} confirmLabel="Upload evidence" cancelLabel="Go Back" processing={uploading} onCancel={() => { if (!uploading) setPendingUpload(null); }} onConfirm={() => { if (pendingUpload && !uploading) upload(pendingUpload.file); }} />
     </section>;
 }
 
@@ -299,10 +329,15 @@ function DataPoint({ label, value }) {
 function TieResolutionForm({ unit, group, rows, periodKey, asOfDate, population = 'official' }) {
     const members = useMemo(() => (group.participant_keys || []).map(key => rows.find(row => row.participant_key === key)).filter(Boolean), [group.participant_keys, rows]);
     const form = useForm({ unit: unit.unit, population, period_key: periodKey, as_of_date: asOfDate, metric_fingerprint: group.fingerprint, participant_keys: group.participant_keys, ordered_participant_keys: Array(members.length).fill(''), reason: '' });
+    const [confirmationOpen, setConfirmationOpen] = useState(false);
     useEffect(() => form.setData(current => ({ ...current, unit: unit.unit, population, period_key: periodKey, as_of_date: asOfDate, metric_fingerprint: group.fingerprint, participant_keys: group.participant_keys })), [unit.unit, population, periodKey, asOfDate, group.fingerprint]);
     const changePosition = (index, value) => form.setData('ordered_participant_keys', form.data.ordered_participant_keys.map((key, slot) => slot === index ? value : key));
     const valid = form.data.ordered_participant_keys.every(Boolean) && new Set(form.data.ordered_participant_keys).size === members.length && form.data.reason.trim().length >= 10;
-    const submit = event => { event.preventDefault(); form.post('/admin/office-tat/tie-decision', { preserveScroll: true }); };
+    const submit = event => { event.preventDefault(); if (valid && !form.processing) setConfirmationOpen(true); };
+    const confirmSubmit = () => {
+        if (!valid || form.processing) return;
+        form.post('/admin/office-tat/tie-decision', { preserveScroll: true, onSuccess: () => setConfirmationOpen(false), onError: () => setConfirmationOpen(false) });
+    };
     return <form onSubmit={submit} className="border-t border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
         <h3 className="text-sm font-extrabold text-amber-950 dark:text-amber-100">Awaiting tie resolution · places {group.rank_start}–{group.rank_start + members.length - 1}</h3>
         <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-200">All five performance measures are equal. An authorized reviewer records a complete order with a reason. The server rechecks membership and the metric fingerprint before saving.</p>
@@ -312,6 +347,7 @@ function TieResolutionForm({ unit, group, rows, periodKey, asOfDate, population 
         <label className="mt-3 block text-xs font-semibold text-gray-800 dark:text-gray-100">Decision reason<textarea value={form.data.reason} onChange={event => form.setData('reason', event.target.value)} minLength={10} maxLength={2000} rows={2} className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>
         {(form.errors.order || form.errors.reason) && <p className="mt-2 text-xs text-red-700 dark:text-red-300">{form.errors.order || form.errors.reason}</p>}
         <Button type="submit" size="compact" disabled={!valid || form.processing} className="mt-3 rounded-lg px-4 py-2 text-xs">Record approved tie order</Button>
+        <ConfirmDialog open={confirmationOpen} title="Record this tie order?" message={`Record the approved order for ${members.map(member => member.name).join(', ')} for ${periodKey}?`} confirmLabel="Record tie order" cancelLabel="Go Back" processing={form.processing} onCancel={() => { if (!form.processing) setConfirmationOpen(false); }} onConfirm={confirmSubmit} />
     </form>;
 }
 
@@ -351,6 +387,9 @@ function TechnicalClassificationPanel({ items, canConfigure }) {
     const [values, setValues] = useState({});
     const [approval, setApproval] = useState({});
     const [uploadingKey, setUploadingKey] = useState('');
+    const [pendingUpload, setPendingUpload] = useState(null);
+    const [savingKey, setSavingKey] = useState('');
+    const [pendingClassification, setPendingClassification] = useState(null);
     const [errors, setErrors] = useState({});
     useEffect(() => {
         setValues(Object.fromEntries(items.map(item => [`${item.domain}:${item.workflow_key}`, item.is_highly_technical == null ? '' : (item.is_highly_technical ? 'yes' : 'no')])));
@@ -362,17 +401,42 @@ function TechnicalClassificationPanel({ items, canConfigure }) {
         setUploadingKey(key); setErrors(current => ({ ...current, [key]: '' }));
         router.post('/admin/office-tat/approval-evidence', { kind: 'classification', identity: { domain: item.domain, workflow_key: item.workflow_key }, evidence: file }, {
             forceFormData: true, preserveScroll: true,
-            onSuccess: page => setField(key, 'evidence_reference', page?.props?.assessmentSaved?.evidence_reference || ''),
-            onError: messages => setErrors(current => ({ ...current, [key]: Object.values(messages || {})[0] || 'Approval file could not be registered.' })),
+            onSuccess: page => {
+                setField(key, 'evidence_reference', page?.props?.assessmentSaved?.evidence_reference || '');
+                setPendingUpload(null);
+            },
+            onError: messages => {
+                setErrors(current => ({ ...current, [key]: Object.values(messages || {})[0] || 'Approval file could not be registered.' }));
+                setPendingUpload(null);
+            },
             onFinish: () => setUploadingKey(''),
         });
     };
-    const submit = (item, key, value) => {
+    const requestUpload = (item, key, file) => {
+        if (file && !uploadingKey && !savingKey) setPendingUpload({ item, key, file });
+    };
+    const requestSubmit = (item, key, value) => {
+        if (savingKey || uploadingKey) return;
         const fields = approval[key] || {};
-        router.post('/admin/office-tat/technical-classification', {
+        setPendingClassification({ key, payload: {
             domain: item.domain, workflow_key: item.workflow_key, is_highly_technical: value === 'yes',
             ...fields, expected_version: Number(item.stored_version || 0),
-        }, { preserveScroll: true });
+        } });
+    };
+    const submitClassification = () => {
+        if (!pendingClassification || savingKey) return;
+        const { key, payload } = pendingClassification;
+        setSavingKey(key);
+        setErrors(current => ({ ...current, [key]: '' }));
+        router.post('/admin/office-tat/technical-classification', payload, {
+            preserveScroll: true,
+            onSuccess: () => setPendingClassification(null),
+            onError: messages => {
+                setErrors(current => ({ ...current, [key]: Object.values(messages || {})[0] || 'The classification could not be saved.' }));
+                setPendingClassification(null);
+            },
+            onFinish: () => setSavingKey(''),
+        });
     };
     return <details className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <summary className="cursor-pointer px-4 py-4 text-sm font-extrabold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700 dark:text-white">Highly technical report classification · {items.filter(item => item.is_highly_technical == null).length} unclassified workflows</summary>
@@ -384,18 +448,20 @@ function TechnicalClassificationPanel({ items, canConfigure }) {
                 return <div key={key} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700"><div className="flex flex-wrap items-start justify-between gap-3"><span className="min-w-48 flex-1 text-xs font-semibold text-gray-800 dark:text-gray-100">{item.label}{item.version ? <span className="ml-1 text-[10px] font-normal text-gray-500">v{item.version}</span> : <span className="ml-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">Approval missing</span>}<span className="mt-1 block text-[10px] font-normal leading-4 text-gray-500 dark:text-gray-400">Start: {item.start_basis}. Deadline: {item.deadline_basis}. Endpoint: {item.submission_endpoint}. {item.day_convention}{item.allowed_days ? ` · configured duration ${item.allowed_days} days` : ''}.</span></span>
                     <select disabled={!canConfigure} aria-label={`Technical classification for ${item.label}`} value={value} onChange={event => setValues(current => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-950 dark:text-white"><option value="">Choose classification</option><option value="yes">Highly technical</option><option value="no">Not highly technical</option></select></div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                        <input aria-label={`Approving authority for ${item.label}`} placeholder="Approving authority" maxLength={180} disabled={!canConfigure} value={fields.approving_authority || ''} onChange={event => setField(key, 'approving_authority', event.target.value)} className={fieldClass} />
-                        <input aria-label={`Written approval reference for ${item.label}`} placeholder="Written reference" maxLength={180} disabled={!canConfigure} value={fields.approval_reference || ''} onChange={event => setField(key, 'approval_reference', event.target.value)} className={fieldClass} />
-                        <input aria-label={`Effective from for ${item.label}`} type="date" disabled={!canConfigure} value={fields.effective_from || ''} onChange={event => setField(key, 'effective_from', event.target.value)} className={fieldClass} />
-                        <input aria-label={`Effective to for ${item.label}`} type="date" disabled={!canConfigure} value={fields.effective_to || ''} onChange={event => setField(key, 'effective_to', event.target.value)} className={fieldClass} />
-                        <textarea aria-label={`Classification rationale for ${item.label}`} placeholder="Rationale" minLength={10} maxLength={4000} rows={2} disabled={!canConfigure} value={fields.rationale || ''} onChange={event => setField(key, 'rationale', event.target.value)} className={fieldClass} />
-                        <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-300">Approval source file<input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" disabled={!canConfigure || uploadingKey === key} onChange={event => upload(item, key, event.target.files?.[0])} className={fieldClass} /><span className="mt-1 block font-normal">{fields.evidence_reference ? `Stored evidence ${fields.evidence_reference}` : 'Upload source file.'}</span></label>
+                        <input aria-label={`Approving authority for ${item.label}`} placeholder="Approving authority" maxLength={180} disabled={!canConfigure || Boolean(savingKey)} value={fields.approving_authority || ''} onChange={event => setField(key, 'approving_authority', event.target.value)} className={fieldClass} />
+                        <input aria-label={`Written approval reference for ${item.label}`} placeholder="Written reference" maxLength={180} disabled={!canConfigure || Boolean(savingKey)} value={fields.approval_reference || ''} onChange={event => setField(key, 'approval_reference', event.target.value)} className={fieldClass} />
+                        <input aria-label={`Effective from for ${item.label}`} type="date" disabled={!canConfigure || Boolean(savingKey)} value={fields.effective_from || ''} onChange={event => setField(key, 'effective_from', event.target.value)} className={fieldClass} />
+                        <input aria-label={`Effective to for ${item.label}`} type="date" disabled={!canConfigure || Boolean(savingKey)} value={fields.effective_to || ''} onChange={event => setField(key, 'effective_to', event.target.value)} className={fieldClass} />
+                        <textarea aria-label={`Classification rationale for ${item.label}`} placeholder="Rationale" minLength={10} maxLength={4000} rows={2} disabled={!canConfigure || Boolean(savingKey)} value={fields.rationale || ''} onChange={event => setField(key, 'rationale', event.target.value)} className={fieldClass} />
+                        <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-300">Approval source file<input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" disabled={!canConfigure || uploadingKey === key || Boolean(savingKey)} onChange={event => requestUpload(item, key, event.target.files?.[0])} className={fieldClass} /><span className="mt-1 block font-normal">{fields.evidence_reference ? `Stored evidence ${fields.evidence_reference}` : 'Upload source file.'}</span></label>
                     </div>
                     {errors[key] && <p role="alert" className="mt-2 text-xs text-red-700 dark:text-red-300">{errors[key]}</p>}
-                    <button type="button" disabled={!canConfigure || !value || !fields.evidence_reference || !fields.approving_authority?.trim() || !fields.approval_reference?.trim() || !fields.rationale?.trim() || fields.rationale.trim().length < 10 || !fields.effective_from} onClick={() => submit(item, key, value)} className="mt-3 rounded-lg bg-gradient-to-r from-emerald-700 to-teal-700 px-3 py-2 text-[11px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">Append approved classification version</button>
+                    <button type="button" disabled={!canConfigure || Boolean(savingKey) || Boolean(uploadingKey) || !value || !fields.evidence_reference || !fields.approving_authority?.trim() || !fields.approval_reference?.trim() || !fields.rationale?.trim() || fields.rationale.trim().length < 10 || !fields.effective_from} onClick={() => requestSubmit(item, key, value)} className="mt-3 rounded-lg bg-gradient-to-r from-emerald-700 to-teal-700 px-3 py-2 text-[11px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50">Append approved classification version</button>
                 </div>;
             })}</div></section>)}
         </div>
+        <ConfirmDialog open={Boolean(pendingUpload)} title="Upload this classification evidence?" message={pendingUpload?.file?.name ? `Upload ${pendingUpload.file.name} to the protected approval-evidence store?` : 'Upload this file to the protected approval-evidence store?'} confirmLabel="Upload evidence" cancelLabel="Go Back" processing={Boolean(uploadingKey)} onCancel={() => { if (!uploadingKey) setPendingUpload(null); }} onConfirm={() => { if (pendingUpload && !uploadingKey) upload(pendingUpload.item, pendingUpload.key, pendingUpload.file); }} />
+        <ConfirmDialog open={Boolean(pendingClassification)} title="Append this classification version?" message="This adds a versioned technical classification with its current approval details." confirmLabel="Append classification" cancelLabel="Go Back" processing={Boolean(savingKey)} onCancel={() => { if (!savingKey) setPendingClassification(null); }} onConfirm={submitClassification} />
     </details>;
 }
 

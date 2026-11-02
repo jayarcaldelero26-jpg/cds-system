@@ -176,7 +176,14 @@ test('Calendar renders both plus utility controls with labels, focus, hover, and
         chooseModule() {}, chooseProtectedArea() {}, clearFilters() {}, canManage: true,
         onAdd: date => receivedDates.push(date),
     });
-    const restoredAdd = rail.props.children[2].props.children[0];
+    const findRailAction = node => {
+        if (Array.isArray(node)) return node.map(findRailAction).find(Boolean);
+        if (!node || typeof node !== 'object') return null;
+        if (node.type === 'button' && node.props['aria-label'] === 'Add Non-Working Day') return node;
+        return findRailAction(node.props?.children);
+    };
+    const restoredAdd = findRailAction(rail);
+    assert.ok(restoredAdd);
     restoredAdd.props.onClick();
     assert.equal(receivedDates.at(-1), '', 'the restored rail control still opens the form without a preselected date');
     const unauthorizedRail = renderToStaticMarkup(React.createElement(FilterRail, {
@@ -287,4 +294,117 @@ test('year view keeps all twelve month headings accessible, selected, and free o
     assert.ok(dateButton);
     dateButton.props.onClick();
     assert.deepEqual(openedMonths, [8, 8], 'the heading and active date cell both open their corresponding month');
+});
+
+test('Year view task filtering preserves report and holiday layers and opens the selected private task', async () => {
+    const { default: BusinessCalendarMonth, FilterRail, YearView, YearMiniCalendar } = await load('Components/BusinessCalendarMonth.jsx');
+    const tasks = [
+        { id: 21, title: 'New Year task', scheduled_date: '2026-01-01', is_all_day: true, start_time: null, end_time: null, status: 'scheduled' },
+        { id: 22, title: 'May task outside opened month', scheduled_date: '2026-05-17', is_all_day: false, start_time: '09:15', end_time: '10:00', status: 'scheduled' },
+        { id: 23, title: 'Year-end task', scheduled_date: '2026-12-31', is_all_day: false, start_time: '23:15', end_time: '23:45', status: 'scheduled', creator_attribution: { office_name: 'PENRO Davao Oriental' } },
+    ];
+    const props = {
+        view: 'month', year: 2026, month: '2026-05', filters: { module: 'bms', protected_area_id: 9 }, modules: [], protectedAreas: [],
+        movEvents: [{ source_key: 'fixture-mov', source_type: 'bms', event_date: '2026-05-20', module: 'BMS', title: 'Fixture MOV', source_name: 'Fixture office', program_area: 'protected_area_management_and_development' }],
+        yearSummary: {
+            months: { '05': { days: { '20': [{ source_type: 'bms', program_area: 'protected_area_management_and_development' }] } } },
+            overview: { submitted_movs: 12, historical_reports: 7, months_with_submissions: 4, non_working_days: 1 },
+        },
+        nonWorkingDays: [
+            { id: 1, date: '2026-05-18', type: 'NATIONAL_HOLIDAY', name: 'Fixture Holiday', is_active: true },
+            { id: 2, date: '2026-11-11', type: 'NATIONAL_HOLIDAY', name: 'Year Fixture Holiday', is_active: true },
+        ],
+        tasks, taskStorageReady: true, canManage: false, onSelectMov() {}, onSelectHoliday() {}, onSelectTask(task) { selectedTasks.push(task); },
+    };
+    const selectedTasks = [];
+    const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+    const previousDispatcher = internals.H;
+    const slots = [];
+    let cursor = 0;
+    const renderCalendar = nextProps => {
+        cursor = 0;
+        internals.H = {
+            useState(initialValue) {
+                const index = cursor++;
+                if (!(index in slots)) slots[index] = typeof initialValue === 'function' ? initialValue() : initialValue;
+                return [slots[index], nextValue => { slots[index] = typeof nextValue === 'function' ? nextValue(slots[index]) : nextValue; }];
+            },
+            useMemo(factory) { cursor++; return factory(); },
+            useRef(initialValue) { const index = cursor++; return slots[index] ??= { current: initialValue }; },
+        };
+        return BusinessCalendarMonth(nextProps);
+    };
+    const findElement = (node, predicate) => {
+        if (Array.isArray(node)) return node.map(child => findElement(child, predicate)).find(Boolean) || null;
+        if (!React.isValidElement(node)) return null;
+        if (predicate(node)) return node;
+        return findElement(node.props?.children, predicate);
+    };
+    const taskFilterFrom = tree => {
+        const rail = findElement(tree, element => element.type === FilterRail);
+        const railTree = FilterRail(rail.props);
+        return findElement(railTree, element => element.type === 'input' && element.props.className?.includes('border-sky-400'));
+    };
+
+    try {
+        const monthTree = renderCalendar(props);
+        const taskFilter = taskFilterFrom(monthTree);
+        assert.equal(taskFilter.props.checked, true);
+        taskFilter.props.onChange({ target: { checked: false } });
+
+        const filteredMonthTree = renderCalendar(props);
+        const monthElement = findElement(filteredMonthTree, element => element.type?.name === 'MonthView');
+        const hiddenMonthMarkup = renderToStaticMarkup(monthElement.type(monthElement.props));
+        assert.doesNotMatch(hiddenMonthMarkup, /May task outside opened month/);
+        assert.match(hiddenMonthMarkup, /Fixture MOV/);
+        assert.match(hiddenMonthMarkup, /Fixture Holiday/);
+
+        const yearTree = renderCalendar({ ...props, view: 'year' });
+        const yearElement = findElement(yearTree, element => element.type === YearView);
+        assert.ok(yearElement);
+        assert.equal(yearElement.props.showTasks, false);
+        const hiddenMarkup = renderToStaticMarkup(YearView(yearElement.props));
+        assert.doesNotMatch(hiddenMarkup, /New Year task|May task outside opened month|Year-end task/);
+        assert.doesNotMatch(hiddenMarkup, /h-1\.5 w-1\.5 rounded-sm bg-sky-700/);
+        assert.match(hiddenMarkup, />12<\/b> Submitted MOVs/);
+        assert.match(hiddenMarkup, />7<\/b> Historical reports/);
+        assert.match(hiddenMarkup, />4<\/b> Months with Activity/);
+        assert.match(hiddenMarkup, /title="Open MAY 20"/);
+        assert.match(hiddenMarkup, /title="Open NOVEMBER 11"/);
+
+        const nextYearTree = renderCalendar({ ...props, view: 'year', year: 2027, month: '2027-01' });
+        const nextYear = findElement(nextYearTree, element => element.type === YearView);
+        assert.equal(nextYear.props.showTasks, false, 'the filter state survives a view and year prop change');
+        const nextRail = findElement(nextYearTree, element => element.type === FilterRail);
+        assert.deepEqual(nextRail.props.filters, { module: 'bms', protected_area_id: 9 });
+        taskFilterFrom(nextYearTree).props.onChange({ target: { checked: true } });
+
+        const enabledTree = renderCalendar({ ...props, view: 'year' });
+        const enabledYear = findElement(enabledTree, element => element.type === YearView);
+        assert.equal(enabledYear.props.showTasks, true);
+        const visibleMarkup = renderToStaticMarkup(YearView(enabledYear.props));
+        for (const title of ['New Year task', 'May task outside opened month', 'Year-end task']) assert.match(visibleMarkup, new RegExp(title));
+        assert.match(visibleMarkup, /All day/);
+        assert.match(visibleMarkup, /23:15.{0,5}23:45/);
+        assert.equal((visibleMarkup.match(/h-1\.5 w-1\.5 rounded-sm bg-sky-700/g) || []).length, 3, 'the January, May, and December mini-months show task markers');
+        assert.match(visibleMarkup, />12<\/b> Submitted MOVs/);
+        assert.match(visibleMarkup, />7<\/b> Historical reports/);
+        assert.match(visibleMarkup, />4<\/b> Months with Activity/);
+
+        const enabledMonthTree = renderCalendar(props);
+        const enabledMonth = findElement(enabledMonthTree, element => element.type?.name === 'MonthView');
+        const visibleMonthMarkup = renderToStaticMarkup(enabledMonth.type(enabledMonth.props));
+        assert.match(visibleMonthMarkup, /May task outside opened month/);
+        assert.match(visibleMonthMarkup, /Fixture MOV/);
+        assert.match(visibleMonthMarkup, /Fixture Holiday/);
+
+        const december = YearMiniCalendar({ year: 2026, month: 12, tasks: [tasks[2]], eventDays: {}, holidayDays: {}, showMovs: true, showTasks: true, onOpenMonth() {}, onSelectTask: task => selectedTasks.push(task) });
+        assert.match(renderToStaticMarkup(december), /PENRO Davao Oriental/, 'task labels retain their creator office context');
+        const yearTaskChip = findElement(december, element => element.props?.task?.id === tasks[2].id);
+        assert.ok(yearTaskChip);
+        yearTaskChip.props.onSelect(tasks[2]);
+        assert.deepEqual(selectedTasks, [tasks[2]], 'selecting the Year task uses the same task-detail callback as Month');
+    } finally {
+        internals.H = previousDispatcher;
+    }
 });

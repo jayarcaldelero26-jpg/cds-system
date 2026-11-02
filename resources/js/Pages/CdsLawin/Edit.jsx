@@ -1,4 +1,5 @@
 import { Head, useForm, Link } from '@inertiajs/react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import { FloatingInput, FloatingTextarea } from '@/Components/Form';
 
@@ -17,6 +18,8 @@ export default function Edit({ auth, lawin }) {
         e.preventDefault();
         patch(route('cds-lawin.update', lawin.id));
     };
+    const submitGate = useConfirmedFormSubmit({ processing, onSubmit: submit });
+
 
     return (
         <AuthenticatedLayout
@@ -28,7 +31,7 @@ export default function Edit({ auth, lawin }) {
             <div className="py-12">
                 <div className="max-w-3xl mx-auto sm:px-6 lg:px-8">
                     <div className="cds-card-surface bg-white dark:bg-gray-800 overflow-hidden shadow-sm sm:rounded-lg p-6">
-                        <form onSubmit={submit} className="space-y-6">
+                        <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-6">
                             <div>
                                 <FloatingInput variant="legacy" id="cds-lawin-area" label="Patrol Area / Protected Area"
                                     type="text"
@@ -115,6 +118,7 @@ export default function Edit({ auth, lawin }) {
                     </div>
                 </div>
             </div>
-        </AuthenticatedLayout>
+                <ConfirmedSubmitDialog gate={submitGate} title="Save CDS LAWIN changes?" message="This submits the displayed patrol record changes for server validation." confirmLabel="Save Changes" processing={processing} />
+</AuthenticatedLayout>
     );
 }

@@ -1,11 +1,12 @@
 import { Head, router, useForm } from '@inertiajs/react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
 import SettingsShell from '@/Components/Admin/SettingsShell';
 import SettingsPageHeader from '@/Components/Admin/SettingsPageHeader';
 import { FloatingSelect } from '@/Components/Form';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import ConfirmDialog from '@/Components/ConfirmDialog';
 
 const empty = { name: '', unit: 'conservation', program_area: 'protected_area_management_and_development', module_type: 'regular_target', reporting_frequency: 'monthly', activity_name: '', document_types: '', period_labels: '', offices: [], reminder_offices: [], configure_workflow: true, deadline_mode: 'standard_working_days', default_deadline_days: '15', allow_deadline_override: false, description: '', is_active: true };
 const deadlineLabels = { standard_working_days: 'Standard Working Days', calendar_days: 'Calendar Days', custom: 'Custom Deadline', none: 'No Deadline' };
@@ -13,6 +14,10 @@ const deadlineLabels = { standard_working_days: 'Standard Working Days', calenda
 export default function ModuleManagement({ definitions = [], filters = {}, programAreas = [], frequencies = [], developmentOffices = [], needsCanonicalConservationSetup = false, needsCanonicalEngpSetup = false }) {
     const [editing, setEditing] = useState(null);
     const [open, setOpen] = useState(false);
+    const [pendingMutation, setPendingMutation] = useState(null);
+    const [mutationProcessing, setMutationProcessing] = useState(false);
+    const [mutationError, setMutationError] = useState('');
+    const mutationInFlight = useRef(false);
     const form = useForm(empty);
     const setFilter = (name, value) => router.get(route('module-definitions.index'), buildModuleFilterParams(filters, name, value), { preserveState: true, preserveScroll: true, replace: true });
     const startCreate = () => { form.setData({ ...empty, offices: [...developmentOffices] }); form.clearErrors(); setEditing(null); setOpen(true); };
@@ -27,7 +32,23 @@ export default function ModuleManagement({ definitions = [], filters = {}, progr
         const options = { preserveScroll: true, onSuccess: () => { setOpen(false); setEditing(null); form.reset(); } };
         editing ? form.put(route('module-definitions.update', editing.id), options) : form.post(route('module-definitions.store'), options);
     };
-    const toggle = definition => router.patch(route('module-definitions.status', definition.id), {}, { preserveScroll: true });
+    const confirmMutation = () => {
+        if (!pendingMutation || mutationInFlight.current) return;
+        mutationInFlight.current = true;
+        setMutationProcessing(true);
+        setMutationError('');
+        const options = {
+            preserveScroll: true,
+            onSuccess: () => setPendingMutation(null),
+            onError: errors => setMutationError(Object.values(errors || {}).find(value => typeof value === 'string' && value.trim()) || 'The module change was not saved. Review its current state and try again.'),
+            onHttpException: () => setMutationError('The server could not complete this module change. Review the current state and try again.'),
+            onNetworkError: () => setMutationError('The request did not reach the server. Check the connection and try again.'),
+            onFinish: () => { setMutationProcessing(false); mutationInFlight.current = false; },
+        };
+        if (pendingMutation.type === 'toggle') router.patch(route('module-definitions.status', pendingMutation.definition.id), {}, options);
+        if (pendingMutation.type === 'ensure-conservation') router.post(route('module-definitions.ensure-canonical-conservation'), {}, options);
+        if (pendingMutation.type === 'ensure-engp') router.post(route('module-definitions.ensure-canonical-engp'), {}, options);
+    };
     const appliedFilters = [
         ...(filters.search ? [{ key: 'search', label: 'Search', value: filters.search, onRemove: () => setFilter('search', '') }] : []),
         ...(filters.program_area ? [{ key: 'program_area', label: 'Program Area', value: programAreas.find(item => item.value === filters.program_area)?.label || filters.program_area, onRemove: () => setFilter('program_area', '') }] : []),
@@ -46,22 +67,39 @@ export default function ModuleManagement({ definitions = [], filters = {}, progr
                         <div className="grid gap-3 sm:grid-cols-3"><FilterSelect value={filters.program_area || ''} onChange={value => setFilter('program_area', value)} label="All Program Areas" options={programAreas} /><FilterSelect value={filters.module_type || ''} onChange={value => setFilter('module_type', value)} label="All Module Types" options={[{ value: 'regular_target', label: 'Regular Target' }, { value: 'plan', label: 'Plan' }]} /><FilterSelect value={filters.status || ''} onChange={value => setFilter('status', value)} label="All Statuses" options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]} /></div>
                     </FilterToolbar>
                 </div>
-                <div className="flex flex-wrap gap-2">{needsCanonicalConservationSetup && <button type="button" title="Adds only missing canonical generic PA and native PAMO definitions. Existing settings and inactive status are preserved; Management Plans is excluded." onClick={() => router.post(route('module-definitions.ensure-canonical-conservation'), {}, { preserveScroll: true })} className="h-10 rounded-lg border border-emerald-700 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-emerald-300 dark:hover:bg-emerald-950/40" data-cds-action="true" data-cds-action-variant="primary">Add missing canonical Conservation definitions</button>}{needsCanonicalEngpSetup && <button type="button" title="Adds only missing ENGP definitions from the registered workflow metadata. Existing settings and inactive status are preserved." onClick={() => router.post(route('module-definitions.ensure-canonical-engp'), {}, { preserveScroll: true })} className="h-10 rounded-lg border border-emerald-700 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-emerald-300 dark:hover:bg-emerald-950/40" data-cds-action="true" data-cds-action-variant="primary">Add missing canonical ENGP definitions</button>}<button type="button" onClick={startCreate} className="h-10 rounded-lg bg-gradient-to-r from-emerald-600 to-green-700 px-4 text-xs font-bold text-white shadow-sm transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600" data-cds-action="true" data-cds-action-variant="primary">+ Create Module</button></div>
+                <div className="flex flex-wrap gap-2">{needsCanonicalConservationSetup && <button type="button" title="Adds only missing canonical generic PA and native PAMO definitions. Existing settings and inactive status are preserved; Management Plans is excluded." onClick={() => { setMutationError(''); setPendingMutation({ type: 'ensure-conservation' }); }} className="h-10 rounded-lg border border-emerald-700 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-emerald-300 dark:hover:bg-emerald-950/40" data-cds-action="true" data-cds-action-variant="primary">Add missing canonical Conservation definitions</button>}{needsCanonicalEngpSetup && <button type="button" title="Adds only missing ENGP definitions from the registered workflow metadata. Existing settings and inactive status are preserved." onClick={() => { setMutationError(''); setPendingMutation({ type: 'ensure-engp' }); }} className="h-10 rounded-lg border border-emerald-700 px-4 text-xs font-bold text-emerald-800 hover:bg-emerald-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-emerald-300 dark:hover:bg-emerald-950/40" data-cds-action="true" data-cds-action-variant="primary">Add missing canonical ENGP definitions</button>}<button type="button" onClick={startCreate} className="h-10 rounded-lg bg-gradient-to-r from-emerald-600 to-green-700 px-4 text-xs font-bold text-white shadow-sm transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600" data-cds-action="true" data-cds-action-variant="primary">+ Create Module</button></div>
             </div>
-            <div className="mt-4 overflow-x-auto custom-table-scrollbar">
-                <table className="cds-data-table min-w-[880px] w-full text-left"><thead><tr className="border-y border-slate-100 text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:border-gray-800 dark:text-gray-400"><th className="px-3 py-3">Module Name</th><th className="px-3 py-3">Program Area</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Frequency / Duration</th><th className="px-3 py-3">Deadline</th><th className="px-3 py-3">Status</th><th className="px-3 py-3 text-right">Actions</th></tr></thead>
-                    <tbody>{definitions.map(definition => <tr key={definition.id} className="border-b border-slate-100 text-xs text-slate-700 dark:border-gray-800 dark:text-gray-200"><td className="px-3 py-3"><p className="font-bold text-slate-900 dark:text-white">{definition.name}</p><p className="mt-0.5 font-mono text-[10px] text-slate-400">{definition.code}{definition.implementation_type === 'specialized' ? ' · Specialized' : ''}</p></td><td className="px-3 py-3">{definition.program_area_label}</td><td className="px-3 py-3">{definition.module_type === 'plan' ? 'Plan' : 'Regular Target'}</td><td className="px-3 py-3">{definition.module_type === 'plan' ? `${definition.plan_duration_years || 'Not recorded'} Years` : titleCase(definition.reporting_frequency) || 'Not recorded'}</td><td className="px-3 py-3">{definition.deadline_mode === 'standard_working_days' ? `${definition.default_deadline_days} Working Days` : deadlineLabels[definition.deadline_mode]}</td><td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${definition.is_active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-gray-800 dark:text-gray-300'}`}>{definition.is_active ? 'Active' : 'Inactive'}</span></td><td className="px-3 py-3 text-right"><ModuleDefinitionActions definition={definition} onEdit={() => startEdit(definition)} onToggle={() => toggle(definition)} /></td></tr>)}{definitions.length === 0 && <tr><td colSpan="7" className="px-3 py-10 text-center text-sm text-slate-500">No module definitions match these filters.</td></tr>}</tbody>
+            <div className="mt-4 max-h-[min(34rem,70vh)] overflow-auto custom-table-scrollbar" role="region" aria-label="Module definitions; scroll to view all rows" tabIndex={0}>
+                <table className="cds-data-table min-w-[880px] w-full text-left"><thead className="sticky top-0 z-20 bg-white shadow-sm dark:bg-gray-900"><tr className="border-y border-slate-100 bg-white text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400"><th className="px-3 py-3">Module Name</th><th className="px-3 py-3">Program Area</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Frequency / Duration</th><th className="px-3 py-3">Deadline</th><th className="px-3 py-3">Status</th><th className="px-3 py-3 text-right">Actions</th></tr></thead>
+                    <tbody>{definitions.map(definition => <tr key={definition.id} className="border-b border-slate-100 text-xs text-slate-700 dark:border-gray-800 dark:text-gray-200"><td className="px-3 py-3"><p className="font-bold text-slate-900 dark:text-white">{definition.name}</p><p className="mt-0.5 font-mono text-[10px] text-slate-400">{definition.code}{definition.implementation_type === 'specialized' ? ' · Specialized' : ''}</p></td><td className="px-3 py-3">{definition.program_area_label}</td><td className="px-3 py-3">{definition.module_type === 'plan' ? 'Plan' : 'Regular Target'}</td><td className="px-3 py-3">{definition.module_type === 'plan' ? `${definition.plan_duration_years || 'Not recorded'} Years` : titleCase(definition.reporting_frequency) || 'Not recorded'}</td><td className="px-3 py-3">{definition.deadline_mode === 'standard_working_days' ? `${definition.default_deadline_days} Working Days` : deadlineLabels[definition.deadline_mode]}</td><td className="px-3 py-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${definition.is_active ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-gray-800 dark:text-gray-300'}`}>{definition.is_active ? 'Active' : 'Inactive'}</span></td><td className="px-3 py-3 text-right"><ModuleDefinitionActions definition={definition} onEdit={() => startEdit(definition)} onToggle={() => { setMutationError(''); setPendingMutation({ type: 'toggle', definition }); }} /></td></tr>)}{definitions.length === 0 && <tr><td colSpan="7" className="px-3 py-10 text-center text-sm text-slate-500">No module definitions match these filters.</td></tr>}</tbody>
                 </table>
             </div>
         </section>
         <ModuleForm open={open} form={form} editing={editing} programAreas={programAreas} frequencies={frequencies} developmentOffices={developmentOffices} onClose={() => !form.processing && setOpen(false)} onSubmit={submit} />
+        <ConfirmDialog open={Boolean(pendingMutation)} title={pendingMutation?.type === 'toggle' ? `${pendingMutation.definition.is_active ? 'Deactivate' : 'Activate'} module?` : 'Add module definitions?'} message={<><span>{pendingMutation?.type === 'toggle' ? `This changes whether ${pendingMutation.definition.name} is active for future submissions and navigation.` : pendingMutation?.type === 'ensure-conservation' ? 'This adds only missing canonical Conservation definitions; existing settings and inactive status are preserved.' : 'This adds only missing ENGP definitions from the registered workflow metadata; existing settings and inactive status are preserved.'}</span>{mutationError && <span role="alert" className="mt-3 block rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-left text-xs leading-5 text-red-800 dark:border-red-900 dark:bg-red-950/50 dark:text-red-200">{mutationError}</span>}</>} confirmLabel={pendingMutation?.type === 'toggle' ? (pendingMutation.definition.is_active ? 'Deactivate Module' : 'Activate Module') : 'Add Missing Definitions'} cancelLabel="Go Back" processing={mutationProcessing} onConfirm={confirmMutation} onCancel={() => { if (!mutationProcessing) { setPendingMutation(null); setMutationError(''); } }} />
     </SettingsShell>;
 }
 
 export function ModuleForm({ open = true, form, editing, programAreas, frequencies, developmentOffices = [], onClose, onSubmit }) {
     const overlayRef = useRef(null);
     const formRef = useRef(null);
+    const saveBypassRef = useRef(false);
+    const saveInFlightRef = useRef(false);
+    const wasProcessingRef = useRef(form.processing);
+    const [saveConfirmationOpen, setSaveConfirmationOpen] = useState(false);
     const { present, phase, onTransitionEnd } = useModalMotion(open, { onClose, panelRef: formRef, layerRef: overlayRef });
+    useEffect(() => {
+        if (form.processing) {
+            wasProcessingRef.current = true;
+            saveInFlightRef.current = true;
+            return;
+        }
+        if (wasProcessingRef.current) {
+            wasProcessingRef.current = false;
+            saveInFlightRef.current = false;
+            saveBypassRef.current = false;
+        }
+    }, [form.processing]);
     const isGeneric = !editing || editing.implementation_type === 'generic';
     const isPlan = form.data.module_type === 'plan';
     const standard = ['standard_working_days', 'calendar_days'].includes(form.data.deadline_mode);
@@ -80,7 +118,7 @@ export function ModuleForm({ open = true, form, editing, programAreas, frequenci
     };
     if (!present) return null;
     return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
-        <form ref={formRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} onSubmit={onSubmit} role="dialog" aria-modal="true" aria-label={editing ? 'Edit module definition' : 'Create module definition'} data-motion-state={phase} className="cds-modal-motion-panel max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
+        <form ref={formRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} onSubmit={event => { if (saveBypassRef.current) { saveBypassRef.current = false; if (!saveInFlightRef.current && !form.processing) { saveInFlightRef.current = true; onSubmit(event); } else event.preventDefault(); return; } event.preventDefault(); if (!saveInFlightRef.current && !form.processing) setSaveConfirmationOpen(true); }} inert={saveConfirmationOpen || undefined} aria-hidden={saveConfirmationOpen || undefined} role="dialog" aria-modal="true" aria-label={editing ? 'Edit module definition' : 'Create module definition'} data-motion-state={phase} className="cds-modal-motion-panel max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <header className="flex items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-gray-800"><div><h2 className="text-base font-bold text-slate-900 dark:text-white">{editing ? 'Edit Module' : 'Create Module'}</h2><p className="mt-1 text-xs text-slate-500">Configure a shared report workflow for Conservation or Development. Existing canonical adapters remain in place.</p></div><button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800" aria-label="Close module form"><Icon icon="lucide:x" width="16" height="16" aria-hidden="true" /></button></header>
             <div className="grid gap-4 p-5 sm:grid-cols-2">
                 <Field label="Module Name" error={form.errors.name} required className="sm:col-span-2"><input required value={form.data.name} onChange={event => set('name', event.target.value)} className={field} /></Field>
@@ -103,6 +141,7 @@ export function ModuleForm({ open = true, form, editing, programAreas, frequenci
             </div>
             <footer className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4 dark:border-gray-800"><button type="button" onClick={onClose} className="h-10 rounded-lg border border-slate-200 px-4 text-xs font-bold text-slate-700 dark:border-gray-700 dark:text-gray-200" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button><button type="submit" disabled={form.processing} className="h-10 rounded-lg bg-green-700 px-4 text-xs font-bold text-white disabled:opacity-50" data-cds-action="true" data-cds-action-variant="primary">{form.processing ? 'Saving\u2026' : editing ? 'Save Changes' : 'Create Module'}</button></footer>
         </form>
+        <ConfirmDialog open={saveConfirmationOpen} title={editing ? 'Save module changes?' : 'Create this module?'} message="This saves the module definition and its configuration for future submissions." confirmLabel={editing ? 'Save Changes' : 'Create Module'} cancelLabel="Go Back" processing={form.processing} onConfirm={() => { if (!formRef.current || saveInFlightRef.current || form.processing) return; if (!formRef.current.checkValidity()) { setSaveConfirmationOpen(false); window.requestAnimationFrame(() => formRef.current?.reportValidity()); return; } saveBypassRef.current = true; setSaveConfirmationOpen(false); formRef.current.requestSubmit(); }} onCancel={() => !form.processing && setSaveConfirmationOpen(false)} />
     </div>;
 }
 

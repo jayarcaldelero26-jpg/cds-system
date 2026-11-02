@@ -73,6 +73,29 @@ final class OrganizationalAccessService
         return $user?->hasAnyRole(['CDS Admin', self::ACCOUNT_ROLE_SUPER_ADMIN]) ?? false;
     }
 
+    public function canViewCalendar(User $user): bool
+    {
+        if (! $user->is_active || ! $user->is_approved) {
+            return false;
+        }
+
+        if ($this->isGlobal($user)) {
+            return true;
+        }
+
+        $calendarCategories = [
+            self::PAMO,
+            self::CENRO_RECORDS,
+            self::CENRO_CHIEF,
+            self::CENRO_FOCAL,
+            self::PENRO_CHIEF,
+            self::PENRO_FOCAL,
+        ];
+
+        return in_array($this->effectiveCategory($user), $calendarCategories, true)
+            || $user->can('reports.view');
+    }
+
     public function accountRole(?User $user): ?string
     {
         if (! $user) return null;

@@ -7,33 +7,39 @@ function ClockIcon() {
     return <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><circle cx="12" cy="12" r="8.5" /><path strokeLinecap="round" d="M12 7.5v4.9l3.2 1.9" /></svg>;
 }
 
-export default function PremiumTimePicker({ id, label = 'Time', value = '', onChange, error, name, disabled = false }) {
+export default function PremiumTimePicker({ id, label = 'Time', value = '', dateContext = '', onChange, error, name, disabled = false }) {
     const rootRef = useRef(null);
+    const triggerRef = useRef(null);
     const hourRef = useRef(null);
     const minuteRef = useRef(null);
     const periodRef = useRef(null);
     const snapTimers = useRef({});
     const [open, setOpen] = useState(false);
     const [mode, setMode] = useState('time');
-    const [draft, setDraft] = useState(() => initialDraft(value));
+    const [draft, setDraft] = useState(() => initialDraft(value, new Date(), dateContext));
 
     const scrollToIndex = (ref, index, behavior = 'smooth') => ref.current?.scrollTo({ top: index * ROW_HEIGHT, behavior });
 
     useEffect(() => {
         if (!open) return;
-        const next = initialDraft(value);
+        const next = initialDraft(value, new Date(), dateContext);
         setDraft(next);
         requestAnimationFrame(() => {
             scrollToIndex(hourRef, next.hour - 1, 'auto');
             scrollToIndex(minuteRef, next.minute, 'auto');
             scrollToIndex(periodRef, next.period === 'PM' ? 1 : 0, 'auto');
         });
-    }, [open]);
+    }, [open, dateContext, value]);
+
+    const close = () => {
+        setOpen(false);
+        window.requestAnimationFrame(() => triggerRef.current?.focus());
+    };
 
     useEffect(() => {
         if (!open) return undefined;
-        const onPointerDown = event => { if (!rootRef.current?.contains(event.target)) setOpen(false); };
-        const onKeyDown = event => { if (event.key === 'Escape') { event.preventDefault(); setOpen(false); } };
+        const onPointerDown = event => { if (!rootRef.current?.contains(event.target)) close(); };
+        const onKeyDown = event => { if (event.key === 'Escape') { event.preventDefault(); close(); } };
         document.addEventListener('pointerdown', onPointerDown);
         document.addEventListener('keydown', onKeyDown);
         return () => { document.removeEventListener('pointerdown', onPointerDown); document.removeEventListener('keydown', onKeyDown); };
@@ -61,10 +67,10 @@ export default function PremiumTimePicker({ id, label = 'Time', value = '', onCh
         scrollToIndex(ref, Math.max(0, Math.min(max, next)));
     };
 
-    const commit = () => { onChange?.(serializeTimeValue(draft)); setOpen(false); };
+    const commit = () => { onChange?.(serializeTimeValue(draft)); close(); };
     const chooseNow = () => {
         setMode('now');
-        const next = currentDraft(value);
+        const next = currentDraft(value, new Date(), dateContext);
         setDraft(next);
         requestAnimationFrame(() => { scrollToIndex(hourRef, next.hour - 1); scrollToIndex(minuteRef, next.minute); scrollToIndex(periodRef, next.period === 'PM' ? 1 : 0); });
     };
@@ -81,7 +87,7 @@ export default function PremiumTimePicker({ id, label = 'Time', value = '', onCh
 
     return <div ref={rootRef} className="relative w-full">
         <label htmlFor={`${id}-trigger`} className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</label>
-        <button id={`${id}-trigger`} type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); } }} className="premium-time-trigger">
+        <button ref={triggerRef} id={`${id}-trigger`} type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); } }} className="premium-time-trigger">
             <span className="text-emerald-700 dark:text-emerald-400"><ClockIcon /></span>
             <span className={value ? 'premium-time-value' : 'premium-time-placeholder'}>{value ? formatTimeDisplay(value) : 'Select time'}</span>
         </button>
@@ -96,7 +102,7 @@ export default function PremiumTimePicker({ id, label = 'Time', value = '', onCh
                 <div className="premium-time-selection-band" aria-hidden="true" />
             </div></div>
             <p className="premium-time-current" aria-live="polite">{formatTimeDisplay(draft)}</p>
-            <div className="premium-time-actions"><button type="button" onClick={() => setOpen(false)} className="premium-time-cancel" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button><button type="button" onClick={commit} className="premium-time-done" data-cds-action="true" data-cds-action-variant="primary">Done</button></div>
+            <div className="premium-time-actions"><button type="button" onClick={close} className="premium-time-cancel" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button><button type="button" onClick={commit} className="premium-time-done" data-cds-action="true" data-cds-action-variant="primary">Done</button></div>
         </div>}
     </div>;
 }

@@ -1,4 +1,5 @@
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { useState } from 'react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import { useForm, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import Card from '@/Components/Card';
@@ -59,6 +60,8 @@ export default function ImeaCreate({ protectedAreas }) {
     e.preventDefault();
     post('/imea', { preserveScroll: true });
   };
+    const submitGate = useConfirmedFormSubmit({ processing, onSubmit: submit });
+
 
   return (
     <AuthenticatedLayout title="Add IMEA Assessment">
@@ -88,7 +91,7 @@ export default function ImeaCreate({ protectedAreas }) {
                 {/* LEFT SIDE: FORM */}
                 <div className="lg:col-span-7">
                     <Card padding="p-6 sm:p-8" className="border border-gray-100 dark:border-gray-800 shadow-xl rounded-2xl bg-white dark:bg-gray-900">
-                        <form onSubmit={submit} className="space-y-8">
+                        <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-8">
 
                             {/* SECTION 1: GENERAL INFORMATION */}
                             <div className="bg-gray-50/70 dark:bg-gray-800/40 p-5 rounded-2xl border border-gray-100 dark:border-gray-800">
@@ -441,6 +444,7 @@ export default function ImeaCreate({ protectedAreas }) {
 
             </div>
 
-        </AuthenticatedLayout>);
+                <ConfirmedSubmitDialog gate={submitGate} title="Save this IMEA assessment?" message="This submits the displayed assessment details for server validation." confirmLabel="Save Assessment" processing={processing} />
+</AuthenticatedLayout>);
 
 }

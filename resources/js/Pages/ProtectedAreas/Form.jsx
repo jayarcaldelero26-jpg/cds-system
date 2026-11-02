@@ -11,6 +11,7 @@ import PageHeader from '../../Components/PageHeader';
 import PrimaryButton from '../../Components/PrimaryButton';
 import Button from '../../Components/Button';
 import ConfirmDialog from '../../Components/ConfirmDialog';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
 export const protectedAreaCreateCardSurface = isEdit => !isEdit;
@@ -227,6 +228,8 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
       router.post('/protected-areas', payload, options);
     }
   };
+
+  const submitGate = useConfirmedFormSubmit({ processing: submitting || form.processing, onSubmit: submit });
 
   const select = (id, label, options, required = false) =>
   <div className="block text-sm font-medium text-gray-700 dark:text-gray-200">
@@ -603,13 +606,15 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
             <button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition hover:bg-gray-100 hover:text-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-white" aria-label="Close create form"><Icon icon="lucide:x" width="18" height="18" aria-hidden="true" /></button>
           </div>
           {form.hasErrors && <div className="mx-5 mt-4 shrink-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 sm:mx-6">Please review the highlighted fields before saving.</div>}
-          <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+          <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="flex min-h-0 flex-1 flex-col">
             <div className="protected-area-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">{formFields}</div>
             <div className="flex shrink-0 justify-end gap-2 border-t border-gray-200 bg-gray-50 px-5 py-3 dark:border-gray-700 dark:bg-gray-800/50 sm:px-6">
               <button type="button" onClick={onClose} className="inline-flex items-center rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-200" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button>
               <PrimaryButton type="submit" disabled={submitting}>{form.processing ? 'Saving...' : 'Create protected area'}</PrimaryButton>
             </div>
           </form>
+                <ConfirmedSubmitDialog gate={submitGate} title={isEdit ? "Save Protected Area changes?" : "Save this Protected Area?"} message="This saves the displayed Protected Area registry details for server validation." confirmLabel={isEdit ? "Save Changes" : "Save Protected Area"} processing={submitting || form.processing} />
+
         </div>
       </div>
     );
@@ -639,7 +644,7 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
                             </div>
             }
 
-                        <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+                        <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="flex min-h-0 flex-1 flex-col">
                             <div className="custom-table-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">
                                 {formFields}
                             </div>
@@ -649,7 +654,8 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
                 </div>
                 <ConfirmDialog open={deleteDialogOpen} variant="danger" title={`Delete ${protectedArea?.name || 'this protected area'}?`} message="This action will remove the record from the active registry." confirmLabel="Delete" processing={deletingRecord} onConfirm={confirmDeleteRecord} onCancel={() => !deletingRecord && setDeleteDialogOpen(false)} />
         </>
-            </AuthenticatedLayout>);
+                            <ConfirmedSubmitDialog gate={submitGate} title={isEdit ? "Save Protected Area changes?" : "Save this Protected Area?"} message="This saves the displayed Protected Area registry details for server validation." confirmLabel={isEdit ? "Save Changes" : "Save Protected Area"} processing={submitting || form.processing} />
+</AuthenticatedLayout>);
 
   }
 
@@ -666,7 +672,7 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
         } />
 
             <Card className="mt-6 max-w-6xl">
-                <form onSubmit={submit} className="space-y-8">
+                <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-8">
                     {formFields}
                     <div className="flex flex-wrap gap-3 border-t border-gray-200 pt-5 dark:border-gray-700">
                         <PrimaryButton type="submit" disabled={submitting}>
@@ -678,6 +684,7 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
                     </div>
                 </form>
             </Card>
-        </AuthenticatedLayout>);
+                        <ConfirmedSubmitDialog gate={submitGate} title={isEdit ? "Save Protected Area changes?" : "Save this Protected Area?"} message="This saves the displayed Protected Area registry details for server validation." confirmLabel={isEdit ? "Save Changes" : "Save Protected Area"} processing={submitting || form.processing} />
+</AuthenticatedLayout>);
 
 }

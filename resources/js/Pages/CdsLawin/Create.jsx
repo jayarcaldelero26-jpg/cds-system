@@ -1,4 +1,5 @@
 import { Link, useForm } from '@inertiajs/react';
+import { ConfirmedSubmitDialog, useConfirmedFormSubmit } from '@/Components/Crud/useConfirmedFormSubmit';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
 import Card from '../../Components/Card';
 import PageHeader from '../../Components/PageHeader';
@@ -21,6 +22,8 @@ export default function Create({ cenroList = [], statuses = [] }) {
         e.preventDefault();
         post(route('cds-lawin.store'));
     };
+    const submitGate = useConfirmedFormSubmit({ processing, onSubmit: submit });
+
 
 
     return (
@@ -37,7 +40,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
 
             <div className="mt-6 max-w-3xl">
                 <Card>
-                    <form onSubmit={submit} className="space-y-6">
+                    <form ref={submitGate.formRef} onSubmit={submitGate.handleSubmit} inert={submitGate.confirmationOpen || undefined} aria-hidden={submitGate.confirmationOpen || undefined} className="space-y-6">
                         <div className="grid gap-6 md:grid-cols-2">
                             {/* Patrol Area / Protected Area */}
                             <div className="md:col-span-2">
@@ -130,6 +133,7 @@ export default function Create({ cenroList = [], statuses = [] }) {
                     </form>
                 </Card>
             </div>
-        </AuthenticatedLayout>
+                <ConfirmedSubmitDialog gate={submitGate} title="Save this CDS LAWIN patrol record?" message="This submits the displayed patrol record for server validation." confirmLabel="Save Patrol" processing={processing} />
+</AuthenticatedLayout>
     );
 }
