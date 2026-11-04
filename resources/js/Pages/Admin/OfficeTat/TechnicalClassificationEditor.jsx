@@ -1,8 +1,7 @@
 import { router } from '@inertiajs/react';
 import { useEffect, useState } from 'react';
+import { FloatingInput, FloatingSelect, FloatingTextarea } from '@/Components/Form';
 import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
-
-const inputClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:border-gray-700 dark:bg-gray-950 dark:text-white';
 
 export default function TechnicalClassificationEditor({ items = [], canConfigure = false }) {
     const [selectedKey, setSelectedKey] = useState('');
@@ -75,8 +74,6 @@ export default function TechnicalClassificationEditor({ items = [], canConfigure
         && approval.rationale.trim().length >= 10 && approval.effective_from,
     );
     const setField = (field, nextValue) => setApproval(current => ({ ...current, [field]: nextValue }));
-    const Field = ({ label, children }) => <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200">{label}{children}</label>;
-
     return <details className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
         <summary className="cursor-pointer px-4 py-3 text-sm font-extrabold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700 dark:text-white">
             Technical classification · {items.filter(item => item.is_highly_technical == null).length} workflows need an approved classification
@@ -92,12 +89,12 @@ export default function TechnicalClassificationEditor({ items = [], canConfigure
                     </span>
                 </p>
                 <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <Field label="Classification"><select disabled={!canConfigure} value={value} onChange={event => setValue(event.target.value)} className={inputClass}><option value="">Choose classification</option><option value="yes">Highly technical</option><option value="no">Not highly technical</option></select></Field>
-                    <Field label="Approving authority"><input maxLength={180} disabled={!canConfigure} value={approval.approving_authority} onChange={event => setField('approving_authority', event.target.value)} className={inputClass} /></Field>
-                    <Field label="Written approval reference"><input maxLength={180} disabled={!canConfigure} value={approval.approval_reference} onChange={event => setField('approval_reference', event.target.value)} className={inputClass} /></Field>
-                    <Field label="Effective from"><input type="date" disabled={!canConfigure} value={approval.effective_from} onChange={event => setField('effective_from', event.target.value)} className={inputClass} /></Field>
-                    <Field label="Effective to (optional)"><input type="date" disabled={!canConfigure} value={approval.effective_to} onChange={event => setField('effective_to', event.target.value)} className={inputClass} /></Field>
-                    <Field label="Classification rationale"><textarea minLength={10} maxLength={4000} rows={2} disabled={!canConfigure} value={approval.rationale} onChange={event => setField('rationale', event.target.value)} className={inputClass} /></Field>
+                    <FloatingSelect id="office-tat-classification-value" label="Classification" size="sm" disabled={!canConfigure} value={value} onChange={event => setValue(event.target.value)}><option value="">Choose classification</option><option value="yes">Highly technical</option><option value="no">Not highly technical</option></FloatingSelect>
+                    <FloatingInput id="office-tat-approving-authority" label="Approving authority" size="sm" maxLength={180} disabled={!canConfigure} value={approval.approving_authority} onChange={event => setField('approving_authority', event.target.value)} />
+                    <FloatingInput id="office-tat-approval-reference" label="Written approval reference" size="sm" maxLength={180} disabled={!canConfigure} value={approval.approval_reference} onChange={event => setField('approval_reference', event.target.value)} />
+                    <FloatingInput id="office-tat-effective-from" label="Effective from" size="sm" type="date" disabled={!canConfigure} value={approval.effective_from} onChange={event => setField('effective_from', event.target.value)} />
+                    <FloatingInput id="office-tat-effective-to" label="Effective to (optional)" size="sm" type="date" disabled={!canConfigure} value={approval.effective_to} onChange={event => setField('effective_to', event.target.value)} />
+                    <FloatingTextarea id="office-tat-classification-rationale" label="Classification rationale" size="sm" minLength={10} maxLength={4000} rows={2} disabled={!canConfigure} value={approval.rationale} onChange={event => setField('rationale', event.target.value)} />
                     <Field label="Approval source file"><input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" disabled={!canConfigure || uploading} onChange={event => upload(event.target.files?.[0])} className={inputClass} /><span className="mt-1 block text-[11px] font-normal text-gray-500">{approval.evidence_reference ? 'Supporting file registered.' : 'Upload the approval source file.'}</span></Field>
                 </div>
                 {error && <p role="alert" className="mt-2 text-xs text-red-700 dark:text-red-300">{error}</p>}

@@ -200,7 +200,7 @@ class ComplianceAlertController extends Controller
         ]);
     }
 
-    public function businessCalendar(Request $request, CalendarMovEventService $calendarEvents, CalendarTaskService $calendarTasks): Response
+    public function businessCalendar(Request $request, CalendarMovEventService $calendarEvents, CalendarTaskService $calendarTasks, \App\Services\Calendar\CalendarTaskAudienceService $calendarTaskAudiences): Response
     {
         $view = $request->string('view')->toString() === 'year' ? 'year' : 'month';
         $monthValue = $request->string('month')->toString();
@@ -255,7 +255,8 @@ class ComplianceAlertController extends Controller
         $taskEnd = $view === 'year'
             ? CarbonImmutable::create($year, 12, 31, 0, 0, 0, BusinessCalendarService::TIMEZONE)
             : $month->endOfMonth()->endOfWeek();
-        $tasks = $calendarTasks->forRange($request->user(), $taskStart, $taskEnd);
+        $taskSharingReady = $calendarTaskAudiences->isReady();
+        $tasks = $calendarTasks->forRange($request->user(), $taskStart, $taskEnd, $calendarTaskAudiences, $taskSharingReady);
 
         return Inertia::render('Calendar/Index', [
             'view' => $view,
@@ -270,6 +271,8 @@ class ComplianceAlertController extends Controller
             'tasks' => $tasks,
             'taskStorageReady' => $calendarTasks->isReady(),
             'taskRangeReady' => $calendarTasks->rangeReady(),
+            'taskSharingReady' => $taskSharingReady,
+            'taskSharingOptions' => $calendarTaskAudiences->sharingOptions($request->user()),
         ]);
     }
 

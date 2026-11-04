@@ -4,6 +4,7 @@ namespace App\Policies;
 
 use App\Models\CalendarTask;
 use App\Models\User;
+use App\Services\Calendar\CalendarTaskAudienceService;
 
 class CalendarTaskPolicy
 {
@@ -19,13 +20,13 @@ class CalendarTaskPolicy
 
     public function view(User $user, CalendarTask $task): bool
     {
-        return (int) $task->created_by === (int) $user->getKey()
-            && $this->canAccessCalendar($user);
+        return app(CalendarTaskAudienceService::class)->canView($user, $task);
     }
 
     public function update(User $user, CalendarTask $task): bool
     {
-        return $this->view($user, $task)
+        return (int) $task->created_by === (int) $user->getKey()
+            && $this->canAccessCalendar($user)
             && $task->status === CalendarTask::STATUS_SCHEDULED;
     }
 

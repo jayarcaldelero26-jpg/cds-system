@@ -2,6 +2,7 @@ import { Icon } from '@iconify/react';
 import { useEffect, useRef, useState } from 'react';
 import { formatManila } from '@/Utils/dateFormatters';
 import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
+import FloatingSelect from '@/Components/Form/FloatingSelect';
 import FinalArchiveRecordActions from './FinalArchiveRecordActions';
 import SubmissionTrackingReaderDialog from './SubmissionTrackingReaderDialog';
 import PamoReportPendingAnimation from '@/Components/PamoReportPendingAnimation';
@@ -116,11 +117,10 @@ export default function FinalArchiveReader({
 
     const documentPanel = <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {hasDocument && <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-900">
-            <label htmlFor={files.length > 1 ? 'archive-reader-file' : undefined} className="shrink-0 text-[11px] font-medium text-slate-500 dark:text-slate-400">File</label>
             {files.length > 1
-                ? <select id="archive-reader-file" value={activeFile?.id ?? ''} onChange={event => setActiveFileId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
+                ? <FloatingSelect id="archive-reader-file" label="File" size="sm" className="min-w-0 flex-1" value={activeFile?.id ?? ''} onChange={event => setActiveFileId(event.target.value)}>
                     {files.map(file => <option key={file.id} value={file.id}>{file.name || 'Archived file'}</option>)}
-                </select>
+                </FloatingSelect>
                 : <span data-archive-original-filename className="min-w-0 truncate text-xs font-medium text-slate-700 dark:text-slate-200" title={activeFile?.name || 'Archived file'}>{activeFile?.name || 'Archived file'}</span>}
         </div>}
         {!hasDocument ? <div className="flex min-h-0 flex-1 items-center justify-center p-6 text-center">

@@ -95,6 +95,18 @@ test('duplicate activity and inapplicable ENGP area are hidden while missing dat
     assert.equal(fields.get('PENRO Receipt'), null);
 });
 
+test('PENRO receipt stays visible as missing for ENGP, stays hidden when inapplicable, and shows a recorded PAMB date', () => {
+    const engp = new Map(reportContextFields({ source: 'engp', date_received_penro: null }, true));
+    assert.equal(engp.has('PENRO Receipt'), true);
+    assert.equal(engp.get('PENRO Receipt'), null);
+
+    const notApplicable = new Map(reportContextFields({ source: 'conservation', date_received_penro: null }, true));
+    assert.equal(notApplicable.has('PENRO Receipt'), false);
+
+    const received = new Map(reportContextFields({ source: 'conservation', date_received_penro: '2026-08-12' }, true));
+    assert.equal(received.get('PENRO Receipt'), '2026-08-12');
+});
+
 test('a fresh selected record wins over an older linked row and refreshes actions/document metadata', () => {
     const old = { source: 'conservation', source_id: 30, current_document: { name: 'old.pdf' }, routing: { actions: [{ key: 'old' }] } };
     const fresh = { ...old, current_document: { name: 'current.pdf' }, routing: { actions: [{ key: 'forward' }] } };

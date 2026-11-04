@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import FloatingField from '@/Components/Form/FloatingField';
 
 const COLORS = [
     { label: 'Black', value: '#000000' },
@@ -175,10 +176,9 @@ export default function ComplianceRichTextEditor({ id, label, value = '', onChan
         className={`rounded px-2 py-1 text-xs font-bold transition ${active ? 'bg-green-700 text-white' : 'text-gray-700 hover:bg-gray-200 dark:text-gray-200 dark:hover:bg-gray-700'} disabled:cursor-not-allowed disabled:opacity-50`}
     >{text}</button>;
 
-    return <div className="min-w-0 space-y-1.5">
-        <label htmlFor={editorId} className="block min-w-0 break-words text-xs font-semibold leading-4 text-gray-700 dark:text-gray-300">{label}</label>
-        <div className="overflow-visible rounded-xl border border-gray-300 bg-white dark:border-gray-700 dark:bg-gray-950">
-            <div className="compliance-rich-text-toolbar flex flex-wrap items-center gap-1 border-b border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-900">
+    return <FloatingField id={editorId} label={label} value={value} alwaysFloat multiline disabled={disabled} error={error} className="min-w-0" inputRef={editorRef}>
+        {({ fieldId, nativeProps }) => <div className="overflow-visible pt-2">
+            <div className="compliance-rich-text-toolbar flex flex-wrap items-center gap-1 border-b border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-800">
                 {toolbarButton('Regular', 'Remove formatting', regular)}
                 {toolbarButton('B', 'Bold', () => command('bold'), selectionState.bold)}
                 {toolbarButton('I', 'Italic', () => command('italic'), selectionState.italic)}
@@ -194,13 +194,14 @@ export default function ComplianceRichTextEditor({ id, label, value = '', onChan
             </div>
             <div
                 ref={editorRef}
-                id={editorId}
+                id={fieldId}
                 contentEditable={!disabled}
                 suppressContentEditableWarning
                 role="textbox"
                 aria-multiline="true"
-                aria-invalid={error ? 'true' : undefined}
-                aria-describedby={error ? `${editorId}-error` : undefined}
+                aria-invalid={nativeProps['aria-invalid']}
+                aria-describedby={nativeProps['aria-describedby']}
+                aria-labelledby={nativeProps['aria-labelledby']}
                 data-placeholder={placeholder}
                 onInput={sync}
                 onKeyUp={refreshSelectionState}
@@ -209,7 +210,6 @@ export default function ComplianceRichTextEditor({ id, label, value = '', onChan
                 className="min-h-28 w-full whitespace-normal p-3 text-sm leading-6 text-gray-800 outline-none empty:before:pointer-events-none empty:before:text-gray-400 empty:before:content-[attr(data-placeholder)] dark:text-gray-100"
                 style={{ minHeight: `${Math.max(3, rows) * 1.5}rem` }}
             />
-        </div>
-        {error && <p id={`${editorId}-error`} className="text-xs text-red-600 dark:text-red-400" role="alert">{error}</p>}
-    </div>;
+        </div>}
+    </FloatingField>;
 }

@@ -22,16 +22,26 @@ class CalendarTaskService
     }
 
     /** @return Collection<int, array<string, mixed>> */
-    public function forRange(User $user, CarbonImmutable $start, CarbonImmutable $end): Collection
+    public function forRange(
+        User $user,
+        CarbonImmutable $start,
+        CarbonImmutable $end,
+        ?CalendarTaskAudienceService $audienceService = null,
+        ?bool $sharingReady = null,
+    ): Collection
     {
         if (! $this->isReady()) {
             return collect();
         }
 
         $rangeReady = $this->rangeReady();
+        $audienceService ??= app(CalendarTaskAudienceService::class);
+        $sharingReady ??= $audienceService->isReady();
         $query = CalendarTask::query()
             ->with('creator.protectedArea')
-            ->where('created_by', $user->getKey())
+            ;
+        $audienceService->applyVisibilityScope($query, $user, $sharingReady);
+        $query
             ->where(function ($query) use ($start, $end, $rangeReady): void {
                 $query->whereBetween('scheduled_date', [$start->toDateString(), $end->toDateString()]);
                 if ($rangeReady) {
@@ -48,13 +58,40 @@ class CalendarTaskService
         $records = $query->get();
         $events = $this->auditEvents($records);
         $attribution = app(CalendarTaskAttributionService::class);
-        $creator = $records->first()?->creator;
-        $creatorFallback = $creator ? $attribution->snapshot($creator) + ['label' => 'Creator current office'] : null;
+        $audiencesByTask = $audienceService->audiencesForTasks($records->modelKeys(), $sharingReady);
+        $creatorFallbacks = [];
 
-        return $records->map(fn (CalendarTask $task): array => $this->payload($task, $events[$task->getKey()] ?? [], $attribution, $creatorFallback, $rangeReady))->values();
+        return $records->map(function (CalendarTask $task) use ($events, $attribution, $rangeReady, $audiencesByTask, &$creatorFallbacks, $user, $sharingReady): array {
+            $creatorId = (string) $task->created_by;
+            if (! array_key_exists($creatorId, $creatorFallbacks)) {
+                $creatorFallbacks[$creatorId] = $task->creator
+                    ? $attribution->snapshot($task->creator) + ['label' => 'Creator current office']
+                    : null;
+            }
+
+            return $this->payload(
+                $task,
+                $events[$task->getKey()] ?? [],
+                $attribution,
+                $creatorFallbacks[$creatorId],
+                $rangeReady,
+                $user,
+                $audiencesByTask[$task->getKey()] ?? [],
+                $sharingReady,
+            );
+        })->values();
     }
 
-    public function payload(CalendarTask $task, array $events = [], ?CalendarTaskAttributionService $attribution = null, ?array $creatorFallback = null, ?bool $rangeReady = null): array
+    public function payload(
+        CalendarTask $task,
+        array $events = [],
+        ?CalendarTaskAttributionService $attribution = null,
+        ?array $creatorFallback = null,
+        ?bool $rangeReady = null,
+        ?User $viewer = null,
+        array $audienceRows = [],
+        bool $sharingReady = false,
+    ): array
     {
         $creatorAttribution = $events['created']['metadata']['calendar_task_attribution'] ?? null;
         $creator = $task->creator;
@@ -79,6 +116,16 @@ class CalendarTaskService
             ]
             : ['label' => $task->status === CalendarTask::STATUS_SCHEDULED ? 'No status action yet' : 'Action details not recorded'];
 
+        $isOwner = $viewer && (int) $task->created_by === (int) $viewer->getKey();
+        $canChange = (bool) $isOwner && $task->status === CalendarTask::STATUS_SCHEDULED;
+        $visibility = $sharingReady && $task->getAttribute('visibility') === 'shared' ? 'shared' : 'private';
+        $audiences = $visibility === 'shared' ? array_map(fn (array $audience): array => [
+            'type' => $audience['audience_type'],
+            'label' => $audience['label_snapshot'],
+            'office_name' => $audience['office_name_snapshot'],
+            'protected_area_name' => $audience['protected_area_name_snapshot'],
+        ], $audienceRows) : [];
+
         return [
             'id' => $task->getKey(),
             'title' => $task->title,
@@ -89,6 +136,12 @@ class CalendarTaskService
             'end_time' => $task->end_time ? substr((string) $task->end_time, 0, 5) : null,
             'notes' => $task->notes,
             'status' => $task->status,
+            'visibility' => $visibility,
+            'audiences' => $audiences,
+            'is_owner' => (bool) $isOwner,
+            'can_edit' => (bool) $canChange,
+            'can_complete' => (bool) $canChange,
+            'can_cancel' => (bool) $canChange,
             'creator_attribution' => is_array($creatorAttribution) ? $creatorAttribution : ['label' => 'Creator details not recorded'],
             'status_attribution' => $statusDetails,
         ];

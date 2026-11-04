@@ -17,6 +17,7 @@ final class FakeDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArchi
     private ?string $rejectNextIdGenerationCategory = null;
     private bool $rejectNextUpload = false;
     private ?\Throwable $rejectNextUploadWith = null;
+    private ?\Throwable $rejectNextRetrievalWith = null;
     private ?int $rejectUploadAtAttempt = null;
     private bool $throwAfterNextUpload = false;
     private ?\Closure $afterNextUpload = null;
@@ -28,6 +29,11 @@ final class FakeDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArchi
     {
         $this->rejectNextUpload = true;
         $this->rejectNextUploadWith = $exception;
+    }
+
+    public function rejectNextRetrieval(?\Throwable $exception = null): void
+    {
+        $this->rejectNextRetrievalWith = $exception ?? new \RuntimeException('Injected fake archive retrieval failure.');
     }
 
     public function rejectNextIdGeneration(?string $oauthErrorCategory = null): void
@@ -241,6 +247,11 @@ final class FakeDocumentArchiveGateway implements PreGeneratedIdGoogleDriveArchi
     public function retrieve(string $fileId)
     {
         $this->retrievals++;
+        if ($this->rejectNextRetrievalWith !== null) {
+            $exception = $this->rejectNextRetrievalWith;
+            $this->rejectNextRetrievalWith = null;
+            throw $exception;
+        }
         $stream = fopen('php://memory', 'r+');
         fwrite($stream, (string) ($this->objects[$fileId]['bytes'] ?? ''));
         rewind($stream);

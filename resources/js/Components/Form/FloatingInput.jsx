@@ -8,6 +8,7 @@ export default function FloatingInput({
     alwaysFloat = false,
     placeholderAlwaysVisible = false,
     labelSrOnly = false,
+    inputRef = null,
     focusTone,
     variant = 'calendar',
     className = '',
@@ -29,8 +30,9 @@ export default function FloatingInput({
             error={error}
             hint={hint}
             size={size}
-            alwaysFloat={alwaysFloat}
+            alwaysFloat={alwaysFloat || !supportsPlaceholder}
             labelSrOnly={labelSrOnly}
+            inputRef={inputRef}
             focusTone={focusTone || (variant === 'legacy' ? 'blue' : 'green')}
             variant={variant}
             disabled={props.disabled}
@@ -41,6 +43,7 @@ export default function FloatingInput({
             showFocusRing={showFocusRing}
         >
             {({ ref, nativeProps, sizeClasses, fieldShapeClass, showPlaceholder }) => {
+                const verticalPadding = labelSrOnly ? 'py-2' : 'pt-[1.05rem] pb-1';
                 const placeholderClasses = supportsPlaceholder
                     ? (placeholderAlwaysVisible
                         ? 'placeholder:font-normal placeholder:text-gray-400 placeholder:opacity-100 dark:placeholder:text-gray-500'
@@ -53,6 +56,7 @@ export default function FloatingInput({
                     placeholderClasses,
                     leadingIcon ? 'pl-10' : '',
                     trailingAdornment ? 'pr-12' : '',
+                    verticalPadding,
                     sizeClasses,
                 ].filter(Boolean).join(' ');
 

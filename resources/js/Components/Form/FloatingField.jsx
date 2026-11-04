@@ -1,13 +1,13 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 const sizeClasses = {
-    default: 'h-11 px-3 py-2.5 text-sm leading-5 font-normal',
-    sm: 'h-10 px-3 py-2 text-sm leading-5 font-normal',
+    default: 'h-[2.625rem] px-3 text-sm leading-5 font-normal',
+    sm: 'h-[2.375rem] px-3 text-sm leading-5 font-normal',
 };
 
 const legacySizeClasses = {
-    default: 'h-11 px-3 py-2.5 text-sm',
-    sm: 'h-10 px-2.5 py-2 text-xs',
+    default: 'h-[2.625rem] px-3 text-sm',
+    sm: 'h-[2.375rem] px-2.5 text-xs',
 };
 
 export function useFloatingValue({ value, defaultValue, alwaysFloat = false }) {
@@ -15,7 +15,7 @@ export function useFloatingValue({ value, defaultValue, alwaysFloat = false }) {
     const ref = useRef(null);
     const hasContent = candidate => candidate !== undefined && candidate !== null && String(candidate).length > 0;
     const [nativeHasValue, setNativeHasValue] = useState(() => hasContent(value !== undefined ? value : defaultValue));
-    const hasValue = alwaysFloat || nativeHasValue;
+    const hasValue = alwaysFloat || (value !== undefined && hasContent(value)) || nativeHasValue;
 
     useEffect(() => {
         if (value !== undefined) setNativeHasValue(hasContent(value));
@@ -29,12 +29,16 @@ export function useFloatingValue({ value, defaultValue, alwaysFloat = false }) {
         const check = () => setNativeHasValue(hasContent(node.value));
         check();
         const timer = window.setTimeout(check, 150);
+        const form = node.form;
+        const reset = () => window.setTimeout(check, 0);
         node.addEventListener('input', check);
         node.addEventListener('change', check);
+        form?.addEventListener('reset', reset);
         return () => {
             window.clearTimeout(timer);
             node.removeEventListener('input', check);
             node.removeEventListener('change', check);
+            form?.removeEventListener('reset', reset);
         };
     }, [value]);
 
@@ -55,6 +59,7 @@ export default function FloatingField({
     className = '',
     children,
     alwaysFloat = false,
+    active = false,
     multiline = false,
     focusTone = 'green',
     variant = 'calendar',
@@ -62,10 +67,18 @@ export default function FloatingField({
     showFocusRing = true,
     hideLabel = false,
     labelSrOnly = false,
+    inputRef = null,
 }) {
     const generatedId = useId();
     const fieldId = id || 'field-' + generatedId.replace(/:/g, '');
-    const { floated, focused, hasValue, setFocused, setNativeHasValue, ref } = useFloatingValue({ value, defaultValue, alwaysFloat });
+    const labelId = fieldId + '-label';
+    const { focused, hasValue, setFocused, setNativeHasValue, ref } = useFloatingValue({ value, defaultValue, alwaysFloat });
+    const setFieldRef = useCallback(node => {
+        ref.current = node;
+        if (typeof inputRef === 'function') inputRef(node);
+        else if (inputRef) inputRef.current = node;
+    }, [inputRef, ref]);
+    const floated = focused || hasValue || active;
     const invalid = Boolean(error);
     const calendarStyle = variant !== 'legacy';
     const background = disabled || readOnly ? 'bg-gray-50 dark:bg-gray-800' : 'bg-white dark:bg-gray-900';
@@ -85,12 +98,25 @@ export default function FloatingField({
             onAnimationStart={(event) => event.animationName === 'floating-field-autofill' && setNativeHasValue(event.target?.value !== undefined && event.target?.value !== '')}
             onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setFocused(false); }}
         >
-            {!hideLabel && <label htmlFor={fieldId} className={(labelSrOnly ? 'sr-only ' : 'mb-1.5 block min-w-0 break-words text-xs font-semibold leading-4 ') + labelColor}>
-                {label}{required && <span className="ml-0.5 whitespace-nowrap text-red-500 dark:text-red-400">*</span>}
-            </label>}
-            <div className={'relative min-w-0 border shadow-none transition-colors duration-150 ' + (calendarStyle ? 'rounded-lg' : 'rounded-ui') + focusRingClass + ' ' + background + ' ' + border}>
+            <div data-floating-field data-floated={floated ? 'true' : 'false'} className={'relative min-w-0 border shadow-none transition-colors duration-150 ' + (calendarStyle ? 'rounded-lg' : 'rounded-ui') + focusRingClass + ' ' + background + ' ' + border}>
+                {!hideLabel && <label
+                    id={labelId}
+                    htmlFor={fieldId}
+                    title={typeof label === 'string' ? label : undefined}
+                    onClick={() => inputRef?.current?.focus?.()}
+                    className={labelSrOnly
+                        ? 'sr-only'
+                        : [
+                            'pointer-events-auto absolute z-10 max-w-[calc(100%-1.5rem)] truncate px-1.5 font-semibold leading-4 transition-[top,transform,font-size,color] duration-150 motion-reduce:transition-none',
+                            multiline ? (floated ? 'left-3 top-0 -translate-y-1/2 text-[10px]' : 'left-3 top-2 text-xs') : (floated ? 'left-3 top-0 -translate-y-1/2 text-[10px]' : (hasLeadingIcon ? 'left-10' : 'left-3') + ' top-1/2 -translate-y-1/2 text-xs'),
+                            ' ' + labelColor,
+                            ' ' + background,
+                        ].join(' ')}
+                >
+                    {label}{required && <span className="ml-0.5 whitespace-nowrap text-red-500 dark:text-red-400">*</span>}
+                </label>}
                 {children({
-                    ref,
+                    ref: setFieldRef,
                     nativeProps: {
                         id: fieldId,
                         disabled,
@@ -98,6 +124,7 @@ export default function FloatingField({
                         required,
                         'aria-invalid': invalid || undefined,
                         'aria-describedby': [hint && fieldId + '-hint', error && fieldId + '-error'].filter(Boolean).join(' ') || undefined,
+                        'aria-labelledby': label && !hideLabel ? labelId : undefined,
                     },
                     fieldId,
                     floated,

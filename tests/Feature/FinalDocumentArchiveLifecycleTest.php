@@ -1453,6 +1453,8 @@ test('protected final previews serve the complete hash-bound private PDF without
 
     Storage::disk('local')->put($file->staged_path, '<html>not a PDF</html>');
     $this->actingAs($reader)->get($previewUrl)->assertNotFound();
+    Storage::disk('local')->delete($file->staged_path);
+    $this->actingAs($reader)->get($previewUrl)->assertNotFound();
     expect($fixture['gateway']->availabilityChecks())->toBe($providerChecksBeforePreview)
         ->and($fixture['gateway']->retrievals())->toBe($providerRetrievalsBeforePreview);
 });
@@ -1678,7 +1680,24 @@ test('earlier Dispatch copies are visible with exact protected identity and neve
         ->assertNotFound();
 
     $secondIdentity = 'bms:'.(int) $second['report']->getKey();
-    $copies[$secondIdentity]->forceFill(['archived_sha256' => str_repeat('0', 64)])->saveOrFail();
+    $secondArchive = $copies[$secondIdentity];
+    $secondFileId = (string) $secondArchive->google_drive_file_id;
+    $availabilityBefore = $gateway->availabilityChecks();
+    $retrievalsBefore = $gateway->retrievals();
+    $secondArchive->forceFill(['google_drive_file_id' => 'missing-fake-dispatch-object'])->saveOrFail();
+    $this->actingAs($reader)->get(route('final-archives.dispatch-files.show', $secondArchive->getKey()))
+        ->assertNotFound();
+    expect($gateway->availabilityChecks())->toBe($availabilityBefore + 1)
+        ->and($gateway->retrievals())->toBe($retrievalsBefore);
+
+    $secondArchive->forceFill(['google_drive_file_id' => $secondFileId])->saveOrFail();
+    $retrievalsBeforeFailure = $gateway->retrievals();
+    $gateway->rejectNextRetrieval(new RuntimeException('Controlled fake retrieval failure.'));
+    $this->actingAs($reader)->get(route('final-archives.dispatch-files.show', $secondArchive->getKey()))
+        ->assertNotFound();
+    expect($gateway->retrievals())->toBe($retrievalsBeforeFailure + 1);
+
+    $secondArchive->forceFill(['archived_sha256' => str_repeat('0', 64)])->saveOrFail();
     $this->actingAs($reader)->get(route('final-archives.dispatch-files.show', $copies[$secondIdentity]->getKey()))
         ->assertNotFound();
 });

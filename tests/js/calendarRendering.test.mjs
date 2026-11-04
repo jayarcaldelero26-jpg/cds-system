@@ -4,6 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { createServer } from 'vite';
 import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { viteReactInterop } from './helpers/viteReactInterop.mjs';
 
@@ -21,6 +22,15 @@ const load = async path => {
 };
 
 test.after(async () => { await server?.close(); });
+
+function renderFloatingField(fieldElement) {
+    const fieldTree = fieldElement.type(fieldElement.props);
+    const fieldChildren = React.Children.toArray(fieldTree.props.children);
+    const controlShell = fieldChildren.find(child => child.props?.['data-floating-field'] !== undefined);
+    const hint = fieldChildren.find(child => child.type === 'p');
+    const trigger = React.Children.toArray(controlShell?.props.children).find(child => child.type === 'button');
+    return { fieldTree, trigger, hint };
+}
 
 test('opening an empty DatePicker under a fixed clock does not select or change a date', async () => {
     const { default: DatePicker } = await load('Components/DatePicker.jsx');
@@ -52,6 +62,8 @@ test('opening an empty DatePicker under a fixed clock does not select or change 
                 }];
             },
             useEffect() { cursor++; },
+            useId() { return `fixture-${cursor++}`; },
+            useCallback(callback) { cursor++; return callback; },
         };
         return DatePicker(props);
     };
@@ -59,11 +71,13 @@ test('opening an empty DatePicker under a fixed clock does not select or change 
     try {
         globalThis.Date = FixedDate;
         const closed = render();
-        const trigger = React.Children.toArray(closed.props.children).find(child => child.type === 'button');
+        const closedChildren = React.Children.toArray(closed.props.children);
+        const fieldElement = closedChildren.find(child => child.type?.name === 'FloatingField');
+        const { trigger } = renderFloatingField(fieldElement);
         trigger.props.onClick();
         const opened = render();
         const openedChildren = React.Children.toArray(opened.props.children);
-        const openTrigger = openedChildren.find(child => child.type === 'button');
+        const { trigger: openTrigger } = renderFloatingField(openedChildren.find(child => child.type?.name === 'FloatingField'));
         const popover = openedChildren.find(child => child.props && 'anchorRef' in child.props);
         const calendarPanel = React.Children.toArray(popover.props.children)
             .find(child => child.props && 'selectedDate' in child.props);
@@ -108,15 +122,19 @@ test('actual activity date pickers render the Philippines today cap and helper t
                 return [slots[index], nextValue => { slots[index] = typeof nextValue === 'function' ? nextValue(slots[index]) : nextValue; }];
             },
             useEffect() { cursor++; },
+            useId() { return `fixture-${cursor++}`; },
+            useCallback(callback) { cursor++; return callback; },
         };
-        return Component({ id: 'actual-activity-date', value: '', actualDate: true });
+        const root = Component({ id: 'actual-activity-date', label: 'Activity date', value: '', actualDate: true });
+        const fieldElement = React.Children.toArray(root.props.children).find(child => child.type?.name === 'FloatingField');
+        return { root, ...renderFloatingField(fieldElement) };
     };
 
     try {
         globalThis.Date = FixedDate;
         const single = renderComponent(DatePicker);
-        const singleChildren = React.Children.toArray(single.props.children);
-        const singleMarkup = renderToStaticMarkup(singleChildren.find(child => child.type === 'p'));
+        const singleChildren = React.Children.toArray(single.root.props.children);
+        const singleMarkup = renderToStaticMarkup(single.hint);
         const singlePopover = singleChildren.find(child => child.props && 'anchorRef' in child.props);
         const singlePanel = React.Children.toArray(singlePopover.props.children).find(child => child.props && 'selectedDate' in child.props);
         assert.equal(singlePanel.props.maxDate, '2026-10-09');
@@ -124,8 +142,8 @@ test('actual activity date pickers render the Philippines today cap and helper t
         assert.match(singleMarkup, /Choose today or an earlier date \(Philippines time\)\./);
 
         const range = renderComponent(DateRangePicker);
-        const rangeChildren = React.Children.toArray(range.props.children);
-        const rangeMarkup = renderToStaticMarkup(rangeChildren.find(child => child.type === 'p'));
+        const rangeChildren = React.Children.toArray(range.root.props.children);
+        const rangeMarkup = renderToStaticMarkup(range.hint);
         const rangePopover = rangeChildren.find(child => child.props && 'anchorRef' in child.props);
         const rangePanel = React.Children.toArray(rangePopover.props.children).find(child => child.props && 'rangeStart' in child.props);
         assert.equal(rangePanel.props.maxDate, '2026-10-09');
@@ -407,4 +425,29 @@ test('Year view task filtering preserves report and holiday layers and opens the
     } finally {
         internals.H = previousDispatcher;
     }
+});
+
+test('Month and Year task chips label saved audiences while detail controls follow server capabilities', async () => {
+    const { YearMiniCalendar } = await load('Components/BusinessCalendarMonth.jsx');
+    const task = {
+        id: 91, title: 'PA coordination', scheduled_date: '2026-11-12', is_all_day: true,
+        status: 'scheduled', visibility: 'shared', audiences: [{ label: 'CENRO Baganga — Aliwagwag Protected Landscape' }],
+        creator_attribution: { office_name: 'APL PAMO' }, can_edit: false, can_complete: false, can_cancel: false,
+    };
+    const shared = renderToStaticMarkup(React.createElement(YearMiniCalendar, {
+        year: 2026, month: 11, tasks: [task], eventDays: {}, holidayDays: {}, showMovs: true, showTasks: true,
+        onOpenMonth() {}, onSelectTask() {},
+    }));
+    assert.match(shared, />Shared</);
+    assert.match(shared, /Shared with CENRO Baganga — Aliwagwag Protected Landscape/);
+    assert.match(shared, /1 Calendar tasks in November/);
+
+    const indexSource = readFileSync(resolve('resources/js/Pages/Calendar/Index.jsx'), 'utf8');
+    assert.match(indexSource, /share_with_office: false, include_supervising_office: false/);
+    assert.match(indexSource, /disabled=\{!taskSharingReady \|\| !taskSharingOptions\.available\}/);
+    assert.match(indexSource, /Only you can edit it or change its status/);
+    assert.match(indexSource, /selectedTask\?\.can_edit/);
+    assert.match(indexSource, /selectedTask\?\.can_complete/);
+    assert.match(indexSource, /selectedTask\?\.can_cancel/);
+    assert.match(indexSource, /Sharing cannot be changed while editing/);
 });

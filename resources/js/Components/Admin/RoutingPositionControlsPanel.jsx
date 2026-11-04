@@ -1,3 +1,5 @@
+import FloatingInput from '@/Components/Form/FloatingInput';
+
 function Toggle({ id, label, description, checked, disabled, onChange }) {
     return <label htmlFor={id} className="flex cursor-pointer items-start justify-between gap-4 rounded-xl border border-gray-200 p-4 dark:border-gray-700">
         <span><span className="block text-sm font-bold text-gray-900 dark:text-white">{label}</span><span className="mt-1 block text-xs leading-5 text-gray-500 dark:text-gray-400">{description}</span></span>
@@ -48,8 +50,7 @@ export default function RoutingPositionControlsPanel({ settings, canUpdate, data
                 <p className="mt-3 text-xs leading-5 text-gray-500 dark:text-gray-400">When Office is not included, the CDS Chief recommends directly to PENRO Records for receipt and regional release. This recommendation is not an Office approval.</p>
             </div>
             {canUpdate ? <>
-                <label htmlFor="routing-change-reason" className="mt-5 block text-xs font-bold text-gray-700 dark:text-gray-300">Change note (optional)</label>
-                <input id="routing-change-reason" maxLength={500} value={data.reason} disabled={disabled} onChange={event => onReason(event.target.value)} className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600/20 disabled:opacity-60 dark:border-gray-700 dark:bg-gray-950 dark:text-white" />
+                <FloatingInput id="routing-change-reason" label="Change note (optional)" maxLength={500} value={data.reason} disabled={disabled} onChange={event => onReason(event.target.value)} className="mt-5" />
                 {errors.expected_version && <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">{errors.expected_version}</p>}
                 {errors.office_penro_enabled && <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">{errors.office_penro_enabled}</p>}
                 {errors.penro_tsd_chief_enabled && <p role="alert" className="mt-2 text-sm text-red-700 dark:text-red-300">{errors.penro_tsd_chief_enabled}</p>}

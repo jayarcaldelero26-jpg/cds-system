@@ -7,6 +7,7 @@ import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
 import CrudModalCardContext from './CrudModalCardContext';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 import { resolveCrudFormInitialFocusSelector } from '@/Components/ModalMotion/initialFocus.mjs';
+import { releaseModalFocusTarget } from '@/Components/ModalMotion/focusReturn.mjs';
 import ConfirmDialog from '@/Components/ConfirmDialog';
 
 function formEntries(form) {
@@ -36,6 +37,7 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
     const busyOverlayRef = useRef(null);
     const errorSummaryRef = useRef(null);
     const restoreFocusRef = useRef(null);
+    const confirmationReturnFocusRef = useRef(null);
     const submitHandlerRef = useRef(onSubmit);
     const bypassConfirmationRef = useRef(false);
     const saveInFlightRef = useRef(false);
@@ -88,6 +90,7 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
         if (saveInFlightRef.current || processingRef.current) return;
         if (beforeConfirmation?.(event) === false) return;
         pendingEntriesRef.current = formEntries(panelRef.current);
+        confirmationReturnFocusRef.current = releaseModalFocusTarget(panelRef.current, document) || panelRef.current;
         setConfirmationChanged(false);
         setConfirmationOpen(true);
     };
@@ -181,12 +184,14 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
             confirmLabel={confirmationOptions.confirmLabel || resolvedActionLabel}
             cancelLabel={confirmationOptions.cancelLabel || 'Go Back'}
             processing={processing || confirmationSubmitting}
+            returnFocusTarget={confirmationReturnFocusRef.current}
             onConfirm={confirmFormSubmit}
             onCancel={() => {
                 if (processing || confirmationSubmitting) return;
                 setConfirmationOpen(false);
                 setConfirmationChanged(false);
                 pendingEntriesRef.current = null;
+                confirmationReturnFocusRef.current = null;
             }}
         />}
     </div>;

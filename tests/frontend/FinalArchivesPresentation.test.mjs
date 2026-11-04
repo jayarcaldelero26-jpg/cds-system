@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { rolldown } from 'rolldown';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { fitPageScale, fitWidthScale } from '../../resources/js/Utils/pdfViewerGeometry.mjs';
 import {
     archiveFileTitle,
@@ -379,7 +381,7 @@ test('compact reader keeps the protected file mounted across tabs and layout cha
         hooks.beginRender();
         tree = Reader(props);
         tree = tree.type(tree.props);
-        assert.match(findElement(tree, element => element.type === 'section' && element.props.role === 'dialog').props.className, /h-\[100dvh\]/);
+        assert.match(findElement(tree, element => element.type === 'section' && element.props.role === 'dialog').props.className, /h-\[calc\(100dvh_-_var\(--reader-bottom-obstruction\)\)\]/);
         assert.equal(findElement(tree, element => element.props.file?.id)?.props.file.id, 392, 'Expand preserves the selected file without changing its protected URL');
         assert.equal(findElement(tree, element => element.props.file?.id)?.props.viewerOptions.layoutKey, 'details:true:392');
     } finally {
@@ -462,8 +464,49 @@ test('archive PDF mode adds fit-width and one authorized download control withou
     assert.match(archiveMarkup, />Fit page</);
     assert.match(archiveMarkup, />Fit width</);
     assert.match(archiveMarkup, /href="\/protected\/81\?download=1"[^>]*download="final\.pdf"/);
-    assert.ok(archiveMarkup.includes('of —'));
+    assert.ok(archiveMarkup.includes('Loading pages'));
     assert.doesNotMatch(sharedMarkup, /Fit width|protected\/81\?download/);
+});
+
+test('shared PDF viewer moves from honest loading to measured ready and decode-error states with a local PDF fixture', async () => {
+    const fixture = new Uint8Array(readFileSync(resolve('tests/Fixtures/protected-preview-valid.pdf')));
+    const blob = new Blob([fixture]);
+    const loadingTask = getDocument({ data: fixture.slice(), disableWorker: true });
+    const parsed = await loadingTask.promise;
+    try {
+        assert.equal(parsed.numPages, 1);
+        const page = await parsed.getPage(1);
+        const viewport = page.getViewport({ scale: 1 });
+        const LoadingViewer = await loadComponent('resources/js/Components/SubmissionTracking/PdfDocumentViewer.jsx');
+        const loading = renderToStaticMarkup(React.createElement(LoadingViewer, { blob }));
+        assert.match(loading, /aria-label="Zoom percentage"[^>]*>Loading</);
+        assert.match(loading, /Preparing PDF preview/);
+        assert.match(loading, /aria-label="Zoom out"[^>]*disabled=""/);
+
+        const hooks = stateHooks({
+            8: parsed.numPages,
+            9: { 1: { width: viewport.width, height: viewport.height } },
+            13: { width: 800, height: 600 },
+            15: 'ready',
+        });
+        const ReadyViewer = await loadComponent('resources/js/Components/SubmissionTracking/PdfDocumentViewer.jsx', hooks.runtime);
+        hooks.beginRender();
+        const ready = ReadyViewer({ blob });
+        const percentage = findElement(ready, element => element.props['aria-label'] === 'Zoom percentage');
+        assert.equal(percentage.props.children, `${Math.round(fitPageScale(viewport.width, viewport.height, 768, 568) * 100)}%`);
+        assert.equal(findElement(ready, element => element.type === 'button' && element.props.children === 'Fit Page').props.disabled, false);
+        assert.equal(findElement(ready, element => element.props['aria-label'] === 'Go to page').props.value, '1');
+
+        const errorHooks = stateHooks({ 15: 'error' });
+        const ErrorViewer = await loadComponent('resources/js/Components/SubmissionTracking/PdfDocumentViewer.jsx', errorHooks.runtime);
+        errorHooks.beginRender();
+        const error = ErrorViewer({ blob });
+        assert.equal(findElement(error, element => element.props['aria-label'] === 'Zoom percentage').props.children, 'Unavailable');
+        assert.match(String(findElement(error, element => element.props.role === 'alert').props.children), /could not be rendered/);
+        assert.equal(findElement(error, element => element.props['aria-label'] === 'Zoom in').props.disabled, true);
+    } finally {
+        await loadingTask.destroy();
+    }
 });
 
 test('archive PDF controls apply measured Fit page, Fit width, resize, and manual zoom to the actual viewer scale', async () => {

@@ -93,9 +93,11 @@ export function reportContextFields(row, expanded = false) {
         ["Date Conducted", row.date_conducted ?? null, true, "Not recorded"],
         ["Date Accomplished", row.date_accomplished ?? null, true, "Not recorded"],
         ["CENRO Release", row.cenro_release_applicable === false ? "Not applicable" : row.date_report_released_cenro ?? null, true, releaseFallback],
-        ["PENRO Receipt", row.date_received_penro ?? null, true, "Not recorded"],
         ["Regional Endorsement", row.date_endorsed_regional ?? null, true, "Not recorded"],
     );
+    const hasPenroReceipt = Boolean(text(row.date_received_penro));
+    const penroReceiptApplies = row.source === "engp" || row.penro_receipt_applicable === true || hasPenroReceipt;
+    if (expanded && penroReceiptApplies) fields.push(["PENRO Receipt", row.date_received_penro ?? null, true, "Not recorded"]);
     return fields.filter(([, value]) => value !== HIDE_FIELD);
 }
 

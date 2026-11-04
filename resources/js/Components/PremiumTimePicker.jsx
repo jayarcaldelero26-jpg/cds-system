@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { HOURS, MINUTES, PERIODS, currentDraft, formatTimeDisplay, initialDraft, serializeTimeValue } from '@/Utils/timePicker';
+import FloatingField from './Form/FloatingField';
 
 const ROW_HEIGHT = 42;
 
@@ -86,13 +87,13 @@ export default function PremiumTimePicker({ id, label = 'Time', value = '', date
     </div>;
 
     return <div ref={rootRef} className="relative w-full">
-        <label htmlFor={`${id}-trigger`} className="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-200">{label}</label>
-        <button ref={triggerRef} id={`${id}-trigger`} type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); } }} className="premium-time-trigger">
-            <span className="text-emerald-700 dark:text-emerald-400"><ClockIcon /></span>
-            <span className={value ? 'premium-time-value' : 'premium-time-placeholder'}>{value ? formatTimeDisplay(value) : 'Select time'}</span>
-        </button>
+        <FloatingField id={`${id}-trigger`} label={label} value={value || ''} error={error} disabled={disabled} active={open}>
+            {({ fieldId, nativeProps, showPlaceholder }) => <button ref={triggerRef} id={fieldId} type="button" disabled={disabled} aria-haspopup="dialog" aria-expanded={open} aria-labelledby={nativeProps['aria-labelledby']} aria-invalid={nativeProps['aria-invalid']} aria-describedby={nativeProps['aria-describedby']} onClick={() => setOpen(true)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOpen(true); } }} className="premium-time-trigger">
+                <span className="text-emerald-700 dark:text-emerald-400"><ClockIcon /></span>
+                <span className={value ? 'premium-time-value' : showPlaceholder || open ? 'premium-time-placeholder' : 'text-transparent'}>{value ? formatTimeDisplay(value) : (showPlaceholder || open ? 'Select time' : '')}</span>
+            </button>}
+        </FloatingField>
         <input type="hidden" id={id} name={name} value={value || ''} readOnly data-premium-time-picker-input="true" aria-hidden="true" />
-        {error && <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400" role="alert">{error}</p>}
         {open && <div role="dialog" aria-label={`${label} picker`} className="premium-time-popover">
             <div className="premium-time-tabs" role="tablist" aria-label="Time selection mode"><button type="button" role="tab" aria-selected={mode === 'time'} onClick={() => setMode('time')} className={mode === 'time' ? 'is-selected' : ''}>Time</button><button type="button" role="tab" aria-selected={mode === 'now'} onClick={chooseNow} className={mode === 'now' ? 'is-selected' : ''}>Now</button></div>
             <div className="premium-time-wheel-area"><div className="premium-time-wheel-labels"><span>HOUR</span><span>MINUTE</span><span>PERIOD</span></div><div className="premium-time-wheels">

@@ -1,11 +1,12 @@
 import { router, useForm } from '@inertiajs/react';
 import { Icon } from '@iconify/react';
-import { useEffect, useMemo, useState } from 'react';
+import { Children, cloneElement, isValidElement, useEffect, useMemo, useState } from 'react';
 import Button from '@/Components/Button';
 import ConfirmDialog from '@/Components/ConfirmDialog';
 import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import CrudFormModal from '@/Components/Crud/CrudFormModal';
 import CrudTable from '@/Components/Crud/CrudTable';
+import FloatingField from '@/Components/Form/FloatingField';
 import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
 import TechnicalClassificationEditor from './TechnicalClassificationEditor';
 import ObligationDetailsAccordion from './ObligationDetailsAccordion';
@@ -156,7 +157,40 @@ export default function OfficeTatAssessmentSettings({ data, recordedAssessment, 
 }
 
 const fieldClass = 'mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 dark:border-gray-700 dark:bg-gray-950 dark:text-white';
-function Field({ label, children }) { return <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200">{label}{children}</label>; }
+function Field({ label, children, className = '', error, hint }) {
+    const nodes = Children.toArray(children);
+    const index = nodes.findIndex(node => isValidElement(node) && ['input', 'select', 'textarea'].includes(node.type));
+    if (index < 0) return <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200">{label}{children}</label>;
+
+    const [control] = nodes.splice(index, 1);
+    const type = control.type === 'input' ? control.props.type || 'text' : control.type;
+    if (control.type === 'input' && ['checkbox', 'radio', 'file', 'hidden', 'button', 'submit'].includes(type)) {
+        return <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200">{label}{children}</label>;
+    }
+    const controlProps = { ...control.props };
+    delete controlProps.className;
+    const isSelect = control.type === 'select';
+    const isTextarea = control.type === 'textarea';
+    const nativeAlwaysFloat = ['date', 'datetime-local', 'month', 'time', 'week', 'color', 'range'].includes(type);
+    const emptySelect = isSelect && String(control.props.value ?? control.props.defaultValue ?? '') === '';
+
+    return <div className={'min-w-0 ' + className}>
+        <FloatingField id={control.props.id} label={label} value={control.props.value} defaultValue={control.props.defaultValue} error={error} hint={hint} size="sm" multiline={isTextarea} alwaysFloat={nativeAlwaysFloat} disabled={control.props.disabled} readOnly={control.props.readOnly} required={control.props.required} inputRef={control.props.ref}>
+            {({ ref, nativeProps, sizeClasses, fieldShapeClass, focused, showPlaceholder }) => {
+                const classes = [
+                    'block w-full rounded-lg border-0 bg-transparent text-sm text-gray-900 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-600 dark:text-white',
+                    isTextarea ? 'min-h-28 resize-y px-3 pt-8 pb-2' : isSelect ? 'pr-9' : 'px-3 pt-[1.05rem] pb-1',
+                    !isSelect && control.props.placeholder ? `placeholder:font-normal placeholder:opacity-0 focus:placeholder:opacity-100 ${showPlaceholder ? 'placeholder:text-gray-400 placeholder:opacity-100 dark:placeholder:text-gray-500' : ''}` : '',
+                    fieldShapeClass,
+                    sizeClasses,
+                    emptySelect && !focused ? 'text-transparent' : '',
+                ].filter(Boolean).join(' ');
+                return cloneElement(control, { ...controlProps, ...nativeProps, ref, className: classes });
+            }}
+        </FloatingField>
+        {nodes}
+    </div>;
+}
 
 function UnitPanel({ unit, rows, canConfigure, periodKey, asOfDate, periodLabel, onConfigureScope }) {
     const [detailRow, setDetailRow] = useState(null);
@@ -341,11 +375,10 @@ function TieResolutionForm({ unit, group, rows, periodKey, asOfDate, population 
     return <form onSubmit={submit} className="border-t border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900 dark:bg-amber-950/20">
         <h3 className="text-sm font-extrabold text-amber-950 dark:text-amber-100">Awaiting tie resolution · places {group.rank_start}–{group.rank_start + members.length - 1}</h3>
         <p className="mt-1 text-xs leading-5 text-amber-900 dark:text-amber-200">All five performance measures are equal. An authorized reviewer records a complete order with a reason. The server rechecks membership and the metric fingerprint before saving.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{members.map((row, index) => <label key={`${group.fingerprint}-${index}`} className="text-xs font-semibold text-gray-800 dark:text-gray-100">Place {group.rank_start + index}
-            <select value={form.data.ordered_participant_keys[index] || ''} onChange={event => changePosition(index, event.target.value)} className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white"><option value="">Choose participant</option>{members.map(option => <option key={option.participant_key} value={option.participant_key}>{option.name}</option>)}</select>
-        </label>)}</div>
-        <label className="mt-3 block text-xs font-semibold text-gray-800 dark:text-gray-100">Decision reason<textarea value={form.data.reason} onChange={event => form.setData('reason', event.target.value)} minLength={10} maxLength={2000} rows={2} className="mt-1 block w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-white" /></label>
-        {(form.errors.order || form.errors.reason) && <p className="mt-2 text-xs text-red-700 dark:text-red-300">{form.errors.order || form.errors.reason}</p>}
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{members.map((row, index) => <Field key={`${group.fingerprint}-${index}`} label={`Place ${group.rank_start + index}`} error={index === 0 ? form.errors.order : undefined}>
+            <select value={form.data.ordered_participant_keys[index] || ''} onChange={event => changePosition(index, event.target.value)} className={fieldClass}><option value="">Choose participant</option>{members.map(option => <option key={option.participant_key} value={option.participant_key}>{option.name}</option>)}</select>
+        </Field>)}</div>
+        <Field label="Decision reason" className="mt-3" error={form.errors.reason}><textarea value={form.data.reason} onChange={event => form.setData('reason', event.target.value)} minLength={10} maxLength={2000} rows={2} className={fieldClass} /></Field>
         <Button type="submit" size="compact" disabled={!valid || form.processing} className="mt-3 rounded-lg px-4 py-2 text-xs">Record approved tie order</Button>
         <ConfirmDialog open={confirmationOpen} title="Record this tie order?" message={`Record the approved order for ${members.map(member => member.name).join(', ')} for ${periodKey}?`} confirmLabel="Record tie order" cancelLabel="Go Back" processing={form.processing} onCancel={() => { if (!form.processing) setConfirmationOpen(false); }} onConfirm={confirmSubmit} />
     </form>;
@@ -371,7 +404,7 @@ function TieSettingsPanel({ unit, official, recorded, periodKey, asOfDate }) {
         <summary className="cursor-pointer px-4 py-3 text-sm font-extrabold text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-700 dark:text-white">Manual tie decisions</summary>
         <div className="space-y-3 border-t border-gray-100 p-4 dark:border-gray-800">
             <p className="text-xs leading-5 text-gray-600 dark:text-gray-300">Record an order only when TC, SE, early percentage and unique volume match. Recorded report and official assessment decisions keep separate result fingerprints.</p>
-            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-200">Assessment basis<select value={population} onChange={event => { setPopulation(event.target.value); setFingerprint(''); }} className={fieldClass}><option value="official">Official complete-period assessment</option><option value="recorded">Recorded reports</option></select></label>
+            <Field label="Assessment basis"><select value={population} onChange={event => { setPopulation(event.target.value); setFingerprint(''); }} className={fieldClass}><option value="official">Official complete-period assessment</option><option value="recorded">Recorded reports</option></select></Field>
             {groups.length > 0
                 ? <><ScopedOptionSelect id="office-tat-tie-group" label="Tied participants" value={selected?.fingerprint || ''} options={options} onChange={setFingerprint} placeholder="Choose the tied participants" />{selected && <TieResolutionForm unit={active} group={selected} rows={active.rows || []} periodKey={periodKey} asOfDate={asOfDate} population={population} />}</>
                 : <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:bg-gray-950 dark:text-gray-300">No unresolved manual tie is available for this unit and basis.</p>}
@@ -446,13 +479,13 @@ function TechnicalClassificationPanel({ items, canConfigure }) {
                 const value = values[key] ?? (item.is_highly_technical == null ? '' : (item.is_highly_technical ? 'yes' : 'no'));
                 const fields = approval[key] || {};
                 return <div key={key} className="rounded-xl border border-gray-200 p-3 dark:border-gray-700"><div className="flex flex-wrap items-start justify-between gap-3"><span className="min-w-48 flex-1 text-xs font-semibold text-gray-800 dark:text-gray-100">{item.label}{item.version ? <span className="ml-1 text-[10px] font-normal text-gray-500">v{item.version}</span> : <span className="ml-1 text-[10px] font-bold text-amber-700 dark:text-amber-300">Approval missing</span>}<span className="mt-1 block text-[10px] font-normal leading-4 text-gray-500 dark:text-gray-400">Start: {item.start_basis}. Deadline: {item.deadline_basis}. Endpoint: {item.submission_endpoint}. {item.day_convention}{item.allowed_days ? ` · configured duration ${item.allowed_days} days` : ''}.</span></span>
-                    <select disabled={!canConfigure} aria-label={`Technical classification for ${item.label}`} value={value} onChange={event => setValues(current => ({ ...current, [key]: event.target.value }))} className="rounded-lg border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-950 dark:text-white"><option value="">Choose classification</option><option value="yes">Highly technical</option><option value="no">Not highly technical</option></select></div>
+                    <div className="w-full sm:max-w-xs"><Field label={`Technical classification for ${item.label}`}><select disabled={!canConfigure} value={value} onChange={event => setValues(current => ({ ...current, [key]: event.target.value }))} className={fieldClass}><option value="">Choose classification</option><option value="yes">Highly technical</option><option value="no">Not highly technical</option></select></Field></div></div>
                     <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                        <input aria-label={`Approving authority for ${item.label}`} placeholder="Approving authority" maxLength={180} disabled={!canConfigure || Boolean(savingKey)} value={fields.approving_authority || ''} onChange={event => setField(key, 'approving_authority', event.target.value)} className={fieldClass} />
-                        <input aria-label={`Written approval reference for ${item.label}`} placeholder="Written reference" maxLength={180} disabled={!canConfigure || Boolean(savingKey)} value={fields.approval_reference || ''} onChange={event => setField(key, 'approval_reference', event.target.value)} className={fieldClass} />
-                        <input aria-label={`Effective from for ${item.label}`} type="date" disabled={!canConfigure || Boolean(savingKey)} value={fields.effective_from || ''} onChange={event => setField(key, 'effective_from', event.target.value)} className={fieldClass} />
-                        <input aria-label={`Effective to for ${item.label}`} type="date" disabled={!canConfigure || Boolean(savingKey)} value={fields.effective_to || ''} onChange={event => setField(key, 'effective_to', event.target.value)} className={fieldClass} />
-                        <textarea aria-label={`Classification rationale for ${item.label}`} placeholder="Rationale" minLength={10} maxLength={4000} rows={2} disabled={!canConfigure || Boolean(savingKey)} value={fields.rationale || ''} onChange={event => setField(key, 'rationale', event.target.value)} className={fieldClass} />
+                        <Field label={`Approving authority for ${item.label}`}><input placeholder="Approving authority" maxLength={180} disabled={!canConfigure || Boolean(savingKey)} value={fields.approving_authority || ''} onChange={event => setField(key, 'approving_authority', event.target.value)} className={fieldClass} /></Field>
+                        <Field label={`Written approval reference for ${item.label}`}><input placeholder="Written reference" maxLength={180} disabled={!canConfigure || Boolean(savingKey)} value={fields.approval_reference || ''} onChange={event => setField(key, 'approval_reference', event.target.value)} className={fieldClass} /></Field>
+                        <Field label={`Effective from for ${item.label}`}><input type="date" disabled={!canConfigure || Boolean(savingKey)} value={fields.effective_from || ''} onChange={event => setField(key, 'effective_from', event.target.value)} className={fieldClass} /></Field>
+                        <Field label={`Effective to for ${item.label}`}><input type="date" disabled={!canConfigure || Boolean(savingKey)} value={fields.effective_to || ''} onChange={event => setField(key, 'effective_to', event.target.value)} className={fieldClass} /></Field>
+                        <Field label={`Classification rationale for ${item.label}`}><textarea placeholder="Rationale" minLength={10} maxLength={4000} rows={2} disabled={!canConfigure || Boolean(savingKey)} value={fields.rationale || ''} onChange={event => setField(key, 'rationale', event.target.value)} className={fieldClass} /></Field>
                         <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-300">Approval source file<input type="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" disabled={!canConfigure || uploadingKey === key || Boolean(savingKey)} onChange={event => requestUpload(item, key, event.target.files?.[0])} className={fieldClass} /><span className="mt-1 block font-normal">{fields.evidence_reference ? `Stored evidence ${fields.evidence_reference}` : 'Upload source file.'}</span></label>
                     </div>
                     {errors[key] && <p role="alert" className="mt-2 text-xs text-red-700 dark:text-red-300">{errors[key]}</p>}

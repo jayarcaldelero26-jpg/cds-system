@@ -100,14 +100,15 @@ export default function FloatingSelect({
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); choose(activeOption); }
     };
 
-    return <FloatingField id={fieldId} label={label} hideLabel={!label} value={selectedValue} defaultValue={defaultValue} error={error} hint={hint} size={size} focusTone={focusTone || (variant === 'legacy' ? 'blue' : 'green')} variant={variant} disabled={disabled} readOnly={readOnly} required={required} className={className} hasLeadingIcon={Boolean(leadingIcon)} showFocusRing={showFocusRing}>
-        {({ nativeProps, sizeClasses, fieldShapeClass }) => {
+    return <FloatingField id={fieldId} label={label} hideLabel={!label} value={selectedValue} defaultValue={defaultValue} error={error} hint={hint} size={size} focusTone={focusTone || (variant === 'legacy' ? 'blue' : 'green')} variant={variant} disabled={disabled} readOnly={readOnly} required={required} className={className} hasLeadingIcon={Boolean(leadingIcon)} showFocusRing={showFocusRing} active={open}>
+        {({ nativeProps, sizeClasses, fieldShapeClass, floated, focused }) => {
             const selectClasses = ['absolute left-0 top-0 h-px w-px opacity-0', 'pointer-events-none'];
             const triggerClasses = ['flex w-full items-center justify-between gap-2 border-0 bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-700 dark:focus-visible:ring-green-400', fieldShapeClass, sizeClasses, leadingIcon ? 'pl-10' : '', 'text-gray-800 dark:text-gray-100', isDisabled ? 'cursor-not-allowed text-gray-500 dark:text-gray-400' : 'cursor-pointer'];
-            const hideEmpty = hideEmptyBlurredValue && !selectedValue;
+            const hideEmpty = !selectedValue && (hideEmptyBlurredValue ? !focused : Boolean(label) && !floated);
+            const describedBy = nativeProps['aria-describedby'];
             return <>
                 {leadingIcon && <span className="pointer-events-none absolute inset-y-0 left-3 z-10 flex items-center text-emerald-700 dark:text-emerald-400">{leadingIcon}</span>}
-                <button ref={triggerRef} id={fieldId} type="button" role="combobox" aria-label={ariaLabel || undefined} aria-haspopup="listbox" aria-expanded={open} aria-controls={`${fieldId}-listbox`} aria-activedescendant={open && activeOption ? `${fieldId}-option-${activeIndex}` : undefined} aria-required={required || undefined} aria-invalid={Boolean(error) || undefined} aria-describedby={error ? `${fieldId}-error` : hint ? `${fieldId}-hint` : undefined} disabled={isDisabled} onClick={() => open ? closeMenu(false) : openMenu()} onKeyDown={onKeyDown} className={triggerClasses.join(' ')}>
+                <button ref={triggerRef} id={fieldId} type="button" role="combobox" aria-label={ariaLabel || undefined} aria-labelledby={!ariaLabel ? nativeProps['aria-labelledby'] : undefined} aria-haspopup="listbox" aria-expanded={open} aria-controls={`${fieldId}-listbox`} aria-activedescendant={open && activeOption ? `${fieldId}-option-${activeIndex}` : undefined} aria-required={required || undefined} aria-invalid={Boolean(error) || undefined} aria-describedby={describedBy} disabled={isDisabled} onClick={() => open ? closeMenu(false) : openMenu()} onKeyDown={onKeyDown} className={triggerClasses.join(' ')}>
                     <span className={`min-w-0 flex-1 truncate ${hideEmpty ? 'text-transparent' : selectedOption ? 'text-gray-800 dark:text-gray-100' : 'text-gray-500 dark:text-gray-400'}`}>{selectedOption?.label ?? placeholder?.label ?? ''}</span>
                     <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" className={`h-4 w-4 shrink-0 text-gray-500 transition-transform dark:text-gray-400 ${open ? 'rotate-180 text-green-700 dark:text-green-300' : ''}`}><path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </button>

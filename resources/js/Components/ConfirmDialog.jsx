@@ -2,13 +2,13 @@ import { useId, useRef } from 'react';
 import Button from '@/Components/Button';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
-export default function ConfirmDialog({ open, title = 'Are you sure you want to change the data?', message = 'Once updated, you will not be able to revert it.', confirmLabel = 'OK', cancelLabel = 'Cancel', onConfirm, onCancel, processing = false, variant = 'default' }) {
+export default function ConfirmDialog({ open, title = 'Are you sure you want to change the data?', message = 'Once updated, you will not be able to revert it.', confirmLabel = 'OK', cancelLabel = 'Cancel', onConfirm, onCancel, processing = false, variant = 'default', returnFocusTarget = null }) {
     const dialogId = useId().replace(/:/g, '');
     const overlayRef = useRef(null);
     const panelRef = useRef(null);
     const processingRef = useRef(processing);
     processingRef.current = processing;
-    const { present, phase, onTransitionEnd } = useModalMotion(open, { onClose: () => { if (!processingRef.current) onCancel?.(); }, panelRef, layerRef: overlayRef });
+    const { present, phase, onTransitionEnd } = useModalMotion(open, { onClose: () => { if (!processingRef.current) onCancel?.(); }, panelRef, layerRef: overlayRef, returnFocusTarget });
     if (!present) return null;
     return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
         <div ref={panelRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} role="alertdialog" aria-modal="true" aria-labelledby={`confirm-dialog-title-${dialogId}`} aria-describedby={`confirm-dialog-message-${dialogId}`} data-motion-state={phase} className={`cds-modal-motion-panel w-full max-w-sm rounded-2xl border bg-white p-6 text-center shadow-2xl dark:bg-gray-900 ${variant === 'danger' ? 'border-red-100 dark:border-red-950' : 'border-gray-200 dark:border-gray-800'}`}>

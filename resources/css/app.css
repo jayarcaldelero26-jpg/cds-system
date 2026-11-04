@@ -266,9 +266,8 @@ textarea:-webkit-autofill {
     filter: grayscale(1) brightness(0) invert(1);
 }
 
-.premium-time-trigger { display: flex; min-height: 2.75rem; width: 100%; align-items: center; gap: 0.65rem; border: 1px solid rgb(209 213 219); border-radius: 0.75rem; background: rgb(255 255 255 / 0.96); padding: 0.55rem 0.8rem; text-align: left; transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease; }
-.premium-time-trigger:hover, .premium-time-trigger[aria-expanded="true"] { border-color: rgb(22 163 74); box-shadow: 0 0 0 3px rgb(22 163 74 / 0.12); }
-.premium-time-trigger:disabled { cursor: not-allowed; opacity: 0.6; }
+.premium-time-trigger { display: flex; min-height: 2.625rem; width: 100%; align-items: center; gap: 0.65rem; border: 0; border-radius: inherit; background: transparent; padding: 0.45rem 0.8rem; text-align: left; outline: none; }
+.premium-time-trigger:disabled { cursor: not-allowed; }
 .premium-time-value { color: rgb(17 24 39); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 .premium-time-placeholder { color: rgb(107 114 128); font-size: 0.875rem; }
 .premium-time-popover { position: absolute; z-index: 60; top: calc(100% + 0.5rem); left: 50%; width: min(100%, 23rem); transform: translateX(-50%); border: 1px solid rgb(187 247 208); border-radius: 1rem; background: rgb(255 255 255 / 0.98); padding: 0.8rem; box-shadow: 0 18px 40px rgb(15 23 42 / 0.2), 0 0 0 4px rgb(22 163 74 / 0.07); animation: premium-time-popover-in 180ms ease-out both; }
@@ -299,8 +298,6 @@ textarea:-webkit-autofill {
     .premium-time-popover { position: fixed; top: auto; right: 0.75rem; bottom: 0.75rem; left: 0.75rem; width: auto; transform: none; }
     @keyframes premium-time-popover-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
 }
-.dark .premium-time-trigger { border-color: rgb(75 85 99); background: rgb(17 24 39 / 0.96); }
-.dark .premium-time-trigger:hover, .dark .premium-time-trigger[aria-expanded="true"] { border-color: rgb(74 222 128); }
 .dark .premium-time-value { color: rgb(243 244 246); }
 .dark .premium-time-placeholder { color: rgb(156 163 175); }
 .dark .premium-time-popover { border-color: rgb(22 101 52); background: rgb(17 24 39 / 0.99); box-shadow: 0 18px 40px rgb(0 0 0 / 0.45), 0 0 0 4px rgb(74 222 128 / 0.08); }

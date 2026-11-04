@@ -225,9 +225,11 @@ function MovChip({ event, onSelect }) {
 function CalendarTaskChip({ task, onSelect }) {
     const office = task.creator_attribution?.office_name || 'Office not assigned';
     const time = task.is_all_day ? 'All day' : [task.start_time, task.end_time].filter(Boolean).join('–');
+    const audienceNames = (task.audiences || []).map(audience => audience.label).filter(Boolean);
+    const visibility = task.visibility === 'shared' ? `Shared with ${audienceNames.join(' and ') || 'office'}` : 'Private';
     const label = [task.status === 'done' ? 'Done' : task.status === 'cancelled' ? 'Cancelled' : 'Task', time, task.title, office].filter(Boolean).join(' - ');
     const statusStyle = task.status === 'done' ? 'bg-slate-600' : task.status === 'cancelled' ? 'bg-slate-600 line-through' : 'bg-sky-700';
-    return <button type="button" onClick={() => onSelect(task)} title={label + ' - ' + office} aria-label={`Calendar task: ${label}; ${office}`} className={`block h-[22px] w-full truncate rounded-md px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 ${statusStyle}`}>{label} <span className="sr-only">{office}</span></button>;
+    return <button type="button" onClick={() => onSelect(task)} title={`${visibility} · ${label}`} aria-label={`Calendar task: ${visibility}; ${label}; ${office}`} className={`block h-[22px] w-full truncate rounded-md px-2 text-left text-[10px] font-semibold leading-[22px] text-white shadow-sm transition hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-600 ${statusStyle}`}><span className="mr-1 rounded bg-white/20 px-1 text-[9px]">{task.visibility === 'shared' ? 'Shared' : 'Private'}</span>{label} <span className="sr-only">{visibility}; {office}</span></button>;
 }
 
 function TaskIcon() {
@@ -312,7 +314,7 @@ export function CalendarLegend() {
     return <div role="group" aria-label="Calendar legend" className="mx-2 mb-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-slate-200/80 bg-white/80 px-3 py-2 text-[11px] font-medium leading-4 text-slate-700 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/80 dark:text-gray-200 sm:mx-3 sm:mb-3">
         <span className="shrink-0 font-semibold uppercase tracking-[0.12em] text-slate-500 dark:text-gray-400">Legend</span>
         <ul aria-label="Calendar event categories" className="flex min-w-0 flex-1 list-none flex-wrap items-center gap-x-3 gap-y-1 p-0">
-            <li aria-label="Calendar task" title="Private task or schedule created by you" className="inline-flex min-w-0 items-center gap-1.5"><span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-sky-700" aria-hidden="true" /><span>Calendar task</span></li>
+            <li aria-label="Calendar task" title="Private or shared Calendar task; shared tasks are read-only for office members" className="inline-flex min-w-0 items-center gap-1.5"><span className="h-2.5 w-2.5 shrink-0 rounded-sm bg-sky-700" aria-hidden="true" /><span>Calendar task</span></li>
             {LEGEND_GROUPS.map(group => {
                 const style = getCalendarGroupStyle(group);
                 return <li key={group} aria-label={style.description ? `Non-working-day group: ${style.description}` : style.label} title={style.description || style.label} className="inline-flex min-w-0 items-center gap-1.5"><span className={`h-2.5 w-2.5 shrink-0 rounded-full bg-gradient-to-br ${style.chip}`} aria-hidden="true" /><span>{style.label}</span></li>;

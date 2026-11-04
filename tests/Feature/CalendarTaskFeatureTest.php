@@ -3,10 +3,14 @@
 use App\Models\CalendarTask;
 use App\Models\AuditLog;
 use App\Models\NonWorkingDay;
+use App\Models\OrganizationalOffice;
+use App\Models\ProtectedArea;
+use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\TechnicalReport;
 use App\Models\User;
 use App\Services\Authorization\OrganizationalAccessService;
 use App\Services\BusinessCalendarService;
+use App\Services\Calendar\CalendarTaskAudienceService;
 use App\Services\Calendar\CalendarTaskService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Database\Events\QueryExecuted;
@@ -24,6 +28,52 @@ beforeEach(function (): void {
     BusinessCalendarService::forgetCache();
     Mail::fake();
 });
+
+function makeCalendarOfficeShareUser(string $office, string $category = OrganizationalAccessService::CENRO_FOCAL): User
+{
+    return User::factory()->create(['section' => $category, 'office_designated' => $office]);
+}
+
+/** @return array{User,ProtectedArea,OrganizationalOffice} */
+function makeCalendarPamoShareFixture(string $areaName, string $shortName, string $officeCode, ?string $supervisingOfficeCode = 'cenro_baganga'): array
+{
+    $creator = User::factory()->create(['section' => OrganizationalAccessService::PAMO]);
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => $officeCode,
+        'name' => $officeCode.' Office',
+        'office_type' => 'pamo',
+        'is_active' => true,
+    ]);
+    $area = ProtectedArea::query()->create([
+        'name' => $areaName,
+        'short_name' => $shortName,
+        'category' => 'Protected Landscape',
+        'municipality' => 'Baganga',
+        'province' => 'Davao Oriental',
+        'region' => 'Region XI',
+        'status' => 'Active',
+        'created_by' => $creator->getKey(),
+        'updated_by' => $creator->getKey(),
+    ]);
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->getKey(),
+        'organizational_office_id' => $pamoOffice->getKey(),
+        'assignment_type' => 'pamo',
+        'assigned_by' => $creator->getKey(),
+    ]);
+    if ($supervisingOfficeCode) {
+        $supervisingOffice = OrganizationalOffice::query()->where('code', $supervisingOfficeCode)->firstOrFail();
+        ProtectedAreaOfficeAssignment::query()->create([
+            'protected_area_id' => $area->getKey(),
+            'organizational_office_id' => $supervisingOffice->getKey(),
+            'assignment_type' => 'supervising',
+            'assigned_by' => $creator->getKey(),
+        ]);
+    }
+    $creator->forceFill(['protected_area_id' => $area->getKey(), 'office_designated' => $pamoOffice->name])->save();
+
+    return [$creator->fresh(), $area, $pamoOffice];
+}
 
 test('Calendar is available to requested organizational categories and existing reports viewers', function (): void {
     $organization = app(OrganizationalAccessService::class);
@@ -74,10 +124,16 @@ test('Calendar tasks are private, creator-owned, and use Manila wall-clock value
         'title' => 'Quarterly coordination', 'scheduled_date' => '2026-11-03', 'is_all_day' => false,
         'start_time' => '09:15', 'end_time' => '10:00', 'notes' => 'Local wall-clock schedule.',
         'created_by' => $viewer->id, 'actor_name' => 'Spoofed actor', 'office_name' => 'Spoofed office',
+    ])->assertSessionHasErrors('created_by');
+
+    $this->actingAs($owner)->post(route('calendar.tasks.store'), [
+        'title' => 'Quarterly coordination', 'scheduled_date' => '2026-11-03', 'is_all_day' => false,
+        'start_time' => '09:15', 'end_time' => '10:00', 'notes' => 'Local wall-clock schedule.',
     ])->assertRedirect();
 
     $task = CalendarTask::query()->firstOrFail();
     expect($task->created_by)->toBe($owner->id)
+        ->and($task->visibility)->toBe('private')
         ->and($task->scheduled_date->format('Y-m-d'))->toBe('2026-11-03')
         ->and($task->start_time)->toBe('09:15')
         ->and($task->end_time)->toBe('10:00')
@@ -423,4 +479,246 @@ test('a missing task table leaves the existing report Calendar available', funct
             (require base_path('database/migrations/2026_11_01_190000_create_calendar_tasks_table.php'))->up();
         }
     }
+});
+
+test('office sharing is explicit, office-scoped, read-only for peers, and immutable on creator edits', function (): void {
+    $owner = makeCalendarOfficeShareUser('CENRO Baganga');
+    $peer = makeCalendarOfficeShareUser('CENRO Baganga', OrganizationalAccessService::CENRO_CHIEF);
+    $otherOffice = makeCalendarOfficeShareUser('CENRO Mati');
+    $global = User::factory()->create();
+    $global->assignRole(Role::findOrCreate('Super Admin', 'web'));
+
+    $this->actingAs($owner)->post(route('calendar.tasks.store'), [
+        'title' => 'Office coordination', 'scheduled_date' => '2026-11-12', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true,
+    ])->assertRedirect();
+
+    $task = CalendarTask::query()->where('title', 'Office coordination')->firstOrFail();
+    $audience = DB::table('calendar_task_audiences')->where('calendar_task_id', $task->id)->first();
+    $created = AuditLog::query()->where('entity_type', CalendarTask::class)->where('entity_id', (string) $task->id)->where('action', 'created')->firstOrFail();
+    expect($task->visibility)->toBe('shared')
+        ->and($audience->audience_type)->toBe('office')
+        ->and($audience->office_name_snapshot)->toBe('CENRO Baganga')
+        ->and($created->metadata['calendar_task_sharing']['choice'])->toBe('shared_with_office')
+        ->and($created->metadata['calendar_task_sharing']['audiences'][0]['office_name'])->toBe('CENRO Baganga');
+
+    $this->actingAs($peer)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 1)
+            ->where('tasks.0.visibility', 'shared')
+            ->where('tasks.0.is_owner', false)
+            ->where('tasks.0.can_edit', false)
+            ->where('tasks.0.can_complete', false)
+            ->where('tasks.0.can_cancel', false)
+            ->where('tasks.0.audiences.0.label', 'CENRO Baganga'));
+    $otherResponse = $this->actingAs($otherOffice)->get(route('business-calendar.index', ['month' => '2026-11']));
+    $otherResponse->assertInertia(fn (Assert $page) => $page->has('tasks', 0));
+    $globalResponse = $this->actingAs($global)->get(route('business-calendar.index', ['month' => '2026-11']));
+    $globalResponse->assertInertia(fn (Assert $page) => $page->has('tasks', 0));
+
+    $policy = app(\App\Policies\CalendarTaskPolicy::class);
+    expect($policy->view($peer, $task))->toBeTrue()
+        ->and($policy->update($peer, $task))->toBeFalse()
+        ->and($policy->complete($peer, $task))->toBeFalse()
+        ->and($policy->cancel($peer, $task))->toBeFalse();
+    $this->actingAs($peer)->put(route('calendar.tasks.update', $task->id), [
+        'title' => 'Peer edit', 'scheduled_date' => '2026-11-13', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '',
+    ])->assertNotFound();
+    $this->actingAs($peer)->patch(route('calendar.tasks.status', $task->id), ['status' => CalendarTask::STATUS_DONE])->assertNotFound();
+    $this->actingAs($owner)->put(route('calendar.tasks.update', $task->id), [
+        'title' => 'Attempt to change audience', 'scheduled_date' => '2026-11-13', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => false,
+    ])->assertSessionHasErrors('share_with_office');
+    $this->actingAs($owner)->put(route('calendar.tasks.update', $task->id), [
+        'title' => 'Edited without changing audience', 'scheduled_date' => '2026-11-13', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '',
+    ])->assertRedirect();
+    expect($task->fresh()->visibility)->toBe('shared')
+        ->and(DB::table('calendar_task_audiences')->where('calendar_task_id', $task->id)->count())->toBe(1);
+});
+
+test('PAMO sharing stays within the assigned Protected Area and adds only an explicitly selected mapped supervisor', function (): void {
+    [$pamo, $area, $pamoOffice] = makeCalendarPamoShareFixture('Aliwagwag Protected Landscape', 'APL', 'pamo_apl_share', 'cenro_baganga');
+    [$otherPamo, $otherArea] = makeCalendarPamoShareFixture('Mati Protected Landscape', 'MPL', 'pamo_mpl_share', 'cenro_mati');
+    $samePaPeer = User::factory()->create([
+        'section' => OrganizationalAccessService::PAMO,
+        'protected_area_id' => $area->id,
+        'office_designated' => $pamoOffice->name,
+    ]);
+    $baganga = makeCalendarOfficeShareUser('CENRO Baganga');
+    $mati = makeCalendarOfficeShareUser('CENRO Mati');
+
+    $this->actingAs($pamo)->post(route('calendar.tasks.store'), [
+        'title' => 'PA team schedule', 'scheduled_date' => '2026-11-14', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true,
+    ])->assertRedirect();
+    $primaryOnly = CalendarTask::query()->where('title', 'PA team schedule')->firstOrFail();
+    $this->actingAs($samePaPeer)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 1)->where('tasks.0.audiences.0.label', 'pamo_apl_share Office — Aliwagwag Protected Landscape'));
+    $this->actingAs($otherPamo)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 0));
+    $this->actingAs($baganga)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 0));
+
+    $this->actingAs($pamo)->post(route('calendar.tasks.store'), [
+        'title' => 'PA and supervisor schedule', 'scheduled_date' => '2026-11-15', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true, 'include_supervising_office' => true,
+    ])->assertRedirect();
+    $this->actingAs($baganga)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 1)
+            ->where('tasks.0.title', 'PA and supervisor schedule')
+            ->has('tasks.0.audiences', 2));
+    $this->actingAs($mati)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 0));
+
+    [$withoutSupervisor] = makeCalendarPamoShareFixture('Example Protected Area', 'EPA', 'pamo_without_supervisor', null);
+    $options = app(CalendarTaskAudienceService::class)->sharingOptions($withoutSupervisor);
+    expect($options['available'])->toBeTrue()->and($options['supervising'])->toBeNull();
+    $this->actingAs($withoutSupervisor)->post(route('calendar.tasks.store'), [
+        'title' => 'Independent PA task', 'scheduled_date' => '2026-11-16', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true,
+    ])->assertRedirect();
+    $this->actingAs($withoutSupervisor)->post(route('calendar.tasks.store'), [
+        'title' => 'Invalid supervisor choice', 'scheduled_date' => '2026-11-17', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true, 'include_supervising_office' => true,
+    ])->assertSessionHasErrors('include_supervising_office');
+
+    [$directPamo] = makeCalendarPamoShareFixture('Mt. Hamiguitan Range Wildlife Sanctuary', 'MHRWS', 'pamo_mhrws_share', 'penro_davao_oriental');
+    $directOptions = app(CalendarTaskAudienceService::class)->sharingOptions($directPamo);
+    expect($directOptions['supervising']['label'])->toContain('PENRO Davao Oriental');
+    $this->actingAs($directPamo)->post(route('calendar.tasks.store'), [
+        'title' => 'Direct PA supervisor schedule', 'scheduled_date' => '2026-11-18', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true, 'include_supervising_office' => true,
+    ])->assertRedirect();
+    $penro = makeCalendarOfficeShareUser('PENRO Davao Oriental', OrganizationalAccessService::PENRO_FOCAL);
+    $this->actingAs($penro)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->where('tasks.0.title', 'Direct PA supervisor schedule'));
+
+    expect($primaryOnly->fresh()->visibility)->toBe('shared');
+});
+
+test('a cross-year shared range is returned once only inside its office audience', function (): void {
+    $owner = makeCalendarOfficeShareUser('CENRO Baganga');
+    $peer = makeCalendarOfficeShareUser('CENRO Baganga', OrganizationalAccessService::CENRO_CHIEF);
+    $other = makeCalendarOfficeShareUser('CENRO Mati');
+    $payload = [
+        'title' => 'Year-boundary office task', 'scheduled_date' => '2025-12-30', 'scheduled_end_date' => '2026-01-03',
+        'is_all_day' => true, 'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true,
+    ];
+    $this->actingAs($owner)->post(route('calendar.tasks.store'), $payload)->assertRedirect();
+    $this->actingAs($other)->post(route('calendar.tasks.store'), [...$payload, 'title' => 'Other office task'])->assertRedirect();
+
+    foreach ([['month' => '2025-12'], ['month' => '2026-01'], ['view' => 'year', 'year' => 2025], ['view' => 'year', 'year' => 2026]] as $range) {
+        $this->actingAs($peer)->get(route('business-calendar.index', $range))
+            ->assertInertia(fn (Assert $page) => $page->has('tasks', 1)->where('tasks.0.title', 'Year-boundary office task'));
+    }
+});
+
+test('creator fallback attribution is correct for each shared task in a multi-owner feed with bounded queries', function (): void {
+    $viewer = makeCalendarOfficeShareUser('CENRO Baganga');
+    $office = OrganizationalOffice::query()->where('code', 'cenro_baganga')->firstOrFail();
+    $audienceService = app(CalendarTaskAudienceService::class);
+    $creators = collect([
+        makeCalendarOfficeShareUser('CENRO Baganga'),
+        makeCalendarOfficeShareUser('CENRO Baganga', OrganizationalAccessService::CENRO_CHIEF),
+        makeCalendarOfficeShareUser('CENRO Baganga', OrganizationalAccessService::CENRO_RECORDS),
+    ]);
+    $addCreatorTasks = static function (User $creator, int $creatorIndex, array $indexes) use ($audienceService): void {
+        foreach ($indexes as $index) {
+            $task = CalendarTask::query()->create([
+                'created_by' => $creator->id,
+                'title' => 'Fallback owner '.$creator->name.' '.$index,
+                'scheduled_date' => '2026-11-'.str_pad((string) (10 + $creatorIndex * 3 + $index), 2, '0', STR_PAD_LEFT),
+                'is_all_day' => true, 'start_time' => null, 'end_time' => null, 'notes' => '',
+                'status' => CalendarTask::STATUS_SCHEDULED,
+            ]);
+            $grant = $audienceService->createAudiences($creator, true, false);
+            $task->forceFill(['visibility' => 'shared'])->save();
+            $audienceService->persistAudiences($task, $grant);
+        }
+    };
+    foreach ($creators as $creatorIndex => $creator) {
+        $addCreatorTasks($creator, $creatorIndex, [0]);
+    }
+
+    $service = app(CalendarTaskService::class);
+    $range = [Carbon\CarbonImmutable::parse('2026-11-01'), Carbon\CarbonImmutable::parse('2026-11-30')];
+    $capture = false;
+    $queryCount = 0;
+    DB::listen(static function (QueryExecuted $query) use (&$capture, &$queryCount): void {
+        if ($capture) $queryCount++;
+    });
+    $capture = true;
+    $service->forRange($viewer, ...$range);
+    $threeCreatorCount = $queryCount;
+    $capture = false;
+    foreach ($creators as $creatorIndex => $creator) {
+        $addCreatorTasks($creator, $creatorIndex, [1, 2]);
+    }
+    $queryCount = 0;
+    $capture = true;
+    $tasks = $service->forRange($viewer, ...$range);
+    $capture = false;
+
+    expect($tasks)->toHaveCount(9)
+        ->and($tasks->pluck('id')->unique())->toHaveCount(9)
+        ->and($tasks->pluck('creator_attribution.actor_name')->unique())->toHaveCount(3)
+        ->and($tasks->every(fn (array $task): bool => $task['creator_attribution']['office_name'] === $office->name))->toBeTrue()
+        ->and($queryCount)->toBeLessThanOrEqual($threeCreatorCount)
+        ->and($queryCount)->toBeLessThan(25);
+});
+
+test('sharing stays unavailable while audience schema is missing and old tasks remain private after the additive migration', function (): void {
+    $owner = makeCalendarOfficeShareUser('CENRO Baganga');
+    $peer = makeCalendarOfficeShareUser('CENRO Baganga');
+    $migration = require base_path('database/migrations/2026_11_03_120000_add_office_sharing_to_calendar_tasks.php');
+    $migration->down();
+    $legacy = CalendarTask::query()->create([
+        'created_by' => $owner->id, 'title' => 'Pre-sharing task', 'scheduled_date' => '2026-11-20',
+        'is_all_day' => true, 'start_time' => null, 'end_time' => null, 'notes' => '', 'status' => CalendarTask::STATUS_SCHEDULED,
+    ]);
+    $migration->up();
+
+    expect($legacy->fresh()->visibility)->toBe('private')
+        ->and(DB::table('calendar_task_audiences')->count())->toBe(0);
+    $options = app(CalendarTaskAudienceService::class)->sharingOptions($owner);
+    expect($options['ready'])->toBeTrue()->and($options['available'])->toBeTrue();
+    $this->actingAs($peer)->get(route('business-calendar.index', ['month' => '2026-11']))
+        ->assertInertia(fn (Assert $page) => $page->has('tasks', 0));
+
+    Schema::dropIfExists('calendar_task_audiences');
+    expect(app(CalendarTaskAudienceService::class)->sharingOptions($owner)['ready'])->toBeFalse();
+    $this->actingAs($owner)->post(route('calendar.tasks.store'), [
+        'title' => 'Legacy private save', 'scheduled_date' => '2026-11-21', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '',
+    ])->assertRedirect();
+    $this->actingAs($owner)->post(route('calendar.tasks.store'), [
+        'title' => 'No silent shared save', 'scheduled_date' => '2026-11-22', 'is_all_day' => true,
+        'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true,
+    ])->assertSessionHasErrors('share_with_office');
+});
+
+test('a failed creation audit rolls back the task and its audience rows', function (): void {
+    if (DB::connection()->getDriverName() !== 'sqlite') $this->markTestSkipped('This focused rollback test uses an isolated SQLite trigger.');
+    $owner = makeCalendarOfficeShareUser('CENRO Baganga');
+    DB::statement("CREATE TRIGGER calendar_task_share_audit_failure BEFORE INSERT ON audit_logs WHEN NEW.module = 'Calendar' AND NEW.action = 'created' BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END");
+    try {
+        $this->withoutExceptionHandling();
+        try {
+            $this->actingAs($owner)->post(route('calendar.tasks.store'), [
+                'title' => 'Atomic share fixture', 'scheduled_date' => '2026-11-23', 'is_all_day' => true,
+                'start_time' => '', 'end_time' => '', 'notes' => '', 'share_with_office' => true,
+            ]);
+            $this->fail('The injected audit write failure should abort shared task creation.');
+        } catch (QueryException $exception) {
+            expect($exception->getMessage())->toContain('forced audit failure');
+        }
+    } finally {
+        DB::statement('DROP TRIGGER IF EXISTS calendar_task_share_audit_failure');
+    }
+
+    expect(CalendarTask::query()->where('title', 'Atomic share fixture')->exists())->toBeFalse()
+        ->and(DB::table('calendar_task_audiences')->count())->toBe(0)
+        ->and(AuditLog::query()->where('entity_type', CalendarTask::class)->count())->toBe(0);
 });

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Button from '@/Components/Button';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import FloatingInput from '@/Components/Form/FloatingInput';
 
 export default function CurrentPasswordConfirmDialog({ open, onCancel, onConfirmed, message = 'Confirm your current password to continue.', confirmLabel = 'Confirm and continue' }) {
     const [password, setPassword] = useState('');
@@ -76,11 +77,7 @@ export default function CurrentPasswordConfirmDialog({ open, onCancel, onConfirm
             <h2 id="current-password-title" className="text-lg font-bold text-gray-900 dark:text-white">Confirm your current password</h2>
             <p id="current-password-description" className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">{message}</p>
             <form onSubmit={submit} className="mt-5 space-y-4">
-                <div>
-                    <label htmlFor="passkey-current-password" className="mb-1.5 block text-sm font-semibold text-gray-800 dark:text-gray-200">Current password</label>
-                    <input ref={inputRef} id="passkey-current-password" name="password" type="password" autoComplete="current-password" required value={password} onChange={(event) => { setPassword(event.target.value); if (error) setError(''); }} aria-invalid={Boolean(error)} aria-describedby={error ? 'current-password-error' : undefined} disabled={processing} className="h-11 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 shadow-sm focus:border-green-700 focus:outline-none focus:ring-2 focus:ring-green-700/30 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-800 dark:text-white" />
-                    {error && <p id="current-password-error" className="mt-2 text-sm text-red-700 dark:text-red-300" role="alert">{error}</p>}
-                </div>
+                <FloatingInput inputRef={inputRef} id="passkey-current-password" name="password" label="Current password" type="password" autoComplete="current-password" required value={password} onChange={(event) => { setPassword(event.target.value); if (error) setError(''); }} error={error} disabled={processing} />
                 <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                     <Button type="button" size="compact" variant="cancel" onClick={cancel} disabled={processing} className="h-11 rounded-lg px-4 text-sm">Cancel</Button>
                     <Button type="submit" size="compact" variant="primary" disabled={processing || !password} className="h-11 rounded-lg px-4 text-sm">{processing ? 'Confirming…' : confirmLabel}</Button>

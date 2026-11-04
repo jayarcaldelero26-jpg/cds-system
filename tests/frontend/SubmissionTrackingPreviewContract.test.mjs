@@ -637,8 +637,10 @@ test('PDF viewer exposes Fit Page, bounded zoom, continuous scrolling, and acces
     assert.match(markup, /class="[^"]*overflow-auto[^"]*" role="region" aria-label="PDF pages"/);
     assert.doesNotMatch(markup, /aria-label="Previous page"|aria-label="Next page"/);
     assert.match(markup, /Preparing PDF preview/);
-    assert.match(markup, /aria-label="Zoom percentage"[^>]*>—%/);
-    assert.match(markup, /Page — of —/);
+    assert.match(markup, /aria-label="Zoom percentage"[^>]*>Loading</);
+    assert.doesNotMatch(markup, /aria-label="Zoom percentage"[^>]*>\d+%/);
+    assert.match(markup, /Loading pages/);
+    assert.match(markup, /aria-label="Zoom out"[^>]*disabled=""/);
     assert.match(pdfViewerSource, /Math\.abs\(number - pageNumber\) <= 1/);
     assert.match(pdfViewerSource, /onWheel/);
     assert.match(pdfViewerSource, /if \(!event\.ctrlKey/);
@@ -1427,6 +1429,7 @@ test('correction confirmation submit uses warning while other form saves retain 
 test('shared report context uses honest ENGP values and expands actual PAMB dates', () => {
     const engp = renderToStaticMarkup(React.createElement(ReportContext, {
         row: {
+            source: 'engp',
             tracking_number: 'ENGP-2026-001',
             module: 'ENGP Quarterly Report',
             document_type: 'Quarterly Report',
@@ -1440,10 +1443,13 @@ test('shared report context uses honest ENGP values and expands actual PAMB date
     assert.match(engp, /ENGP-2026-001/);
     assert.match(engp, /PENRO Davao Oriental/);
     assert.match(engp, /Quarter 3, 2026/);
-    assert.doesNotMatch(engp, /Protected Area|PENRO Receipt/);
+    assert.doesNotMatch(engp, /Protected Area/);
+    assert.match(engp, /PENRO Receipt/);
+    assert.match(engp, /Not recorded/);
 
     const populatedEngp = renderToStaticMarkup(React.createElement(ReportContext, {
         row: {
+            source: 'engp',
             tracking_number: 'ENGP-2026-042',
             module: 'Site Visit',
             activity_name: 'Field verification at Banao Watershed',
@@ -1465,6 +1471,7 @@ test('shared report context uses honest ENGP values and expands actual PAMB date
 
     const pamb = renderToStaticMarkup(React.createElement(ReportContext, {
         row: {
+            source: 'conservation',
             tracking_number: 'CDS-2026-002',
             module: 'Regular PAMB',
             document_type: 'Minutes',

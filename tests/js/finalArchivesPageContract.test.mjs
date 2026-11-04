@@ -54,12 +54,14 @@ test('Archives page uses the same paginated records for Grid and List and opens 
 test('receipt date, signed files, and confirmation submit through one archive form', () => {
     assert.equal((page.match(/<CrudFormModal open=/g) || []).length, 1);
     assert.match(page, /type="datetime-local"/);
+    assert.match(page, /<FloatingInput id="final-regional-receipt-at" name="physically_received_at" label="Actual receipt date and time \(Asia\/Manila\)" type="datetime-local"/);
     assert.match(actions, /final-archives\.store/);
     assert.match(actions, /final-archives\.retry/);
     assert.match(actions, /latest_manifest\?\.retry_available !== true/);
     assert.match(reader, /FinalArchiveRecordActions/);
     assert.match(reader, /activeFile\?\.preview_url/);
     assert.match(reader, /activeFile\?\.download_url/);
+    assert.match(reader, /<FloatingSelect id="archive-reader-file" label="File"/);
     assert.match(page, /Receive and Archive/);
     assert.match(page, /earliestManilaReceiptInput/);
     assert.match(page, /I reviewed this complete returned file set and confirm its signatures are complete/);

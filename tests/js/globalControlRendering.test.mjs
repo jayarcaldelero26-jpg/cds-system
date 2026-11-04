@@ -62,7 +62,7 @@ test('shared native filter select keeps its selected string value and does not r
 test('Calendar form select integration keeps its controlled string value and option contract', async () => {
     const { CalendarSelect } = await load('Pages/Calendar/Index.jsx');
     const html = renderToStaticMarkup(React.createElement(CalendarSelect, {
-        value: 'OFFICE', onChange: () => {}, required: true,
+        label: 'Scope', value: 'OFFICE', onChange: () => {}, required: true,
         children: [React.createElement('option', { key: 'national', value: 'NATIONAL' }, 'National'), React.createElement('option', { key: 'office', value: 'OFFICE' }, 'Office')],
     }));
     assert.match(html, /role="combobox"/);
@@ -71,14 +71,45 @@ test('Calendar form select integration keeps its controlled string value and opt
     assert.doesNotMatch(html, /type="checkbox"/);
 });
 
-test('Protected Area compact field sizing leaves multiline notes multiline', async () => {
+test('shared compact input and textarea preserve size, id association, and multiline editing', async () => {
     const { default: FormField } = await load('Components/FormField.jsx');
     const { default: FloatingTextarea } = await load('Components/Form/FloatingTextarea.jsx');
     const text = renderToStaticMarkup(React.createElement(FormField, { id: 'area-name', label: 'Protected Area Name', size: 'sm', value: 'Sample', onChange: () => {} }));
     const notes = renderToStaticMarkup(React.createElement(FloatingTextarea, { id: 'description', label: 'Description', rows: 4, value: 'Long text', onChange: () => {} }));
-    assert.match(text, /h-10 px-3 py-2 text-sm leading-5/);
-    assert.match(notes, /<textarea[^>]*rows="4"/);
+    assert.match(text, /h-\[2\.375rem\] px-3 text-sm leading-5/);
+    assert.match(text, /<label[^>]*for="area-name"[^>]*>Protected Area Name/);
+    assert.match(text, /<input[^>]*id="area-name"[^>]*aria-labelledby="area-name-label"/);
+    assert.match(notes, /<label[^>]*for="description"[^>]*>Description/);
+    assert.match(notes, /<textarea[^>]*id="description"[^>]*rows="4"/);
     assert.match(notes, /min-h-28/);
+});
+
+test('shared floating field raises on real prefilled zero, exposes errors and hints, and rests when empty', async () => {
+    const { default: FloatingInput } = await load('Components/Form/FloatingInput.jsx');
+    const empty = renderToStaticMarkup(React.createElement(FloatingInput, { id: 'empty-note', label: 'Long note', value: '', readOnly: true, placeholder: 'Enter a note' }));
+    const zero = renderToStaticMarkup(React.createElement(FloatingInput, { id: 'zero-value', label: 'Days', type: 'number', value: 0, readOnly: true, required: true, error: 'Use a value from 1 to 366.', hint: 'Whole days.' }));
+
+    assert.match(empty, /data-floating-field="true" data-floated="false"/);
+    assert.match(empty, /<label[^>]*for="empty-note"[^>]*title="Long note"/);
+    assert.match(empty, /placeholder:opacity-0/);
+    assert.match(zero, /data-floating-field="true" data-floated="true"/);
+    assert.match(zero, /<input[^>]*id="zero-value"[^>]*required=""/);
+    assert.match(zero, /aria-labelledby="zero-value-label"/);
+    assert.match(zero, /aria-invalid="true"/);
+    assert.match(zero, /aria-describedby="zero-value-hint zero-value-error"/);
+    assert.match(zero, /id="zero-value-error"[^>]*role="alert"/);
+});
+
+test('compliance message editor has an associated visible label and linked error', async () => {
+    const { default: ComplianceRichTextEditor } = await load('Components/Compliance/ComplianceRichTextEditor.jsx');
+    const html = renderToStaticMarkup(React.createElement(ComplianceRichTextEditor, {
+        id: 'fixture-compliance-body', label: 'System-generated footer', value: '<p>Fixture body</p>', error: 'Review this body.', onChange() {},
+    }));
+    assert.match(html, /<label[^>]*for="fixture-compliance-body"[^>]*>System-generated footer/);
+    assert.match(html, /id="fixture-compliance-body"[^>]*role="textbox"[^>]*aria-multiline="true"/);
+    assert.match(html, /aria-labelledby="fixture-compliance-body-label"/);
+    assert.match(html, /aria-describedby="fixture-compliance-body-error"/);
+    assert.match(html, /id="fixture-compliance-body-error"[^>]*role="alert"/);
 });
 
 test('incoming action categories keep filter semantics, selected state, and callbacks outside action styling', async () => {
@@ -563,19 +594,30 @@ test('shared Development report context renders missing, optional, inapplicable,
     assert.doesNotMatch(html, /<dt[^>]*>Protected Area<\/dt>/);
 });
 
-test('Office TAT ranking renders an explicit no-sample state instead of a dash or N/A', async () => {
-    const { RankingSection } = await load('Pages/Admin/OfficeTat/Index.jsx');
+test('Office TAT document turnaround renders its current no-sample state while empty offices remain unranked', async () => {
+    const { default: DocumentTurnaround } = await load('Pages/Admin/OfficeTat/DocumentTurnaround.jsx');
     const { rankTatRows } = await load('Pages/Admin/OfficeTat/ranking.mjs');
-    const rows = rankTatRows([{
+    const [unranked] = rankTatRows([{
         office: 'CENRO Baganga', tat_average_elapsed_seconds: null,
         event_derived_tat_completed_documents: 0,
     }], 'live');
-    const html = renderToStaticMarkup(React.createElement(RankingSection, {
-        title: 'Live TAT', description: 'Office receipt to next accepted handoff', rows, evidence: 'live',
+    const html = renderToStaticMarkup(React.createElement(DocumentTurnaround, {
+        data: {
+            unit: 'conservation', reports: 1, received_count: 0, in_progress_count: 1,
+            overdue_count: 0, average_supporting_documents: 0,
+            rows: [{
+                participant_key: 'cenro-baganga', name: 'CENRO Baganga', reports: 1,
+                received_count: 0, in_progress_count: 1, overdue_count: 0,
+                average_supporting_documents: 0, documents: [],
+            }],
+        },
     }));
 
-    assert.match(html, /No completed samples/);
-    assert.match(html, /No valid live event averages/);
+    assert.equal(unranked.averageSeconds, null);
+    assert.equal(unranked.rank, null);
+    assert.match(html, /Document turnaround/);
+    assert.match(html, /No completed turnaround yet/);
+    assert.doesNotMatch(html, /No valid live event averages/);
     assert.doesNotMatch(html, />\s*(?:—|N\/A)\s*</);
 });
 
@@ -656,6 +698,10 @@ test('Create Module close control is a neutral accessible icon button wired to i
     assert.match(html, /aria-label="Close module form"/);
     assert.match(html, /type="button"/);
     assert.match(html, /focus-visible:ring-2/);
+    const moduleLabel = html.match(/<label id="([^"]+-label)" for="([^"]+)"[^>]*>Module Name/);
+    assert.ok(moduleLabel, 'Module Name has a visible associated label');
+    assert.equal(moduleLabel[1], `${moduleLabel[2]}-label`);
+    assert.match(html, new RegExp(`<input[^>]*id="${moduleLabel[2]}"[^>]*aria-labelledby="${moduleLabel[1]}"`));
     assert.match(source, /<button type="button" onClick=\{onClose\}[^>]*aria-label="Close module form"/);
 });
 
