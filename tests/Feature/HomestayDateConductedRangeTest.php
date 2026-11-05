@@ -80,14 +80,19 @@ test('Homestay exposes the shared BMS range picker and structured range payload 
 
     $tracker = File::get(resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'));
     $dateRangePicker = File::get(resource_path('js/Components/DateRangePicker.jsx'));
+    $dateConductedRanges = File::get(resource_path('js/Components/Reports/DateConductedRangesField.jsx'));
     $formatting = app(DateConductedRangeService::class)->display([['from' => '2026-05-12', 'to' => '2026-05-14']]);
 
     expect($tracker)
         ->toContain('dateRangeEnabled = dateConductedRangesEnabled || Boolean(workflowConfig?.date_conducted_ranges_enabled)')
-        ->toContain('<DateRangePicker id={\'reportsubmissiontracker-date-conducted-range-\' + index}')
+        ->toContain('<DateConductedRangesField')
+        ->toContain('idPrefix="reportsubmissiontracker-date-conducted-range"')
+        ->toContain('onRangeChange={updateDateConductedRange}')
         ->toContain('rangesFromRecord(report.date_conducted_ranges, report.date_conducted)')
         ->toContain('compactDateConductedRanges(data.date_conducted_ranges)')
         ->toContain("date_conducted: dateRangeEnabled && ranges.length > 0 ? ranges[0].from : data.date_conducted")
+        ->and($dateConductedRanges)->toContain('<DateRangePicker')
+        ->toContain('onRangeChange(index, value)')
         ->and($dateRangePicker)->toContain('disabled={!draft.from || !draft.to}')
         ->and($formatting)->toBe('May 12-14, 2026');
 });

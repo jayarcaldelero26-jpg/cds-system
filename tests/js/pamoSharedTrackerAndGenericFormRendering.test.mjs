@@ -14,7 +14,7 @@ const load = async path => {
         configFile: false,
         plugins: [viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
-        server: { middlewareMode: true, hmr: false },
+        server: { middlewareMode: true, hmr: false, ws: false },
         appType: 'custom',
         logLevel: 'error',
     });
@@ -59,6 +59,44 @@ function findElement(root, predicate) {
     return null;
 }
 
+function assertDateConductedAccessibility(markup, triggerCount, { required = false } = {}) {
+    const group = markup.match(/<fieldset\b[^>]*data-date-conducted-group[^>]*>[\s\S]*?<\/fieldset>/)?.[0];
+    assert.ok(group, 'the Date Conducted fieldset is rendered');
+
+    const ids = [...group.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+    const idSet = new Set(ids);
+    assert.equal(idSet.size, ids.length, 'helper, error, and picker ids are unique within the group');
+
+    const hint = group.match(/<p\b(?=[^>]*data-date-conducted-guidance)([^>]*)>([\s\S]*?)<\/p>/);
+    assert.ok(hint, 'the group guidance is visible inside the Date Conducted fieldset');
+    const hintId = hint[1].match(/\bid="([^"]+)"/)?.[1];
+    assert.ok(hintId);
+    assert.equal(hint[2].replace(/<[^>]*>/g, '').trim(), 'Choose today or an earlier date (Philippines time).');
+    assert.equal((group.match(/Choose today or an earlier date \(Philippines time\)\./g) || []).length, 1,
+        'the guidance renders once per group, not once per row');
+
+    const descriptionLists = [...group.matchAll(/aria-describedby="([^"]+)"/g)]
+        .map(match => match[1].split(/\s+/).filter(Boolean));
+    assert.equal(descriptionLists.length, triggerCount + 1, 'the group and each date trigger expose descriptions');
+    for (const references of descriptionLists) {
+        for (const id of references) assert.ok(idSet.has(id), `aria-describedby target ${id} exists in the group`);
+    }
+
+    const triggers = [...group.matchAll(/<button\b(?=[^>]*aria-haspopup="dialog")([^>]*)>/g)]
+        .map(match => match[1]);
+    assert.equal(triggers.length, triggerCount, 'each date row renders one range-picker trigger');
+    const triggerDescriptions = triggers.map(attributes => {
+        const describedBy = attributes.match(/\baria-describedby="([^"]+)"/)?.[1];
+        assert.ok(describedBy, 'each date trigger has an accessible description');
+        const references = describedBy.split(/\s+/).filter(Boolean);
+        assert.ok(references.includes(hintId), 'each date trigger references the shared guidance');
+        if (required) assert.match(attributes, /\baria-required="true"/);
+        return references;
+    });
+
+    return { group, hintId, triggerDescriptions };
+}
+
 test('populated Homestay saved-draft row renders the Manila preparation timestamp through the actual shared table', async () => {
     const { default: PamoSavedDraftsTable } = await load('Components/PamoSavedDraftsTable.jsx');
     const html = renderToStaticMarkup(React.createElement(PamoSavedDraftsTable, {
@@ -69,22 +107,142 @@ test('populated Homestay saved-draft row renders the Manila preparation timestam
     assert.match(html, /Quarter 3/);
     assert.match(html, /Oct 12, 2026, 12:00 PM/);
     assert.match(html, /Preparation started/);
-    const missing = renderToStaticMarkup(React.createElement(PamoSavedDraftsTable, {
+    const draft = { id: 'draft-2', status: 'draft', started_at: null, report_payload: { activity_name: 'Homestay draft missing optional fields' } };
+    const forwarded = { id: 'draft-3', status: 'forwarded', started_at: null, report_payload: { activity_name: 'Forwarded Homestay report' } };
+    let clickedDraftId = '';
+    const onRowClick = row => { clickedDraftId = row.id; };
+    const table = PamoSavedDraftsTable({
         workflow: { key: 'homestay', label: 'Homestay' },
-        drafts: [{ id: 'draft-2', status: 'draft', started_at: null, report_payload: {} }],
-    }));
-    assert.match(missing, /<td[^>]*>—<\/td>/);
+        drafts: [draft, forwarded],
+        onRowClick,
+    });
+    const missing = renderToStaticMarkup(React.createElement(table.type, table.props));
+    assert.match(missing, /<td[^>]*>Not recorded<\/td>/, 'the shared Manila formatter supplies the missing timestamp label');
+    assert.match(missing, /<td[^>]*>Not provided<\/td>/, 'an absent reporting period retains its explicit fallback');
+    assert.match(missing, /<td[^>]*>Draft<\/td>/, 'the editable row remains identified as a draft');
+    const draftRow = missing.match(/<tr\b([^>]*)>(?:(?!<tr\b)[\s\S])*Homestay draft missing optional fields(?:(?!<tr\b)[\s\S])*?<\/tr>/)?.[1] || '';
+    const forwardedRow = missing.match(/<tr\b([^>]*)>(?:(?!<tr\b)[\s\S])*Forwarded Homestay report(?:(?!<tr\b)[\s\S])*?<\/tr>/)?.[1] || '';
+    assert.match(draftRow, /\btabindex="0"/);
+    assert.match(draftRow, /\baria-haspopup="dialog"/);
+    assert.doesNotMatch(forwardedRow, /\btabindex=|\baria-haspopup=/, 'forwarded rows do not expose draft editing controls');
+    table.props.onRowClick(draft);
+    assert.equal(clickedDraftId, draft.id, 'clicking an active draft keeps its edit action');
+    table.props.onRowClick(forwarded);
+    assert.equal(clickedDraftId, draft.id, 'forwarded rows remain inert');
 });
 
 test('rendered Regular, Special, and TWC generic PAMO fields include configured periods and conducted-date ranges', async () => {
-    const { default: PamoGenericSubmissionFields } = await load('Components/PamoGenericSubmissionFields.jsx');
+    const [{ default: PamoGenericSubmissionFields }, DateConductedRangesFieldModule] = await Promise.all([
+        load('Components/PamoGenericSubmissionFields.jsx'),
+        load('Components/Reports/DateConductedRangesField.jsx'),
+    ]);
     const workspace = await readFile(resolve('resources/js/Components/PamoPambDraftWorkspace.jsx'), 'utf8');
     const fieldsSource = await readFile(resolve('resources/js/Components/PamoGenericSubmissionFields.jsx'), 'utf8');
+    const { createDateConductedRowKeyManager } = DateConductedRangesFieldModule;
     assert.match(workspace, /genericForm && <PamoGenericSubmissionFields/);
-    assert.match(fieldsSource, /onClick=\{onAddRange\}/);
-    assert.match(fieldsSource, /onClick=\{\(\) => onRemoveRange\(index\)\}/);
+    assert.match(fieldsSource, /<DateConductedRangesField/);
+    const standardFields = workspace.match(/\{standardForm && <CrudSection title="General \/ Report Information">([\s\S]*?)<\/CrudSection>\}/)?.[1];
+    assert.ok(standardFields, 'the active PAMO standard report variant remains wired');
+    assert.match(standardFields, /<DateConductedRangesField/);
+    assert.match(standardFields, /onRangeChange=\{updateRange\}/);
+    assert.match(standardFields, /onRemoveRange=\{index => form\.setData\('date_conducted_ranges'/);
+    assert.doesNotMatch(standardFields, /key=\{index\}/, 'standard PAMO rows do not recycle index keys');
     assert.match(workspace, /saveLabel=\{inCorrection \? 'Save correction' : submitMode \? 'Submit Report' : 'Save Draft'\}/);
     assert.match(workspace, /Submit Report from the draft row when ready/);
+
+    const keyManager = createDateConductedRowKeyManager('range-test');
+    const originalKeys = keyManager.getKeys(3);
+    const afterMiddleRemoval = keyManager.remove(1);
+    assert.deepEqual(afterMiddleRemoval, [originalKeys[0], originalKeys[2]], 'removing the middle row preserves the identity of the following picker');
+    keyManager.add();
+    assert.deepEqual(keyManager.getKeys(3), [originalKeys[0], originalKeys[2], 'range-test-row-3'], 'adding a row does not recycle a removed row key');
+
+    const form = {
+        data: { date_conducted_ranges: [{ from: '2026-08-01', to: '2026-08-02' }, { from: '2026-09-01', to: '2026-09-02' }] },
+        setData(field, value) {
+            assert.equal(field, 'date_conducted_ranges');
+            this.data[field] = value;
+        },
+    };
+    const workspaceSource = await readFile(resolve('resources/js/Components/PamoPambDraftWorkspace.jsx'), 'utf8');
+    const trackerSource = await readFile(resolve('resources/js/Pages/Bms/ReportSubmissionTracker.jsx'), 'utf8');
+    assert.match(workspaceSource, /const updateRange = \(index, value\) => form\.setData\('date_conducted_ranges', form\.data\.date_conducted_ranges\.map\(/);
+    assert.match(workspaceSource, /onAddRange=\{\(\) => form\.setData\('date_conducted_ranges', \[\.\.\.form\.data\.date_conducted_ranges, emptyDateConductedRange\(\)\]\)\}/);
+    assert.match(workspaceSource, /onRemoveRange=\{index => form\.setData\('date_conducted_ranges', form\.data\.date_conducted_ranges\.filter\(\(_, at\) => at !== index\)\)\}/);
+    assert.match(trackerSource, /const updateDateConductedRange = \(index, value\) => form\.setData\('date_conducted_ranges', \(form\.data\.date_conducted_ranges \|\| \[\]\)\.map\(/);
+    assert.match(trackerSource, /const removeDateConductedRange = \(index\) => \{ const next = \(form\.data\.date_conducted_ranges \|\| \[\]\)\.filter\(/);
+
+    const internals = React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE;
+    const previousDispatcher = internals.H;
+    const previousWindow = globalThis.window;
+    let hookId = 0;
+    globalThis.window = { requestAnimationFrame: callback => callback() };
+    try {
+        internals.H = {
+            useId: () => `date-range-fixture-${hookId++}`,
+            useRef: value => ({ current: value }),
+        };
+        const rangeField = DateConductedRangesFieldModule.default({
+            rowSetKey: 'callback-fixture',
+            ranges: form.data.date_conducted_ranges,
+            onRangeChange(index, value) {
+                form.setData('date_conducted_ranges', form.data.date_conducted_ranges.map((range, at) => at === index
+                    ? { from: value?.from || '', to: value?.to || '' }
+                    : range));
+            },
+            onAddRange() {
+                form.setData('date_conducted_ranges', [...form.data.date_conducted_ranges, { from: '', to: '' }]);
+            },
+            onRemoveRange(index) {
+                form.setData('date_conducted_ranges', form.data.date_conducted_ranges.filter((_, at) => at !== index));
+            },
+        });
+        const fieldChildren = React.Children.toArray(rangeField.props.children);
+        const list = fieldChildren.find(child => child.props?.['data-date-conducted-list']);
+        const rows = React.Children.toArray(list.props.children);
+        const firstRow = React.Children.toArray(rows[0].props.children);
+        const secondRow = React.Children.toArray(rows[1].props.children);
+        const firstChange = { from: '2026-08-03', to: '2026-08-05' };
+        const secondChange = { from: '2026-09-04', to: '2026-09-07' };
+        firstRow[0].props.onChange(firstChange);
+        secondRow[0].props.onChange(secondChange);
+        assert.deepEqual(form.data.date_conducted_ranges, [firstChange, secondChange],
+            'each visible picker forwards its row index/value into the current date array');
+
+        secondRow[1].props.onClick();
+        assert.deepEqual(form.data.date_conducted_ranges, [firstChange],
+            'removing the second row removes only its matching date range');
+        const addButton = fieldChildren.at(-1);
+        addButton.props.onClick();
+        assert.deepEqual(form.data.date_conducted_ranges, [firstChange, { from: '', to: '' }],
+            'adding a row appends one blank date range while retaining existing values');
+    } finally {
+        internals.H = previousDispatcher;
+        if (previousWindow === undefined) delete globalThis.window;
+        else globalThis.window = previousWindow;
+    }
+
+    const multiRangeHtml = renderToStaticMarkup(React.createElement(DateConductedRangesFieldModule.default, {
+        rowSetKey: 'saved-draft-4',
+        ranges: [{ from: '2026-09-01', to: '2026-09-02' }, { from: '', to: '' }, { from: '2026-09-10', to: '2026-09-11' }],
+        required: true,
+        groupError: 'Add at least one valid date range.',
+        rangeError: (_, index) => index === 1 ? 'Choose a start and end date.' : '',
+        onRangeChange() {}, onAddRange() {}, onRemoveRange() {},
+    }));
+    const multiRange = assertDateConductedAccessibility(multiRangeHtml, 3, { required: true });
+    const alerts = [...multiRange.group.matchAll(/<p\b([^>]*)role="alert"([^>]*)>([\s\S]*?)<\/p>/g)];
+    assert.equal(alerts.length, 2, 'the row validation and group validation each render once');
+    const rowError = alerts.find(match => match[3] === 'Choose a start and end date.');
+    const groupError = alerts.find(match => match[3] === 'Add at least one valid date range.');
+    assert.ok(rowError && groupError);
+    const rowErrorId = rowError[1].match(/\bid="([^"]+)"/)?.[1];
+    const groupErrorId = groupError[1].match(/\bid="([^"]+)"/)?.[1];
+    assert.ok(rowErrorId && groupErrorId);
+    assert.ok(multiRange.triggerDescriptions.every(references => references.includes(groupErrorId)),
+        'the group error is described by each date trigger');
+    assert.deepEqual(multiRange.triggerDescriptions.map(references => references.includes(rowErrorId)), [false, true, false],
+        'only the matching date row references its field error');
 
     for (const workflow of [
         { key: 'regular_pamb', label: 'Regular PAMB Meetings', activities: ['Regular PAMB'], documents: ['Minutes', 'Reso', 'Report'], periods: ['Quarter 1', 'Quarter 2', 'Quarter 3', 'Quarter 4'], default_activity: 'Regular PAMB', date_conducted_required: true, date_accomplished_required: false },
@@ -109,8 +267,11 @@ test('rendered Regular, Special, and TWC generic PAMO fields include configured 
         assert.match(html, /Date Accomplished/);
         assert.match(html, /Minutes|Report/);
         assert.match(html, /Quarter 4/);
-        assert.match(html, /<button type="button" data-cds-action="true" data-cds-action-variant="primary" class="[^\"]*min-h-10[^\"]*rounded-ui[^\"]*px-4[^\"]*">\+ Add Date<\/button>/);
-        assert.match(html, /<button type="button" data-cds-action="true" data-cds-action-variant="danger" class="[^\"]*min-h-10[^\"]*rounded-ui[^\"]*px-4[^\"]*">Remove<\/button>/);
+        assert.match(html, /<button type="button" data-cds-action="true" data-cds-action-variant="primary" data-cds-size="compact" class="[^\"]*min-h-8[^\"]*px-2\.5[^\"]*">\+ Add Date<\/button>/);
+        assert.match(html, /<button type="button" data-cds-action="true" data-cds-action-variant="danger" data-cds-size="compact" class="[^\"]*min-h-8[^\"]*px-2\.5[^\"]*">Remove<\/button>/);
+        const dateGroup = html.match(/<fieldset[^>]*data-date-conducted-group[^>]*>[\s\S]*?<\/fieldset>/)?.[0];
+        assert.ok(dateGroup, 'the repeated date controls stay inside one semantic group');
+        assertDateConductedAccessibility(dateGroup, 1, { required: true });
     }
 });
 
@@ -185,6 +346,9 @@ test('single-catalog, multi-catalog, and custom PAMO workflows all keep activity
             assert.equal(activityField.props.label, 'Name of Activity');
             assert.equal(activityField.props.value, 'Owner supplied activity title');
             assert.equal(activityField.props.required, !draftMode);
+            const dateField = findElement(tree, element => element.props.id === 'pamo-draft-date-conducted');
+            assert.equal(dateField?.type.name, 'DatePicker', 'single-date workflows retain the DatePicker fallback');
+            assert.equal(dateField.props.actualDate, true, 'single-date workflows retain the Manila actual-date restriction');
             activityField.props.onChange({ target: { value: 'Restoration Plan Workshop' } });
             assert.equal(changed, 'Restoration Plan Workshop', `${workflow.key} sends the event's scalar value`);
             const documentField = findElement(tree, element => element.props.id === 'pamo-draft-document');

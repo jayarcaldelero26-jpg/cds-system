@@ -1045,3 +1045,57 @@ button[role="tab"]:focus-visible {
 @media (prefers-reduced-motion: reduce) {
     .cds-pagination :is(button, a) { transition: none; }
 }
+
+/* Report forms adapt to the usable panel width, including a side-by-side preview. */
+.cds-report-form-fields-container {
+    container-name: cds-report-form-fields;
+    container-type: inline-size;
+    min-width: 0;
+}
+
+.cds-report-form-fields-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    min-width: 0;
+}
+
+@container cds-report-form-fields (min-width: 30rem) {
+    .cds-report-form-fields-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.cds-date-conducted-group {
+    container-name: cds-date-conducted-group;
+    container-type: inline-size;
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.cds-date-conducted-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.75rem;
+}
+
+.cds-date-conducted-remove {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: start;
+}
+
+@container cds-date-conducted-group (max-width: 32rem) {
+    .cds-date-conducted-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0.5rem;
+    }
+
+    .cds-date-conducted-remove {
+        grid-column: 1;
+        grid-row: 2;
+        justify-self: end;
+    }
+}

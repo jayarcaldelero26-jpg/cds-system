@@ -4,10 +4,16 @@ use Illuminate\Support\Facades\File;
 
 test('selected multi-date rows use the shared premium range picker', function (): void {
     $tracker = File::get(resource_path('js/Pages/Bms/ReportSubmissionTracker.jsx'));
+    $rangeField = File::get(resource_path('js/Components/Reports/DateConductedRangesField.jsx'));
 
     expect($tracker)
-        ->toContain("DateRangePicker id={'reportsubmissiontracker-date-conducted-range-' + index}")
-        ->toContain('onChange={(value) => updateDateConductedRange(index, value)}')
+        ->toContain('<DateConductedRangesField')
+        ->toContain('idPrefix="reportsubmissiontracker-date-conducted-range"')
+        ->toContain('onRangeChange={updateDateConductedRange}')
+        ->and($rangeField)
+        ->toContain('<DateRangePicker')
+        ->toContain('onRangeChange(index, value)')
+        ->toContain('actualDate')
         ->not->toContain('reportsubmissiontracker-date-conducted-from-')
         ->not->toContain('reportsubmissiontracker-date-conducted-to-');
 });
