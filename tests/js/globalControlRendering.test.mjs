@@ -589,7 +589,7 @@ test('PAMB Full Submission Details render pending, completed, direct, and skippe
     assert.match(drafts, /PAMO drafts/);
     assert.match(drafts, /Forwarded report/);
     assert.match(drafts, /Forwarded/);
-    assert.equal((drafts.match(/<tr tabindex="0"/g) || []).length, 1, 'only the editable draft row can open the workspace');
+    assert.equal((drafts.match(/<tr\b[^>]*\btabindex="0"/g) || []).length, 1, 'only the editable draft row can open the workspace');
     assert.equal((drafts.match(/<tr/g) || []).length, 3, 'both draft statuses remain visible in the table');
 
     const pamo = render({ ...pendingBase, pamo_origin: true, workflow_key: 'homestay' }, { isMeetingPamb: false });
@@ -630,6 +630,29 @@ test('shared Development report context renders missing, optional, inapplicable,
     assert.match(html, /Not applicable/);
     assert.match(html, /October 20, 2026/);
     assert.doesNotMatch(html, /<dt[^>]*>Protected Area<\/dt>/);
+});
+
+test('expanded Revenue tracking omits activity dates while Management of IPAF retains them', async () => {
+    const { default: SubmissionReportContext } = await load('Components/SubmissionTracking/SubmissionReportContext.jsx');
+    const row = {
+        source: 'revenue', module: 'Revenue Collection', reporting_period: 'October 2026',
+        target_office: 'CENRO Baganga', protected_area: 'Fixture Protected Landscape',
+        document_type: 'Final Report', date_received_penro: '2026-11-21',
+    };
+    const revenue = renderToStaticMarkup(React.createElement(SubmissionReportContext, { row, expanded: true }));
+    assert.match(revenue, /Reporting Period/);
+    assert.match(revenue, /October 2026/);
+    assert.match(revenue, /CENRO Release/);
+    assert.match(revenue, /PENRO Receipt/);
+    assert.match(revenue, /Regional Endorsement/);
+    assert.doesNotMatch(revenue, /Date Conducted|Date Accomplished/);
+
+    const management = renderToStaticMarkup(React.createElement(SubmissionReportContext, {
+        expanded: true, row: { ...row, source: 'ipaf-management', module: 'Management of IPAF', date_accomplished: '2026-10-20' },
+    }));
+    assert.match(management, /Date Conducted/);
+    assert.match(management, /Date Accomplished/);
+    assert.match(management, /October 20, 2026/);
 });
 
 test('Office TAT document turnaround renders its current no-sample state while empty offices remain unranked', async () => {
@@ -866,7 +889,7 @@ test('PAMO pending presentation fits the success-sized host and keeps modal cont
         children: React.createElement('input', { name: 'activity_name', value: 'Kept form value', readOnly: true }),
     }));
     assert.match(pamoHtml, /data-cds-busy-presentation="success-sized"/);
-    assert.match(pamoHtml, /max-w-\[390px\][^\"]*min-h-\[320px\]/);
+    assert.match(pamoHtml, /max-w-\[390px\][^\"]*min-h-\[min\(320px,100%\)\]/);
     assert.match(pamoHtml, /role="status"[^>]*data-cds-busy-status/);
     assert.match(pamoHtml, /Kept form value/);
     assert.match(pamoHtml, /inert="" aria-hidden="true"/);

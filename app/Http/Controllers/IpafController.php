@@ -197,10 +197,15 @@ class IpafController extends Controller
             $dates->assertNotFuture($data['date_conducted'] ?? null, 'date_conducted', 'Date Conducted', $record->exists ? $record->date_conducted : null);
             $dates->assertNotFuture($data['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished', $record->exists ? $record->date_accomplished : null);
         }
+        if ($record instanceof IpafRevenueCollection) {
+            $data = $record->withSubmissionDeadline($data);
+        }
         $exists = $record->exists;
         $file = $request->file('mov');
         unset($data['mov']);
-        $data['activity_name'] = $activity;
+        $data['activity_name'] = $record instanceof IpafManagementReport
+            ? ($data['activity_name'] ?? $record->activity_name ?? $activity)
+            : $activity;
         $data['updated_by'] = $request->user()->id;
         if (! $exists) $data['created_by'] = $request->user()->id;
         if ($exists && $file) {
@@ -232,8 +237,24 @@ class IpafController extends Controller
     private function mov(Model $record): HttpResponse { $this->organization->assertCanAccessProtectedArea(request()->user(), $record->protected_area_id); return $this->attachments->response($this->attachmentSource($record), $record, 'mov'); }
     private function search($query, string $search): void { $search = trim($search); $query->where(fn ($q) => $q->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($q) => $q->where('name', 'like', "%{$search}%"))); }
     public function commonRules(bool $requireMov): array { return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'document_type' => ['required', Rule::in(['Final Report', 'Progress Report'])], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:10240'], 'remarks' => ['nullable', 'string']]; }
-    public function revenueRules(bool $requireMov): array { return [...$this->commonRules($requireMov), 'reporting_month' => ['required', 'integer', 'between:1,12'], 'reporting_year' => ['required', 'integer', 'between:2000,2100'], 'total_collected' => ['required', 'decimal:0,2', 'min:0'], 'deadline_submission' => ['required', 'date']]; }
-    public function managementRules(bool $requireMov): array { return [...$this->commonRules($requireMov), 'date_conducted' => ['required', 'date'], 'date_accomplished' => ['required', 'date']]; }
+    public function revenueRules(bool $requireMov): array
+    {
+        return [
+            ...$this->commonRules($requireMov),
+            'reporting_month' => ['required', 'integer', 'between:1,12'],
+            'reporting_year' => ['required', 'integer', 'between:2000,2100'],
+            'total_collected' => ['required', 'decimal:0,2', 'min:0'],
+        ];
+    }
+    public function managementRules(bool $requireMov): array
+    {
+        return [
+            ...$this->commonRules($requireMov),
+            'activity_name' => ['nullable', 'string', 'max:255'],
+            'date_conducted' => ['required', 'date'],
+            'date_accomplished' => ['required', 'date'],
+        ];
+    }
     private function data(Model $record, string $movRoute): array {
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record);
 

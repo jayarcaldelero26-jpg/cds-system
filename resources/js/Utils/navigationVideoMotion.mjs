@@ -180,24 +180,31 @@ function pillTransform(box, destination) {
     return `translate(${box.left - destination.left}px, ${box.top - destination.top}px) scale(${box.width / destination.width}, ${box.height / destination.height})`;
 }
 
-function pillTravelKeyframes(nav, previous, destination, origin) {
-    const middle = Object.fromEntries(['left', 'top', 'width', 'height']
-        .map(axis => [axis, (previous[axis] + destination[axis]) / 2]));
-    const leftSpace = middle.left - nav.scrollLeft;
-    const rightSpace = (nav.clientWidth || 0) - leftSpace - middle.width;
-    const widthGain = Math.max(0, Math.min(middle.width * 0.06, 2 * Math.min(leftSpace, rightSpace)));
-    const heightGain = Math.max(0, Math.max(origin.height, destination.height) * 1.22 - middle.height);
-    const expanded = {
-        left: middle.left - widthGain / 2,
-        top: middle.top - heightGain / 2,
-        width: middle.width + widthGain,
-        height: middle.height + heightGain,
-    };
+function pillTravelKeyframes(previous, destination, origin) {
     const glow = 'inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 0 16px rgb(22 163 74 / 0.3), 0 0 9px rgb(37 99 235 / 0.2)';
+    const settleEasing = 'cubic-bezier(0.22, 1, 0.36, 1)';
+    const start = { offset: 0, transform: pillTransform(previous, destination), boxShadow: glow };
+    const end = {
+        offset: 1,
+        transform: pillTransform(destination, destination),
+        boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 2px 7px rgb(3 25 43 / 0.18)',
+    };
+    const previousBottom = previous.top + previous.height;
+    const destinationBottom = destination.top + destination.height;
+    const movingDown = destination.top + destination.height / 2 >= previous.top + previous.height / 2;
+    const leadingEdgeAdvances = movingDown ? destinationBottom > previousBottom : destination.top < previous.top;
+    if (!leadingEdgeAdvances) return [{ ...start, easing: settleEasing }, end];
+
+    // Send the leading edge to the next item first. Limit the tail on distant jumps.
+    const stretchLimit = Math.max(origin.height, destination.height) * 3;
+    const top = movingDown ? Math.max(previous.top, destinationBottom - stretchLimit) : destination.top;
+    const bottom = movingDown ? destinationBottom : Math.min(previousBottom, destination.top + stretchLimit);
+    const stretched = { ...destination, top, height: bottom - top };
+
     return [
-        { offset: 0, transform: pillTransform(previous, destination), boxShadow: glow, easing: 'ease-out' },
-        { offset: 0.43, transform: pillTransform(expanded, destination), boxShadow: glow, easing: 'cubic-bezier(0.22, 0.66, 0.32, 1)' },
-        { offset: 1, transform: pillTransform(destination, destination), boxShadow: 'inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 2px 7px rgb(3 25 43 / 0.18)' },
+        { ...start, easing: 'cubic-bezier(0.35, 0, 0.2, 1)' },
+        { offset: 0.46, transform: pillTransform(stretched, destination), boxShadow: glow, easing: settleEasing },
+        end,
     ];
 }
 
@@ -233,7 +240,7 @@ function navigationTarget(nav, intentUrl, pageKey, view) {
 }
 
 /**
- * Glide one existing decorative pill; aria-current and route ownership stay intact.
+ * Stretch one decorative pill toward the next link while the trailing edge follows.
  * @param {HTMLElement} nav The existing navigation scroll container.
  * @param {HTMLElement} pill Its existing non-interactive highlight element.
  * @param {Window|undefined} view The container's owning window.
@@ -282,8 +289,8 @@ export function createVideoNavigationHighlight(nav, pill, view, pageKey) {
             nav.setAttribute('data-cds-nav-motion', 'ready');
             if ((withMotion || alreadyTravelling) && previous && (key !== activeKey || !unchanged) && pill.animate && !reducedMotion(view)) {
                 try {
-                    animation = pill.animate(pillTravelKeyframes(nav, previous, next, origin), {
-                        id: 'cds-navigation-travel', duration: 320, easing: 'linear',
+                    animation = pill.animate(pillTravelKeyframes(previous, next, origin), {
+                        id: 'cds-navigation-travel', duration: 360, easing: 'linear',
                     });
                 } catch {
                     animation = null;

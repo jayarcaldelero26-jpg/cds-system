@@ -89,9 +89,11 @@ export function reportContextFields(row, expanded = false) {
         ]] : []),
         ["Reporting Period", text(row.reporting_period) || text(row.period_label), false, "Not provided"],
     ];
-    if (expanded) fields.push(
+    if (expanded && row.source !== "revenue") fields.push(
         ["Date Conducted", row.date_conducted ?? null, true, "Not recorded"],
         ["Date Accomplished", row.date_accomplished ?? null, true, "Not recorded"],
+    );
+    if (expanded) fields.push(
         ["CENRO Release", row.cenro_release_applicable === false ? "Not applicable" : row.date_report_released_cenro ?? null, true, releaseFallback],
         ["Regional Endorsement", row.date_endorsed_regional ?? null, true, "Not recorded"],
     );

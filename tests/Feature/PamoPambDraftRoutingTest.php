@@ -708,15 +708,23 @@ test('all seven native adapters promote into their own source rows with protecte
             'date_accomplished' => '2026-10-03', 'remarks' => 'Native AWS submission fixture',
         ],
         'ipaf_management' => ['document_type' => 'Final Report', 'date_conducted' => '2026-10-01', 'date_accomplished' => '2026-10-03', 'remarks' => 'Native pilot fixture'],
-        'revenue_collection' => ['document_type' => 'Final Report', 'reporting_month' => 10, 'reporting_year' => 2026, 'total_collected' => '250.00', 'deadline_submission' => '2026-10-30', 'remarks' => 'Native pilot fixture'],
+        'revenue_collection' => ['document_type' => 'Final Report', 'reporting_month' => 10, 'reporting_year' => 2026, 'total_collected' => '250.00', 'remarks' => 'Native pilot fixture'],
     ];
+    $managementActivity = 'IPAF fund reconciliation workshop';
 
     foreach ($sourceColumns as $workflow => [$table, $linkColumn, $sourceKey]) {
         $token = (string) Str::uuid();
         $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.store', $workflow), [
             'start_idempotency_key' => $token, 'mov' => pamoPilotUpload(),
+            ...($workflow === 'ipaf_management' ? ['activity_name' => $managementActivity] : []),
         ])->assertRedirect()->assertSessionHasNoErrors();
         $draft = PamoPambDraft::query()->where('start_idempotency_key', $token)->firstOrFail();
+        if ($workflow === 'ipaf_management') {
+            expect($draft->report_payload['activity_name'])->toBe($managementActivity);
+        }
+        if ($workflow === 'revenue_collection') {
+            $draft->update(['report_payload' => ['deadline_submission' => '2026-11-20']]);
+        }
         $this->actingAs($pamo)->post(route('conservation-reports.pamo-drafts.forward', [$workflow, $draft->draft_uuid]), [
             'lock_version' => $draft->fresh()->lock_version, ...$payloads[$workflow],
         ])->assertRedirect()->assertSessionHasNoErrors();
@@ -739,6 +747,12 @@ test('all seven native adapters promote into their own source rows with protecte
                 ->and($record->activity_name)->toBe('Monitoring and Maintenance of AWS')
                 ->and($record->station_name)->toBe('Automated Weather Station')
                 ->and($record->timestamps)->toBeNull();
+        }
+        if ($workflow === 'ipaf_management') {
+            expect($record->activity_name)->toBe($managementActivity);
+        }
+        if ($workflow === 'revenue_collection') {
+            expect($record->deadline_submission)->toBe('2026-10-25');
         }
         $pathColumn = $workflow === 'automated_weather_station' ? 'report_file_path' : 'mov_file_path';
         expect($record->{$pathColumn})->not->toBeNull()
@@ -848,8 +862,20 @@ test('all seven native adapters promote into their own source rows with protecte
         ])->assertSessionHasErrors(['source_id', 'record_id']);
         expect($nativeModel::query()->findOrFail($recordId)->updated_at->equalTo($freshNative->updated_at))->toBeTrue();
         $correction = [...$payloads[$workflow], 'source_updated_at' => $freshNative->updated_at->toISOString()];
+        if ($workflow === 'ipaf_management') {
+            $correction['activity_name'] = 'Revised '.$managementActivity;
+        }
+        if ($workflow === 'revenue_collection') {
+            $correction['reporting_month'] = 11;
+        }
         $this->actingAs($pamo)->put(route('pamo-native-reports.correction.update', [$workflow, $recordId]), $correction)
             ->assertRedirect()->assertSessionHasNoErrors();
+        if ($workflow === 'ipaf_management') {
+            expect($freshNative->fresh()->activity_name)->toBe($correction['activity_name']);
+        }
+        if ($workflow === 'revenue_collection') {
+            expect($freshNative->fresh()->deadline_submission->toDateString())->toBe('2026-11-25');
+        }
         $this->actingAs($pamo)->post(route('submission-tracking.transition', [$sourceKey, $recordId, 'forward_from_pamo_to_cenro_focal']), [
             'stage' => 'forward_from_pamo_to_cenro_focal',
         ])->assertRedirect()->assertSessionHasNoErrors();

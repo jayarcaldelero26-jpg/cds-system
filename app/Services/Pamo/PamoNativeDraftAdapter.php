@@ -8,6 +8,7 @@ use App\Http\Controllers\BamsReportSubmissionController;
 use App\Http\Controllers\ImeaReportSubmissionController;
 use App\Http\Controllers\ImeaFacilityMaintenanceReportController;
 use App\Http\Controllers\IpafController;
+use App\Models\IpafRevenueCollection;
 use App\Models\PamoPambDraft;
 use App\Models\User;
 use App\Services\Attachments\CurrentDocumentReplacementService;
@@ -211,7 +212,7 @@ final class PamoNativeDraftAdapter
         if ($file) $data[$nativeFile] = $file;
         $this->normalize($workflow, $data, $file, true);
         $validated = Validator::make($data, $this->rules($workflow, false))->validate();
-        $validated = $this->prepare($workflow, $validated, $data);
+        $validated = $this->prepare($workflow, $validated, $data, $record instanceof IpafRevenueCollection ? $record : null);
         unset($validated[$nativeFile]);
         if ($workflow === 'automated_weather_station') $validated['timestamps'] = null;
         if ($workflow !== 'automated_weather_station'
@@ -291,7 +292,7 @@ final class PamoNativeDraftAdapter
         $data = $request->all();
     }
 
-    private function prepare(string $workflow, array $validated, array $payload): array
+    private function prepare(string $workflow, array $validated, array $payload, ?IpafRevenueCollection $existingRevenue = null): array
     {
         return match ($workflow) {
             'bms' => $this->prepareBms($validated, $payload),
@@ -299,7 +300,7 @@ final class PamoNativeDraftAdapter
             'imea_facility_maintenance' => $this->prepareMaintenance($validated),
             'automated_weather_station' => $this->prepareAws($validated),
             'ipaf_management' => $this->prepareIpafManagement($validated),
-            'revenue_collection' => $validated,
+            'revenue_collection' => ($existingRevenue ?? new IpafRevenueCollection)->withSubmissionDeadline($validated),
         };
     }
 
@@ -332,6 +333,9 @@ final class PamoNativeDraftAdapter
         $dates = app(\App\Services\ActualActivityDateGuard::class);
         $dates->assertNotFuture($validated['date_conducted'] ?? null, 'date_conducted', 'Date Conducted');
         $dates->assertNotFuture($validated['date_accomplished'] ?? null, 'date_accomplished', 'Date Accomplished');
+        if (blank($validated['activity_name'] ?? null)) {
+            unset($validated['activity_name']);
+        }
         return $validated;
     }
 

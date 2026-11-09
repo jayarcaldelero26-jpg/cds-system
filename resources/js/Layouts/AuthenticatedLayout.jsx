@@ -345,8 +345,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 
     return (
         <>
-            <button type="button" className={`fixed inset-0 z-30 bg-gray-950/40 lg:hidden ${open ? '' : 'hidden'}`} onClick={onClose} aria-label="Close navigation" />
+            <button type="button" className={`fixed inset-0 z-30 bg-gray-950/40 lg:hidden ${open ? '' : 'hidden'}`} onClick={onClose} aria-hidden="true" tabIndex={-1} />
             <aside
+                id="cds-main-sidebar"
                 className={`fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-green-950/20 bg-gradient-to-b from-green-950 via-green-950 to-blue-950 text-white transition-transform duration-200 lg:translate-x-0 ${open ? 'translate-x-0' : '-translate-x-full'}`}
                 style={{
                     backgroundImage: `linear-gradient(to bottom, rgba(3, 39, 38, 0.97) 0%, rgba(3, 44, 42, 0.94) 48%, rgba(23, 37, 84, 0.94) 100%), url(${monitoringMountainForest})`,
@@ -355,14 +356,16 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                     backgroundRepeat: 'no-repeat',
                 }}
             >
-                <div className="flex h-20 items-center gap-3 border-b border-white/10 px-6">
+                <div className="flex h-20 items-center gap-3 border-b border-white/10 px-4 lg:px-6">
                     <img src={logoSrc} alt="Department of Environment and Natural Resources logo" className="h-11 w-11 shrink-0 object-contain rounded-full bg-white p-0.5 shadow-sm" />
                     <div className="min-w-0 flex-1 leading-tight">
                         <p className="text-sm font-bold tracking-wide text-white">{systemTitle}</p>
                         <p className="mt-1 text-[10px] font-medium leading-4 text-green-100">{systemSubtitle}</p>
                         <p className="text-[9px] font-medium leading-3 text-green-200">Conservation and Development Section</p>
                     </div>
-                    <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-green-100 hover:bg-white/10 lg:hidden" data-cds-action="true" data-cds-action-variant="primary">x</button>
+                    <button type="button" onClick={onClose} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-green-100 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white lg:hidden" aria-label="Close navigation">
+                        <IconifyIcon icon="lucide:x" width="20" height="20" aria-hidden="true" />
+                    </button>
                 </div>
                 <nav ref={navigationRef} className="relative isolate flex-1 overflow-y-auto px-3 py-5 space-y-1.5" aria-label="Main navigation">
                     {filteredNavigation.map((item) => {
@@ -499,14 +502,14 @@ export function AuthenticatedShell({ children }) {
                 <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} moduleNavigationCatalog={moduleNavigationCatalog} pamoNativeModuleNavigation={pamoNativeModuleNavigation} pendingUrl={pendingNavigation?.href ?? null} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
-                        <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" data-cds-action="true" data-cds-action-variant="primary">
+                        <button type="button" onClick={() => setSidebarOpen(true)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" aria-controls="cds-main-sidebar" aria-expanded={sidebarOpen}>
                             <IconifyIcon icon="solar:hamburger-menu-linear" width="22" height="22" aria-hidden="true" />
                         </button>
 
                         <div className="hidden flex-1 md:block"><GlobalSearch /></div>
 
                         <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
-                            <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="rounded-lg p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search CDS-SMART" title="Search CDS-SMART" data-cds-action="true" data-cds-action-variant="primary">
+                            <button type="button" onClick={() => setMobileSearchOpen(open => !open)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 md:hidden" aria-label="Search CDS-SMART" aria-controls={mobileSearchOpen ? 'cds-mobile-search' : undefined} aria-expanded={mobileSearchOpen}>
                                 <IconifyIcon icon="solar:magnifer-linear" width="20" height="20" aria-hidden="true" />
                             </button>
                         <UtilityIconButton onClick={toggleTheme} className="border border-gray-200 dark:border-gray-700" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
@@ -532,7 +535,7 @@ export function AuthenticatedShell({ children }) {
                             </div>
                         </div>
                     </header>
-                    {mobileSearchOpen && <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900 md:hidden"><GlobalSearch onNavigate={() => setMobileSearchOpen(false)} /></div>}
+                    {mobileSearchOpen && <div id="cds-mobile-search" className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900 md:hidden"><GlobalSearch autoFocus onNavigate={() => setMobileSearchOpen(false)} /></div>}
                     {demoDataNotice?.label && <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-950 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100 sm:mx-6 lg:mx-8" role="status" aria-label="Demo data notice"><span className="rounded-full bg-amber-200 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-950 dark:bg-amber-900 dark:text-amber-100">{demoDataNotice.label}</span><span>{demoDataNotice.message}</span></div>}
                     <NavigationPendingContext.Provider value={Boolean(pendingNavigation)}>
                         <main ref={mainRef} tabIndex={-1} aria-busy={pendingNavigation ? 'true' : undefined} className="relative isolate mx-auto max-w-screen-2xl px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8">

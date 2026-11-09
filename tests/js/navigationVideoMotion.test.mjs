@@ -178,7 +178,7 @@ function navigationFixture(reduced = false) {
     return { nav, pill, links, attributes, controller: createVideoNavigationHighlight(nav, pill, view, key) };
 }
 
-test('an accepted pending destination glides immediately without changing the confirmed active link', () => {
+test('an accepted pending destination stretches immediately without changing the confirmed active link', () => {
     const f = navigationFixture();
     f.controller.refresh(false);
     f.controller.refresh(true, '/calendar');
@@ -187,7 +187,42 @@ test('an accepted pending destination glides immediately without changing the co
     assert.equal(f.links[1].active, false);
     assert.match(f.pill.calls[0].frames[0].transform, /-50px/);
     assert.match(f.pill.calls[0].frames[0].boxShadow, /22 163 74/);
-    assert.equal(f.pill.calls[0].options.duration, 320);
+    assert.equal(f.pill.calls[0].options.duration, 360);
+    f.controller.dispose();
+});
+
+test('the leading edge arrives before the tail retracts in either direction', () => {
+    const f = navigationFixture();
+    f.controller.refresh(false);
+    f.controller.refresh(true, '/calendar');
+    assert.equal(f.pill.calls[0].frames[1].transform, 'translate(0px, -50px) scale(1, 2.25)');
+    assert.equal(f.pill.calls[0].frames[2].transform, 'translate(0px, 0px) scale(1, 1)');
+
+    f.controller.refresh(true, '/dashboard');
+    assert.equal(f.pill.calls[1].frames[1].transform, 'translate(0px, 0px) scale(1, 2.25)');
+    assert.equal(f.pill.calls[1].frames[2].transform, 'translate(0px, 0px) scale(1, 1)');
+    f.controller.dispose();
+});
+
+test('a distant target caps the stretch at three row heights', () => {
+    const f = navigationFixture();
+    f.controller.refresh(false);
+    f.controller.refresh(true, '/bms?tracker=1');
+    assert.equal(f.pill.calls[0].frames[1].transform, 'translate(0px, -80px) scale(1, 3)');
+    f.controller.dispose();
+});
+
+test('a retarget inside the stretched highlight starts settling from its current shape', () => {
+    const f = navigationFixture();
+    f.controller.refresh(false);
+    f.controller.refresh(true, '/calendar');
+    f.pill.visualRect = { left: 22, top: 50, width: 240, height: 90 };
+    f.controller.refresh(true, '/dashboard');
+
+    assert.equal(f.pill.calls[0].animation.cancelled, true);
+    assert.equal(f.pill.calls[1].frames.length, 2);
+    assert.equal(f.pill.calls[1].frames[0].transform, 'translate(0px, 0px) scale(1, 2.25)');
+    assert.equal(f.pill.calls[1].frames[1].transform, 'translate(0px, 0px) scale(1, 1)');
     f.controller.dispose();
 });
 

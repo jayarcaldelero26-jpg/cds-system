@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
 import { Icon } from '@iconify/react';
 
@@ -6,7 +6,7 @@ const resultIcons = {
     navigation: 'solar:compass-bold', report: 'solar:document-text-bold', protected_area: 'solar:map-point-bold', user: 'solar:user-rounded-bold',
 };
 
-export default function GlobalSearch({ onNavigate }) {
+export default function GlobalSearch({ onNavigate, autoFocus = false }) {
     const [query, setQuery] = useState('');
     const [data, setData] = useState({ groups: [], total: 0 });
     const [isOpen, setIsOpen] = useState(false);
@@ -14,6 +14,7 @@ export default function GlobalSearch({ onNavigate }) {
     const [selectedIndex, setSelectedIndex] = useState(-1);
     const searchRef = useRef(null);
     const inputRef = useRef(null);
+    const inputId = useId();
     const results = useMemo(() => data.groups.flatMap(group => group.results), [data]);
     const canSearch = query.trim().length >= 2;
 
@@ -72,13 +73,13 @@ export default function GlobalSearch({ onNavigate }) {
     };
 
     return <div ref={searchRef} className="relative w-full max-w-[26rem]">
-        <label htmlFor="global-search" className="sr-only">Search CDS-SMART</label>
+        <label htmlFor={inputId} className="sr-only">Search CDS-SMART</label>
         <div className="relative">
             <Icon icon="solar:magnifer-linear" width="18" height="18" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" aria-hidden="true" />
-            <input ref={inputRef} id="global-search" type="search" value={query} onChange={event => { setQuery(event.target.value); setIsOpen(true); }} onFocus={() => canSearch && setIsOpen(true)} onKeyDown={onKeyDown} placeholder="Search CDS-SMART..." autoComplete="off" className="h-11 w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-16 text-sm leading-5 text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-green-700 focus:ring-2 focus:ring-green-700/15 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-green-500 dark:focus:ring-green-500/20" />
+            <input ref={inputRef} id={inputId} type="search" value={query} onChange={event => { setQuery(event.target.value); setIsOpen(true); }} onFocus={() => canSearch && setIsOpen(true)} onKeyDown={onKeyDown} placeholder="Search CDS-SMART..." autoComplete="off" autoFocus={autoFocus} className="cds-global-search-input h-11 w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-16 text-sm leading-5 text-gray-800 outline-none transition placeholder:text-gray-400 focus:border-green-700 focus:ring-2 focus:ring-green-700/15 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-green-500 dark:focus:ring-green-500/20" />
             <span className="absolute inset-y-0 right-2 flex items-center gap-1">
                 {loading && <Icon icon="svg-spinners:90-ring-with-bg" width="17" height="17" className="text-green-700 dark:text-green-400" aria-label="Searching" />}
-                {query && <button type="button" onClick={clear} className="rounded-md p-1 text-gray-400 transition hover:bg-gray-200 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:hover:bg-gray-700 dark:hover:text-gray-100" aria-label="Clear search" data-cds-action="true" data-cds-action-variant="primary"><Icon icon="solar:close-circle-linear" width="18" height="18" /></button>}
+                {query && <button type="button" onClick={clear} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white" aria-label="Clear search"><Icon icon="lucide:x" width="18" height="18" aria-hidden="true" /></button>}
             </span>
         </div>
         {isOpen && canSearch && <div className="cds-menu-panel absolute z-50 mt-2 max-h-[min(32rem,calc(100vh-7rem))] w-full overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-gray-700 dark:bg-gray-900" role="listbox" aria-label="Global search results">

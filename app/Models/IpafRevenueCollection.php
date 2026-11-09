@@ -12,6 +12,21 @@ class IpafRevenueCollection extends Model
     protected $appends = ['ipaf_ria', 'sagf', 'number_days_complied', 'timeliness', 'submission_status'];
     protected function casts(): array { return ['total_collected' => 'decimal:2', 'date_report_released_cenro' => 'date:Y-m-d', 'date_received_penro' => 'date:Y-m-d', 'deadline_submission' => 'date:Y-m-d', 'date_endorsed_regional' => 'date:Y-m-d', 'mov_size' => 'integer']; }
     public function protectedArea(): BelongsTo { return $this->belongsTo(ProtectedArea::class); }
+
+    /** Add the server-owned deadline when creating a report or changing its period. */
+    public function withSubmissionDeadline(array $data): array
+    {
+        $year = (int) $data['reporting_year'];
+        $month = (int) $data['reporting_month'];
+        if ($this->deadline_submission && (int) $this->reporting_year === $year && (int) $this->reporting_month === $month) {
+            return $data;
+        }
+
+        $data['deadline_submission'] = sprintf('%04d-%02d-25', $year, $month);
+
+        return $data;
+    }
+
     public function getIpafRiaAttribute(): string { return self::split($this->total_collected)['ipaf_ria']; }
     public function getSagfAttribute(): string { return self::split($this->total_collected)['sagf']; }
     public function getNumberDaysCompliedAttribute(): ?int { if (! $this->deadline_submission || ! $this->date_received_penro) return null; return app(BusinessCalendarService::class)->signedWorkingDayDifference($this->deadline_submission, $this->date_received_penro, $this->target_office ?? null); }

@@ -282,7 +282,7 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
         assert.deepEqual(form.data, {
             activity_name: 'Replaced mangrove site monitoring', document_type: 'Progress Report',
             reporting_period: 'Quarter 3', semester: '', quarter: '', reporting_month: '', reporting_year: '',
-            total_collected: '', deadline_submission: '', monitoring_period_start: '', monitoring_period_end: '',
+            total_collected: '', monitoring_period_start: '', monitoring_period_end: '',
             date_conducted: '', date_conducted_ranges: [], date_accomplished: '2026-10-18', remarks: 'Keep this note',
             mov: selectedFile, lock_version: 1,
         }, 'server errors preserve the entered activity, selected document/period, remarks, and file');
@@ -306,7 +306,7 @@ test('the actual New draft modal keeps free-text activity scalar through edits, 
                 scrollIntoView(options) { focusEvents.push(['scroll', options]); },
                 focus(options) { focusEvents.push(['focus', options]); },
             };
-            harness.effectCallbacks.at(-1)();
+            harness.effectCallbacks.forEach(effect => effect());
             animationFrames.forEach(callback => callback());
             assert.deepEqual(focusEvents, [
                 ['scroll', { block: 'nearest' }],
@@ -463,6 +463,9 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
         assert.equal(rejected.payload.date_accomplished, '2026-09-14');
         assert.equal(rejected.payload.remarks, 'Keep this saved note.');
         assert.equal(rejected.payload.mov, null, 'the saved attachment is not replaced by an empty upload');
+        const pendingModal = modalFrom(renderWorkspaceTree());
+        const pendingHtml = renderToStaticMarkup(React.createElement(CrudFormModal, pendingModal.props));
+        assert.match(pendingHtml, /<\/form>[\s\S]*data-cds-busy-presentation="success-sized"[\s\S]*Sending document/);
         returnError(rejected, { activity_name: 'The activity title could not be submitted.' });
         tree = renderWorkspaceTree();
         let failedModal = modalFrom(tree);
@@ -476,6 +479,7 @@ test('the actual Submit report modal keeps a free-text restoration activity thro
         assert.match(failedHtml, /tabindex="-1"/);
         assert.match(failedHtml, /Please correct the following:/);
         assert.match(failedHtml, /Restoration Plan Workshop – Davao Oriental/);
+        assert.doesNotMatch(failedHtml, /Sending document/);
 
         activityFieldFrom(tree).props.onChange({ target: { value: 'Restoration Plan Workshop' } });
         assert.equal(harness.forms[0].data.document_type, 'Progress Report', 'replacing the title still preserves the selected document');
@@ -556,6 +560,54 @@ test('the actual native PAMO report modal keeps its Name of Activity field scala
         assert.equal(harness.requests.at(-1).payload.document_type, 'Progress Report');
         assert.equal(harness.requests.at(-1).payload.semester, '1st Semester');
         assert.doesNotMatch(renderToStaticMarkup(React.createElement(CrudFormModal, modal.props)), /\[object Object\]/);
+    } finally {
+        await server.close();
+        if (priorHarness === undefined) delete globalThis.__pamoActivityHarness;
+        else globalThis.__pamoActivityHarness = priorHarness;
+        if (priorRoute === undefined) delete globalThis.route;
+        else globalThis.route = priorRoute;
+    }
+});
+
+test('PAMO IPAF drafts capture an activity name only for management and use an automatic Revenue deadline', async () => {
+    const harness = makeHarness();
+    const priorHarness = globalThis.__pamoActivityHarness;
+    const priorRoute = globalThis.route;
+    globalThis.__pamoActivityHarness = harness;
+    globalThis.route = (...parts) => parts.flat().map(String).join('/');
+    const server = await createServer({
+        configFile: false,
+        plugins: [workspaceTestShims(), viteReactInterop(), react()],
+        resolve: { alias: { '@': resolve('resources/js') } },
+        server: { middlewareMode: true, hmr: false, ws: false },
+        ssr: { noExternal: ['react', '@inertiajs/react'] },
+        appType: 'custom',
+        logLevel: 'error',
+    });
+
+    try {
+        const { default: Workspace } = await server.ssrLoadModule('/resources/js/Components/PamoPambDraftWorkspace.jsx');
+        const management = { key: 'ipaf_management', label: 'Management of IPAF', form: 'ipaf_management', documents: ['Final Report'] };
+        const revenue = { key: 'revenue_collection', label: 'Revenue Collection', form: 'revenue', documents: ['Final Report'] };
+        const ref = { current: null };
+        const props = { workflows: [management, revenue], assignedProtectedArea: { id: 7, name: 'Fixture Protected Landscape' } };
+        const modal = () => findElement(renderWorkspace(Workspace, props, ref, harness), element => element.type?.name === 'CrudFormModal');
+
+        modal();
+        ref.current.startNew(management.key);
+        const field = findElement(modal().props.children, element => element.props.id === 'pamo-ipaf-management-activity');
+        assert.equal(field.props.label, 'Name of Activity');
+        field.props.onChange({ target: { value: 'Review of the protected area fund' } });
+        modal().props.onSubmit({ preventDefault() {} });
+        const request = harness.requests.at(-1);
+        assert.equal(request.payload.activity_name, 'Review of the protected area fund');
+        returnSuccess(request);
+
+        ref.current.startNew(revenue.key);
+        const html = renderToStaticMarkup(modal());
+        assert.match(html, /25th of the reporting month/);
+        assert.match(html, /Save Draft/);
+        assert.doesNotMatch(html, /pamo-ipaf-management-activity|Deadline for Submission to PENRO|Date Conducted|Date Accomplished/);
     } finally {
         await server.close();
         if (priorHarness === undefined) delete globalThis.__pamoActivityHarness;

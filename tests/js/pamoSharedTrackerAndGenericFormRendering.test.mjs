@@ -452,11 +452,15 @@ test('Forward serialization carries the current Homestay modal date values and u
     const payload = serializePamoDraftPayload(formState, { awsForm: false, periodField: 'reporting_period', rangeEnabled: true });
     const newDraft = createPamoDraftFormData();
 
-    for (const field of ['activity_name', 'document_type', 'reporting_period', 'semester', 'quarter', 'reporting_month', 'reporting_year', 'total_collected', 'deadline_submission', 'monitoring_period_start', 'monitoring_period_end', 'date_conducted', 'date_accomplished', 'remarks']) {
+    for (const field of ['activity_name', 'document_type', 'reporting_period', 'semester', 'quarter', 'reporting_month', 'reporting_year', 'total_collected', 'monitoring_period_start', 'monitoring_period_end', 'date_conducted', 'date_accomplished', 'remarks']) {
         assert.equal(newDraft[field], '', `new PAMO drafts start with blank ${field}`);
     }
     assert.deepEqual(newDraft.date_conducted_ranges, []);
     assert.equal(newDraft.mov, null);
+    const revenuePayload = serializePamoDraftPayload({ ...newDraft, reporting_month: '10', reporting_year: '2026', deadline_submission: '2026-11-20' }, { awsForm: false, periodField: 'reporting_month', rangeEnabled: false });
+    assert.equal(revenuePayload.reporting_month, '10');
+    assert.equal(revenuePayload.reporting_year, '2026');
+    assert.equal(Object.hasOwn(revenuePayload, 'deadline_submission'), false);
     assert.deepEqual(payload.date_conducted_ranges, [{ from: '2026-09-21', to: '2026-09-25' }]);
     assert.equal(payload.date_accomplished, '2026-10-13');
     assert.equal(payload.reporting_period, 'Quarter 3');

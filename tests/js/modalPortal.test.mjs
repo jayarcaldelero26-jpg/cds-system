@@ -143,3 +143,41 @@ test('portaling the report form keeps the original submit callback and form elem
     form.props.onSubmit(event);
     assert.deepEqual(calls, [event]);
 });
+
+test('the shared form bounds its panel to the dynamic viewport with a separate scroll body and footer', () => {
+    const layer = fixture('form').render({ open: true, title: 'New draft report', saveLabel: 'Save Draft' }).props.children;
+    const form = descendants(layer).find(element => element.type === 'form');
+    const body = descendants(form).find(element => element.props.className?.includes('overflow-y-auto'));
+    const footer = React.Children.toArray(form.props.children).at(-1);
+    assert.match(layer.props.className, /\bh-dvh\b/);
+    assert.match(form.props.className, /max-h-\[min\(92dvh,100%\)\]/);
+    assert.match(body.props.className, /min-h-0 flex-1 overflow-y-auto/);
+    assert.equal(footer.props.className, 'shrink-0');
+    assert.ok(descendants(footer).some(element => element.props.children === 'Save Draft'));
+});
+
+test('the sending dialog owns the keyboard layer while the background form stays mounted and inert', () => {
+    const instance = fixture('form');
+    const layer = instance.render({
+        open: true,
+        title: 'Submit report',
+        busyOverlay: React.createElement('p', { role: 'status' }, 'Sending document'),
+        busyOverlayPresentation: 'success-sized',
+        closeOnOverlayClick: true,
+        onClose: () => assert.fail('The pending request cannot dismiss the form'),
+    }).props.children;
+    const siblings = React.Children.toArray(layer.props.children);
+    const form = siblings.find(element => element.type === 'form');
+    const host = siblings.find(element => element.props['data-cds-busy-presentation'] === 'success-sized');
+    assert.equal(form.props.inert, true);
+    assert.equal(form.props['aria-hidden'], true);
+    assert.ok(host);
+    const dialog = host.props.children;
+    assert.equal(dialog.props.role, 'dialog');
+    assert.equal(dialog.props.ref, instance.hooks[0].panelRef);
+    assert.equal(instance.hooks[0].closeOnEscape, false);
+    instance.hooks[0].onClose();
+    layer.props.onClick({ target: siblings[0], currentTarget: layer });
+    const target = {};
+    layer.props.onClick({ target, currentTarget: target });
+});

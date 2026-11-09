@@ -1112,7 +1112,7 @@ button[role="tab"]:focus-visible {
 /* Shared shell motion uses the existing selected-tab palette. */
 .cds-navigation-pill {
     position: absolute;
-    z-index: 0;
+    z-index: -1;
     margin: 0 !important;
     pointer-events: none;
     border-radius: 0.75rem;
@@ -1133,6 +1133,17 @@ button[role="tab"]:focus-visible {
 nav[data-cds-nav-motion="ready"] .cds-navigation-link[aria-current="page"] {
     background-color: transparent;
     background-image: none;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+nav[data-cds-nav-motion="ready"] .cds-navigation-link[aria-current="page"]:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+.cds-global-search-input::-webkit-search-cancel-button {
+    display: none;
 }
 
 .cds-theme-toggle-icon {

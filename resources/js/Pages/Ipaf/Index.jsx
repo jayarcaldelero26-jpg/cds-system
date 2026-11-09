@@ -54,7 +54,9 @@ export default function Index(props) {
 function Tracker({ kind, rows = {}, totals, protectedAreas = [], targetOffices = [], protectedAreasByOffice = {}, filters = {} }) {
   const revenue = kind === 'revenue';const { auth = {} } = usePage().props;const canCreate = Boolean(auth.canCreateTechnicalReports),canUpdate = Boolean(auth.canUpdateTechnicalReports),canDelete = Boolean(auth.canDeleteTechnicalReports);
   const records = rows.data || [];const [selected, setSelected] = useState(null),[modal, setModal] = useState(null),[deleting, setDeleting] = useState(null),[preview, setPreview] = useState(null);
-  const empty = revenue ? { protected_area_id: '', target_office: '', document_type: '', reporting_month: new Date().getMonth() + 1, reporting_year: new Date().getFullYear(), total_collected: '', deadline_submission: '', mov: null, remarks: '' } : { protected_area_id: '', target_office: '', document_type: '', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
+  const selectedIsMutable = Boolean(selected && !selected.is_historical
+    && String(selected.submission_status ?? '').toLowerCase() !== 'completed');
+  const empty = revenue ? { protected_area_id: '', target_office: '', document_type: '', reporting_month: new Date().getMonth() + 1, reporting_year: new Date().getFullYear(), total_collected: '', mov: null, remarks: '' } : { protected_area_id: '', target_office: '', activity_name: '', document_type: '', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
   const form = useForm(empty);
   useEffect(() => () => {if (preview?.temporary) URL.revokeObjectURL(preview.url);}, [preview]);
   useEffect(() => {if (!selected) return;const fresh = records.find((row) => row.id === selected.id);if (fresh) setSelected(fresh);}, [rows.data]);
@@ -63,7 +65,14 @@ function Tracker({ kind, rows = {}, totals, protectedAreas = [], targetOffices =
   const close = () => {setModal(null);setSelected(null);setPreview(null);form.reset();form.clearErrors();};
   const selectMov = (file) => {form.setData((data) => ({ ...data, mov: file }));setPreview(file ? { name: file.name, type: file.type, size: file.size, url: URL.createObjectURL(file), temporary: true } : selected?.mov || null);};
   const prefix = revenue ? 'ipaf.revenue' : 'ipaf.management';
-  const submit = (e) => {e.preventDefault();if (form.processing) return;const edit = modal === 'edit';form.transform((data) => edit ? { ...data, _method: 'put' } : data);const endpoint = edit ? route(`${prefix}.update`, selected.id) : route(`${prefix}.store`);form.post(endpoint, { forceFormData: true, preserveScroll: true, onSuccess: close });};
+  const submit = (event) => {
+    event.preventDefault();
+    if (form.processing) return;
+    const edit = modal === 'edit';
+    form.transform(({ deadline_submission: _recordedDeadline, ...data }) => edit ? { ...data, _method: 'put' } : data);
+    const endpoint = edit ? route(`${prefix}.update`, selected.id) : route(`${prefix}.store`);
+    form.post(endpoint, { forceFormData: true, preserveScroll: true, onSuccess: close });
+  };
   const apply = (changes) => router.get(route('ipaf.index'), { ...filters, revenue_search: undefined, management_search: undefined, ...changes }, { preserveState: true, preserveScroll: true, replace: true });
   const columns = revenue ? [
   { key: 'record_origin', label: 'Record Type', render: (r) => <RecordTypeBadge source="revenue" id={r.id} isHistorical={Boolean(r.is_historical)} /> }, { key: 'protected_area_name', label: 'Name of PA', render: (r) => <b>{show(r.protected_area_name)}</b> }, { key: 'reporting_month', label: 'Month', render: (r) => `${months[r.reporting_month - 1]} ${r.reporting_year}` }, { key: 'total_collected', label: 'Total Collected', render: (r) => money(r.total_collected) }, { key: 'ipaf_ria', label: 'IPAF RIA (75%)', render: (r) => money(r.ipaf_ria) }, { key: 'sagf', label: 'SAGF (25%)', render: (r) => money(r.sagf) }, { key: 'date_received_penro', label: 'Received by PENRO', render: (r) => formatReportDate(r.date_received_penro) }, { key: 'timeliness', label: 'Timeliness', render: (r) => <Badge value={r.timeliness} /> }, { key: 'submission_status', label: 'Status of Submission', render: (r) => <Badge value={r.submission_status} /> }] :
@@ -78,13 +87,51 @@ function Tracker({ kind, rows = {}, totals, protectedAreas = [], targetOffices =
   </FilterToolbar>;
   const pagination = rows.links?.length > 3 ? <div className="flex flex-wrap gap-1">{rows.links.map((link, i) => <button key={i} disabled={!link.url || link.active} onClick={() => link.url && router.get(link.url, {}, { preserveState: true, preserveScroll: true })} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${link.active ? 'bg-green-700 text-white' : 'bg-gray-100 dark:bg-gray-700 dark:text-white'} disabled:opacity-50`} dangerouslySetInnerHTML={{ __html: link.label }} data-cds-action="true" data-cds-action-variant="primary" />)}</div> : null;
   return <div className="mt-5 space-y-4"><div className="cds-card-surface rounded-2xl border border-gray-100 bg-white p-4 shadow-xl dark:border-gray-800 dark:bg-gray-900"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div className="min-w-0 flex-1">{filterUi}</div>{canCreate && <button type="button" onClick={openCreate} className="shrink-0 rounded-xl bg-green-700 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-green-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600" data-cds-action="true" data-cds-action-variant="primary">+ {revenue ? 'Add Revenue Collection' : 'Add Report'}</button>}</div></div>{revenue && <CrudSummaryGrid items={[{ label: 'Total Collected', value: money(totals?.total_collected) }, { label: 'IPAF RIA 75%', value: money(totals?.ipaf_ria) }, { label: 'SAGF 25%', value: money(totals?.sagf) }]} />}<CrudTable compactEmpty={true} title={records.length > 0 ? (revenue ? 'Revenue Collection' : 'Management of IPAF') : undefined} subtitle={records.length > 0 ? `${rows.total ?? records.length} records` : undefined} helperText={records.length > 0 ? 'Click any row to view full details' : undefined} columns={columns} rows={records} rowKey="id" onRowClick={(record) => {setSelected(record);setModal('details');}} pagination={records.length > 0 ? pagination : null} emptyTitle="No records found" emptyDescription="No IPAF records match the selected filters." />
-        <CrudDetailsModal open={modal === 'details' && Boolean(selected)} title={revenue ? 'Revenue Collection Details' : 'Management of IPAF Details'} subtitle={selected?.protected_area_name || ''} onClose={close} canEdit={canUpdate && !selected?.is_historical} canDelete={canDelete && !selected?.is_historical} onEdit={() => openEdit(selected)} onDelete={() => setDeleting(selected)} summary={selected && <CrudSummaryGrid items={revenue ? [{ label: 'Reporting Period', value: `${months[selected.reporting_month - 1]} ${selected.reporting_year}` }, { label: 'Deadline', value: formatReportDate(selected.deadline_submission) }, { label: 'Timeliness', render: () => <Badge value={selected.timeliness} /> }, { label: 'Submission Status', render: () => <Badge value={selected.submission_status} /> }] : [{ label: 'Reporting Period', value: show(selected.reporting_period || selected.semester || selected.quarter) }, { label: 'Deadline', value: formatReportDate(selected.deadline_submission) }, { label: 'Timeliness', render: () => <Badge value={selected.timeliness} /> }, { label: 'Submission Status', render: () => <Badge value={selected.submission_status} /> }]} />} attachments={selected && (selected.mov ? <FilePreviewPanel file={selected.mov} title="Report Attachment / MOV" heightClass="h-[420px]" /> : <CrudSection title="Attachment / MOV"><p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>{canUpdate && !selected?.is_historical && <button type="button" onClick={() => openEdit(selected)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">Attach MOV</button>}</CrudSection>)}>{selected?.is_historical && <CrudSection title="Historical record"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><span>Manually encoded record. Live editing and routing are disabled.</span><HistoricalRecordBadge source={revenue ? 'revenue' : 'ipaf-management'} id={selected.id} /></div></CrudSection>}<Details record={selected} revenue={revenue} /></CrudDetailsModal>
-        <CrudFormModal open={modal === 'create' || modal === 'edit'} mode={modal === 'edit' ? 'edit' : 'create'} title={`${modal === 'edit' ? 'Edit' : 'Add'} ${revenue ? 'Revenue Collection' : 'Management of IPAF'}`} subtitle={revenue ? 'Monthly IPAF revenue collection and submission details.' : '7-working-day Standard-B report submission.'} onClose={close} onSubmit={submit} processing={form.processing} progress={form.progress} errors={form.errors} saveLabel={modal === 'edit' ? 'Update Record' : 'Save Record'} preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}><FormFields revenue={revenue} form={form} protectedAreas={protectedAreas} selected={selected} preview={preview} setPreview={setPreview} selectMov={selectMov} /></CrudFormModal>
+        <CrudDetailsModal
+          open={modal === 'details' && Boolean(selected)}
+          title={revenue ? 'Revenue Collection Details' : 'Management of IPAF Details'}
+          subtitle={selected?.protected_area_name || ''}
+          onClose={close}
+          canEdit={canUpdate && selectedIsMutable}
+          canDelete={canDelete && selectedIsMutable}
+          onEdit={() => openEdit(selected)}
+          onDelete={() => setDeleting(selected)}
+          summary={selected && <CrudSummaryGrid items={[
+            { label: 'Reporting Period', value: revenue ? `${months[selected.reporting_month - 1]} ${selected.reporting_year}` : show(selected.reporting_period || selected.semester || selected.quarter) },
+            { label: 'Deadline', value: formatReportDate(selected.deadline_submission) },
+            { label: 'Timeliness', render: () => <Badge value={selected.timeliness} /> },
+            { label: 'Submission Status', render: () => <Badge value={selected.submission_status} /> },
+          ]} />}
+          attachments={selected && (selected.mov
+            ? <FilePreviewPanel file={selected.mov} title="Report Attachment / MOV" heightClass="h-[420px]" />
+            : <CrudSection title="Attachment / MOV">
+                <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>
+                {canUpdate && selectedIsMutable && <button type="button" onClick={() => openEdit(selected)} className="mt-3 rounded-xl bg-green-700 px-4 py-2 text-xs font-bold text-white hover:bg-green-800" data-cds-action="true" data-cds-action-variant="primary">Attach MOV</button>}
+              </CrudSection>)}
+        >
+          {Boolean(selected?.is_historical) && <CrudSection title="Historical record"><div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><span>Manually encoded record. Live editing and routing are disabled.</span><HistoricalRecordBadge source={revenue ? 'revenue' : 'ipaf-management'} id={selected.id} /></div></CrudSection>}
+          <Details record={selected} revenue={revenue} />
+        </CrudDetailsModal>
+        <CrudFormModal
+          open={modal === 'create' || modal === 'edit'}
+          mode={modal === 'edit' ? 'edit' : 'create'}
+          title={`${modal === 'edit' ? 'Edit' : 'Add'} ${revenue ? 'Revenue Collection' : 'Management of IPAF'}`}
+          subtitle={revenue ? 'Monthly IPAF revenue collection and submission details.' : '7-working-day Standard-B report submission.'}
+          onClose={close}
+          onSubmit={submit}
+          processing={form.processing}
+          progress={form.progress}
+          errors={form.errors}
+          saveLabel={modal === 'edit' ? 'Update Record' : 'Save Record'}
+          preview={<FilePreviewPanel file={preview} title="Live Document Preview" />}
+        >
+          <FormFields revenue={revenue} form={form} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} selected={selected} preview={preview} setPreview={setPreview} selectMov={selectMov} />
+        </CrudFormModal>
         <ConfirmDialog open={Boolean(deleting)} variant="danger" title="Delete IPAF Record?" message="This action cannot be undone." confirmLabel="Delete Record" onCancel={() => setDeleting(null)} onConfirm={() => router.delete(route(`${prefix}.destroy`, deleting.id), { onSuccess: () => {setDeleting(null);close();} })} />
     </div>;
 }
 
-function FormFields({ revenue, form, protectedAreas, selected, preview, setPreview, selectMov }) {
+function FormFields({ revenue, form, targetOffices, protectedAreasByOffice, selected, preview, setPreview, selectMov }) {
   const change = (name) => (event) => form.setData(name, event.target.value);
   const error = (name) => form.errors[name] && <span className="mt-1 block text-xs text-red-500">{form.errors[name]}</span>;
   const split = liveSplit(form.data.total_collected);
@@ -93,12 +140,14 @@ function FormFields({ revenue, form, protectedAreas, selected, preview, setPrevi
     <CrudSection title="Report Information"><div className="grid gap-4 sm:grid-cols-2">
       <div className={label}><TargetOfficeSelect id="index-target-office" value={form.data.target_office} options={targetOffices} required onChange={value => form.setData({ ...form.data, target_office: value, protected_area_id: '' })} error={form.errors.target_office} /></div>
       <div className={label}><ProtectedAreaSelect id="index-protected-area" label="Name of PA" required value={form.data.protected_area_id} targetOfficeId={form.data.target_office} protectedAreasByOffice={protectedAreasByOffice} onChange={value => form.setData('protected_area_id', value)} error={form.errors.protected_area_id} disabled={!form.data.target_office} /></div>
+      {!revenue && <div className="min-w-0 sm:col-span-2"><FloatingInput id="ipaf-management-activity" name="activity_name" label="Name of Activity" maxLength={255} value={form.data.activity_name ?? ''} onChange={change('activity_name')} error={form.errors.activity_name} /></div>}
       {revenue && <><div className={label}><FloatingSelect id="index-reporting-month" label="Reporting Month" required value={form.data.reporting_month} onChange={change('reporting_month')}>{months.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}</FloatingSelect>{error('reporting_month')}</div><div className={label}><FloatingInput id="index-reporting-year" label="Reporting Year" required type="number" value={form.data.reporting_year} onChange={change('reporting_year')} size="sm" />{error('reporting_year')}</div></>}
       <div className={label}><FloatingSelect id="index-type-of-document" label="Type of Document" required value={form.data.document_type} onChange={change('document_type')}><option value="">Select Type of Document</option><option>Final Report</option><option>Progress Report</option></FloatingSelect>{error('document_type')}</div>
       {!revenue && <div className={label}><DatePicker id="index-date-conducted" label="Date Conducted" actualDate required value={canonicalDateConductedValue(form.data.date_conducted)} onChange={(value) => form.setData('date_conducted', value)} helperText={legacyDateConductedHelper(form.data.date_conducted)} error={form.errors.date_conducted} />{error('date_conducted')}</div>}
+      {revenue && <p className="text-xs text-gray-500 sm:col-span-2 dark:text-gray-400">New reporting periods are due on the 25th of the reporting month.</p>}
     </div></CrudSection>
     {revenue && <CrudSection title="Revenue Collection"><div className={label}><FloatingInput id="index-total-collected" label="Total Collected" required type="number" min="0" step="0.01" value={form.data.total_collected} onChange={change('total_collected')} />{error('total_collected')}</div><div className="mt-4 grid gap-3 sm:grid-cols-2"><Read label="IPAF RIA (75%)" value={money(split.ria)} /><Read label="SAGF (25%)" value={money(split.sagf)} /></div></CrudSection>}
-    <CrudSection title="Compliance Basis"><div className="grid gap-4 sm:grid-cols-2">{revenue ? <div className={label}><DatePicker id="ipaf-deadline-submission" label="Deadline for Submission to PENRO" required value={form.data.deadline_submission || ''} onChange={(value) => form.setData('deadline_submission', value)} error={form.errors.deadline_submission} />{error('deadline_submission')}</div> : <div className={label}><DatePicker id="index-date-accomplished" label="Date Accomplished" actualDate required value={form.data.date_accomplished || ''} onChange={(value) => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />{error('date_accomplished')}</div>}</div></CrudSection>
+    {!revenue && <CrudSection title="Compliance Basis"><div className="grid gap-4 sm:grid-cols-2"><div className={label}><DatePicker id="index-date-accomplished" label="Date Accomplished" actualDate required value={form.data.date_accomplished || ''} onChange={(value) => form.setData('date_accomplished', value)} error={form.errors.date_accomplished} />{error('date_accomplished')}</div></div></CrudSection>}
     <CrudSection title="Attachment / MOV & Remarks"><div className="space-y-5"><FileAttachmentPanel id={`ipaf-${revenue ? 'revenue' : 'management'}-mov`} label="Report Attachment / MOV" required={!selected?.id} accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" acceptedTypesHint="PDF, JPG, PNG, DOC, or DOCX" maxSizeHint="Maximum 10 MB" existingFiles={selected?.mov ? [selected.mov] : []} selectedFiles={form.data.mov ? [form.data.mov] : []} activeFile={preview} onSelectFile={setPreview} onChange={selectMov} error={form.errors.mov} disabled={form.processing} canManage /><div className={label}><FloatingTextarea id="index-remarks" label="Remarks" rows="4" value={form.data.remarks} onChange={change('remarks')} />{error('remarks')}</div></div></CrudSection>
   </>;
 }

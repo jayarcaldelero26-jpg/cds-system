@@ -61,6 +61,35 @@ test("shared buttons preserve variant semantics and apply restrained interaction
     assert.match(settingsShell, /selected \? 'cds-tab-active border-white\/30'/);
 });
 
+test("the liquid pill owns active link paint while mobile navigation keeps plain icon controls", async () => {
+    const [styles, layout, search] = await Promise.all([
+        "../../resources/css/app.css",
+        "../../resources/js/Layouts/AuthenticatedLayout.jsx",
+        "../../resources/js/Components/GlobalSearch.jsx",
+    ].map(path => readFile(new URL(path, import.meta.url), "utf8")));
+
+    const activeLink = styles.match(/nav\[data-cds-nav-motion="ready"\] \.cds-navigation-link\[aria-current="page"\] \{([^}]+)\}/)?.[1];
+    assert.ok(activeLink);
+    assert.match(activeLink, /background-image:\s*none/);
+    assert.match(activeLink, /border-color:\s*transparent/);
+    assert.match(activeLink, /box-shadow:\s*none/);
+    assert.match(styles, /\.cds-navigation-link\[aria-current="page"\]:focus-visible \{\s*outline:\s*2px solid/);
+
+    for (const [source, label] of [
+        [layout, "Open navigation"], [layout, "Close navigation"],
+        [layout, "Search CDS-SMART"], [search, "Clear search"],
+    ]) {
+        const button = source.split("\n").find(line => line.includes("<button") && line.includes('aria-label="' + label + '"'));
+        assert.ok(button, label + " is a native button");
+        assert.match(button, /type="button"/);
+        assert.doesNotMatch(button, /data-cds-action/);
+        assert.match(button, /focus-visible:ring-2/);
+    }
+    assert.match(search, /id=\{inputId\} type="search"/);
+    assert.match(search, /htmlFor=\{inputId\}/);
+    assert.match(styles, /\.cds-global-search-input::-webkit-search-cancel-button \{\s*display:\s*none/);
+});
+
 test("shared modal, confirmation, export, and PAMB action controls retain their handlers through Button", async () => {
     const paths = [
         "../../resources/js/Components/Crud/CrudDetailsModal.jsx",
