@@ -20,7 +20,7 @@ const load = async (path) => {
                 '@/Components/SubmissionTracking/SubmissionTrackingReaderDialog': resolve(process.env.CDS_TEST_READER_SOURCE),
             } : {}),
         } },
-        server: { middlewareMode: true },
+        server: { middlewareMode: true, hmr: false, ws: false },
         appType: 'custom',
         logLevel: 'error',
     });
@@ -147,6 +147,44 @@ test('Executive report chips describe applied filters and preserve query paramet
     assert.deepEqual(reportFilterParams({ year: '2026', domain: 'pa', period: '', office: 'CENRO A', protected_area_id: '12', workflow: '', status: 'Received' }), {
         year: '2026', domain: 'pa', period: undefined, office: 'CENRO A', protected_area_id: '12', workflow: undefined, status: 'Received',
     });
+});
+
+test('Management Reports renders one breakdown and exports its applied cutoff', async () => {
+    const { default: Reports } = await load('Pages/Reports/Index.jsx');
+    const previousRoute = globalThis.route;
+    const exportRequests = [];
+    globalThis.route = (name, params = {}) => {
+        if (name !== 'reports.export') return '/reports';
+        exportRequests.push(params);
+        return '/reports/export/' + params.format + '?as_of_date=' + params.as_of_date;
+    };
+
+    try {
+        const html = renderWithPageContext(React.createElement(Reports, {
+            canExport: true,
+            report: {
+                today: '2026-11-07', period_label: 'Quarter 3 2026',
+                filters: { year: 2026, period: 'Q3', domain: 'pa', as_of_date: '2026-10-31', scope_label: 'Protected Areas' },
+                filter_options: { years: [2026], periods: [{ value: 'Q3', label: 'Quarter 3' }] },
+                summary: { due: 20, received: 17, receipt_rate: 85, on_time: 14, late: 3, awaiting_receipt: 2, missing: 1 },
+                comparison: { period_label: 'Quarter 2 2026', as_of_date: '2026-08-01', due: 20, received: 19, receipt_rate: 95, change_pp: -10 },
+                breakdowns: { office: [{ label: 'CENRO Mati', due: 20, received: 17, receipt_rate: 85, unresolved: 3 }] },
+                actions: [{ id: 'q3', report: 'Regular PAMB', period: 'Quarter 3', scope: 'Test PA', status: 'Awaiting PENRO receipt', action_office: 'PENRO Records', next_action: 'Verify receipt with PENRO Records.', tracking_url: '/submission-tracking?source=conservation&source_id=1' }],
+            },
+        }));
+        assert.match(html, /17 of 20 due received/);
+        assert.match(html, /-10 percentage points/);
+        assert.match(html, /Open in Tracking/);
+        assert.equal((html.match(/<table\b/g) || []).length, 1);
+        assert.deepEqual(exportRequests.map(({ format, year, period, domain, as_of_date }) => [format, year, period, domain, as_of_date]), [
+            ['pdf', 2026, 'Q3', 'pa', '2026-10-31'],
+            ['docx', 2026, 'Q3', 'pa', '2026-10-31'],
+            ['xlsx', 2026, 'Q3', 'pa', '2026-10-31'],
+        ]);
+    } finally {
+        if (previousRoute === undefined) delete globalThis.route;
+        else globalThis.route = previousRoute;
+    }
 });
 
 test('Module Management real filter forwards the original value and preserves query parameters', async () => {

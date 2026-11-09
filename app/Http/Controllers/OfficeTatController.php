@@ -6,6 +6,7 @@ use App\Services\OfficeTatAnalyticsService;
 use App\Services\OfficeTatComplianceAssessmentService;
 use App\Services\OfficeTatDocumentTurnaroundService;
 use App\Services\OfficeTatObligationEvidenceSetupService;
+use App\Services\OfficeTatProcessedDocumentSourceService;
 use App\Services\Authorization\OrganizationalAccessService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -42,9 +43,32 @@ final class OfficeTatController extends Controller
         }
         $filters = ['unit' => $selectedUnit, 'processing_period' => $periodKey, 'as_of_date' => $asOfDate, 'workflow' => $workflow];
         $recordedAssessment = $assessments->recordedAssessments($request->user(), $selectedUnit, $periodKey, $asOfDate, $workflow);
+        $processedRows = app(OfficeTatProcessedDocumentSourceService::class)
+            ->forAssessment($request->user(), $recordedAssessment);
+        if ($workflow !== 'all') {
+            $processedRows = array_values(array_filter($processedRows, static function (array $row) use ($workflow): bool {
+                $details = $row['obligation_details'] ?? [];
+                return is_array($details) && collect($details)->contains(
+                    static fn (array $detail): bool => ($detail['source_identity']['workflow_key'] ?? null) === $workflow,
+                );
+            }));
+            $processedRows = array_map(static function (array $row) use ($workflow): array {
+                $row['obligation_details'] = array_values(array_filter(
+                    $row['obligation_details'] ?? [],
+                    static fn (array $detail): bool => ($detail['source_identity']['workflow_key'] ?? null) === $workflow,
+                ));
+                return $row;
+            }, $processedRows);
+        }
+        $turnaroundAssessment = $recordedAssessment;
+        $turnaroundAssessment['office_tat_assessment'] = [
+            'period_key' => $periodKey,
+            'as_of_date' => $asOfDate,
+            'rows' => $processedRows,
+        ];
         return Inertia::render('Admin/OfficeTat/Index', [
             'recordedAssessment' => $recordedAssessment,
-            'documentTurnaround' => $documentTurnaround->forAssessment($request->user(), $recordedAssessment),
+            'documentTurnaround' => $documentTurnaround->forAssessment($request->user(), $turnaroundAssessment),
             'selectedUnit' => $selectedUnit,
             'authorizedUnits' => $authorizedUnits,
             'periodOptions' => $periodOptions->values()->all(),

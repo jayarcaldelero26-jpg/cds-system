@@ -7,6 +7,8 @@ import { resolve } from 'node:path';
 // React instance without changing application or production resolution.
 export function viteReactInterop() {
     const require = createRequire(resolve('package.json'));
+    const portalSource = resolve('resources/js/Components/ModalPortal.jsx').replaceAll('\\', '/');
+    const portalImports = new Set(['@/Components/ModalPortal', portalSource, portalSource.slice(0, -4)]);
     const sources = [
         'react', 'react/jsx-runtime', 'react/jsx-dev-runtime',
         'react-dom', 'react-dom/client', 'react-dom/server',
@@ -22,10 +24,15 @@ export function viteReactInterop() {
     return {
         name: 'test-react-native-cjs-interop',
         enforce: 'pre',
-        resolveId(source) {
+        resolveId(source, importer, options) {
+            // Markup fixtures inspect dialog contents; real portal placement has
+            // dedicated tests and must stay enabled in every browser module.
+            const serverFixture = options?.ssr || this.environment?.config?.consumer === 'server';
+            if (serverFixture && portalImports.has(source.replaceAll('\\', '/'))) return '\0test-modal-portal-inline';
             return modules.get(source);
         },
         load(id) {
+            if (id === '\0test-modal-portal-inline') return 'export default function ModalPortalMarkupFixture({ children }) { return children; }';
             const source = [...modules].find(([, virtualId]) => virtualId === id)?.[0];
             if (!source) return null;
             const exports = Object.keys(require(source))

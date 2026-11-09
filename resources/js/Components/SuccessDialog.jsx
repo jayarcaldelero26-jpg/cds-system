@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import ModalPortal from '@/Components/ModalPortal';
 import Button from '@/Components/Button';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
 
@@ -13,7 +14,7 @@ export default function SuccessDialog({ open, message, title = 'Success', onClos
     });
     if (!present) return null;
 
-    return <div className="cds-modal-motion-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/45 p-4" data-motion-state={phase} role="presentation" onMouseDown={event => open && event.target === event.currentTarget && onClose?.()}>
+    return <ModalPortal><div className="cds-modal-motion-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/45 p-4" data-motion-state={phase} role="presentation" onMouseDown={event => open && event.target === event.currentTarget && onClose?.()}>
         <style>{`
             @keyframes success-ring-clockwise {
                 0% { opacity: 0; transform: rotate(0) scale(.9); }
@@ -70,5 +71,5 @@ export default function SuccessDialog({ open, message, title = 'Success', onClos
             <p id="success-dialog-message" className="mx-auto mt-2 max-w-xs break-words text-[15px] font-normal leading-6 text-gray-500 dark:text-gray-400">{message}</p>
             <Button ref={buttonRef} id="success-dialog-ok" type="button" onClick={onClose} className="mt-5 min-w-20 rounded-md px-5 py-2 text-[13px] font-medium leading-4">OK</Button>
         </div>
-    </div>;
+    </div></ModalPortal>;
 }

@@ -231,7 +231,7 @@ test('live CENRO routing average is exposed separately and uses accepted event i
     $record = officeTatEngpRecord($this->actor, '2026-01');
     officeTatEvent($this->actor, $record, 'received', '2026-01-03 09:00:00', 'PENRO Davao Oriental', 'CENRO Baganga');
     officeTatEvent($this->actor, $record, 'forwarded', '2026-01-05 09:00:00', 'CENRO Baganga', 'PENRO Davao Oriental');
-    $this->actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    $this->actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
 
     $previousNow = CarbonImmutable::getTestNow();
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-03-31 12:00:00', 'Asia/Manila'));
@@ -263,36 +263,32 @@ test('live CENRO routing average is exposed separately and uses accepted event i
     }
 });
 
-test('visible live routing navigation and route use the same CENRO authorization scope', function (): void {
-    $reader = User::factory()->create([
-        'section' => 'CENRO_CDS_CHIEF',
-        'office_designated' => 'CENRO Baganga',
-        'unit_assignment' => null,
-        'is_approved' => true,
-        'is_active' => true,
-    ]);
-    $reader->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+test('Office TAT routes require Super Admin even with explicit Office TAT permissions', function (): void {
+    $view = Permission::findOrCreate('office-tat.view', 'web');
+    $configure = Permission::findOrCreate('office-tat.configure', 'web');
+    $cases = [
+        ['CENRO_CDS_CHIEF', 'CENRO Baganga', null],
+        ['PAMO', null, null],
+        ['CDS', 'PENRO Davao Oriental', 'CDS Admin'],
+    ];
 
-    $this->withoutVite()->actingAs($reader)
-        ->get('/admin/office-tat?unit=development&processing_period=2026-H2&as_of_date=2026-10-26')
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->where('selectedUnit', 'development')
-            ->where('canViewLiveRoutingAverage', true));
-
-    $this->actingAs($reader)
-        ->get('/admin/office-tat/routing-average?processing_period=2026-H2&as_of_date=2026-10-26&return_unit=development')
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->where('liveAnalytics.category', 'CENRO')
-            ->where('liveAnalytics.evidence_type', 'live')
-            ->where('filters.return_unit', 'development'));
-
-    $pamo = User::factory()->create(['section' => 'PAMO', 'unit_assignment' => null, 'is_approved' => true, 'is_active' => true]);
-    $pamo->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
-    $this->actingAs($pamo)
-        ->get('/admin/office-tat/routing-average?processing_period=2026-H2&as_of_date=2026-10-26')
-        ->assertForbidden();
+    foreach ($cases as [$section, $office, $role]) {
+        $viewer = User::factory()->create([
+            'section' => $section, 'office_designated' => $office, 'unit_assignment' => null,
+            'is_approved' => true, 'is_active' => true,
+        ]);
+        $viewer->givePermissionTo([$view, $configure]);
+        if ($role !== null) $viewer->assignRole(Role::findOrCreate($role, 'web'));
+        $this->actingAs($viewer)
+            ->get(route('office-tat.index'))->assertForbidden();
+        $this->get(route('office-tat.routing-average'))->assertForbidden();
+        $this->get(route('office-tat.pamo-preparation-average'))->assertForbidden();
+        $this->get(route('office-tat.approval-evidence.show', ['reference' => (string) str()->uuid()]))->assertForbidden();
+        $this->post(route('office-tat.configuration.store'), [])->assertForbidden();
+        $this->withoutVite()->get(route('notifications.index'))->assertOk()->assertInertia(fn ($page) => $page
+            ->where('auth.canViewOfficeTat', false)
+            ->where('auth.canConfigureOfficeTat', false));
+    }
 });
 
 test('direct-to-PENRO historical reports do not receive a synthetic CENRO release interval', function (): void {
@@ -660,7 +656,7 @@ test('assessment keys default to the Philippine semester and normalize legacy pe
             ->and($data['assessment_period']['type'])->toBe('semestral')
             ->and($data['assessment_period']['semester'])->toBe('H2');
 
-        $this->actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+        $this->actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
         $this->actingAs($this->actor)->get(route('office-tat.index', ['unit' => 'development', 'processing_period' => '2026-Q4']))
             ->assertOk()->assertInertia(fn ($page) => $page->where('recordedAssessment.period_key', '2026-H2'));
         $this->actingAs($this->actor)->get(route('office-tat.index', ['unit' => 'development', 'processing_period' => '2026-11']))

@@ -86,7 +86,8 @@ test('native select change dispatch preserves the existing string report-type ca
 
 test('empty historical report types remain an honest empty display value', async () => {
     const { formatReportValue } = await load('Utils/dateFormatters.js');
-    assert.equal(formatReportValue(null), '—');
-    assert.equal(formatReportValue(''), '—');
+    assert.equal(formatReportValue(null), 'Not provided');
+    assert.equal(formatReportValue(''), 'Not provided');
+    assert.equal(formatReportValue(null, '—'), '—');
     assert.equal(formatReportValue('Final Report'), 'Final Report');
 });

@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { useEffect, useRef, useState } from 'react';
 import Button from '@/Components/Button';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
@@ -72,7 +73,7 @@ export default function CurrentPasswordConfirmDialog({ open, onCancel, onConfirm
         }
     };
 
-    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
+    return <ModalPortal><div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
         <section ref={dialogRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="current-password-title" aria-describedby="current-password-description" data-motion-state={phase} className="cds-modal-motion-panel w-full max-w-md rounded-2xl border border-gray-200 bg-white p-5 shadow-2xl dark:border-gray-700 dark:bg-gray-900 sm:p-6">
             <h2 id="current-password-title" className="text-lg font-bold text-gray-900 dark:text-white">Confirm your current password</h2>
             <p id="current-password-description" className="mt-2 text-sm leading-6 text-gray-600 dark:text-gray-300">{message}</p>
@@ -84,5 +85,5 @@ export default function CurrentPasswordConfirmDialog({ open, onCancel, onConfirm
                 </div>
             </form>
         </section>
-    </div>;
+    </div></ModalPortal>;
 }

@@ -283,6 +283,61 @@ test('TAT retains composite source identity and counts each CENRO office that re
         ->and(array_sum(array_column($data['rows'], 'tat_completed_documents')))->toBe(3);
 });
 
+test('Office TAT Document TAT uses the scoped processed inventory and preserves scoring identity', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
+    $actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
+    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    $area = officeTatCoverageArea($actor);
+    $moduleValues = collect(app(\App\Services\OfficeTatComplianceAssessmentService::class)->moduleOptions('conservation'))
+        ->pluck('value')->values();
+    expect($moduleValues)->not->toBeEmpty();
+    $selectedWorkflow = (string) $moduleValues->first();
+    $otherWorkflow = (string) $moduleValues->first(fn (string $value): bool => $value !== $selectedWorkflow);
+    expect($otherWorkflow)->not->toBe('');
+
+    $eligibleId = officeTatCoverageInsertSource($actor, (int) $area->getKey(), 'conservation', $selectedWorkflow, 61001, 1);
+    officeTatCoverageAddCompletedVisit($actor, 'conservation', $eligibleId, $selectedWorkflow, 'CENRO Baganga', '2026-01-04 09:00:00', '2026-01-05 09:00:00');
+
+    $wrongWorkflowId = officeTatCoverageInsertSource($actor, (int) $area->getKey(), 'conservation', $otherWorkflow, 61002, 1);
+    officeTatCoverageAddCompletedVisit($actor, 'conservation', $wrongWorkflowId, $otherWorkflow, 'CENRO Baganga', '2026-01-04 09:00:00', '2026-01-05 09:00:00');
+
+    $unprocessedId = officeTatCoverageInsertSource($actor, (int) $area->getKey(), 'conservation', $selectedWorkflow, 61003, 1);
+    $futureId = officeTatCoverageInsertSource($actor, (int) $area->getKey(), 'conservation', $selectedWorkflow, 61004, 7);
+    officeTatCoverageAddCompletedVisit($actor, 'conservation', $futureId, $selectedWorkflow, 'CENRO Baganga', '2026-07-04 09:00:00', '2026-07-05 09:00:00');
+
+    $assessment = app(\App\Services\OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($actor, 'conservation', '2026-H1', '2026-06-30', $selectedWorkflow);
+    $inventory = app(\App\Services\OfficeTatProcessedDocumentSourceService::class)->forAssessment($actor, $assessment);
+    $inventoryIds = collect($inventory)->flatMap(fn (array $row): array => $row['obligation_details'])
+        ->map(fn (array $detail): int => (int) $detail['source_identity']['source_id'])->sort()->values()->all();
+    expect($inventoryIds)->toBe([$eligibleId, $wrongWorkflowId]);
+
+    $version = app(\App\Http\Middleware\HandleInertiaRequests::class)->version(request());
+    $response = $this->actingAs($actor)->withHeaders([
+        'X-Inertia' => 'true', 'X-Inertia-Version' => $version ?? '',
+    ])->get('/admin/office-tat?unit=conservation&processing_period=2026-H1&as_of_date=2026-06-30&workflow='.$selectedWorkflow);
+    $response->assertOk();
+    $props = json_decode((string) $response->getContent(), true, 512, JSON_THROW_ON_ERROR)['props'];
+    expect($props['filters']['workflow'])->toBe($selectedWorkflow);
+    $projectedIds = collect($props['documentTurnaround']['rows'])->flatMap(fn (array $row): array => $row['documents'])
+        ->map(fn (array $document): int => (int) str_replace('Report #', '', $document['reference']))->sort()->values()->all();
+    $scoreFields = static fn (array $value): array => [
+        $value['evidence_fingerprint'] ?? null,
+        $value['tc_denominator'] ?? null,
+        $value['tc_numerator'] ?? null,
+        $value['due_count'] ?? null,
+        $value['activity_count'] ?? null,
+    ];
+
+    expect($projectedIds)->toBe([$eligibleId])
+        ->and($props['documentTurnaround']['reports'])->toBe(1)
+        ->and($scoreFields($props['recordedAssessment']))->toBe($scoreFields($assessment))
+        ->and($unprocessedId)->not->toBe($eligibleId)
+        ->and($wrongWorkflowId)->not->toBe($eligibleId)
+        ->and($futureId)->not->toBe($eligibleId);
+});
+
 test('an office visit outside the receipt cohort does not enter that period TAT', function (): void {
     $actor = officeTatCoverageActor();
     $area = officeTatCoverageArea($actor);

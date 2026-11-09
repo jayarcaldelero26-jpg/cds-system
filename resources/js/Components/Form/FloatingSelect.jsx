@@ -1,4 +1,4 @@
-import { Children, Fragment, isValidElement, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Children, Fragment, isValidElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import FloatingField from './FloatingField';
 import { setNativeSelectValueAndDispatch } from './nativeSelectChange.mjs';
@@ -55,7 +55,7 @@ export default function FloatingSelect({
         const maxHeight = Math.max(112, Math.min(288, placeAbove ? availableAbove : availableBelow));
         setMenuStyle({ position: 'fixed', left: Math.max(margin, Math.min(rect.left, window.innerWidth - rect.width - margin)), width: Math.min(rect.width, window.innerWidth - margin * 2), maxHeight, ...(placeAbove ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }) });
     };
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!open) return undefined;
         positionMenu();
         const reposition = () => positionMenu();
@@ -113,7 +113,7 @@ export default function FloatingSelect({
                     <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.75" className={`h-4 w-4 shrink-0 text-gray-500 transition-transform dark:text-gray-400 ${open ? 'rotate-180 text-green-700 dark:text-green-300' : ''}`}><path d="m5 7.5 5 5 5-5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                 </button>
                 <select {...nativeAttributes} id={`${fieldId}-native`} ref={selectRef} name={name} required={required} disabled={disabled} form={form} autoComplete={autoComplete} value={selectedValue} onChange={onChange} onInvalid={event => { event.preventDefault(); triggerRef.current?.focus(); openMenu(); }} aria-hidden="true" tabIndex={-1} className={selectClasses.join(' ')}>{children}</select>
-                {open && typeof document !== 'undefined' && createPortal(<div ref={menuRef} id={`${fieldId}-listbox`} role="listbox" aria-labelledby={fieldId} className="cds-select-menu overflow-auto p-1.5" style={menuStyle}>
+                {open && menuStyle && typeof document !== 'undefined' && createPortal(<div ref={menuRef} id={`${fieldId}-listbox`} role="listbox" aria-labelledby={fieldId} className="cds-select-menu overflow-auto p-1.5" style={menuStyle}>
                     {options.map((option, index) => <div key={option.key} id={`${fieldId}-option-${index}`} role="option" aria-selected={option.value === selectedValue} aria-disabled={option.disabled || undefined} onMouseEnter={() => setActiveIndex(index)} onMouseDown={event => event.preventDefault()} onClick={() => choose(option)} className={`cds-select-option flex min-h-9 w-full items-center rounded-md px-3 py-2 text-left text-sm ${index === activeIndex ? 'cds-select-option-active' : ''} ${option.disabled ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'}`}>{option.label}</div>)}
                 </div>, document.body)}
             </>;

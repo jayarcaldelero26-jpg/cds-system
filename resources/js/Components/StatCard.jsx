@@ -1,7 +1,7 @@
 // resources/js/Components/StatCard.jsx
 export default function StatCard({ title, value, icon, color = 'bg-gradient-to-br from-green-600 to-green-800' }) {
     return (
-        <div className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-lg transition hover:scale-[1.02] ${color}`}>
+        <div data-cds-reveal="card" className={`relative overflow-hidden rounded-2xl p-5 text-white shadow-lg transition hover:scale-[1.02] ${color}`}>
             {/* Limpyo ug solid/sharp nga lingin sa taas-tuo */}
             <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/15 pointer-events-none"></div>
 

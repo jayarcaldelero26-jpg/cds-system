@@ -83,6 +83,7 @@ class HandleInertiaRequests extends Middleware
         // CDS Admin is the only role with a global bypass. All other UI
         // visibility must follow the same named abilities enforced by routes.
         $isAdmin = app(OrganizationalAccessService::class)->isGlobal($user);
+        $canViewOfficeTat = ($user?->hasRole('Super Admin') ?? false) && $user->can('office-tat.view');
         $organization = app(OrganizationalAccessService::class);
         $userUnit = $organization->unitFor($user);
         $allowsConservation = $organization->canViewConservationModules($user);
@@ -150,11 +151,11 @@ class HandleInertiaRequests extends Middleware
                 'canViewPamoReports' => (bool) $canViewPamoReports,
                 'canViewFinalArchives' => (bool) $canViewFinalArchives,
                 'canManageAdministration' => $isAdmin || (!$isMes && $can('compliance-alerts.manage')),
-                'canViewOfficeTat' => $user?->can('office-tat.view') ?? false,
-                'canConfigureOfficeTat' => $user?->can('office-tat.configure') ?? false,
+                'canViewOfficeTat' => $canViewOfficeTat,
+                'canConfigureOfficeTat' => $canViewOfficeTat && $user->can('office-tat.configure'),
                 'canViewHistoricalReports' => $user?->can('historical-reports.view') ?? false,
                 'canEncodeHistoricalReports' => $user?->can('historical-reports.encode') ?? false,
-                'canAccessAdministrationSection' => $isAdmin || ($user?->can('office-tat.view') ?? false) || (!$isMes && $can('compliance-alerts.manage')),
+                'canAccessAdministrationSection' => $isAdmin || $canViewOfficeTat || (!$isMes && $can('compliance-alerts.manage')),
                 'canCorrectSubmissionRouting' => $isAdmin && ($user?->can('submission-tracking.correct-routing') ?? false),
                 'canAdminRoutingOverride' => $isAdmin && ($user?->can('submission-tracking.admin-override') ?? false),
                 'pambScope' => $user ? [

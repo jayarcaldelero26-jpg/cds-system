@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { useMemo, useRef, useState } from 'react';
 import { router } from '@inertiajs/react';
 import { formatReportDate } from '@/Utils/dateFormatters';
@@ -72,7 +73,7 @@ export default function BusinessCalendarMonth({
     };
     const openMonth = targetMonth => navigate({ view: 'month', month: `${selectedYear}-${String(targetMonth).padStart(2, '0')}` });
 
-    return <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/95">
+    return <section data-cds-reveal="card" className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white/90 shadow-sm backdrop-blur-sm dark:border-gray-800 dark:bg-gray-900/95">
         <div className="flex flex-col xl:flex-row">
             <aside className="flex w-full shrink-0 border-b border-emerald-100/80 bg-emerald-50/65 px-5 py-5 backdrop-blur-sm dark:border-emerald-950/60 dark:bg-emerald-950/15 xl:w-[238px] xl:flex-col xl:border-b-0 xl:border-r">
                 <FilterRail
@@ -337,7 +338,7 @@ function DateEventsModal({ date: dateProp, events: eventsProp, onClose, onSelect
     const events = dateProp ? eventsProp : (lastSnapshotRef.current?.events || []);
     const { present, phase, onTransitionEnd } = useModalMotion(Boolean(dateProp), { onClose, panelRef, layerRef: overlayRef });
     if (!present || !date) return null;
-    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
+    return <ModalPortal><div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
         <section ref={panelRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} data-motion-state={phase} role="dialog" aria-modal="true" aria-label={`Report evidence for ${formatReportDate(date)}`} className="cds-modal-motion-panel max-h-[80vh] w-full max-w-lg overflow-hidden rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <header className="flex items-center justify-between border-b border-gray-100 px-5 py-4 dark:border-gray-800">
                 <div><h3 className="text-sm font-bold text-gray-900 dark:text-white">Report evidence</h3><p className="mt-0.5 text-xs text-gray-500">{formatReportDate(date)} · {events.length} events</p></div>
@@ -347,7 +348,7 @@ function DateEventsModal({ date: dateProp, events: eventsProp, onClose, onSelect
                 {events.map(event => <button key={event.source_key} type="button" onClick={() => onSelect(event)} className="w-full rounded-lg border border-gray-200 p-3 text-left hover:border-green-300 hover:bg-green-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:border-gray-700 dark:hover:border-green-800 dark:hover:bg-green-950/20" data-cds-action="true" data-cds-action-variant="primary"><span className="block text-xs font-bold text-gray-900 dark:text-white">{event.module} • {event.source_name || event.office || 'Office'}</span><span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">{event.title}{event.reporting_period ? ` · ${event.reporting_period}` : ''}</span></button>)}
             </div>
         </section>
-    </div>;
+    </div></ModalPortal>;
 }
 
 function getCalendarEventGroup(event) {

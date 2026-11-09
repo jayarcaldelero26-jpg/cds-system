@@ -13,7 +13,11 @@ final class ExecutiveReportExportService
     {
         $format = strtolower($format);
         return match ($format) {
-            'pdf' => Pdf::loadView('reports.executive-pdf', ['report' => $report])->setPaper('a4', 'portrait')->download($this->filename($report, 'pdf')),
+            'pdf' => Pdf::loadView('reports.executive-pdf', [
+                'report' => $report,
+                'metrics' => $this->metrics($report),
+                'comparisonText' => $this->comparisonText($report),
+            ])->setPaper('a4', 'portrait')->download($this->filename($report, 'pdf')),
             'xlsx' => $this->xlsx($report),
             'docx' => $this->docx($report),
             default => abort(404),
@@ -31,11 +35,8 @@ final class ExecutiveReportExportService
             'The XLSX workbook could not be created.',
             function (ZipArchive $zip) use ($report): void {
                 $sheets = [
-                    'Executive Summary' => $this->summaryRows($report),
-                    'PA Performance' => $this->performanceRows(collect($report['pa_performance'] ?? [])->all(), 'Protected Area'),
-                    'Office Performance' => $this->performanceRows(collect($report['office_performance'] ?? [])->all(), 'Office'),
-                    'Report Family Performance' => $this->performanceRows(collect($report['family_performance'] ?? [])->all(), 'Report Family'),
-                    'Attention Required' => $this->attentionRows($report['attention'] ?? []),
+                    'Compliance Summary' => $this->summaryRows($report),
+                    'Requirement Details' => $this->detailRows($report['details']),
                 ];
                 $zip->addFromString('[Content_Types].xml', $this->contentTypes(count($sheets)));
                 $zip->addFromString('_rels/.rels', $this->rootRelationships());
@@ -71,41 +72,96 @@ final class ExecutiveReportExportService
         );
     }
 
-    /** @return list<array{values:array<int,mixed>,header:bool}> */
-    private function summaryRows(array $report): array
+    /** @return array<string,int|float|null> */
+    private function metrics(array $report): array
     {
-        $f = $report['filters'] ?? [];
-        $s = $report['summary'] ?? [];
+        $summary = $report['summary'];
+
         return [
-            ['values' => ['CDS-SMART Executive Report Monitoring Summary'], 'header' => true],
-            ['values' => ['Reporting Year', $f['year'] ?? null, 'Domain', strtoupper((string) ($f['domain'] ?? 'all'))], 'header' => false],
-            ['values' => ['Scope', $f['scope_label'] ?? null, 'Generated', $report['generated_at'] ?? null], 'header' => false],
-            ['values' => [], 'header' => false],
-            ['values' => ['Metric', 'Value'], 'header' => true],
-            ['values' => ['Expected Reports', $s['expected'] ?? null], 'header' => false],
-            ['values' => ['Submitted Reports', $s['submitted'] ?? null], 'header' => false],
-            ['values' => ['Submission Compliance %', $s['compliance_rate'] ?? null], 'header' => false],
-            ['values' => ['Overdue / Not Submitted', $s['overdue'] ?? null], 'header' => false],
-            ['values' => ['Pending PENRO Receipt', $s['pending_receipt'] ?? null], 'header' => false],
-            ['values' => [], 'header' => false],
-            ['values' => ['Executive Interpretation', $report['interpretation'] ?? null], 'header' => true],
+            'Due by cutoff' => $summary['due'],
+            'Confirmed PENRO receipts' => $summary['received'],
+            'Receipt rate (%)' => $summary['receipt_rate'],
+            'Received on time' => $summary['on_time'],
+            'Received late' => $summary['late'],
+            'Awaiting PENRO receipt' => $summary['awaiting_receipt'],
+            'No submission record' => $summary['missing'],
+            'Submission evidence missing' => $summary['unverified'],
+            'Not due by cutoff' => $summary['not_due'],
+            'Deadline unavailable' => $summary['no_deadline'],
         ];
     }
 
-    /** @param list<array<string,mixed>> $rows */
-    private function performanceRows(array $rows, string $first): array
+    private function comparisonText(array $report): string
     {
-        $result = [['values' => [$first, 'Expected', 'Submitted', 'Compliance %', 'Overdue'], 'header' => true]];
-        foreach ($rows as $row) $result[] = ['values' => [$row['label'] ?? null, $row['expected'] ?? null, $row['submitted'] ?? null, $row['compliance_rate'] ?? null, $row['overdue'] ?? null], 'header' => false];
-        return $result;
+        $previous = $report['comparison'];
+        if ($previous === null) return 'No comparable scheduled period is available for this scope.';
+
+        $text = $previous['period_label'].' through '.$previous['as_of_date'].' — '.$previous['received'].' of '.$previous['due'].' due received';
+        if ($previous['receipt_rate'] !== null) $text .= ' ('.$previous['receipt_rate'].'%)';
+        if ($previous['change_pp'] === null) return $text.'. A rate comparison requires due requirements in both periods.';
+
+        return $text.'. Change in receipt rate '.($previous['change_pp'] > 0 ? '+' : '').$previous['change_pp'].' percentage points.';
     }
 
-    /** @param list<array<string,mixed>> $rows */
-    private function attentionRows(array $rows): array
+    /** @return list<array{values:array<int,mixed>,header:bool}> */
+    private function metricRows(array $report): array
     {
-        $result = [['values' => ['Tracking No.', 'Report', 'PA / Office', 'Period', 'Status', 'Deadline', 'Reason'], 'header' => true]];
-        foreach ($rows as $row) $result[] = ['values' => [$row['tracking_number'] ?? null, $row['report'] ?? null, $row['scope'] ?? null, $row['period'] ?? null, $row['status'] ?? null, $row['deadline'] ?? null, $row['reason'] ?? null], 'header' => false];
-        return $result;
+        $rows = [['values' => ['Metric', 'Value'], 'header' => true]];
+        foreach ($this->metrics($report) as $label => $value) {
+            $rows[] = ['values' => [$label, $value ?? 'Not available'], 'header' => false];
+        }
+
+        return $rows;
+    }
+
+    private function summaryRows(array $report): array
+    {
+        $filters = $report['filters'];
+
+        return [
+            ['values' => ['CDS-SMART '.$report['title']], 'header' => true],
+            ['values' => ['Reporting period', $report['period_label']], 'header' => false],
+            ['values' => ['Applied scope', $filters['scope_label']], 'header' => false],
+            ['values' => ['Cutoff (Asia/Manila)', $filters['as_of_date']], 'header' => false],
+            ['values' => ['Generated', $report['generated_at']], 'header' => false],
+            ['values' => ['Detail status filter', $filters['status'] ?: 'All detail statuses'], 'header' => false],
+            ...$this->metricRows($report),
+            ['values' => ['Previous period', $this->comparisonText($report)], 'header' => false],
+            ['values' => ['Basis', 'Registered requirements and dated PENRO receipts through the cutoff. The detail filter applies to the appendix only.'], 'header' => false],
+        ];
+    }
+
+    private function detailRows(array $details): array
+    {
+        $rows = [['values' => ['Requirement', 'Program', 'Report', 'PA / Office', 'Office', 'Period', 'Deadline', 'Release by cutoff', 'PENRO receipt by cutoff', 'Outcome', 'Current routing status', 'Tracking no.', 'Follow-up office', 'Follow-up', 'Tracking URL'], 'header' => true]];
+        foreach ($details as $row) {
+            $rows[] = [
+                'values' => [
+                    $row['id'], strtoupper($row['domain']), $row['report'], $row['scope'], $row['office'], $row['period'],
+                    $row['due_date'], $row['release_date'], $row['receipt_date'], $row['status'], $row['routing_status'],
+                    $row['tracking_number'], $row['next_action'] ? $row['action_office'] : null, $row['next_action'], $row['tracking_url'],
+                ],
+                'header' => false,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function actionRows(array $actions): array
+    {
+        $rows = [['values' => ['Report / period', 'PA / Office', 'Deadline', 'Follow-up'], 'header' => true]];
+        foreach ($actions as $row) {
+            $rows[] = ['values' => [
+                $row['report'].' · '.$row['period'],
+                $row['scope'],
+                $row['due_date'] ?? 'Unavailable',
+                implode(' · ', array_filter([$row['action_office'], $row['next_action']])),
+            ], 'header' => false];
+        }
+        if ($actions === []) $rows[] = ['values' => ['No follow-up items for the applied filters.'], 'header' => false];
+
+        return $rows;
     }
 
     /** @param list<array{values:array<int,mixed>,header:bool}> $rows */
@@ -128,17 +184,20 @@ final class ExecutiveReportExportService
 
     private function document(array $report): string
     {
+        $filters = $report['filters'];
         $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>';
         $xml .= $this->paragraph('CDS-SMART', 'Title');
-        $xml .= $this->paragraph('EXECUTIVE REPORT MONITORING SUMMARY', 'Subtitle');
-        $xml .= $this->paragraph('Reporting Year: '.($report['filters']['year'] ?? '—').' | Scope: '.($report['filters']['scope_label'] ?? 'All authorized'), 'Meta');
-        $xml .= $this->paragraph('I. Executive Summary', 'Heading1').$this->paragraph($report['interpretation'] ?? 'No Data', 'Normal');
-        $xml .= $this->paragraph('II. Compliance Overview', 'Heading1').$this->table($this->summaryRows($report), [3600, 1800, 1800, 3000]);
-        foreach ([['III. Protected Area Performance', collect($report['pa_performance'] ?? [])->all(), 'Protected Area'], ['IV. Office Performance', collect($report['office_performance'] ?? [])->all(), 'Office'], ['V. Report Family Performance', collect($report['family_performance'] ?? [])->all(), 'Report Family']] as [$heading, $rows, $first]) {
-            $xml .= $this->paragraph($heading, 'Heading1').$this->table($this->performanceRows($rows, $first), [3200, 1400, 1400, 1500, 1400]);
+        $xml .= $this->paragraph(strtoupper($report['title']), 'Subtitle');
+        $xml .= $this->paragraph($report['period_label'].' · '.$filters['scope_label'].' · Through '.$filters['as_of_date'].' (Manila)', 'Meta');
+        $xml .= $this->paragraph('Compliance results', 'Heading1').$this->table($this->metricRows($report), [6700, 2800]);
+        $xml .= $this->paragraph('Previous period', 'Heading1').$this->paragraph($this->comparisonText($report), 'Normal');
+        $xml .= $this->paragraph('Priority follow-up', 'Heading1');
+        if ($filters['status'] !== '') $xml .= $this->paragraph('Detail status '.$filters['status'], 'Meta');
+        if ($report['action_count'] > count($report['actions'])) {
+            $xml .= $this->paragraph('Showing '.count($report['actions']).' of '.$report['action_count'].' items.', 'Meta');
         }
-        $xml .= $this->paragraph('VI. Timeliness', 'Heading1').$this->table([['values' => ['Metric', 'Value'], 'header' => true], ['values' => ['On-time rated reports', data_get($report, 'timeliness.on_time')], 'header' => false], ['values' => ['Late rated reports', data_get($report, 'timeliness.late')], 'header' => false], ['values' => ['Rated records', data_get($report, 'timeliness.rated')], 'header' => false], ['values' => ['Average days complied', data_get($report, 'timeliness.average_days_complied')], 'header' => false]], [5200, 2700]);
-        $xml .= $this->paragraph('VII. Reports Requiring Attention', 'Heading1').$this->table($this->attentionRows($report['attention'] ?? []), [1800, 2300, 1900, 1300, 1700, 1300, 2500]);
+        $xml .= $this->table($this->actionRows($report['actions']), [2950, 2050, 1550, 3500]);
+
         return $xml.'<w:sectPr><w:pgSz w:w="11906" w:h="16838" w:orient="portrait"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body></w:document>';
     }
 
@@ -164,7 +223,7 @@ final class ExecutiveReportExportService
     private function workbook(array $names): string { $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'; foreach ($names as $i => $name) $xml .= '<sheet name="'.$this->xml($name).'" sheetId="'.($i + 1).'" r:id="rId'.($i + 1).'"/>'; return $xml.'</sheets></workbook>'; }
     private function workbookRelationships(int $count): string { $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'; for ($i = 1; $i <= $count; $i++) $xml .= '<Relationship Id="rId'.$i.'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'.$i.'.xml"/>'; return $xml.'<Relationship Id="rId'.($count + 1).'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'; }
     private function xlsxStyles(): string { return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Times New Roman"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Times New Roman"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="solid"><fgColor rgb="166534"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/><xf numFmtId="0" fontId="1" fillId="1" borderId="0" applyFont="1" applyFill="1"/></cellXfs></styleSheet>'; }
-    private function coreProperties(array $report): string { return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>CDS-SMART Executive Report Monitoring Summary</dc:title><dc:creator>CDS-SMART</dc:creator><dc:subject>'.$this->xml((string) ($report['filters']['scope_label'] ?? 'Authorized report monitoring')).'</dc:subject></cp:coreProperties>'; }
+    private function coreProperties(array $report): string { return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>CDS-SMART Period Compliance Summary</dc:title><dc:creator>CDS-SMART</dc:creator><dc:subject>'.$this->xml((string) ($report['filters']['scope_label'] ?? 'Authorized report monitoring')).'</dc:subject></cp:coreProperties>'; }
     private function appProperties(): string { return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>CDS-SMART</Application></Properties>'; }
     private function docxStyles(): string { return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:sz w:val="26"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Meta"><w:name w:val="Meta"/></w:style></w:styles>'; }
 }

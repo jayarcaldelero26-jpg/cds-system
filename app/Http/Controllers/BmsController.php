@@ -43,6 +43,7 @@ class BmsController extends Controller
 
     public function index(Request $request)
     {
+        $trackerOnly = in_array($request->input('tracker'), ['1', 1, true], true);
         $query = $this->organization->scopeProtectedAreaQuery(BmsRecord::with('protectedArea'), $request->user())
             ->orderBy('monitoring_date', 'desc')
             ->orderBy('station', 'asc');
@@ -73,14 +74,14 @@ class BmsController extends Controller
         if ($protectedAreaId !== null) {
             $this->organization->assertCanAccessProtectedArea($request->user(), $protectedAreaId);
         }
-        $selectedPa = $protectedAreaId
+        $selectedPa = $trackerOnly ? null : ($protectedAreaId
             ? ProtectedArea::query()->whereKey($protectedAreaId)->first()
-            : $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->first();
+            : $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->first());
 
         $spatialLayers = $selectedPa?->spatialLayers()->where(fn ($query) => $query->where('source_key', 'bms')->orWhereNull('source_key'))->latest('id')->get() ?? collect();
 
         $attachmentService = app(ProtectedAttachmentService::class);
-        $bmsRecords = $query->get()->map(function (BmsRecord $record) use ($attachmentService): array {
+        $bmsRecords = $trackerOnly ? collect() : $query->get()->map(function (BmsRecord $record) use ($attachmentService): array {
             $data = $record->toArray();
             unset($data['attachment']);
             $data['attachment'] = $attachmentService->descriptor('bms-data', $record, 'attachment');
@@ -95,7 +96,7 @@ class BmsController extends Controller
             ...app(\App\Services\SubmissionTracking\SubmissionFormScopeService::class)->options($request->user()),
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date', 'year']),
             'spatialLayers' => $spatialLayers,
-            'annexHeaderMetadata' => $this->annexHeaderFor($request),
+            'annexHeaderMetadata' => $trackerOnly ? null : $this->annexHeaderFor($request),
             'reportSubmissions' => $this->organization->scopeProtectedAreaQuery(BmsReportSubmission::with('protectedArea:id,name,short_name'), $request->user())
                 ->when($request->filled('report_protected_area_id'), function ($q) use ($request): void {
                     $this->organization->assertCanAccessProtectedArea($request->user(), $request->report_protected_area_id);
@@ -118,7 +119,7 @@ class BmsController extends Controller
                     return $data;
                 }),
             'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
-            'bmsThreats' => $this->organization->scopeProtectedAreaQuery(BmsThreat::with('protectedArea:id,name,short_name'), $request->user())->latest('date')->latest('id')->get(),
+            'bmsThreats' => $trackerOnly ? collect() : $this->organization->scopeProtectedAreaQuery(BmsThreat::with('protectedArea:id,name,short_name'), $request->user())->latest('date')->latest('id')->get(),
             'initialTab' => $request->input('tab') === 'semestral' ? 'semestral' : null,
         ]);
     }

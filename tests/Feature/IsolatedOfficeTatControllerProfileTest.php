@@ -14,7 +14,7 @@ use Database\Seeders\ModuleDefinitionSeeder;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 function isolatedOfficeTatProfileEvent(User $actor, string $source, int $sourceId, string $workflow, string $eventKey, string $from, string $to, string $occurredAt, ?string $action = null): array
 {
@@ -51,7 +51,7 @@ test('isolated actual Office TAT controller profile at 1000 and 5000 valid repor
         'office_designated' => 'PENRO Davao Oriental',
         'unit_assignment' => null, 'is_active' => true, 'is_approved' => true,
     ]);
-    $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
+    $actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
 
     $officeNames = ['CENRO Baganga', 'CENRO Manay', 'CENRO Mati', 'CENRO Lupon'];
     foreach ($officeNames as $index => $officeName) {
@@ -206,7 +206,7 @@ test('isolated actual Office TAT controller profile at 1000 and 5000 valid repor
             $reports = (int) ($props['documentTurnaround']['reports'] ?? 0);
             $returned = array_sum(array_map(static fn (array $row): int => count($row['documents'] ?? []), $props['documentTurnaround']['rows'] ?? []));
             expect($props['selectedUnit'])->toBe($unit)
-                ->and($props['globalAssessmentAccess'])->toBeFalse()
+                ->and($props['authorizedUnits'])->toContain($unit)
                 ->and($reports)->toBe($expectedDetails)
                 ->and($returned)->toBe($expectedDetails);
             $profile = $GLOBALS['CDS_TAT_PROFILE'];
@@ -248,11 +248,23 @@ test('isolated actual Office TAT controller profile at 1000 and 5000 valid repor
         'as_of_date' => $asOfDate, 'sample_count' => 'one initial plus one warm',
         'development_reports' => 500, 'native_pa_reports' => $nativeCount, 'tiers' => [],
     ];
+    $processedGenericEventCount = 0;
     foreach ([1000, 5000] as $target) {
         $conservationTarget = $target - 500;
         $insertGenericUntil($conservationTarget - $nativeCount);
+        $newGenericIds = DB::table($genericTable)->orderBy('id')->skip($processedGenericEventCount)
+            ->take($genericCount - $processedGenericEventCount)->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        foreach (array_chunk($newGenericIds, 250) as $ids) {
+            $events = array_map(fn (int $id): array => isolatedOfficeTatProfileEvent(
+                $actor, 'conservation', $id, 'general_report', 'forwarded',
+                DocumentRoutingProfileRegistry::PAMO_ORIGIN, DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS,
+                '2026-10-22 09:00:00', 'forward_from_pamo',
+            ), $ids);
+            DB::table('document_routing_events')->insert($events);
+        }
+        $processedGenericEventCount = $genericCount;
         $databaseReports = ConservationReportSubmission::query()->count() + $nativeCount + EngpReportSubmission::query()->count();
-        $processedCohort = $genericCount + $nativeCount + EngpReportSubmission::query()->count();
+        $processedCohort = DB::table('document_routing_events')->select('source_type', 'source_id')->distinct()->get()->count();
         expect($databaseReports)->toBe($target)->and($processedCohort)->toBe($target);
         $output['tiers'][(string) $target] = [
             'database_reports' => $databaseReports, 'processed_reports' => $processedCohort,

@@ -18,12 +18,13 @@ class ReportController extends Controller
 
         return Inertia::render('Reports/Index', [
             'report' => $report,
+            'canExport' => $request->user()->can('reports.export'),
         ]);
     }
 
     public function export(Request $request, string $format, ExecutiveReportExportService $exports)
     {
-        return $exports->download($this->reports->report($this->validatedFilters($request)), $format);
+        return $exports->download($this->reports->report($this->validatedFilters($request), includeDetails: $format === 'xlsx'), $format);
     }
 
     /** @return array<string,mixed> */
@@ -37,6 +38,7 @@ class ReportController extends Controller
             'protected_area_id' => ['nullable', 'integer'],
             'workflow' => ['nullable', 'string', 'max:100'],
             'status' => ['nullable', 'string', 'max:100'],
+            'as_of_date' => ['nullable', 'date_format:Y-m-d'],
         ]);
     }
 }

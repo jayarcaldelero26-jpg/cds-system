@@ -10,8 +10,8 @@ export default function DataTable({ columns = [], rows = [], rowKey = 'id', empt
     }
 
     return (
-        <div className="cds-card-surface overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-        <div className="overflow-x-auto custom-table-scrollbar">
+        <div data-cds-reveal="card" className="cds-card-surface overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
+        <div data-cds-row-viewport="true" className="overflow-x-auto custom-table-scrollbar">
             <table className="cds-data-table min-w-full divide-y divide-gray-200 text-left dark:divide-gray-700">
                 {caption && <caption className="sr-only">{caption}</caption>}
 
@@ -33,7 +33,7 @@ export default function DataTable({ columns = [], rows = [], rowKey = 'id', empt
 
                     <tbody className="divide-y divide-gray-100 bg-white dark:divide-gray-800 dark:bg-gray-900">
                     {safeRows.map((row) => (
-                        <tr key={row[rowKey]} className="transition hover:bg-green-50/40 dark:hover:bg-green-950/20">
+                        <tr key={row[rowKey]} data-cds-reveal="row" className="transition hover:bg-green-50/40 dark:hover:bg-green-950/20">
                             {safeColumns.map((column) => (
                                 <td
                                     key={column.key}

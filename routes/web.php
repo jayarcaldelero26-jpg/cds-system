@@ -111,18 +111,20 @@ Route::middleware('auth')->group(function () {
     Route::get('settings/historical-reports/{source}/{record}', [HistoricalReportController::class, 'show'])
         ->where('source', '[a-z0-9-]+')->whereNumber('record')
         ->middleware('can:historical-reports.view')->name('settings.historical-reports.show');
-    Route::get('admin/office-tat', [OfficeTatController::class, 'index'])->middleware('can:office-tat.view')->name('office-tat.index');
-    Route::get('admin/office-tat/routing-average', [OfficeTatController::class, 'liveRoutingAverage'])->middleware('can:office-tat.view')->name('office-tat.routing-average');
-    Route::get('admin/office-tat/pamo-preparation-average', [OfficeTatController::class, 'pamoPreparationAverage'])->middleware('can:office-tat.view')->name('office-tat.pamo-preparation-average');
-    Route::post('admin/office-tat/configuration', [OfficeTatController::class, 'storeConfiguration'])->middleware('can:office-tat.configure')->name('office-tat.configuration.store');
-    Route::post('admin/office-tat/assessment-scope', [OfficeTatController::class, 'storeAssessmentScope'])->middleware('can:office-tat.configure')->name('office-tat.assessment-scope.store');
-    Route::post('admin/office-tat/approval-evidence', [OfficeTatController::class, 'storeApprovalEvidence'])->middleware('can:office-tat.configure')->name('office-tat.approval-evidence.store');
-    Route::get('admin/office-tat/approval-evidence/{reference}', [OfficeTatController::class, 'downloadApprovalEvidence'])->middleware('can:office-tat.view')->whereUuid('reference')->name('office-tat.approval-evidence.show');
-    Route::post('admin/office-tat/applicability', [OfficeTatController::class, 'storeApplicability'])->middleware('can:office-tat.configure')->name('office-tat.applicability.store');
-    Route::post('admin/office-tat/obligation-schedule', [OfficeTatController::class, 'storeObligationSchedule'])->middleware('can:office-tat.configure')->name('office-tat.obligation-schedule.store');
-    Route::post('admin/office-tat/non-receipt-register', [OfficeTatController::class, 'storeNonReceiptRegister'])->middleware('can:office-tat.configure')->name('office-tat.non-receipt-register.store');
-    Route::post('admin/office-tat/technical-classification', [OfficeTatController::class, 'storeTechnicalClassification'])->middleware('can:office-tat.configure')->name('office-tat.technical-classification.store');
-    Route::post('admin/office-tat/tie-decision', [OfficeTatController::class, 'storeTieDecision'])->middleware('can:office-tat.configure')->name('office-tat.tie-decision.store');
+    Route::middleware(\Spatie\Permission\Middleware\RoleMiddleware::using('Super Admin', 'web'))->group(function () {
+        Route::get('admin/office-tat', [OfficeTatController::class, 'index'])->middleware('can:office-tat.view')->name('office-tat.index');
+        Route::get('admin/office-tat/routing-average', [OfficeTatController::class, 'liveRoutingAverage'])->middleware('can:office-tat.view')->name('office-tat.routing-average');
+        Route::get('admin/office-tat/pamo-preparation-average', [OfficeTatController::class, 'pamoPreparationAverage'])->middleware('can:office-tat.view')->name('office-tat.pamo-preparation-average');
+        Route::post('admin/office-tat/configuration', [OfficeTatController::class, 'storeConfiguration'])->middleware('can:office-tat.configure')->name('office-tat.configuration.store');
+        Route::post('admin/office-tat/assessment-scope', [OfficeTatController::class, 'storeAssessmentScope'])->middleware('can:office-tat.configure')->name('office-tat.assessment-scope.store');
+        Route::post('admin/office-tat/approval-evidence', [OfficeTatController::class, 'storeApprovalEvidence'])->middleware('can:office-tat.configure')->name('office-tat.approval-evidence.store');
+        Route::get('admin/office-tat/approval-evidence/{reference}', [OfficeTatController::class, 'downloadApprovalEvidence'])->middleware('can:office-tat.view')->whereUuid('reference')->name('office-tat.approval-evidence.show');
+        Route::post('admin/office-tat/applicability', [OfficeTatController::class, 'storeApplicability'])->middleware('can:office-tat.configure')->name('office-tat.applicability.store');
+        Route::post('admin/office-tat/obligation-schedule', [OfficeTatController::class, 'storeObligationSchedule'])->middleware('can:office-tat.configure')->name('office-tat.obligation-schedule.store');
+        Route::post('admin/office-tat/non-receipt-register', [OfficeTatController::class, 'storeNonReceiptRegister'])->middleware('can:office-tat.configure')->name('office-tat.non-receipt-register.store');
+        Route::post('admin/office-tat/technical-classification', [OfficeTatController::class, 'storeTechnicalClassification'])->middleware('can:office-tat.configure')->name('office-tat.technical-classification.store');
+        Route::post('admin/office-tat/tie-decision', [OfficeTatController::class, 'storeTieDecision'])->middleware('can:office-tat.configure')->name('office-tat.tie-decision.store');
+    });
     Route::get('settings/routing-workflow', [RoutingWorkflowSettingsController::class, 'index'])->middleware('can:submission-tracking.routing-settings.view')->name('settings.routing-workflow');
     Route::put('settings/routing-workflow', [RoutingWorkflowSettingsController::class, 'update'])->middleware('can:submission-tracking.routing-settings.update')->name('settings.routing-workflow.update');
     Route::get('admin/audit-logs', [AuditLogController::class, 'index'])->middleware('can:audit-logs.view')->name('audit-logs.index');

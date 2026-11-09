@@ -1,6 +1,6 @@
 import { Icon } from '@iconify/react';
 import { createPortal } from 'react-dom';
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import AppliedFilterChip from './AppliedFilterChip';
 
 export default function FilterToolbar({ label = 'Filters', chips = [], onClear, children, className = '', panelClassName = '', triggerClassName = '', clearClassName = '' }) {
@@ -9,7 +9,7 @@ export default function FilterToolbar({ label = 'Filters', chips = [], onClear, 
     const [open, setOpen] = useState(false);
     const [style, setStyle] = useState(null);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!open) return undefined;
         const position = () => {
             const rect = triggerRef.current?.getBoundingClientRect();
@@ -21,7 +21,11 @@ export default function FilterToolbar({ label = 'Filters', chips = [], onClear, 
             setStyle({ position: 'fixed', left, top, width, maxHeight: `min(80vh, ${window.innerHeight - top - margin}px)` });
         };
         const keydown = event => {
-            if (event.key !== 'Escape' || event.defaultPrevented) return;
+            if (event.key !== 'Escape' || event.defaultPrevented || event.target?.closest?.('.cds-menu-panel, .cds-select-menu, .cds-filter-dropdown, [role=listbox]')) return;
+            const nestedPickerTrigger = event.target?.closest?.(
+                'button[aria-haspopup="dialog"][aria-expanded="true"]',
+            );
+            if (nestedPickerTrigger && panelRef.current?.contains(nestedPickerTrigger)) return;
             event.preventDefault(); setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus());
         };
         const pointerdown = event => {
@@ -42,8 +46,8 @@ export default function FilterToolbar({ label = 'Filters', chips = [], onClear, 
         };
     }, [open]);
 
-    const panel = open && typeof document !== 'undefined' ? createPortal(
-        <section ref={panelRef} id="shared-filter-panel" role="region" aria-label={`${label} options`} style={style || { position: 'fixed', left: 12, top: 64, width: 'min(620px, calc(100vw - 24px))' }} className={`cds-filter-panel-enter z-[120] overflow-y-auto rounded-2xl border border-gray-200 bg-white p-4 shadow-2xl dark:border-gray-700 dark:bg-gray-900 ${panelClassName}`}>
+    const panel = open && style && typeof document !== 'undefined' ? createPortal(
+        <section ref={panelRef} id="shared-filter-panel" role="region" aria-label={`${label} options`} style={style} className={`cds-filter-panel-enter z-[120] overflow-y-auto rounded-2xl border border-gray-200 bg-white p-4 shadow-2xl dark:border-gray-700 dark:bg-gray-900 ${panelClassName}`}>
             <header className="mb-3 flex items-center justify-between gap-3">
                 <h2 className="text-sm font-bold text-gray-900 dark:text-white">{label}</h2>
                 <button type="button" onClick={() => { setOpen(false); requestAnimationFrame(() => triggerRef.current?.focus()); }} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-700 dark:text-gray-300 dark:hover:bg-gray-800" aria-label={`Close ${label.toLowerCase()}`}><Icon icon="lucide:x" width="16" height="16" aria-hidden="true" /></button>

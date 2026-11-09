@@ -1,5 +1,5 @@
 import { router, useForm, usePage } from '@inertiajs/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import FilterToolbar from '@/Components/Form/FilterToolbar';
@@ -10,6 +10,7 @@ import AttachmentDropzone from '@/Components/Attachments/AttachmentDropzone';
 import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import LaravelPaginationLinks from '@/Components/Crud/LaravelPaginationLinks';
 import PageHeader from '@/Components/PageHeader';
+import { revealPageSections } from '@/Utils/navigationVideoMotion.mjs';
 import { formatManila } from '@/Utils/dateFormatters';
 import FinalArchiveResults from '@/Components/SubmissionTracking/FinalArchiveResults';
 import FinalArchiveDisplayToggle from '@/Components/SubmissionTracking/FinalArchiveDisplayToggle';
@@ -60,6 +61,14 @@ export default function Archives({ archives = emptyPaginator, awaitingArchive = 
     const [previewFile, setPreviewFile] = useState(null);
     const [archiveRequestError, setArchiveRequestError] = useState('');
     const [listLoading, setListLoading] = useState(false);
+    const archiveResultsRef = useRef(null);
+    const resultView = `${tab}:${displayMode}`;
+    const previousResultView = useRef(resultView);
+    useLayoutEffect(() => {
+        if (listLoading || previousResultView.current === resultView) return undefined;
+        previousResultView.current = resultView;
+        return revealPageSections(archiveResultsRef.current);
+    }, [listLoading, resultView]);
     const [statusRefreshVersion, setStatusRefreshVersion] = useState(0);
     const [statusPollTimedOut, setStatusPollTimedOut] = useState(false);
     const handledStatusRefreshVersion = useRef(0);
@@ -288,12 +297,12 @@ export default function Archives({ archives = emptyPaginator, awaitingArchive = 
                 <FinalArchiveDisplayToggle value={displayMode} onChange={setDisplayMode} />
             </div>
         </div>
-        <div className="mt-4" aria-busy={listLoading}>
+        <div ref={archiveResultsRef} className="mt-4" aria-busy={listLoading}>
             {visibleRows.length > 0 && listLoading && <p role="status" className="mb-2 text-xs text-slate-500 dark:text-slate-400">Updating archive results…</p>}
             {visibleRows.length === 0 && listLoading ? <section className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center dark:border-slate-700 dark:bg-slate-900" role="status">
                 <Icon icon="lucide:loader-circle" width="30" height="30" className="animate-spin text-emerald-700 dark:text-emerald-400" aria-hidden="true" />
                 <h2 className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">Loading archive records…</h2>
-            </section> : visibleRows.length === 0 ? <section className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center dark:border-slate-700 dark:bg-slate-900" role="status">
+            </section> : visibleRows.length === 0 ? <section data-cds-reveal="card" className="flex min-h-48 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-8 text-center dark:border-slate-700 dark:bg-slate-900" role="status">
                 <Icon icon={filtered ? 'lucide:search-x' : 'lucide:files'} width="34" height="34" className="text-slate-300 dark:text-slate-600" aria-hidden="true" />
                 <h2 className="mt-3 text-sm font-semibold text-slate-800 dark:text-slate-100">{filtered ? 'No matching documents' : tab === 'awaiting' ? 'No receipts awaiting archive' : tab === 'receipt' ? 'No released reports awaiting final receipt' : 'No archives'}</h2>
                 <p className="mt-1 max-w-md text-xs leading-5 text-slate-500 dark:text-slate-400">{filtered ? 'Change or clear the current search and filters.' : tab === 'awaiting' ? 'Final receipts from Regional Office appear here for the eligible PENRO focal.' : tab === 'receipt' ? 'Eligible released reports appear here for the receiving PENRO focal.' : 'Final signed returns appear after complete verification. Earlier Dispatch copies are labeled separately and do not prove a Regional receipt.'}</p>

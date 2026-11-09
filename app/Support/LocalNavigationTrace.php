@@ -54,7 +54,7 @@ final class LocalNavigationTrace
     {
         if (! app()->environment('local')
             || app()->bound('octane')
-            || $request->getHost() !== 'cds-system.test'
+            || ! in_array($request->getHost(), ['cds-system.test', 'cds-smart-web.test'], true)
             || ! in_array($request->server->get('REMOTE_ADDR'), ['127.0.0.1', '::1'], true)
             || ! $request->isMethod('GET')
             || $request->query('__cds_perf') !== '1') {

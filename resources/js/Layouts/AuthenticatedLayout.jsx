@@ -1,7 +1,9 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import { Icon as IconifyIcon } from '@iconify/react';
 import UtilityIconButton from '@/Components/UtilityIconButton';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import NavigationHighlight from '@/Components/NavigationHighlight';
+import { useThemeMotion } from '@/Utils/useThemeMotion.js';
 import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 import Tooltip from '../Components/Tooltip';
@@ -9,6 +11,9 @@ import NotificationBell from '../Components/Notifications/NotificationBell';
 import Button from '../Components/Button';
 import monitoringMountainForest from '../../images/dashboard/monitoring-mountain-forest.png';
 import { buildSidebarNavigation, finalArchivesNavigationItem, matchesNavigationItem } from './navigation.mjs';
+import { navigationPendingReducer, navigationSkeletonIntent, navigationVisitKey } from './navigationPending.mjs';
+import { NavigationSkeleton } from '@/Components/Skeleton';
+import { NavigationPendingContext } from '@/Components/NavigationPendingContext';
 import { settingsNavigationItem } from './settingsNavigation.mjs';
 
 const allNavigation = [
@@ -186,7 +191,7 @@ function MenuIcon({ name, active = false, muted = false }) {
     return <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${active ? 'opacity-95' : muted ? 'opacity-35' : 'opacity-55'}`}><Icon name={name} /></span>;
 }
 
-function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], moduleNavigationCatalog = null, pamoNativeModuleNavigation = [] }) {
+function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], moduleNavigationCatalog = null, pamoNativeModuleNavigation = [], pendingUrl = null }) {
     const { url, props = {} } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
@@ -299,7 +304,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         }
 
         const isTrackingViewLink = child.href?.startsWith('/submission-tracking?view=');
-        const childCommon = `${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
+        const childCommon = `cds-navigation-link ${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
             isChildActive ? isTrackingViewLink ? 'cds-submission-tracking-nav-tab cds-tab-active border-l-2 border-green-200 shadow-md' : 'cds-tab-active border-l-2 border-green-200 shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
         }`;
         const href = child.externalConfig === 'engpIacGeneratorUrl' ? engpIacGeneratorUrl : child.href;
@@ -359,7 +364,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                     </div>
                     <button type="button" onClick={onClose} className="ml-auto rounded p-1 text-green-100 hover:bg-white/10 lg:hidden" data-cds-action="true" data-cds-action-variant="primary">x</button>
                 </div>
-                <nav ref={navigationRef} className="flex-1 overflow-y-auto px-3 py-5 space-y-1.5" aria-label="Main navigation">
+                <nav ref={navigationRef} className="relative isolate flex-1 overflow-y-auto px-3 py-5 space-y-1.5" aria-label="Main navigation">
                     {filteredNavigation.map((item) => {
                         if (item.permission && !safeAuth[item.permission]) return null;
 
@@ -392,8 +397,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                         }
 
                         const active = matchesNavigationItem(item, url);
+                        const href = typeof item.hrefResolver === 'function' ? item.hrefResolver(safeAuth) : item.href;
 
-                        const common = `flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-transform duration-150 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
+                        const common = `cds-navigation-link flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-transform duration-150 hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
                             active
                                 ? 'cds-tab-active font-semibold ring-1 ring-inset ring-white/25'
                                 : 'text-green-100/85 hover:bg-white/8 hover:text-white hover:-translate-y-px'
@@ -407,12 +413,13 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
                             </div></Tooltip>
                         );
                         return (
-                            <Link key={item.label} href={typeof item.hrefResolver === 'function' ? item.hrefResolver(safeAuth) : item.href} onClick={onClose} className={common} aria-current={active ? 'page' : undefined}>
+                            <Link key={item.label} href={href} onClick={onClose} className={common} aria-current={active ? 'page' : undefined}>
                                 <MenuIcon name={item.icon} active={active} />
                                 <span>{item.label}</span>
                             </Link>
                         );
                     })}
+                    <NavigationHighlight navigationRef={navigationRef} currentUrl={url} expandedGroups={openDropdowns} items={navigation} pendingUrl={pendingUrl} />
                 </nav>
                 {isSubmissionTrackingPage && (
                     <div className="mx-3 mb-3 rounded-lg border border-green-300/35 bg-green-900/70 px-3 py-2.5" role="status" aria-label={`Current page: ${trackingPageTitle}`}>
@@ -427,45 +434,69 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
 }
 
 export function AuthenticatedShell({ children }) {
-    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, moduleNavigationCatalog, pamoNativeModuleNavigation, demoDataNotice } = usePage().props;
+    const page = usePage();
+    const currentPageUrl = useRef(page.url);
+    currentPageUrl.current = page.url;
+    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, moduleNavigationCatalog, pamoNativeModuleNavigation, demoDataNotice } = page.props;
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
-    const [darkMode, setDarkMode] = useState(() => {
-        if (typeof window === 'undefined') return false;
-        const savedTheme = window.localStorage.getItem('theme');
-        return savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    });
+    const { darkMode, toggleTheme } = useThemeMotion();
     const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+    const [pendingNavigation, dispatchNavigationPending] = useReducer(navigationPendingReducer, null);
+    const navigationVisitSequence = useRef(0);
+    const pendingVisitIds = useRef(new Map());
+    const mainRef = useRef(null);
+    const focusedPageElement = useRef(null);
+    const latestPendingId = useRef(null);
 
     const userName = auth?.user?.name || 'User';
     const initials = userName.split(' ').map((part) => part[0]).slice(0, 2).join('').toUpperCase();
 
     useEffect(() => {
-        document.documentElement.classList.toggle('dark', darkMode);
-    }, [darkMode]);
-
-    useEffect(() => {
+        const stopNavigationStart = router.on('start', (event) => {
+            const visit = event.detail?.visit;
+            const intent = navigationSkeletonIntent(visit, currentPageUrl.current, ++navigationVisitSequence.current);
+            if (!intent) return;
+            const visitKey = navigationVisitKey(visit);
+            if (visitKey) pendingVisitIds.current.set(visitKey, [...(pendingVisitIds.current.get(visitKey) || []), intent.id]);
+            latestPendingId.current = intent.id;
+            const active = document.activeElement;
+            if (active instanceof HTMLElement && active.closest('[data-cds-page-content]')) {
+                focusedPageElement.current = active;
+                mainRef.current?.focus({ preventScroll: true });
+            }
+            dispatchNavigationPending({ type: 'start', intent });
+        });
+        const stopNavigationFinish = router.on('finish', (event) => {
+            const visit = event.detail?.visit;
+            const visitKey = navigationVisitKey(visit);
+            const pendingForUrl = visitKey && pendingVisitIds.current.get(visitKey);
+            const id = pendingForUrl?.shift();
+            if (id === undefined) return;
+            if (pendingForUrl.length === 0) pendingVisitIds.current.delete(visitKey);
+            dispatchNavigationPending({ type: 'finish', id });
+            if (latestPendingId.current === id && visit.cancelled && focusedPageElement.current?.isConnected) {
+                focusedPageElement.current.focus({ preventScroll: true });
+            }
+            if (latestPendingId.current === id) {
+                latestPendingId.current = null;
+                focusedPageElement.current = null;
+            }
+        });
         const stopNavigationCleanup = router.on('navigate', () => {
             setProfileOpen(false);
             setSidebarOpen(false);
             setMobileSearchOpen(false);
         });
 
-        return () => stopNavigationCleanup();
+        return () => { stopNavigationStart(); stopNavigationFinish(); stopNavigationCleanup(); };
     }, []);
-
-    const toggleTheme = () => {
-        const next = !darkMode;
-        setDarkMode(next);
-        document.documentElement.classList.toggle('dark', next);
-        window.localStorage.setItem('theme', next ? 'dark' : 'light');
-    };
 
     return (
         <>
             <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} moduleNavigationCatalog={moduleNavigationCatalog} pamoNativeModuleNavigation={pamoNativeModuleNavigation} />
+                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} moduleNavigationCatalog={moduleNavigationCatalog} pamoNativeModuleNavigation={pamoNativeModuleNavigation} pendingUrl={pendingNavigation?.href ?? null} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-gray-600 transition hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-green-600/40 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" data-cds-action="true" data-cds-action-variant="primary">
@@ -479,7 +510,7 @@ export function AuthenticatedShell({ children }) {
                                 <IconifyIcon icon="solar:magnifer-linear" width="20" height="20" aria-hidden="true" />
                             </button>
                         <UtilityIconButton onClick={toggleTheme} className="border border-gray-200 dark:border-gray-700" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}>
-                                <IconifyIcon icon={darkMode ? 'solar:sun-2-linear' : 'solar:moon-linear'} width="19" height="19" aria-hidden="true" />
+                                <span className="cds-theme-toggle-icon" data-dark={darkMode ? 'true' : 'false'}><IconifyIcon icon={darkMode ? 'solar:sun-2-linear' : 'solar:moon-linear'} width="19" height="19" aria-hidden="true" /></span>
                         </UtilityIconButton>
                             <NotificationBell initial={notificationBell} />
                             <div className="relative">
@@ -503,7 +534,15 @@ export function AuthenticatedShell({ children }) {
                     </header>
                     {mobileSearchOpen && <div className="border-b border-gray-200 bg-white px-4 py-3 dark:border-gray-700 dark:bg-gray-900 md:hidden"><GlobalSearch onNavigate={() => setMobileSearchOpen(false)} /></div>}
                     {demoDataNotice?.label && <div className="mx-4 mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-950 shadow-sm dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100 sm:mx-6 lg:mx-8" role="status" aria-label="Demo data notice"><span className="rounded-full bg-amber-200 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-amber-950 dark:bg-amber-900 dark:text-amber-100">{demoDataNotice.label}</span><span>{demoDataNotice.message}</span></div>}
-                    <main className="mx-auto max-w-screen-2xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
+                    <NavigationPendingContext.Provider value={Boolean(pendingNavigation)}>
+                        <main ref={mainRef} tabIndex={-1} aria-busy={pendingNavigation ? 'true' : undefined} className="relative isolate mx-auto max-w-screen-2xl px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8">
+                            <div data-cds-page-content="true" inert={Boolean(pendingNavigation)} className={pendingNavigation ? 'invisible' : ''}>{children}</div>
+                            {pendingNavigation && <div className="pointer-events-none absolute inset-x-4 top-6 z-10 min-h-[min(65vh,52rem)] overflow-hidden sm:inset-x-6 lg:inset-x-8 lg:top-8" data-cds-navigation-pending>
+                                <span className="sr-only" role="status" aria-live="polite">Loading destination page</span>
+                                <NavigationSkeleton family={pendingNavigation.family} />
+                            </div>}
+                        </main>
+                    </NavigationPendingContext.Provider>
                 </div>
             </div>
         </>

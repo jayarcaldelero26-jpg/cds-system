@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { Head, router, useForm } from '@inertiajs/react';
 import { Children, cloneElement, isValidElement, useEffect, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
@@ -116,7 +117,7 @@ export function ModuleForm({ open = true, form, editing, programAreas, frequenci
         else if (!(form.data.offices || []).length) set('offices', [...developmentOffices]);
     };
     if (!present) return null;
-    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
+    return <ModalPortal><div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" role="presentation">
         <form ref={formRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} onSubmit={event => { if (saveBypassRef.current) { saveBypassRef.current = false; if (!saveInFlightRef.current && !form.processing) { saveInFlightRef.current = true; onSubmit(event); } else event.preventDefault(); return; } event.preventDefault(); if (!saveInFlightRef.current && !form.processing) setSaveConfirmationOpen(true); }} inert={saveConfirmationOpen || undefined} aria-hidden={saveConfirmationOpen || undefined} role="dialog" aria-modal="true" aria-label={editing ? 'Edit module definition' : 'Create module definition'} data-motion-state={phase} className="cds-modal-motion-panel max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
             <header className="flex items-start justify-between border-b border-slate-100 px-5 py-4 dark:border-gray-800"><div><h2 className="text-base font-bold text-slate-900 dark:text-white">{editing ? 'Edit Module' : 'Create Module'}</h2><p className="mt-1 text-xs text-slate-500">Configure a shared report workflow for Conservation or Development. Existing canonical adapters remain in place.</p></div><button type="button" onClick={onClose} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800" aria-label="Close module form"><Icon icon="lucide:x" width="16" height="16" aria-hidden="true" /></button></header>
             <div className="grid gap-4 p-5 sm:grid-cols-2">
@@ -141,7 +142,7 @@ export function ModuleForm({ open = true, form, editing, programAreas, frequenci
             <footer className="flex justify-end gap-2 border-t border-slate-100 px-5 py-4 dark:border-gray-800"><button type="button" onClick={onClose} className="h-10 rounded-lg border border-slate-200 px-4 text-xs font-bold text-slate-700 dark:border-gray-700 dark:text-gray-200" data-cds-action="true" data-cds-action-variant="cancel">Cancel</button><button type="submit" disabled={form.processing} className="h-10 rounded-lg bg-green-700 px-4 text-xs font-bold text-white disabled:opacity-50" data-cds-action="true" data-cds-action-variant="primary">{form.processing ? 'Saving\u2026' : editing ? 'Save Changes' : 'Create Module'}</button></footer>
         </form>
         <ConfirmDialog open={saveConfirmationOpen} title={editing ? 'Save module changes?' : 'Create this module?'} message="This saves the module definition and its configuration for future submissions." confirmLabel={editing ? 'Save Changes' : 'Create Module'} cancelLabel="Go Back" processing={form.processing} onConfirm={() => { if (!formRef.current || saveInFlightRef.current || form.processing) return; if (!formRef.current.checkValidity()) { setSaveConfirmationOpen(false); window.requestAnimationFrame(() => formRef.current?.reportValidity()); return; } saveBypassRef.current = true; setSaveConfirmationOpen(false); formRef.current.requestSubmit(); }} onCancel={() => !form.processing && setSaveConfirmationOpen(false)} />
-    </div>;
+    </div></ModalPortal>;
 }
 
 export function buildModuleFilterParams(filters, name, value) { return { ...filters, [name]: value || undefined }; }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import ModalPortal from '@/Components/ModalPortal';
 import CrudModalHeader from './CrudModalHeader';
 import CrudModalFooter from './CrudModalFooter';
 import SaveProgressIndicator from '@/Components/Attachments/SaveProgressIndicator';
@@ -155,7 +156,7 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
     }, [processing]);
     if (!present) return null;
     const displayPreview = Boolean(preview);
-    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${motion === 'soft' ? '' : 'bg-gray-950/60 backdrop-blur-xs'}`} onClick={event => {
+    return <ModalPortal><div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${motion === 'soft' ? '' : 'bg-gray-950/60 backdrop-blur-xs'}`} onClick={event => {
         const backdropTarget = event.target?.dataset?.modalBackdrop === 'true';
         if (open && closeOnOverlayClick && (event.target === event.currentTarget || backdropTarget) && !processing) onClose?.();
     }}>
@@ -194,5 +195,5 @@ export default function CrudFormModal({ open, mode = 'create', icon, title, subt
                 confirmationReturnFocusRef.current = null;
             }}
         />}
-    </div>;
+    </div></ModalPortal>;
 }

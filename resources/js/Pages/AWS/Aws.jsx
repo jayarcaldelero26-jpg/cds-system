@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";
 import DatePicker from "@/Components/DatePicker";import { useState, useEffect, useRef } from 'react';
 import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
@@ -605,7 +606,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
             </div>
 
             {importMotion.present &&
-      <div ref={importLayerRef} data-cds-modal-layer data-motion-state={importMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" role="presentation">
+      <ModalPortal><div ref={importLayerRef} data-cds-modal-layer data-motion-state={importMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" role="presentation">
                     <div ref={importDropRef} onTransitionEnd={importMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Import AWS Data" data-motion-state={importMotion.phase} data-cds-modal-drop-panel className="relative bg-white dark:bg-gray-900 rounded-2xl p-6 max-w-lg w-full shadow-2xl border border-gray-200 dark:border-gray-800 cds-modal-motion-panel space-y-6">
                         {importDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{importDropMessage}</div>}
                         <div className="flex items-center justify-between border-b pb-4 dark:border-gray-800">
@@ -669,12 +670,12 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             </div>
                         </form>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* VIEW MODAL */}
             {viewMotion.present && selectedRecord &&
-      <div ref={viewLayerRef} data-cds-modal-layer data-motion-state={viewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+      <ModalPortal><div ref={viewLayerRef} data-cds-modal-layer data-motion-state={viewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
                     <div ref={viewPanelRef} onTransitionEnd={viewMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="AWS Monitoring Full Details" data-motion-state={viewMotion.phase} className="relative w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
@@ -736,12 +737,12 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             <button type="button" onClick={() => setIsViewModalOpen(false)} className="rounded-xl bg-green-700 hover:bg-green-800 px-5 py-2 text-xs font-bold text-white shadow-md transition" data-cds-action="true" data-cds-action-variant="primary">Close Details</button>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* EDIT MODAL */}
             {editMotion.present && selectedRecord &&
-      <div ref={editLayerRef} data-cds-modal-layer data-motion-state={editMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
+      <ModalPortal><div ref={editLayerRef} data-cds-modal-layer data-motion-state={editMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
                     <div ref={editDropRef} onTransitionEnd={editMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit AWS Report" data-motion-state={editMotion.phase} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         {editDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{editDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
@@ -859,7 +860,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
                             </div>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* BULK DELETE CONFIRMATION */}

@@ -334,7 +334,7 @@ export const SubmissionDetailsPanel = ({ row, onViewFullDetails, onAction, onPre
     const custodyActions = routing.actions || [];
     const showCustodyActions = Boolean(row.can_transition && custodyActions.length > 0);
     return (
-        <aside className="cds-card-surface flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0 xl:max-h-[calc(100dvh-2rem)]">
+        <aside data-cds-reveal="card" className="cds-card-surface flex min-h-[420px] flex-col rounded-xl border border-gray-200 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900 xl:min-h-0 xl:max-h-[calc(100dvh-2rem)]">
             <div className="border-b border-gray-200 px-4 py-3 dark:border-gray-800">
                 <p className="text-sm font-extrabold text-gray-900 dark:text-white">
                     {pamoWorkspace ? 'Report Details' : 'Submission Details'}
@@ -523,7 +523,14 @@ export default function Index({
         pageProps.auth?.canAdminRoutingOverride,
     );
     const isGlobalMonitoring = Boolean(trackingContext.is_global_user);
-    const [tab, setTab] = useState(trackingContext.view || "incoming");
+    const routeTab = trackingContext.view || "incoming";
+    const [tab, setTab] = useState(routeTab);
+    const [previousRouteTab, setPreviousRouteTab] = useState(routeTab);
+    if (routeTab !== previousRouteTab) {
+        // Commit the destination rows in the same render as its navigation view.
+        setPreviousRouteTab(routeTab);
+        setTab(routeTab);
+    }
     const [search, setSearch] = useState(filters.search || "");
     const [module, setModule] = useState(filters.module || "");
     const [protectedAreaId, setProtectedAreaId] = useState(
@@ -1072,10 +1079,6 @@ export default function Index({
         : tab === "outgoing"
           ? ["submission", "office_area", "destination", "status"]
           : ["submission", "office_area", "status", "required_action", "deadline_submission"];
-    useEffect(
-        () => setTab(trackingContext.view || "incoming"),
-        [trackingContext.view],
-    );
     useEffect(() => {
         if (tab !== "incoming" || isGlobalMonitoring) return;
         const nextActionTab = reconcileIncomingActionTab(incomingActionTab, incomingActionTabs);

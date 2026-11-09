@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import { Link, useForm, usePage, router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import useModalFileDrop from '@/Components/Attachments/useModalFileDrop';
@@ -449,7 +450,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
 
             {/* VIEW ASSESSMENT FULL DETAILS MODAL */}
             {assessmentViewMotion.present && selectedAssessment &&
-      <div ref={assessmentViewLayerRef} data-cds-modal-layer data-motion-state={assessmentViewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+      <ModalPortal><div ref={assessmentViewLayerRef} data-cds-modal-layer data-motion-state={assessmentViewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
                     <div ref={assessmentViewPanelRef} onTransitionEnd={assessmentViewMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="IMEA Assessment Full Details" data-motion-state={assessmentViewMotion.phase} className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
@@ -510,12 +511,12 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <Button type="button" size="compact" onClick={() => setIsViewAssessmentModalOpen(false)} className="rounded-xl px-5 py-2 text-xs">Close Details</Button>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* EDIT MODAL FOR IMEA ASSESSMENTS */}
             {assessmentMotion.present &&
-      <div ref={assessmentLayerRef} data-cds-modal-layer data-motion-state={assessmentMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
+      <ModalPortal><div ref={assessmentLayerRef} data-cds-modal-layer data-motion-state={assessmentMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation">
                     <div ref={assessmentDropRef} onTransitionEnd={assessmentMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Edit IMEA Assessment" data-motion-state={assessmentMotion.phase} data-cds-modal-drop-panel className="relative w-full max-w-7xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[92vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         {assessmentDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{assessmentDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
@@ -727,12 +728,12 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             </div>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* MODAL FOR ADDING/EDITING FACILITIES */}
             {facilityMotion.present &&
-      <div ref={facilityLayerRef} data-cds-modal-layer data-motion-state={facilityMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+      <ModalPortal><div ref={facilityLayerRef} data-cds-modal-layer data-motion-state={facilityMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
                     <div ref={facilityPanelRef} onTransitionEnd={facilityMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Facility / Infrastructure Form" data-motion-state={facilityMotion.phase} className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <h3 className="font-bold text-gray-900 dark:text-white text-base">
@@ -850,12 +851,12 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             </div>
                         </form>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* VIEW FACILITY DETAILS MODAL */}
             {facilityViewMotion.present && selectedFacility &&
-      <div ref={facilityViewLayerRef} data-cds-modal-layer data-motion-state={facilityViewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
+      <ModalPortal><div ref={facilityViewLayerRef} data-cds-modal-layer data-motion-state={facilityViewMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs overflow-y-auto" role="presentation">
                     <div ref={facilityViewPanelRef} onTransitionEnd={facilityViewMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Facility Full Details" data-motion-state={facilityViewMotion.phase} className="relative w-full max-w-4xl rounded-2xl bg-white dark:bg-gray-900 shadow-2xl max-h-[90vh] flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
                             <div>
@@ -918,12 +919,12 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             <Button type="button" size="compact" onClick={() => setIsViewFacilityModalOpen(false)} className="rounded-xl px-5 py-2 text-xs">Close Details</Button>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* IMPORT EXCEL/CSV MODAL */}
             {canImport && importMotion.present &&
-      <div ref={importLayerRef} data-cds-modal-layer data-motion-state={importMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" role="presentation">
+      <ModalPortal><div ref={importLayerRef} data-cds-modal-layer data-motion-state={importMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs" role="presentation">
                     <div ref={importDropRef} onTransitionEnd={importMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Import Facilities" data-motion-state={importMotion.phase} data-cds-modal-drop-panel className="relative w-full max-w-lg rounded-2xl bg-white dark:bg-gray-900 shadow-2xl flex flex-col overflow-hidden cds-modal-motion-panel border border-gray-200 dark:border-gray-800">
                         {importDropMessage && <div className="cds-modal-drop-feedback" aria-live="polite">{importDropMessage}</div>}
                         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40">
@@ -949,7 +950,7 @@ export default function ImeaIndex({ assessments, facilities = { data: [] }, prot
                             </div>
                         </form>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             {/* DELETE ALERTS */}

@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import FloatingField from './FloatingField';
 
@@ -19,7 +19,7 @@ export default function ScopedOptionSelect({ id, label, value = '', options = []
     const selected = options.find(option => String(option.id) === String(value));
     const filtered = useMemo(() => options.filter(option => String(option.label || option.name).toLowerCase().includes(query.toLowerCase())), [options, query]);
     const choose = option => { onChange?.(String(option.id)); setQuery(''); setOpen(false); };
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!open) return undefined;
         const position = () => {
             const rect = inputRef.current?.getBoundingClientRect();
@@ -57,7 +57,7 @@ export default function ScopedOptionSelect({ id, label, value = '', options = []
             className={`block w-full rounded-lg border-0 bg-transparent px-3 pt-[1.05rem] pb-1 text-sm text-gray-900 outline-none focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-green-700 dark:text-gray-100 ${sizeClasses}`}
             value={open ? query : selectedLabel} placeholder={!selected && open ? placeholder : ''} onKeyDown={keyDown}
             onFocus={() => { if (!disabled && !readOnly) { setOpen(true); setQuery(''); } }} onChange={event => { setQuery(event.target.value); setOpen(true); setActive(0); }} onBlur={event => { if (!event.currentTarget.parentElement?.contains(event.relatedTarget)) { setOpen(false); setQuery(''); } }} />
-        {!disabled && !readOnly && open && typeof document !== 'undefined' && createPortal(<div ref={menuRef} id={`${fieldId}-options`} role="listbox" className="cds-filter-dropdown overflow-auto p-1" style={menuStyle}>
+        {!disabled && !readOnly && open && menuStyle && typeof document !== 'undefined' && createPortal(<div ref={menuRef} id={`${fieldId}-options`} role="listbox" className="cds-filter-dropdown overflow-auto p-1" style={menuStyle}>
             {filtered.length ? filtered.map((option, index) => <ScopedSelectOption key={option.id} option={option} selected={String(option.id) === String(value)} active={index === active} onActivate={() => setActive(index)} onChoose={() => choose(option)} />) : <p className="px-3 py-2 text-sm text-gray-600 dark:text-gray-300">No matching options</p>}
         </div>, document.body)}
         </>}

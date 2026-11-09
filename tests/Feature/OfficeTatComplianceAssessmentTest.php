@@ -302,19 +302,18 @@ test('Office TAT limits a local participant roster and does not label a partial 
     ]);
     $viewer->givePermissionTo([$view, $configure]);
 
-    $this->actingAs($viewer)->get('/admin/office-tat?unit=development&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
-        ->component('Admin/OfficeTat/Index')
-        ->where('selectedUnit', 'development')
-        ->where('authorizedUnits', ['conservation', 'development'])
-        ->where('recordedAssessment.unit', 'development')
-        ->where('recordedAssessment.roster_count', 1)
-        ->where('recordedAssessment.roster_complete', false)
-        ->where('recordedAssessment.ranking_scope', 'authorized_participants_only')
-        ->where('recordedAssessment.rows.0.name', 'CENRO Baganga')
-        ->where('recordedAssessment.rows.0.rank_status', 'Comparison limited by organizational access'));
+    $this->actingAs($viewer)->get(route('office-tat.index'))->assertForbidden();
+    $assessment = app(OfficeTatComplianceAssessmentService::class)
+        ->recordedAssessments($viewer, 'development', '2026-H2', '2026-10-11');
+    expect($assessment['unit'])->toBe('development')
+        ->and($assessment['roster_count'])->toBe(1)
+        ->and($assessment['roster_complete'])->toBeFalse()
+        ->and($assessment['ranking_scope'])->toBe('authorized_participants_only')
+        ->and($assessment['rows'][0]['name'])->toBe('CENRO Baganga')
+        ->and($assessment['rows'][0]['rank_status'])->toBe('Comparison limited by organizational access');
 
     $global = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
-    $global->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $global->assignRole(Role::findOrCreate('Super Admin', 'web'));
     $global->givePermissionTo([$view, $configure]);
     $this->actingAs($global)->get('/admin/office-tat?unit=conservation&processing_period=2026-H2&as_of_date=2026-10-11')->assertOk()->assertInertia(fn ($page) => $page
         ->component('Admin/OfficeTat/Index')
@@ -327,7 +326,7 @@ test('Office TAT limits a local participant roster and does not label a partial 
 
 test('Office TAT route returns a roster whose selected unit and participant identities agree', function (): void {
     $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
-    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
     $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
     $area = complianceAssessmentArea('Unit Response Test PA', 'Active', 'PAMO Unit Response');
 
@@ -570,7 +569,7 @@ test('recorded TAT counts actual report IDs once and keeps PA, ENGP, pending, ea
 test('PAMO preparation average route exposes the retained preparation measurement separately', function (): void {
     $this->withoutVite();
     $actor = User::factory()->create(['unit_assignment' => null, 'section' => 'CDS']);
-    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
     $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
 
     $this->actingAs($actor)

@@ -4,6 +4,8 @@ import { createInertiaApp } from '@inertiajs/react';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { createRoot } from 'react-dom/client';
 import { AuthenticatedShell } from './Layouts/AuthenticatedLayout';
+import { withPageMotion } from './Components/PageMotion';
+import { readPreferredTheme } from './Utils/shellMotion.mjs';
 
 const appName = import.meta.env.VITE_APP_NAME || 'CDS-SMART';
 const pageModules = import.meta.glob('./Pages/**/*.jsx');
@@ -20,13 +22,14 @@ const resolve = async (name) => {
         Page.layout = (pageElement) => <AuthenticatedShell>{pageElement}</AuthenticatedShell>;
     }
 
-    return Page;
+    return withPageMotion(Page);
 };
 
 createInertiaApp({
     title: (title) => `${title} - ${appName}`,
     resolve,
     setup({ el, App, props }) {
+        document.documentElement.classList.toggle('dark', readPreferredTheme());
         createRoot(el).render(<App {...props} />);
     },
     // 🚀 GI-UPDATE KINI NGA PROGRESS CONFIGURATION 🚀

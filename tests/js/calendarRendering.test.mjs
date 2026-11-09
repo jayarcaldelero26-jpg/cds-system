@@ -14,7 +14,7 @@ const load = async path => {
         configFile: false,
         plugins: [viteReactInterop(), react()],
         resolve: { alias: { '@': resolve('resources/js') } },
-        server: { middlewareMode: true, hmr: false },
+        server: { middlewareMode: true, hmr: false, ws: false },
         appType: 'custom',
         logLevel: 'error',
     });

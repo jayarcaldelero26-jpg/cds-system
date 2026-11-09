@@ -59,7 +59,7 @@ test('isolated capacity profile samples Document TAT and Submission Tracking at 
     $actor = User::factory()->create([
         'section' => 'CDS', 'unit_assignment' => null, 'is_approved' => true, 'is_active' => true,
     ]);
-    $actor->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $actor->assignRole(Role::findOrCreate('Super Admin', 'web'));
     $actor->givePermissionTo(Permission::findOrCreate('office-tat.view', 'web'));
     $area = ProtectedArea::query()->create([
         'name' => 'Isolated Capacity Test PA', 'short_name' => 'ICTPA', 'category' => 'Protected Landscape',
@@ -147,6 +147,7 @@ test('isolated capacity profile samples Document TAT and Submission Tracking at 
         'database' => 'sqlite :memory:', 'targets' => [], 'note' => 'first sample then five warm; peak_php_bytes is process allocation peak; payload_bytes is serialized service JSON for service cases and rendered response body for controller cases; no browser or wire timing is claimed',
     ];
     $targets = array_values(array_filter(array_map('intval', explode(',', (string) (getenv('CDS_CAPACITY_PROFILE_TARGETS') ?: '100,1000,5000'))), static fn (int $value): bool => in_array($value, [100, 1000, 5000], true)));
+    $processedGenericEventCount = 0;
     foreach ($targets as $target) {
         $genericTarget = $target - 8;
         $rows = [];
@@ -167,14 +168,35 @@ test('isolated capacity profile samples Document TAT and Submission Tracking at 
         }
         if ($rows !== []) DB::table($genericTable)->insert($rows);
 
+        $newGenericIds = DB::table($genericTable)->orderBy('id')->skip($processedGenericEventCount)
+            ->take($genericCount - $processedGenericEventCount)->pluck('id')->map(static fn ($id): int => (int) $id)->all();
+        foreach (array_chunk($newGenericIds, 500) as $ids) {
+            $events = array_map(static fn (int $id): array => [
+                'source_type' => 'conservation', 'source_id' => $id, 'workflow_key' => 'general_report',
+                'event_key' => 'forwarded', 'from_stage' => DocumentRoutingProfileRegistry::PAMO_ORIGIN,
+                'to_stage' => DocumentRoutingProfileRegistry::TRANSIT_PENRO_RECORDS,
+                'from_office' => 'Synthetic source office', 'to_office' => 'Synthetic receiving office',
+                'occurred_at' => '2026-10-22 09:00:00', 'recorded_by' => $actor->getKey(),
+                'metadata' => json_encode(['action_key' => 'forward_from_pamo'], JSON_THROW_ON_ERROR),
+                'created_at' => now(), 'updated_at' => now(),
+            ], $ids);
+            DB::table('document_routing_events')->insert($events);
+        }
+        $processedGenericEventCount = $genericCount;
+
         $nativeReportCount = 0;
         foreach (app(PamoNativeSourceRegistry::class)->all() as $source) {
             $nativeReportCount += DB::table((new $source['model'])->getTable())->count();
         }
         $engpCount = EngpReportSubmission::query()->count();
         $total = ConservationReportSubmission::query()->count() + $nativeReportCount + $engpCount;
-        $processed = $genericCount + DB::table('document_routing_events')->select('source_type', 'source_id')->distinct()->get()->count();
+        $processed = DB::table('document_routing_events')->select('source_type', 'source_id')->distinct()->get()->count();
         expect($total)->toBe($target)->and($processed)->toBe($target);
+
+        $conservationAssessment['office_tat_assessment']['rows'] = app(OfficeTatProcessedDocumentSourceService::class)
+            ->forAssessment($actor, $conservationAssessment);
+        $developmentAssessment['office_tat_assessment']['rows'] = app(OfficeTatProcessedDocumentSourceService::class)
+            ->forAssessment($actor, $developmentAssessment);
 
         $testCase = $this;
         $tatSamples = [];

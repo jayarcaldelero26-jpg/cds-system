@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { FloatingInput } from "@/Components/Form";import { Icon } from '@iconify/react';import { Link, router, usePage } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import AuthenticatedLayout from '../../Layouts/AuthenticatedLayout';
@@ -392,7 +393,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
 
             {/* FULL DETAILS MODAL */}
             {detailsPresent && selectedArea &&
-      <div ref={detailsOverlayRef} data-cds-modal-layer data-motion-state={detailsPhase}
+      <ModalPortal><div ref={detailsOverlayRef} data-cds-modal-layer data-motion-state={detailsPhase}
         className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-[2px]"
         onMouseDown={(event) => {
           if (detailsOpen && event.target === event.currentTarget) closeDetails();
@@ -616,7 +617,7 @@ export default function Index({ protectedAreas, filters, officeOptions = [], pam
                             </button>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
 
             <ConfirmDialog

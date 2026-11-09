@@ -61,6 +61,7 @@ class LocalNavigationTraceTest extends TestCase
 
         $request = $this->request('GET', '127.0.0.1', false, 'submission-tracking.index');
         $this->assertTrue(LocalNavigationTrace::eligible($request));
+        $this->assertTrue(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'reports.index', 'cds-smart-web.test')));
         $this->assertTrue(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'submission-tracking.index')));
         $detailRequest = $this->request('GET', '127.0.0.1', true, 'settings.historical-reports.show');
         $this->assertTrue(LocalNavigationTrace::eligible($detailRequest));
@@ -130,6 +131,7 @@ class LocalNavigationTraceTest extends TestCase
         $this->assertFalse(LocalNavigationTrace::eligible($this->request('POST', '127.0.0.1', true, 'submission-tracking.index')));
         $this->assertFalse(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'submission-tracking.transition')));
         $this->assertFalse(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'submission-tracking.index', 'other.local')));
+        $this->assertFalse(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'reports.index', 'attacker.test')));
         $this->assertFalse(LocalNavigationTrace::eligible($this->request('GET', '127.0.0.1', true, 'submission-tracking.index', 'cds-system.test', false)));
 
         $this->app['env'] = 'testing';

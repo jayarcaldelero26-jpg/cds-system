@@ -62,6 +62,15 @@
 
 .edats-current-stage-pulse { animation: edats-current-stage-pulse 2s ease-in-out infinite; }
 
+@keyframes cds-skeleton-opacity {
+    0%, 100% { opacity: .58; }
+    50% { opacity: .88; }
+}
+.cds-skeleton { animation: cds-skeleton-opacity 2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+    .cds-skeleton { animation: none; }
+}
+
 .edats-current-stage-marker { overflow: visible; }
 
 .edats-current-stage-marker__halo {
@@ -1097,5 +1106,71 @@ button[role="tab"]:focus-visible {
         grid-column: 1;
         grid-row: 2;
         justify-self: end;
+    }
+}
+
+/* Shared shell motion uses the existing selected-tab palette. */
+.cds-navigation-pill {
+    position: absolute;
+    z-index: 0;
+    margin: 0 !important;
+    pointer-events: none;
+    border-radius: 0.75rem;
+    transform-origin: top left;
+    background-image: var(--cds-selected-tab-gradient);
+    box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.2), 0 2px 7px rgb(3 25 43 / 0.18);
+}
+
+.cds-navigation-link {
+    position: relative;
+    z-index: 1;
+}
+
+.cds-navigation-link:hover {
+    transform: none;
+}
+
+nav[data-cds-nav-motion="ready"] .cds-navigation-link[aria-current="page"] {
+    background-color: transparent;
+    background-image: none;
+}
+
+.cds-theme-toggle-icon {
+    display: inline-flex;
+    transition: transform 200ms ease;
+}
+
+.cds-theme-toggle-icon[data-dark="true"] {
+    transform: rotate(180deg);
+}
+
+@keyframes cds-theme-fade-out {
+    to { opacity: 0; }
+}
+
+@keyframes cds-theme-fade-in {
+    from { opacity: 0; }
+}
+
+:root[data-cds-theme-transition]::view-transition {
+    pointer-events: none;
+}
+
+:root[data-cds-theme-transition]::view-transition-old(root) {
+    animation: cds-theme-fade-out 200ms ease both;
+}
+
+:root[data-cds-theme-transition]::view-transition-new(root) {
+    animation: cds-theme-fade-in 200ms ease both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cds-theme-toggle-icon {
+        transition: none;
+    }
+
+    :root[data-cds-theme-transition]::view-transition-old(root),
+    :root[data-cds-theme-transition]::view-transition-new(root) {
+        animation: none;
     }
 }

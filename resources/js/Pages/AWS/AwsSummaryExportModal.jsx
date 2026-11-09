@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { Icon } from '@iconify/react';
 import { useEffect, useRef, useState } from 'react';
 import CrudModalFooter from '@/Components/Crud/CrudModalFooter';
@@ -84,7 +85,7 @@ export default function AwsSummaryExportModal({ open, onClose, onExport, returnF
 
     const generatingLabel = generating ? `Generating ${formatNames[generating]}...` : '';
 
-    return <div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation" onMouseDown={(event) => { if (open && event.target === event.currentTarget) close(); }}>
+    return <ModalPortal><div ref={overlayRef} data-cds-modal-layer data-motion-state={phase} className="cds-modal-motion-backdrop fixed inset-0 z-[60] flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs" role="presentation" onMouseDown={(event) => { if (open && event.target === event.currentTarget) close(); }}>
         <div ref={dialogRef} onTransitionEnd={onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="aws-export-title" aria-describedby="aws-export-subtitle" data-motion-state={phase} className="cds-modal-motion-panel flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900">
             <CrudModalHeader title="Export AWS Monitoring Summary" subtitle="Choose the file format for the current monitoring report." onClose={generating ? undefined : close} />
             <div className="custom-table-scrollbar min-h-0 overflow-y-auto p-5 sm:p-6">
@@ -116,5 +117,5 @@ export default function AwsSummaryExportModal({ open, onClose, onExport, returnF
                 <Button type="button" size="compact" variant="primary" onClick={exportFile} disabled={!selectedFormat || Boolean(generating)} className="rounded-xl px-5 py-2.5 text-xs">{generating ? generatingLabel : 'Export File'}</Button>
             </CrudModalFooter>
         </div>
-    </div>;
+    </div></ModalPortal>;
 }

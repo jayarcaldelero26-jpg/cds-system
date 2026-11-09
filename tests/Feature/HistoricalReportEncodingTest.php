@@ -670,6 +670,7 @@ test('historical ENGP encoding never overwrites a live office-period submission'
 test('Office TAT is limited to PAMO and CENRO and versioned targets leave SLA compliance unavailable', function (): void {
     $this->withoutVite();
     $user = historicalEncodingActor();
+    $user->assignRole(Role::findOrCreate('Super Admin', 'web'));
     $payload = [
         'office_category' => 'CENRO',
         'office' => 'CENRO Mati',
@@ -688,30 +689,32 @@ test('Office TAT is limited to PAMO and CENRO and versioned targets leave SLA co
     expect(DB::table('office_tat_configuration_versions')->count())->toBe(1);
 
     $this->actingAs($user)->get(route('office-tat.index', [
-        'category' => 'CENRO', 'processing_period' => '2026-H2', 'as_of_date' => '2026-10-09',
+        'unit' => 'development', 'processing_period' => '2026-H2', 'as_of_date' => '2026-10-09',
     ]))->assertOk()->assertInertia(fn ($page) => $page
         ->component('Admin/OfficeTat/Index')
-        ->where('analytics.category', 'CENRO')
-        ->where('analytics.options.offices', function ($offices): bool {
-            expect(collect($offices))->toContain('CENRO Mati')->not->toContain('PENRO Davao Oriental');
-            return true;
-        })
-        ->where('analytics.rows', function ($rows): bool {
-            $mati = collect($rows)->firstWhere('office', 'CENRO Mati');
-            expect($mati)->not->toBeNull()
-                ->and($mati['volume_target'])->toBe(12)
-                ->and($mati['configuration_version'])->toBe(1)
-                ->and($mati['tat_compliance_percent'])->toBeNull()
-                ->and($mati['score'])->toBeNull();
-            return true;
-        }));
+        ->where('selectedUnit', 'development')
+        ->where('filters.processing_period', '2026-H2')
+        ->has('recordedAssessment'));
+
+    $analytics = app(OfficeTatAnalyticsService::class);
+    $result = $analytics->analytics($user, [
+        'category' => 'CENRO', 'processing_period' => '2026-H2', 'as_of_date' => '2026-10-09',
+    ]);
+    $mati = collect($result['rows'])->firstWhere('office', 'CENRO Mati');
+    expect($result['options']['offices'])->toContain('CENRO Mati')->not->toContain('PENRO Davao Oriental')
+        ->and($mati)->not->toBeNull()
+        ->and($mati['volume_target'])->toBe(12)
+        ->and($mati['configuration_version'])->toBe(1)
+        ->and($mati['tat_compliance_percent'])->toBeNull()
+        ->and($mati['score'])->toBeNull();
 
     $this->actingAs($user)->post(route('office-tat.configuration.store'), [...$payload, 'volume_target' => 18])->assertRedirect();
     $this->assertDatabaseHas('office_tat_configuration_versions', [
         'office_category' => 'CENRO', 'office' => 'CENRO Mati', 'period_key' => '2026-H2', 'version' => 2, 'volume_target' => 18,
     ]);
 
-    $this->actingAs($user)->get(route('office-tat.index', ['category' => 'PENRO', 'processing_period' => '2026-H2']))->assertUnprocessable();
+    expect(fn () => $analytics->analytics($user, ['category' => 'PENRO', 'processing_period' => '2026-H2']))
+        ->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
     $this->actingAs($user)->post(route('office-tat.configuration.store'), [...$payload, 'office_category' => 'PENRO'])
         ->assertSessionHasErrors('office_category');
     expect(DB::table('office_tat_configuration_versions')->count())->toBe(2);

@@ -1,5 +1,5 @@
 import { Head } from '@inertiajs/react';
-import { useEffect, useState } from 'react';
+import { useThemeMotion } from '../Utils/useThemeMotion.js';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 
 function ThemeIcon({ darkMode }) {
@@ -15,21 +15,7 @@ function BrandDivider() {
 }
 
 export default function AuthLayout({ title, children, contentClassName = '', cleanBackground = false }) {
-    const [darkMode, setDarkMode] = useState(false);
-
-    useEffect(() => {
-        const savedTheme = window.localStorage.getItem('cds-theme');
-        const shouldUseDark = savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        setDarkMode(shouldUseDark);
-        document.documentElement.classList.toggle('dark', shouldUseDark);
-    }, []);
-
-    const toggleTheme = () => {
-        const next = !darkMode;
-        setDarkMode(next);
-        document.documentElement.classList.toggle('dark', next);
-        window.localStorage.setItem('cds-theme', next ? 'dark' : 'light');
-    };
+    const { darkMode, toggleTheme } = useThemeMotion();
 
     return (
         <>
@@ -41,7 +27,7 @@ export default function AuthLayout({ title, children, contentClassName = '', cle
             >
                 <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-emerald-950/55 via-emerald-950/45 to-slate-950/55" aria-hidden="true" />
                 <button type="button" onClick={toggleTheme} className="absolute right-4 top-4 z-10 inline-flex h-9 items-center gap-1.5 rounded-full border border-emerald-950/10 bg-white/80 px-3 text-xs font-semibold text-emerald-900 shadow-sm backdrop-blur-sm transition hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-700 dark:border-emerald-100/15 dark:bg-slate-900/80 dark:text-emerald-200 dark:hover:bg-slate-800 sm:right-6 sm:top-6" aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'} data-cds-action="true" data-cds-action-variant="primary">
-                    <ThemeIcon darkMode={darkMode} />
+                    <span className="cds-theme-toggle-icon" data-dark={darkMode ? 'true' : 'false'}><ThemeIcon darkMode={darkMode} /></span>
                     <span>{darkMode ? 'Light' : 'Dark'}</span>
                 </button>
 

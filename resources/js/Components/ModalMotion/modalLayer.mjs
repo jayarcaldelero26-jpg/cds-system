@@ -2,6 +2,7 @@ const layers = new Map();
 let sequence = 0;
 let listeningDocument = null;
 let originalBodyOverflow = null;
+let originalBodyPaddingRight = null;
 
 function stopEvent(event) {
     event.preventDefault();
@@ -69,14 +70,24 @@ function handleDocumentKeydown(event) {
 
 function lockBody(documentObject) {
     if (originalBodyOverflow !== null || !documentObject?.body) return;
-    originalBodyOverflow = documentObject.body.style.overflow;
-    documentObject.body.style.overflow = 'hidden';
+    const body = documentObject.body;
+    originalBodyOverflow = body.style.overflow;
+    originalBodyPaddingRight = body.style.paddingRight;
+    const view = documentObject.defaultView;
+    const scrollbarWidth = Math.max(0, (view?.innerWidth || 0) - (documentObject.documentElement?.clientWidth || 0));
+    if (scrollbarWidth > 0 && view) {
+        const computedPadding = Number.parseFloat(view.getComputedStyle(body).paddingRight) || 0;
+        body.style.paddingRight = `${computedPadding + scrollbarWidth}px`;
+    }
+    body.style.overflow = 'hidden';
 }
 
 function unlockBody(documentObject) {
     if (originalBodyOverflow === null || !documentObject?.body) return;
     documentObject.body.style.overflow = originalBodyOverflow;
+    documentObject.body.style.paddingRight = originalBodyPaddingRight;
     originalBodyOverflow = null;
+    originalBodyPaddingRight = null;
 }
 
 export function registerModalLayer(layer) {

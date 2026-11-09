@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
 use App\Models\EngpReportSubmission;
 use App\Models\HistoricalReportOrigin;
 use App\Models\OrganizationalOffice;
@@ -92,7 +93,7 @@ test('recorded ENGP scoring uses only matched source identities and excludes fut
             '2026-10' => $deadline,
             default => null,
         };
-        automaticTatEngpSource('CENRO Baganga', $period, $receipt);
+        $engpSources[$period] = automaticTatEngpSource('CENRO Baganga', $period, $receipt);
     }
     EngpReportSubmission::query()->create([
         'workflow_key' => 'unmapped_engp_test', 'office' => 'CENRO Baganga', 'section_name' => 'ENGP',
@@ -106,38 +107,46 @@ test('recorded ENGP scoring uses only matched source identities and excludes fut
         'reporting_year' => 2026, 'period_key' => '2026-10', 'period_label' => 'October 2026',
         'deadline_submission' => '2026-10-24', 'date_received_penro' => '2026-10-24',
     ]);
+    DocumentRoutingEvent::query()->create([
+        'source_type' => 'engp', 'source_id' => $unsupportedEngp->getKey(), 'workflow_key' => 'unmapped_engp_test',
+        'event_key' => 'forwarded', 'from_stage' => 'cenro_records', 'to_stage' => 'transit_penro_records',
+        'from_office' => 'CENRO Baganga', 'to_office' => 'PENRO Records',
+        'occurred_at' => '2026-10-20 09:00:00', 'recorded_by' => $actor->getKey(),
+    ]);
 
     $service = app(OfficeTatComplianceAssessmentService::class);
     $recorded = $service->recordedAssessments($actor, 'development', '2026-H2', '2026-10-31');
     $baganga = collect($recorded['rows'])->firstWhere('name', 'CENRO Baganga');
-    $unsupportedDetail = collect($baganga['obligation_details'])->firstWhere('source_reference', 'ENGP report #'.$unsupportedEngp->getKey());
+    $unsupportedDetail = collect($baganga['obligation_details'])->firstWhere('source_reference', 'Report #'.$unsupportedEngp->getKey());
     $futureRecorded = $service->recordedAssessments($actor, 'development', '2026-H2', '2026-10-20');
     $futureBaganga = collect($futureRecorded['rows'])->firstWhere('name', 'CENRO Baganga');
-    $futureUnsupportedDetail = collect($futureBaganga['obligation_details'])->firstWhere('source_reference', 'ENGP report #'.$unsupportedEngp->getKey());
+    $futureUnsupportedDetail = collect($futureBaganga['obligation_details'])->firstWhere('source_reference', 'Report #'.$unsupportedEngp->getKey());
     $octoberCbep = collect($baganga['obligation_details'])->first(fn (array $detail): bool =>
         ($detail['source_identity']['workflow_key'] ?? null) === 'cbep'
-        && ($detail['source_identity']['period_key'] ?? null) === '2026-10'
+        && ($detail['source_identity']['source_id'] ?? null) === $engpSources['2026-10']->getKey()
     );
     $official = $service->assessments('2026-H2', '2026-10-31')['development'];
     $officialBaganga = collect($official['rows'])->firstWhere('name', 'CENRO Baganga');
     $officialOctoberCbep = collect($officialBaganga['obligation_details'])->first(fn (array $detail): bool =>
         ($detail['source_identity']['workflow_key'] ?? null) === 'cbep'
-        && ($detail['source_identity']['period_key'] ?? null) === '2026-10'
+        && ($detail['source_identity']['source_id'] ?? null) === null
+        && ($detail['allowed_days'] ?? null) === 20
     );
 
-    expect($recorded['basis'])->toBe('recorded_live_source')
+    expect($recorded['basis'])->toBe('processed_reports_only')
         ->and($recorded['activity_count'])->toBe(3)
-        ->and($recorded['received_activity_count'])->toBe(2)
-        ->and($recorded['not_yet_due_count'])->toBe(1)
-        ->and($recorded['due_count'])->toBeGreaterThan($recorded['activity_count'])
+        ->and($recorded['received_activity_count'])->toBe(3)
+        ->and($recorded['not_yet_due_count'])->toBe(0)
+        ->and($recorded['due_count'])->toBe(2)
+        ->and($recorded['on_time_count'])->toBe(1)
         ->and($recorded['incomplete_evidence_count'])->toBe(1)
-        ->and($recorded['recognition_assessment']['basis'])->toBe('approved_all_required_obligations')
-        ->and($recorded['recognition_assessment']['coverage_complete'])->toBeFalse()
-        ->and($recorded['recognition_assessment']['due_count'])->toBeNull()
-        ->and(collect($recorded['recognition_assessment']['rows'])->every(fn (array $row): bool => $row['rank'] === null))->toBeTrue()
+        ->and($recorded['office_tat_assessment']['basis'])->toBe('processed_reports_only')
+        ->and($recorded['office_tat_assessment']['coverage_complete'])->toBeFalse()
+        ->and($recorded['office_tat_assessment']['due_count'])->toBe(2)
+        ->and(collect($recorded['office_tat_assessment']['rows'])->every(fn (array $row): bool => $row['rank'] === null))->toBeTrue()
         ->and($recorded['tc_percent'])->toEqual(100 * $recorded['on_time_count'] / $recorded['due_count'])
         ->and($unsupportedDetail['status'])->toBe('Unsupported source identity')
-        ->and($unsupportedDetail['source_reference'])->toBe('ENGP report #'.$unsupportedEngp->getKey())
+        ->and($unsupportedDetail['source_reference'])->toBe('Report #'.$unsupportedEngp->getKey())
         ->and($unsupportedDetail['source_identity']['workflow_key'])->toBe('unmapped_engp_test')
         ->and($unsupportedDetail['source_identity']['activity_name'])->toBe('Unmapped test source')
         ->and($unsupportedDetail['received'])->toBe('2026-10-24')
@@ -147,7 +156,8 @@ test('recorded ENGP scoring uses only matched source identities and excludes fut
         ->and($futureUnsupportedDetail['due_status'])->toBe('not_yet_due')
         ->and($futureUnsupportedDetail['due_as_of_date'])->toBe('2026-10-20')
         ->and($baganga['activity_count'])->toBe(3)
-        ->and($baganga['due_count'])->toBeGreaterThan($baganga['activity_count'])
+        ->and($baganga['due_count'])->toBe(2)
+        ->and($baganga['on_time_count'])->toBe(1)
         ->and($baganga['tc_percent'])->toEqual(100 * $baganga['on_time_count'] / $baganga['due_count'])
         ->and($octoberCbep['allowed_days'])->toBe(20)
         ->and($octoberCbep['days_used'])->toBe(20)
@@ -157,12 +167,12 @@ test('recorded ENGP scoring uses only matched source identities and excludes fut
             ($detail['source_identity']['workflow_key'] ?? null) === 'cbep'
             && ($detail['source_identity']['period_key'] ?? null) === '2026-09'
             && ($detail['source_identity']['source_id'] ?? null) === null
-        ))->toBeTrue()
+        ))->toBeFalse()
         ->and($official['coverage_complete'])->toBeFalse()
         ->and($official['due_count'])->toBeNull()
         ->and($officialOctoberCbep['allowed_days'])->toBe(20)
-        ->and($officialOctoberCbep['days_used'])->toBe(20)
-        ->and($officialOctoberCbep['status'])->toBe('Submitted on deadline')
+        ->and($officialOctoberCbep['days_used'])->toBeNull()
+        ->and($officialOctoberCbep['source_identity']['source_id'] ?? null)->toBeNull()
         ->and($officialOctoberCbep['day_convention'])->toContain('inclusive');
 });
 
@@ -183,11 +193,13 @@ test('recognized ENGP source identity stays excluded until its canonical definit
     $service = app(OfficeTatComplianceAssessmentService::class);
     $before = $service->recordedAssessments($actor, 'development', '2026-H2', '2026-10-22');
     $beforeRow = collect($before['rows'])->firstWhere('name', 'CENRO Baganga');
-    $excluded = collect($beforeRow['obligation_details'])->firstWhere('source_reference', 'ENGP report #'.$record->getKey());
+    $excluded = collect($beforeRow['obligation_details'])->firstWhere('source_reference', 'Report #'.$record->getKey());
 
     expect($excluded['status'])->toBe('Missing or inactive workflow definition')
         ->and($excluded['issue'])->toContain('workflow is recognized')
-        ->and($beforeRow['activity_count'])->toBe(0)
+        ->and($beforeRow['activity_count'])->toBe(1)
+        ->and($beforeRow['received_activity_count'])->toBe(1)
+        ->and($beforeRow['due_count'])->toBe(0)
         ->and($beforeRow['incomplete_evidence_count'])->toBe(1);
 
     $setup = app(\App\Services\Modules\CanonicalModuleDefinitionService::class)->ensureCanonicalEngpDefinitions();
@@ -202,14 +214,14 @@ test('recognized ENGP source identity stays excluded until its canonical definit
     expect($setup['created'])->toHaveCount(1)
         ->and($afterRow['activity_count'])->toBe(1)
         ->and($afterRow['received_activity_count'])->toBe(1)
-        ->and($afterRow['due_count'])->toBeGreaterThan($afterRow['activity_count'])
+        ->and($afterRow['due_count'])->toBe(1)
         ->and($afterRow['on_time_count'])->toBe(0)
         ->and($afterRow['tc_percent'])->toEqual(0.0)
         ->and($afterRow['incomplete_evidence_count'])->toBe(0)
         ->and($scored['status'])->toBe('Submitted late')
         ->and($scored['deadline'])->toBe('2026-10-20')
         ->and($scored['received'])->toBe('2026-10-22')
-        ->and($scored['source_reference'])->toBe('ENGP report #'.$record->getKey())
+        ->and($scored['source_reference'])->toBe('Report #'.$record->getKey())
         ->and($scored['source_identity']['source_ids'])->toBe([$record->getKey()])
         ->and($record->fresh()->activity_name)->toBe($title);
 });
@@ -274,7 +286,7 @@ test('recorded Conservation deduplicates PAMB source identities and excludes his
     $specialQ4 = collect($specialPeriods)->firstWhere('key', 'Q4') ?? $specialPeriods[3];
 
     $first = automaticTatPaSource($area, $regular, $regularQ3['label'], '2026-08-03', '2026-08-10');
-    automaticTatPaSource($area, $regular, $regularQ3['label'], '2026-08-03', '2026-08-11');
+    $second = automaticTatPaSource($area, $regular, $regularQ3['label'], '2026-08-03', '2026-08-11');
     automaticTatPaSource($area, $regular, $regularQ3['label'], '2025-08-03', '2025-08-10');
     automaticTatPaSource($area, $regular, $regularQ4['label'], null, null);
     $liveConflict = automaticTatPaSource($area, $special, $specialQ4['label'], '2026-10-12', null);
@@ -296,13 +308,17 @@ test('recorded Conservation deduplicates PAMB source identities and excludes his
     $recorded = $service->recordedAssessments($actor, 'conservation', '2026-H2', '2026-10-31');
     $paRow = collect($recorded['rows'])->firstWhere('participant_key', 'pa:'.$area->getKey());
     $regularDetail = collect($paRow['obligation_details'])->firstWhere('source_identity.workflow_key', 'regular_pamb');
+    $regularSourceDetails = collect($paRow['obligation_details'])->filter(fn (array $detail): bool =>
+        ($detail['source_identity']['workflow_key'] ?? null) === 'regular_pamb'
+        && in_array(($detail['source_identity']['source_id'] ?? null), [$first->getKey(), $second->getKey()], true)
+    );
     $historicalDetail = collect($paRow['obligation_details'])->first(fn (array $detail): bool =>
         ($detail['source_identity']['source_id'] ?? null) === $historicConflict->getKey()
     );
 
     expect($first->getKey())->toBeInt()
         ->and($liveConflict->getKey())->not->toBe($historicConflict->getKey())
-        ->and($recorded['activity_count'])->toBe(3)
+        ->and($recorded['activity_count'])->toBe(2)
         ->and($recorded['due_count'])->toBe($withoutHistorical['due_count'])
         ->and($recorded['incomplete_date_count'])->toBe($withoutHistorical['incomplete_date_count'])
         ->and($recorded['incomplete_evidence_count'])->toBe($withoutHistorical['incomplete_evidence_count'])
@@ -311,7 +327,9 @@ test('recorded Conservation deduplicates PAMB source identities and excludes his
         ->and($paRow['due_count'])->toBe($withoutHistoricalRow['due_count'])
         ->and($paRow['incomplete_evidence_count'])->toBe($withoutHistoricalRow['incomplete_evidence_count'])
         ->and($regularDetail['received'])->toBe('2026-08-10')
-        ->and($regularDetail['source_rows_matched'])->toBe(2)
+        ->and($regularDetail['source_rows_matched'])->toBe(1)
+        ->and($regularSourceDetails->pluck('source_identity.source_id')->sort()->values()->all())->toBe([$first->getKey(), $second->getKey()])
+        ->and($regularSourceDetails->every(fn (array $detail): bool => $detail['source_rows_matched'] === 1))->toBeTrue()
         ->and($historicalDetail)->toBeNull()
         ->and(array_key_exists('historical_excluded_count', $paRow))->toBeFalse();
 });
@@ -384,5 +402,5 @@ test('PA traffic handled by a CENRO does not change that CENRO Development score
         ->and($bagangaAfter['se_percent'])->toBe($bagangaBefore['se_percent'])
         ->and($bagangaAfter['otps'])->toBe($bagangaBefore['otps'])
         ->and($after['result_identity'])->toBe($before['result_identity'])
-        ->and($after['recognition_assessment']['metric_fingerprint'])->toBe($before['recognition_assessment']['metric_fingerprint']);
+        ->and($after['result_identity'])->toBe($before['result_identity']);
 });

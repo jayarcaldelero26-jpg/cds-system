@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { HOURS, MINUTES, PERIODS, currentDraft, formatTimeDisplay, initialDraft, serializeTimeValue } from '@/Utils/timePicker';
 import FloatingField from './Form/FloatingField';
 
@@ -21,15 +21,13 @@ export default function PremiumTimePicker({ id, label = 'Time', value = '', date
 
     const scrollToIndex = (ref, index, behavior = 'smooth') => ref.current?.scrollTo({ top: index * ROW_HEIGHT, behavior });
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!open) return;
         const next = initialDraft(value, new Date(), dateContext);
         setDraft(next);
-        requestAnimationFrame(() => {
-            scrollToIndex(hourRef, next.hour - 1, 'auto');
-            scrollToIndex(minuteRef, next.minute, 'auto');
-            scrollToIndex(periodRef, next.period === 'PM' ? 1 : 0, 'auto');
-        });
+        scrollToIndex(hourRef, next.hour - 1, 'auto');
+        scrollToIndex(minuteRef, next.minute, 'auto');
+        scrollToIndex(periodRef, next.period === 'PM' ? 1 : 0, 'auto');
     }, [open, dateContext, value]);
 
     const close = () => {

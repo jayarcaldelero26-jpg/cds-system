@@ -1,10 +1,10 @@
 import { createPortal } from 'react-dom';
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 
 export default function CalendarPopover({ open, anchorRef, popoverRef, children, wide = false }) {
-    const [position, setPosition] = useState({ top: 0, left: 0 });
+    const [position, setPosition] = useState(null);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!open) return undefined;
         const updatePosition = () => {
             const anchor = anchorRef.current;
@@ -14,8 +14,11 @@ export default function CalendarPopover({ open, anchorRef, popoverRef, children,
             const estimatedHeight = wide ? 520 : 480;
             const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
             const below = rect.bottom + 8;
-            const top = below + estimatedHeight <= window.innerHeight ? below : Math.max(8, rect.top - estimatedHeight - 8);
-            setPosition({ top, left });
+            const desiredTop = below + estimatedHeight <= window.innerHeight ? below : rect.top - estimatedHeight - 8;
+            const top = Math.max(8, Math.min(desiredTop, window.innerHeight - estimatedHeight - 8));
+            const owner = anchor.closest('.cds-filter-panel-enter, .cds-filter-panel, .cds-filter-dropdown');
+            const ownerZ = owner ? Number.parseInt(window.getComputedStyle(owner).zIndex, 10) || 120 : 70;
+            setPosition({ top, left, zIndex: owner ? ownerZ + 10 : 70 });
         };
         updatePosition();
         window.addEventListener('resize', updatePosition);
@@ -23,8 +26,8 @@ export default function CalendarPopover({ open, anchorRef, popoverRef, children,
         return () => { window.removeEventListener('resize', updatePosition); window.removeEventListener('scroll', updatePosition, true); };
     }, [anchorRef, open, wide]);
 
-    if (!open || typeof document === 'undefined') return null;
-    return createPortal(<div ref={popoverRef} role='dialog' aria-label='Calendar date picker' style={{ top: position.top, left: position.left }} className={wide ? 'cds-menu-panel fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(680px,calc(100vw-16px))]' : 'cds-menu-panel fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(340px,calc(100vw-16px))]'}>
+    if (!open || !position || typeof document === 'undefined') return null;
+    return createPortal(<div ref={popoverRef} role='dialog' aria-label='Calendar date picker' style={{ top: position.top, left: position.left, zIndex: position.zIndex }} className={wide ? 'cds-menu-panel fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(680px,calc(100vw-16px))]' : 'cds-menu-panel fixed z-[70] max-h-[min(78vh,560px)] overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-900 w-[min(340px,calc(100vw-16px))]'}>
         {children}
     </div>, document.body);
 }

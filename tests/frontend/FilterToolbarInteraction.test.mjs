@@ -46,7 +46,24 @@ hookRuntime.useState = initial => {
     }
     return [slots[index], value => { slots[index] = typeof value === 'function' ? value(slots[index]) : value; }];
 };
-hookRuntime.useEffect = () => {};
+const layoutEffects = [];
+const passiveEffects = [];
+const effectSlots = new Map();
+
+function queueEffect(queue, effect, dependencies) {
+    const index = cursor++;
+    const previous = effectSlots.get(index);
+    if (dependencies && previous?.dependencies?.length === dependencies.length
+        && dependencies.every((value, offset) => Object.is(value, previous.dependencies[offset]))) return;
+
+    queue.push(() => {
+        previous?.cleanup?.();
+        effectSlots.set(index, { dependencies, cleanup: effect() });
+    });
+}
+
+hookRuntime.useLayoutEffect = (effect, dependencies) => queueEffect(layoutEffects, effect, dependencies);
+hookRuntime.useEffect = (effect, dependencies) => queueEffect(passiveEffects, effect, dependencies);
 
 const toolbarModule = { exports: {} };
 new Function('require', 'module', 'exports', output[0].code)(id => {
@@ -65,46 +82,115 @@ function findElement(root, predicate) {
     return null;
 }
 
-test('shared filter popover opens from its trigger and closes with focus returned to the trigger', () => {
-    const previousDocument = globalThis.document;
-    const previousAnimationFrame = globalThis.requestAnimationFrame;
+function createFixture(t, panelNode = { contains: () => false }) {
+    const previousGlobals = {
+        document: globalThis.document,
+        window: globalThis.window,
+        requestAnimationFrame: globalThis.requestAnimationFrame,
+    };
+    const document = Object.assign(new EventTarget(), { body: {} });
+    const window = Object.assign(new EventTarget(), { innerWidth: 1024, innerHeight: 768 });
     let triggerFocusCount = 0;
-    globalThis.document = { body: {} };
-    globalThis.requestAnimationFrame = callback => callback();
-
-    const render = () => {
-        cursor = 0;
-        return FilterToolbar({ label: 'Filters', children: React.createElement('div', null, 'filter controls') });
+    let mountedPanelRef = null;
+    const triggerNode = {
+        getBoundingClientRect: () => ({ left: 40, top: 40, right: 160, bottom: 80, width: 120, height: 40 }),
+        focus: () => { triggerFocusCount += 1; },
     };
 
-    try {
-        let tree = render();
-        const trigger = findElement(tree, element => element.type === 'button' && element.props['aria-controls'] === 'shared-filter-panel');
-        assert.ok(trigger);
-        assert.equal(trigger.props['aria-expanded'], false);
-        slots[0].current = { focus: () => { triggerFocusCount += 1; } };
+    t.after(() => {
+        try {
+            for (const { cleanup } of effectSlots.values()) cleanup?.();
+        } finally {
+            for (const [name, value] of Object.entries(previousGlobals)) {
+                if (value === undefined) delete globalThis[name];
+                else globalThis[name] = value;
+            }
+            effectSlots.clear();
+            layoutEffects.length = 0;
+            passiveEffects.length = 0;
+            slots = [];
+            initializedSlots = new Set();
+            cursor = 0;
+        }
+    });
 
-        trigger.props.onClick();
-        tree = render();
-        const openedTrigger = findElement(tree, element => element.type === 'button' && element.props['aria-controls'] === 'shared-filter-panel');
-        const panel = findElement(tree, element => element.type === 'section' && element.props.id === 'shared-filter-panel');
-        assert.equal(openedTrigger.props['aria-expanded'], true);
-        assert.equal(panel.props['aria-label'], 'Filters options');
+    globalThis.document = document;
+    globalThis.window = window;
+    globalThis.requestAnimationFrame = callback => callback();
 
-        const close = findElement(panel, element => element.type === 'button' && element.props['aria-label'] === 'Close filters');
-        close.props.onClick();
-        tree = render();
-        const closedTrigger = findElement(tree, element => element.type === 'button' && element.props['aria-controls'] === 'shared-filter-panel');
-        assert.equal(closedTrigger.props['aria-expanded'], false);
-        assert.equal(findElement(tree, element => element.type === 'section' && element.props.id === 'shared-filter-panel'), null);
-        assert.equal(triggerFocusCount, 1);
-    } finally {
-        if (previousDocument === undefined) delete globalThis.document;
-        else globalThis.document = previousDocument;
-        if (previousAnimationFrame === undefined) delete globalThis.requestAnimationFrame;
-        else globalThis.requestAnimationFrame = previousAnimationFrame;
-        slots = [];
-        initializedSlots = new Set();
+    function renderOnce() {
         cursor = 0;
+        const tree = FilterToolbar({ label: 'Filters', children: React.createElement('div', null, 'filter controls') });
+        const trigger = findElement(tree, element => element.type === 'button' && element.props['aria-controls'] === 'shared-filter-panel');
+        const panel = findElement(tree, element => element.type === 'section' && element.props.id === 'shared-filter-panel');
+        assert.ok(trigger);
+        trigger.props.ref.current = triggerNode;
+        if (panel) mountedPanelRef = panel.props.ref;
+        if (mountedPanelRef) mountedPanelRef.current = panel ? panelNode : null;
+
+        for (const effect of layoutEffects.splice(0)) effect();
+        for (const effect of passiveEffects.splice(0)) effect();
+        return { trigger, panel };
     }
+
+    return {
+        document,
+        get triggerFocusCount() { return triggerFocusCount; },
+        render() {
+            renderOnce();
+            return renderOnce();
+        },
+    };
+}
+
+test('shared filter popover opens from its trigger and closes with focus returned to the trigger', t => {
+    const fixture = createFixture(t);
+    const { trigger } = fixture.render();
+    assert.equal(trigger.props['aria-expanded'], false);
+
+    trigger.props.onClick();
+    const opened = fixture.render();
+    assert.equal(opened.trigger.props['aria-expanded'], true);
+    assert.equal(opened.panel.props['aria-label'], 'Filters options');
+
+    const close = findElement(opened.panel, element => element.type === 'button' && element.props['aria-label'] === 'Close filters');
+    close.props.onClick();
+    const closed = fixture.render();
+    assert.equal(closed.trigger.props['aria-expanded'], false);
+    assert.equal(closed.panel, null);
+    assert.equal(fixture.triggerFocusCount, 1);
+});
+
+test('Escape yields to an expanded picker trigger inside Filters before closing Filters', t => {
+    let pickerExpanded = true;
+    const pickerTrigger = {
+        closest(selector) {
+            return pickerExpanded && selector === 'button[aria-haspopup="dialog"][aria-expanded="true"]' ? this : null;
+        },
+    };
+    const fixture = createFixture(t, { contains: element => element === pickerTrigger });
+    fixture.render().trigger.props.onClick();
+    assert.ok(fixture.render().panel);
+
+    const pressEscape = () => {
+        const event = new Event('keydown', { cancelable: true });
+        Object.defineProperties(event, {
+            key: { value: 'Escape' },
+            target: { value: pickerTrigger },
+        });
+        fixture.document.dispatchEvent(event);
+        return event.defaultPrevented;
+    };
+
+    assert.equal(pressEscape(), false);
+    assert.equal(fixture.render().trigger.props['aria-expanded'], true);
+    assert.equal(fixture.triggerFocusCount, 0);
+
+    // The picker handles its own Escape and clears its expanded state.
+    pickerExpanded = false;
+    assert.equal(pressEscape(), true);
+    const closed = fixture.render();
+    assert.equal(closed.trigger.props['aria-expanded'], false);
+    assert.equal(closed.panel, null);
+    assert.equal(fixture.triggerFocusCount, 1);
 });

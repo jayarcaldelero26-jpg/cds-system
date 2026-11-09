@@ -142,6 +142,12 @@ final class ReportRequirementRegistry
             return null;
         }
 
+        return $this->deadlineForPeriod($domain, $key, $year, $periodKey, $definition, $period);
+    }
+
+    /** Calculate an already resolved period without rebuilding its annual schedule. */
+    private function deadlineForPeriod(string $domain, string $key, int $year, string $periodKey, array $definition, array $period): ?string
+    {
         $frequency = strtolower((string) ($definition['reporting_frequency'] ?? $definition['period'] ?? 'custom'));
         $metadata = $definition['requirement_metadata'] ?? [];
 
@@ -271,6 +277,19 @@ final class ReportRequirementRegistry
                     $candidateTargets = [null];
                 }
 
+                // The public deadline has no target argument: reuse the same
+                // calculation for every PA/office in this generation only.
+                $deadlines = [];
+                $canonicalDefinition = $periods !== [] ? $this->find($domain, $definition['key']) : null;
+                $periodCollection = collect($periods);
+                foreach ($periods as $period) {
+                    if (array_key_exists($period['key'], $deadlines)) continue;
+                    $canonicalPeriod = $periodCollection->firstWhere('key', $period['key']);
+                    $deadlines[$period['key']] = $canonicalDefinition && $canonicalPeriod
+                        ? $this->deadlineForPeriod($domain, $definition['key'], $year, $period['key'], $canonicalDefinition, $canonicalPeriod)
+                        : null;
+                }
+
                 $generated = [];
                 foreach ($candidateTargets as $target) {
                     [$targetType, $targetId, $targetLabel] = $this->target($domain, $target);
@@ -287,7 +306,7 @@ final class ReportRequirementRegistry
                             'reporting_year' => $year,
                             'period_key' => $period['key'],
                             'period_label' => $period['label'],
-                            'deadline' => $this->deadline($domain, $definition['key'], $year, $period['key']),
+                            'deadline' => $deadlines[$period['key']],
                             'identity' => $this->identity($domain, $definition['key'], $targetType, $targetId, $year, $period['key']),
                             'definition' => $definition,
                         ];

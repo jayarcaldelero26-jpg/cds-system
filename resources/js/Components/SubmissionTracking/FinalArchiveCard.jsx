@@ -57,7 +57,7 @@ export default function FinalArchiveCard({ row, tab = 'archives', selected = fal
         onOpen?.(row, view);
     };
 
-    return <article ref={cardRef} data-final-archive-card={row.id} aria-current={selected ? 'true' : undefined} className={`group relative w-full min-w-0 rounded-2xl border p-2 transition-colors sm:max-w-[280px] ${selected
+    return <article ref={cardRef} data-cds-reveal="card" data-final-archive-card={row.id} aria-current={selected ? 'true' : undefined} className={`group relative w-full min-w-0 rounded-2xl border p-2 transition-colors sm:max-w-[280px] ${selected
         ? 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-600/20 dark:border-emerald-500 dark:bg-emerald-950/30'
         : 'border-slate-200 bg-slate-50/70 hover:border-emerald-300 hover:bg-emerald-50/30 dark:border-slate-700 dark:bg-slate-900/70 dark:hover:border-emerald-700'}`}>
         <button type="button" onClick={() => open('document')} aria-label={`Open ${title}${context ? `, ${context}` : ''}${files.length > 1 ? `, ${files.length} files` : ''}${earlierDispatchCopy ? ', earlier Dispatch copy' : ''}${pendingStatus ? `, ${pendingStatus.label}` : ''}`} className="block w-full rounded-xl text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-900">

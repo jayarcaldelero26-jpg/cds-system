@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { FloatingSelect } from "@/Components/Form";import { Link, router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
@@ -435,7 +436,7 @@ export default function ImeaReport({
 
             {/* FULL DETAILS MODAL */}
             {detailMotion.present && selectedRecord &&
-      <div ref={detailLayerRef} data-cds-modal-layer data-motion-state={detailMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print" role="presentation">
+      <ModalPortal><div ref={detailLayerRef} data-cds-modal-layer data-motion-state={detailMotion.phase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-4 backdrop-blur-xs no-print" role="presentation">
                     <div ref={detailPanelRef} onTransitionEnd={detailMotion.onTransitionEnd} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Assessment Full Details" data-motion-state={detailMotion.phase} className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-gray-900 max-h-[90vh] overflow-y-auto cds-modal-motion-panel custom-table-scrollbar border border-gray-200 dark:border-gray-800">
                         <div className="flex items-center justify-between border-b border-gray-100 pb-4 dark:border-gray-800">
                             <div className="flex items-center gap-2">
@@ -512,7 +513,7 @@ export default function ImeaReport({
                             </div>
                         </div>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
         </AuthenticatedLayout>);
 

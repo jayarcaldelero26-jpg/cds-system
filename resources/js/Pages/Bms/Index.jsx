@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { FileInput } from "@/Components/Crud/FileInput";import { FloatingSelect, FloatingInput, FloatingTextarea } from "@/Components/Form";import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 import PageHeader from '@/Components/PageHeader';
 import { Head, router, useForm } from '@inertiajs/react';
@@ -1325,7 +1326,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
 
             {/* EDIT ANNEX HEADER MODAL */}
             {headerModalPresent &&
-      <div ref={headerModalOverlayRef} data-cds-modal-layer data-motion-state={headerModalPhase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs" role="presentation">
+      <ModalPortal><div ref={headerModalOverlayRef} data-cds-modal-layer data-motion-state={headerModalPhase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-xs" role="presentation">
                     <div ref={headerModalPanelRef} onTransitionEnd={headerModalTransitionEnd} data-motion-state={headerModalPhase} role="dialog" aria-modal="true" aria-label="Edit Annex Header Details" tabIndex={-1} className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-2xl border border-gray-200 dark:border-gray-700 cds-modal-motion-panel max-h-[90vh] overflow-y-auto">
                         <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-700 pb-3">
                             <div><h3 className="text-lg font-bold text-gray-900 dark:text-white">✏️ Edit Annex Header Details</h3><p className="text-xs text-gray-500">Update the summary metadata at the top of the Annex report.</p></div>
@@ -1361,7 +1362,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                             </div>
                         </form>
                     </div>
-                </div>
+                </div></ModalPortal>
       }
             <ConfirmedSubmitDialog gate={headerSubmitGate} title="Save these report header details?" message="This updates the header metadata for the current BMS report selection." confirmLabel="Save header changes" processing={annexHeaderForm.processing} />
 

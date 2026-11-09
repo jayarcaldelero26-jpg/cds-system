@@ -1,3 +1,4 @@
+import ModalPortal from '@/Components/ModalPortal';
 import { FloatingSelect, FloatingTextarea } from "@/Components/Form";import { Link, router, useForm, usePage } from '@inertiajs/react';
 import ScopedOptionSelect from '@/Components/Form/ScopedOptionSelect';
 import { officeDisplayLabel, pamoEligibilityGuidance } from '@/Components/Form/officePresentation.mjs';
@@ -596,7 +597,7 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
   if (modal && !isEdit) {
     if (!modalPresent) return null;
     return (
-      <div ref={overlayRef} data-cds-modal-layer data-motion-state={modalPhase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-3 backdrop-blur-sm sm:p-4" role="presentation">
+      <ModalPortal><div ref={overlayRef} data-cds-modal-layer data-motion-state={modalPhase} className="cds-modal-motion-backdrop fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 p-3 backdrop-blur-sm sm:p-4" role="presentation">
         <div ref={modalPanelRef} onTransitionEnd={modalTransitionEnd} data-motion-state={modalPhase} tabIndex={-1} className="cds-modal-motion-panel relative flex max-h-[94vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900" role="dialog" aria-modal="true" aria-labelledby="create-protected-area-title">
           <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-4 dark:border-gray-700 dark:bg-gray-900 sm:px-6">
             <div>
@@ -616,7 +617,7 @@ export default function Form({ title, protectedArea, officeOptions = [], pamoOff
                 <ConfirmedSubmitDialog gate={submitGate} title={isEdit ? "Save Protected Area changes?" : "Save this Protected Area?"} message="This saves the displayed Protected Area registry details for server validation." confirmLabel={isEdit ? "Save Changes" : "Save Protected Area"} processing={submitting || form.processing} />
 
         </div>
-      </div>
+      </div></ModalPortal>
     );
   }
 

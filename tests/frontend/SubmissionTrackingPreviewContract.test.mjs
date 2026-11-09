@@ -77,6 +77,7 @@ async function component(name, { stubAuthenticatedLayout = false, hooks = React 
         plugins: [{
             name: 'isolated-page-test-shims',
             resolveId(source) {
+                if (source === '@/Components/ModalPortal') return '\0modal-portal-markup-fixture';
                 if (source === '@inertiajs/react') return '\0inertia-ssr-shim';
                 if (stubAuthenticatedLayout && source === '@/Layouts/AuthenticatedLayout') return '\0authenticated-layout-ssr-shim';
                 if (source === 'pdfjs-dist') return '\0pdfjs-ssr-shim';
@@ -84,6 +85,7 @@ async function component(name, { stubAuthenticatedLayout = false, hooks = React 
                 if (source.endsWith('.css')) return '\0submission-tracking-css-shim';
             },
             load(id) {
+                if (id === '\0modal-portal-markup-fixture') return 'export default function ModalPortalMarkupFixture({ children }) { return children; }';
                 if (id === '\0submission-tracking-css-shim') return '';
                 if (id === '\0authenticated-layout-ssr-shim') {
                     return 'import React from "react"; export default function AuthenticatedLayout({ title, children }) { return React.createElement(React.Fragment, null, React.createElement("title", null, title), children); }';
