@@ -6,6 +6,7 @@ use App\Models\ConservationReportSubmission;
 use App\Models\ModuleDefinition;
 use App\Models\ProtectedArea;
 use App\Models\SubmissionRoutingSnapshot;
+use App\Services\Archive\FinalDocumentArchiveService;
 use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use App\Services\DateConductedRangeService;
 use App\Services\Conservation\PambComplianceCalculator;
@@ -54,8 +55,10 @@ class ConservationReportSubmissionController extends Controller
                     ->orWhere('document_type', 'like', "%{$search}%")
                     ->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%")));
             })
-            ->latest('id')->paginate(10)->withQueryString()
-            ->through(fn (ConservationReportSubmission $submission) => $this->submissionData($submission, $request->user()));
+            ->latest('id')->paginate(10)->withQueryString();
+        $submissions = app(FinalDocumentArchiveService::class)->presentModuleReportPage('conservation', $submissions,
+            fn (ConservationReportSubmission $submission, bool $archived) => $this->submissionData($submission, $request->user(), $archived),
+        );
 
         $formScope = app(SubmissionFormScopeService::class)->options($request->user());
         $pamoDraftProps = $this->pambAccess->isPamo($request->user())
@@ -379,7 +382,7 @@ class ConservationReportSubmissionController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function submissionData(ConservationReportSubmission $submission, ?\App\Models\User $viewer = null): array
+    private function submissionData(ConservationReportSubmission $submission, ?\App\Models\User $viewer, bool $hasVerifiedFinalArchive): array
     {
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
         $historical = (bool) $submission->getAttribute('is_historical')
@@ -392,7 +395,7 @@ class ConservationReportSubmissionController extends Controller
             : null;
         $pamoOrigin = $originSnapshot?->origin_kind === 'pamo_pamb';
 
-        $original = $this->attachments->descriptor('conservation-report', $submission, 'mov');
+        $original = $hasVerifiedFinalArchive ? null : $this->attachments->descriptor('conservation-report', $submission, 'mov');
 
         return [
             ...collect($presentation->toArray())->except(['mov_file_path', 'mov_file_name'])->all(),
@@ -405,8 +408,8 @@ class ConservationReportSubmissionController extends Controller
                 'historical_evidence' => $historical['historical_evidence'],
             ] : []),
             'mov' => $original,
-            'mov_url' => $submission->mov_file_path ? $this->attachments->url('conservation-report', $submission, 'mov') : null,
-            'current_document' => $this->routingAttachments->currentDescriptor('conservation', (int) $submission->getKey(), $original),
+            'mov_url' => ! $hasVerifiedFinalArchive && $submission->mov_file_path ? $this->attachments->url('conservation-report', $submission, 'mov') : null,
+            'current_document' => $hasVerifiedFinalArchive ? null : $this->routingAttachments->currentDescriptor('conservation', (int) $submission->getKey(), $original),
             'pamo_origin' => $pamoOrigin,
             'pamo_origin_office' => $pamoOrigin ? $originSnapshot?->pamo_office_name : null,
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',

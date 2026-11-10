@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\ModuleDefinition;
 use App\Models\PamoPambDraft;
 use App\Models\ProtectedArea;
@@ -49,8 +51,9 @@ final class PamoNativeReportsController extends Controller
                 }
             });
         }
-        $reports = $query->latest('id')->paginate(15)->withQueryString()->through(
-            fn (Model $record): array => $this->reportRow($record, $workflow, $source, $actor),
+        $reports = $query->latest('id')->paginate(15)->withQueryString();
+        $reports = app(FinalDocumentArchiveService::class)->presentModuleReportPage($source['source'], $reports,
+            fn (Model $record, bool $archived): array => $this->reportRow($record, $workflow, $source, $actor, $archived),
         );
 
         $drafts = PamoPambDraft::query()
@@ -135,7 +138,7 @@ final class PamoNativeReportsController extends Controller
         return $facts;
     }
 
-    private function reportRow(Model $record, string $workflow, array $source, User $actor): array
+    private function reportRow(Model $record, string $workflow, array $source, User $actor, bool $archived): array
     {
         $fields = [
             'id', 'protected_area_id', 'target_office', 'activity_name', 'document_type',
@@ -151,12 +154,13 @@ final class PamoNativeReportsController extends Controller
         $data['source_key'] = $source['source'];
         $routing = app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
             ->state($record, $source['source'], actor: $actor);
-        $descriptor = $this->attachments->descriptor($source['attachment'], $record, $source['file_field']);
+        $descriptor = $archived ? null : $this->attachments->descriptor($source['attachment'], $record, $source['file_field']);
         $data['mov_url'] = $descriptor !== null
             ? route('pamo-native-reports.mov', [$workflow, $record->getKey()])
             : null;
         $data['mov_available'] = $descriptor !== null;
-        $data['mov_file_name'] = $record->getAttribute('mov_file_name') ?: $record->getAttribute('report_file_name');
+        $data['mov_file_name'] = $archived ? null : ($record->getAttribute('mov_file_name') ?: $record->getAttribute('report_file_name'));
+        if ($archived) $data['report_file_name'] = null;
         $data['source_updated_at'] = $record->updated_at?->toISOString();
         $data['workflow_stage'] = $routing['stage'];
         $snapshot = \App\Models\SubmissionRoutingSnapshot::query()
@@ -168,7 +172,7 @@ final class PamoNativeReportsController extends Controller
             ->where('status', 'forwarded')->where($source['column'], $record->getKey())->exists();
         $lastEvent = $routing['events']->last();
         $resubmit = collect($routing['actions'])->first(fn (array $action): bool => in_array($action['key'], ['forward_from_pamo', 'forward_from_pamo_to_cenro_focal'], true));
-        $data['can_edit_correction'] = $linkedDraft && $snapshot?->origin_kind === 'pamo_pamb'
+        $data['can_edit_correction'] = ! $archived && $linkedDraft && $snapshot?->origin_kind === 'pamo_pamb'
             && (int) $snapshot?->pamo_office_id === (int) ($facts['pamo_office_id'] ?? 0)
             && $routing['stage'] === \App\Services\SubmissionTracking\DocumentRoutingProfileRegistry::PAMO_ORIGIN
             && $lastEvent?->event_key === 'correction_received' && $resubmit !== null;

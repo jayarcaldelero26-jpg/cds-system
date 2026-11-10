@@ -334,6 +334,7 @@ class HandleInertiaRequests extends Middleware
                 $notifications = $user->unreadNotifications()->latest()->get()
                     ->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))
                     ->take(8);
+                $canViewTracking = $notifications->isNotEmpty() && $user->can('submission-tracking.view');
 
                 return [
                     'unread_count' => $notifications->count(),
@@ -346,7 +347,7 @@ class HandleInertiaRequests extends Middleware
                         'source_label' => $notification->data['source_label'] ?? 'Report',
                         'office' => $notification->data['office'] ?? null,
                         'protected_area' => $notification->data['protected_area'] ?? null,
-                        'url' => $notification->data['url'] ?? null,
+                        'url' => EdatsInAppNotificationService::actionUrl($notification->data, $canViewTracking),
                         'read_at' => $notification->read_at?->toIso8601String(),
                         'created_at' => $notification->created_at?->toIso8601String(),
                     ]),

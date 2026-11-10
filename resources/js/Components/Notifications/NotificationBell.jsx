@@ -1,5 +1,5 @@
 import { Icon } from '@iconify/react';
-import { router } from '@inertiajs/react';
+import { http, router } from '@inertiajs/react';
 import { useEffect, useRef, useState } from 'react';
 import UtilityIconButton from '@/Components/UtilityIconButton';
 
@@ -69,23 +69,17 @@ export default function NotificationBell({ initial = { unread_count: 0, notifica
         return () => { window.clearInterval(timer); window.removeEventListener('cds:notifications-updated', sync); document.removeEventListener('mousedown', close); };
     }, []);
 
-    const csrf = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     const request = async (url, method = 'PATCH') => {
         try {
-            const response = await fetch(url, {
-                method,
-                credentials: 'same-origin',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json',
-                    'X-CSRF-TOKEN': csrf(),
-                    'X-Requested-With': 'XMLHttpRequest',
-                },
-                body: JSON.stringify({}),
+            const response = await http.getClient().request({
+                url,
+                method: method.toLowerCase(),
+                headers: { Accept: 'application/json' },
+                data: {},
             });
-            if (!response.ok) throw new Error('request-failed');
-            const payload = await response.json().catch(() => null);
-            if (payload && Object.prototype.hasOwnProperty.call(payload, 'notifications')) setState(payload);
+            const payload = JSON.parse(response.data);
+            if (payload?.ok !== true) throw new Error('request-unconfirmed');
+            if (Array.isArray(payload.notifications)) setState(payload);
             else if (!await refresh()) return false;
             setRequestError('');
             return true;

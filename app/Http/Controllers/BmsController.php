@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\BmsRecord;
 use App\Models\BmsAnnexHeader;
 use App\Models\BmsReportSubmission;
@@ -90,6 +92,30 @@ class BmsController extends Controller
             return $data;
         })->values();
 
+        $reportSubmissions = $this->organization->scopeProtectedAreaQuery(BmsReportSubmission::with('protectedArea:id,name,short_name'), $request->user())
+            ->when($request->filled('report_protected_area_id'), function ($q) use ($request): void {
+                $this->organization->assertCanAccessProtectedArea($request->user(), $request->report_protected_area_id);
+                $q->where('protected_area_id', $request->report_protected_area_id);
+            })
+            ->when($request->filled('report_semester'), fn ($q) => $q->where('semester', $request->report_semester))
+            ->latest('id')
+            ->paginate(10, ['*'], 'report_page')
+            ->withQueryString();
+        $reportSubmissions = app(FinalDocumentArchiveService::class)->presentModuleReportPage('bms', $reportSubmissions,
+            function (BmsReportSubmission $submission, bool $archived) use ($attachmentService): array {
+                $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
+                $data['mov'] = $archived ? null : $attachmentService->descriptor('bms-report', $submission, 'mov');
+                $data['mov_url'] = $data['mov']['url'] ?? null;
+                $data['date_conducted_display'] = $this->dateConductedRanges->display($submission->date_conducted_ranges, $submission->date_conducted);
+                $data['date_conducted_ranges'] = $submission->date_conducted_ranges;
+                $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
+                $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
+                $data['cenro_release_applicable'] = ! $directPenro;
+
+                return $data;
+            },
+        );
+
         return Inertia::render('Bms/Index', [
             'bmsRecords' => $bmsRecords,
             'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->get(),
@@ -97,27 +123,7 @@ class BmsController extends Controller
             'filters' => $request->only(['protected_area_id', 'category', 'start_date', 'end_date', 'year']),
             'spatialLayers' => $spatialLayers,
             'annexHeaderMetadata' => $trackerOnly ? null : $this->annexHeaderFor($request),
-            'reportSubmissions' => $this->organization->scopeProtectedAreaQuery(BmsReportSubmission::with('protectedArea:id,name,short_name'), $request->user())
-                ->when($request->filled('report_protected_area_id'), function ($q) use ($request): void {
-                    $this->organization->assertCanAccessProtectedArea($request->user(), $request->report_protected_area_id);
-                    $q->where('protected_area_id', $request->report_protected_area_id);
-                })
-                ->when($request->filled('report_semester'), fn ($q) => $q->where('semester', $request->report_semester))
-                ->latest('id')
-                ->paginate(10, ['*'], 'report_page')
-                ->withQueryString()
-                ->through(function (BmsReportSubmission $submission) {
-                    $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
-                    $data['mov'] = app(ProtectedAttachmentService::class)->descriptor('bms-report', $submission, 'mov');
-                    $data['mov_url'] = $data['mov']['url'] ?? null;
-                    $data['date_conducted_display'] = $this->dateConductedRanges->display($submission->date_conducted_ranges, $submission->date_conducted);
-                    $data['date_conducted_ranges'] = $submission->date_conducted_ranges;
-                    $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
-                    $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
-                    $data['cenro_release_applicable'] = ! $directPenro;
-
-                    return $data;
-                }),
+            'reportSubmissions' => $reportSubmissions,
             'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
             'bmsThreats' => $trackerOnly ? collect() : $this->organization->scopeProtectedAreaQuery(BmsThreat::with('protectedArea:id,name,short_name'), $request->user())->latest('date')->latest('id')->get(),
             'initialTab' => $request->input('tab') === 'semestral' ? 'semestral' : null,

@@ -24,6 +24,7 @@ use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Support\ArchiveRequestTrace;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
@@ -420,6 +421,88 @@ final class FinalDocumentArchiveService
         })->filter()->groupBy('source')->map(fn (Collection $items) => $items->pluck('id')->unique()->values());
         if ($idsBySource->isEmpty()) return [];
 
+        $latestCandidates = $this->latestArchivedCandidates($idsBySource);
+        if ($latestCandidates->isEmpty()) return [];
+
+        // Reapply live source and exact reader scope only to records that have
+        // an archived final-manifest candidate, not every tracking row.
+        $scopedCandidates = collect();
+        foreach ($latestCandidates->groupBy('source') as $source => $items) {
+            $definition = $this->tracking->source((string) $source);
+            if (! $definition) continue;
+            foreach ($items->pluck('receipt')->map(fn (FinalDocumentReceipt $receipt) => (int) $receipt->source_id)->unique()->chunk(400) as $chunk) {
+                $query = $this->tracking->archiveSourceQuery((string) $source);
+                if (! $query) continue;
+                if ($source !== 'engp') $query->with('protectedArea');
+                if ($source === 'conservation') $query->with('routingEvents');
+                foreach ($query->whereIn($query->getModel()->getQualifiedKeyName(), $chunk)->get() as $record) {
+                    if (! $this->routingAccess->canView($actor, $record, (string) $source, (string) $definition['ability'])) continue;
+                    $identity = $source.':'.$record->getKey();
+                    $candidate = $latestCandidates->get($identity);
+                    if (! $candidate) continue;
+                    $scopedCandidates->put($identity, [
+                        ...$candidate, 'definition' => $definition, 'record' => $record,
+                    ]);
+                }
+            }
+        }
+        return $this->verifyArchivedCandidates($scopedCandidates);
+    }
+
+    public function presentModuleReportPage(string $source, LengthAwarePaginator $page, callable $present): LengthAwarePaginator
+    {
+        return $page->setCollection($this->presentModuleReports($source, $page->getCollection(), $present));
+    }
+
+    /** Present only records already scoped to the viewer by the module. */
+    public function presentModuleReports(string $source, Collection $records, callable $present): Collection
+    {
+        $verified = array_fill_keys($this->verifiedModuleArchiveRecordKeys($source, $records), true);
+
+        return $records->map(fn (Model $record): array => [
+            ...$present($record, isset($verified[$source.':'.$record->getKey()])),
+            'has_verified_final_archive' => isset($verified[$source.':'.$record->getKey()]),
+        ]);
+    }
+
+    /**
+     * Only for records already scoped to the viewer by their module page.
+     * This status does not grant permission to read any archived files.
+     *
+     * @return list<string>
+     */
+    private function verifiedModuleArchiveRecordKeys(string $source, Collection $records): array
+    {
+        if ($records->isEmpty() || ! $this->availability->schemaReady()
+            || ! in_array($source, $this->sourceContracts->sourceKeys(), true)) return [];
+
+        $definition = $this->tracking->source($source);
+        if (! $definition) return [];
+
+        $ids = $records->map(fn (Model $record) => $record->getKey());
+        $candidates = $this->latestArchivedCandidates(collect([$source => $ids]));
+        if ($candidates->isEmpty()) return [];
+
+        // Module pages may select only the Protected Area display columns.
+        // Reload the exact archived candidates for full routing evidence.
+        $query = $definition['model']::query()->whereKey($candidates->pluck('receipt.source_id')->all());
+        if ($source !== 'engp') $query->with('protectedArea');
+        if ($source === 'conservation') $query->with('routingEvents');
+        $candidates = $query->get()->toBase()->mapWithKeys(function (Model $record) use ($source, $definition, $candidates): array {
+            $identity = $source.':'.$record->getKey();
+
+            return [$identity => [
+                ...$candidates->get($identity),
+                'definition' => $definition,
+                'record' => $record,
+            ]];
+        });
+
+        return $this->verifyArchivedCandidates($candidates);
+    }
+
+    private function latestArchivedCandidates(Collection $idsBySource): Collection
+    {
         $receiptsByIdentity = collect();
         foreach ($idsBySource as $source => $ids) {
             foreach ($ids->chunk(400) as $chunk) {
@@ -428,7 +511,7 @@ final class FinalDocumentArchiveService
                 }
             }
         }
-        if ($receiptsByIdentity->isEmpty()) return [];
+        if ($receiptsByIdentity->isEmpty()) return collect();
 
         // Include every Regional-return revision so a newer pending/failed
         // manifest cannot be masked by an older archived revision.
@@ -456,31 +539,12 @@ final class FinalDocumentArchiveService
                 'manifest' => $latest,
             ]);
         }
-        if ($latestCandidates->isEmpty()) return [];
+        return $latestCandidates;
+    }
 
-        // Reapply live source and exact reader scope only to records that have
-        // an archived final-manifest candidate, not every tracking row.
-        $scopedCandidates = collect();
-        foreach ($latestCandidates->groupBy('source') as $source => $items) {
-            $definition = $this->tracking->source((string) $source);
-            if (! $definition) continue;
-            foreach ($items->pluck('receipt')->map(fn (FinalDocumentReceipt $receipt) => (int) $receipt->source_id)->unique()->chunk(400) as $chunk) {
-                $query = $this->tracking->archiveSourceQuery((string) $source);
-                if (! $query) continue;
-                if ($source !== 'engp') $query->with('protectedArea');
-                if ($source === 'conservation') $query->with('routingEvents');
-                foreach ($query->whereIn($query->getModel()->getQualifiedKeyName(), $chunk)->get() as $record) {
-                    if (! $this->routingAccess->canView($actor, $record, (string) $source, (string) $definition['ability'])) continue;
-                    $identity = $source.':'.$record->getKey();
-                    $candidate = $latestCandidates->get($identity);
-                    if (! $candidate) continue;
-                    $scopedCandidates->put($identity, [
-                        ...$candidate, 'definition' => $definition, 'record' => $record,
-                    ]);
-                }
-            }
-        }
-        $latestCandidates = $scopedCandidates;
+    /** @return list<string> */
+    private function verifyArchivedCandidates(Collection $latestCandidates): array
+    {
         if ($latestCandidates->isEmpty()) return [];
 
         $moduleCodes = $latestCandidates->map(function (array $item): ?string {

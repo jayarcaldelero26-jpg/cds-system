@@ -35,7 +35,7 @@ function standardizedReportSummary(summary, reportData = null) {
     ]} />;
 }
 
-export default function CrudDetailsModal({ open, icon, title, subtitle, onClose, children, summary, attachments, report = false, darkTheme = false, canEdit = false, canDelete = false, onEdit, onDelete, editLabel = 'Edit Details', deleteLabel = 'Delete Record', closeLabel = 'Close Details', maxWidth = 'max-w-4xl', compact = false, footerActions = null, closeOnEscape = true, busyOverlay = null, busyOverlayPresentation = 'default', avoidBottomDebugbar = false }) {
+export default function CrudDetailsModal({ open, icon, title, subtitle, onClose, children, summary, attachments, reportData: providedReportData = null, report = false, darkTheme = false, canEdit = false, canDelete = false, onEdit, onDelete, editLabel = 'Edit Details', deleteLabel = 'Delete Record', closeLabel = 'Close Details', maxWidth = 'max-w-4xl', compact = false, footerActions = null, closeOnEscape = true, busyOverlay = null, busyOverlayPresentation = 'default', avoidBottomDebugbar = false }) {
     const overlayRef = useRef(null);
     const panelRef = useRef(null);
     const busyRef = useRef(null);
@@ -106,10 +106,10 @@ export default function CrudDetailsModal({ open, icon, title, subtitle, onClose,
     }, [busy]);
     if (!present) return null;
     const isReport = report || (/\breport\b/i.test(title || '') && !/^Overdue Report\b/i.test(title || '')) || title === 'Management of IPAF Details' || title === 'Revenue Collection Details';
-    const reportData = children?.props?.report || children?.props?.record || null;
+    const reportData = providedReportData || children?.props?.report || children?.props?.record || null;
     const terminalReport = isReport && String(reportData?.submission_status || '').toLowerCase() === 'completed';
     const displaySummary = isReport ? standardizedReportSummary(summary, reportData) : summary;
-    const attachmentContent = attachments || (isReport && <p className="text-xs text-gray-500 dark:text-gray-400">No MOV / attachment has been submitted.</p>);
+    const attachmentContent = attachments || (isReport && reportData?.has_verified_final_archive !== true && <p className="text-xs text-gray-500 dark:text-gray-400">No MOV / attachment has been submitted.</p>);
     const displayAttachments = isReport && attachmentContent
         ? (attachmentContent.type === CrudSection ? attachmentContent : <CrudSection title="Attachment / MOV">{attachmentContent}</CrudSection>)
         : attachmentContent;

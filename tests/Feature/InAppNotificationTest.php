@@ -180,7 +180,7 @@ test('workflow notification URLs select the exact supported source record safely
             'source_type' => $sourceType,
             'source_id' => $id,
             'url' => 'https://attacker.invalid/',
-        ], $this->user);
+        ], $this->user->can('submission-tracking.view'));
 
         expect($url)->toContain('source='.$expectedSource)
             ->and($url)->toContain('source_id='.$id)
@@ -191,7 +191,7 @@ test('workflow notification URLs select the exact supported source record safely
         'source_type' => 'unknown-family',
         'source_id' => 44,
         'url' => 'https://attacker.invalid/',
-    ], $this->user);
+    ], $this->user->can('submission-tracking.view'));
     expect($fallback)->toBe(route('submission-tracking.index'))
         ->and($fallback)->not->toContain('attacker.invalid');
 });
@@ -226,8 +226,60 @@ test('recent workflow notifications preserve the intended Tracking tab and selec
                 'view' => $notification->data['source_id'] === 72 ? 'outgoing' : 'incoming',
                 'source' => $notification->data['source_type'],
                 'source_id' => (string) $notification->data['source_id'],
+                'open_details' => '1',
             ]);
     }
+});
+
+test('a scoped CENRO chief can open a revenue notification without Reports permission', function (): void {
+    $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga', permission: false);
+    $otherChief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati', permission: false);
+    $area = notificationProtectedArea('Revenue notification scope', $chief);
+    ProtectedAreaOfficeAssignment::create([
+        'protected_area_id' => $area->id,
+        'organizational_office_id' => OrganizationalOffice::query()->where('code', 'cenro_baganga')->firstOrFail()->id,
+        'assignment_type' => 'supervising',
+        'assigned_by' => $chief->id,
+    ]);
+    $report = IpafRevenueCollection::create([
+        'protected_area_id' => $area->id,
+        'target_office' => 'CENRO Baganga',
+        'activity_name' => 'Revenue Collection',
+        'document_type' => 'Final Report',
+        'reporting_month' => 10,
+        'reporting_year' => 2026,
+        'total_collected' => '100.00',
+    ]);
+    $target = ['view' => 'incoming', 'source' => 'revenue', 'source_id' => $report->id];
+    $payload = [
+        ...notificationPayload('scoped-revenue'),
+        'type' => EdatsInAppNotificationService::WORKFLOW,
+        'category' => 'submission_updates',
+        'source_type' => 'revenue',
+        'source_id' => $report->id,
+        'url' => route('submission-tracking.index', $target),
+    ];
+    $chief->notify(new EdatsInAppNotification($payload));
+
+    expect($chief->can('reports.view'))->toBeFalse()
+        ->and($chief->can('submission-tracking.view'))->toBeTrue();
+
+    $link = route('submission-tracking.index', [...$target, 'open_details' => 1]);
+    $this->actingAs($chief)->getJson(route('notifications.recent'))
+        ->assertOk()->assertJsonPath('notifications.0.url', $link);
+    $this->get(route('notifications.index'))->assertOk()->assertInertia(fn ($page) => $page
+        ->where('notificationBell.notifications.0.url', $link)
+        ->where('notifications.0.url', $link));
+    $this->get($link)->assertOk()->assertInertia(fn ($page) => $page
+        ->where('trackingContext.open_details', true)
+        ->where('trackingContext.selected_record.source', 'revenue')
+        ->where('trackingContext.selected_record.source_id', $report->id));
+
+    $this->actingAs($otherChief)->get($link)->assertOk()->assertInertia(fn ($page) => $page
+        ->where('trackingContext.open_details', false)
+        ->where('trackingContext.selected_record', null));
+    expect(EdatsInAppNotificationService::actionUrl($payload, User::factory()->create()->can('submission-tracking.view')))
+        ->toBe(route('dashboard'));
 });
 
 test('unauthenticated users cannot mark notifications as read', function () {

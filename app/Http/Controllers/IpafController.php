@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\IpafAccountingStatus;
 use App\Models\IpafManagementReport;
 use App\Models\IpafRevenueCollection;
@@ -46,11 +48,14 @@ class IpafController extends Controller
             ->when($request->filled('revenue_month'), fn ($q) => $q->where('reporting_month', $request->integer('revenue_month')))
             ->when($request->filled('revenue_year'), fn ($q) => $q->where('reporting_year', $request->integer('revenue_year')));
         $totalCollected = IpafRevenueCollection::normalizeMoney((string) (clone $revenueQuery)->sum('total_collected'));
-        $revenues = (clone $revenueQuery)->latest('id')->paginate(10, ['*'], 'revenue_page')->withQueryString()->through(fn ($row) => $this->data($row, 'ipaf.revenue.mov'));
+        $revenues = (clone $revenueQuery)->latest('id')->paginate(10, ['*'], 'revenue_page')->withQueryString();
         $management = $this->organization->scopeProtectedAreaQuery(IpafManagementReport::query(), $request->user())->with('protectedArea:id,name,short_name')
             ->when($request->filled('management_search'), fn ($q) => $this->search($q, (string) $request->input('management_search')))
             ->when($request->filled('management_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->integer('management_protected_area_id')))
-            ->latest('id')->paginate(10, ['*'], 'management_page')->withQueryString()->through(fn ($row) => $this->data($row, 'ipaf.management.mov'));
+            ->latest('id')->paginate(10, ['*'], 'management_page')->withQueryString();
+        $archives = app(FinalDocumentArchiveService::class);
+        $revenues = $archives->presentModuleReportPage('revenue', $revenues, $this->data(...));
+        $management = $archives->presentModuleReportPage('ipaf-management', $management, $this->data(...));
         $quarterly = $this->quarterlyRevenueSummary($request, $protectedAreas);
         return Inertia::render('Ipaf/Index', [
             'revenueCollections' => $revenues,
@@ -255,10 +260,10 @@ class IpafController extends Controller
             'date_accomplished' => ['required', 'date'],
         ];
     }
-    private function data(Model $record, string $movRoute): array {
+    private function data(Model $record, bool $archived): array {
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($record);
 
-        return [...collect($record->toArray())->except(['mov_file_path', 'mov_file_name', 'mov_mime_type', 'mov_size'])->all(), 'protected_area_name' => $record->protectedArea?->name, 'submission_origin' => $directPenro ? 'PENRO' : 'CENRO', 'cenro_release_applicable' => ! $directPenro, 'mov' => $record->mov_file_path ? $this->attachments->descriptor($this->attachmentSource($record), $record, 'mov') : null];
+        return [...collect($record->toArray())->except(['mov_file_path', 'mov_file_name', 'mov_mime_type', 'mov_size'])->all(), 'protected_area_name' => $record->protectedArea?->name, 'submission_origin' => $directPenro ? 'PENRO' : 'CENRO', 'cenro_release_applicable' => ! $directPenro, 'mov' => ! $archived && $record->mov_file_path ? $this->attachments->descriptor($this->attachmentSource($record), $record, 'mov') : null];
     }
 
     private function attachmentSource(Model $record): string

@@ -465,6 +465,27 @@ test('every archive source enforces its declared upload size cap and spreadsheet
 
 test('each remaining generic source releases, receives, archives its returned set, and protects the final copy', function (string $source, bool $spreadsheet): void {
     $fixture = finalArchiveReleasedSource($source, 'Final archive '.$source.' lifecycle');
+    $report = $fixture['report'];
+    $viewer = $fixture['penro_focal'];
+    foreach (['bams.view', 'imea.view', 'aws.view'] as $ability) {
+        $viewer->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+    [$url, $reportProp, $fileProp] = match ($source) {
+        'conservation' => [route('conservation-reports.index', $report->workflow_key), 'submissions', 'mov'],
+        'bams' => [route('bams.report-submissions.index'), 'submissions', 'mov'],
+        'imea' => [route('imea.report-submissions.index'), 'submissions', 'mov'],
+        'imea-maintenance' => [route('imea.maintenance-reports.index'), 'reports', 'mov'],
+        'aws' => [route('aws.index'), 'awsRecords', 'report_file'],
+        'ipaf-management' => [route('ipaf.index', ['ipaf_tab' => 'management']), 'managementReports', 'mov'],
+        'revenue' => [route('ipaf.index', ['ipaf_tab' => 'revenue']), 'revenueCollections', 'mov'],
+        'engp' => [route('engp-reports.index', [$report->workflow_key, 'year' => $report->reporting_year]), 'submissions', 'mov'],
+    };
+    $row = $reportProp.'.data.0';
+    $this->actingAs($viewer)->get($url)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where($row.'.id', $report->getKey())
+        ->where($row.'.has_verified_final_archive', false)
+        ->where($row.'.'.$fileProp.'.url', fn ($url) => is_string($url) && $url !== ''));
+
     $archives = app(FinalDocumentArchiveService::class);
     $gateway = $fixture['gateway'];
     $beforeReceiptUploads = $gateway->uploadAttempts();
@@ -507,7 +528,18 @@ test('each remaining generic source releases, receives, archives its returned se
         ->assertInertia(fn (Assert $page) => $page->where('selected.source', $source)
             ->where('selected.latest_manifest.status', 'ARCHIVED'));
 
+    $this->get($url)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where($row.'.id', $report->getKey())
+        ->where($row.'.has_verified_final_archive', true)
+        ->where($row.'.'.$fileProp, null));
+
     if ($source === 'engp') {
+        $this->get(route('engp-reports.summary', ['year' => $report->reporting_year]))
+            ->assertOk()->assertInertia(fn (Assert $page) => $page
+                ->where('summaryRows.0.id', $report->getKey())
+                ->where('summaryRows.0.mov_status', 'Archived')
+                ->where('summaryRows.0.mov', null)
+                ->where('summaryRows.0.mov_external_url', null));
         expect($fixture['report']->mov_external_url)->toBe('https://example.invalid/source-reference-only')
             ->and($file->staged_path)->not->toBe($fixture['report']->mov_external_url)
             ->and(Storage::disk('local')->exists($file->staged_path))->toBeTrue();
@@ -534,6 +566,13 @@ test('legacy Regular PAMB release evidence supports separate receipt and final a
     expect($state['stage'])->toBe(DocumentRoutingProfileRegistry::RELEASED_REGIONAL)
         ->and((int) data_get($lastProjected->metadata, 'legacy_pamb_event_id'))->toBe((int) $legacyRelease->getKey());
 
+    $moduleViewer = finalArchiveActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $moduleUrl = route('conservation-reports.index', ['workflow' => 'regular_pamb']);
+    $this->actingAs($moduleViewer)->get($moduleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('submissions.data.0.id', $report->getKey())
+        ->where('submissions.data.0.has_verified_final_archive', false)
+        ->where('submissions.data.0.mov_url', fn ($url) => is_string($url) && $url !== ''));
+
     $gateway = $fixture['gateway'];
     $attemptsBeforeReceipt = $gateway->uploadAttempts();
     $receipt = app(FinalDocumentArchiveService::class)->recordReceipt(
@@ -545,6 +584,10 @@ test('legacy Regular PAMB release evidence supports separate receipt and final a
         ->and($gateway->uploadAttempts())->toBe($attemptsBeforeReceipt)
         ->and(\App\Models\DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->getKey())->count())->toBe($eventsBefore);
 
+    $this->get($moduleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('submissions.data.0.has_verified_final_archive', false)
+        ->where('submissions.data.0.mov_url', fn ($url) => is_string($url) && $url !== ''));
+
     $result = app(FinalDocumentArchiveService::class)->createOrRetryManifest(
         $fixture['penro_focal'], 'conservation', (int) $report->getKey(), (string) Str::uuid(),
         [UploadedFile::fake()->createWithContent('legacy-pamb-final.pdf', "%PDF-1.7\nSigned legacy PAMB return")], true,
@@ -554,6 +597,16 @@ test('legacy Regular PAMB release evidence supports separate receipt and final a
         ->and($manifest->archive_status)->toBe('ARCHIVED')
         ->and($manifest->source_type)->toBe('conservation')
         ->and(\App\Models\DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->getKey())->count())->toBe($eventsBefore);
+
+    $this->get($moduleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('submissions.data.0.id', $report->getKey())
+        ->where('submissions.data.0.has_verified_final_archive', true)
+        ->where('submissions.data.0.mov', null)
+        ->where('submissions.data.0.mov_url', null)
+        ->where('submissions.data.0.current_document', null));
+    $this->actingAs($fixture['penro_focal'])
+        ->get(route('final-archives.files.show', $manifest->files()->firstOrFail()->getKey()).'?download=1')
+        ->assertOk();
 });
 
 test('direct PENRO MHRWS release receives and archives under the authoritative PENRO assignment', function (): void {
@@ -1756,6 +1809,14 @@ test('Submission Tracking exposes the record archive link only for a scoped veri
     expect($result['status'])->toBe('archived')
         ->and($archives->verifiedFinalArchiveRecordKeys($writer, $completeCandidate))->toBe(['bms:'.$completeId]);
 
+    $writer->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
+    $this->get(route('bms.index', ['tracker' => 1]))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('reportSubmissions.data.0.id', $completeId)
+        ->where('reportSubmissions.data.0.has_verified_final_archive', true)
+        ->where('reportSubmissions.data.0.mov_url', null)
+        ->where('reportSubmissions.data.1.id', $sourceId)
+        ->where('reportSubmissions.data.1.has_verified_final_archive', false));
+
     $this->actingAs($writer)->get(route('submission-tracking.index', ['view' => 'history', 'source' => 'bms', 'source_id' => $completeId]))
         ->assertRedirect(route('final-archives.index', ['source' => 'bms', 'record' => $completeId]))
         ->assertSessionHas('info', 'This verified final return is now available in Archives.');
@@ -1771,6 +1832,29 @@ test('Submission Tracking exposes the record archive link only for a scoped veri
         ->where('workspaceQueues.history', [])
         ->where('pagination.total', 0)
         ->where('pagination.has_more', false));
+
+    ModuleDefinition::query()->where('code', 'bms')->update(['requirement_domain' => 'pa']);
+    $area = $complete['report']->protectedArea;
+    $pamoOffice = OrganizationalOffice::query()->create([
+        'code' => 'pamo_archive_module', 'name' => 'PAMO Archive Module', 'office_type' => 'pamo', 'is_active' => true,
+    ]);
+    $area->forceFill(['status' => 'Active', 'pamo' => $pamoOffice->name])->save();
+    ProtectedAreaOfficeAssignment::query()->create([
+        'protected_area_id' => $area->getKey(), 'organizational_office_id' => $pamoOffice->getKey(),
+        'assignment_type' => 'pamo',
+    ]);
+    $pamo = User::factory()->create([
+        'section' => OrganizationalAccessService::PAMO, 'unit_assignment' => null,
+        'protected_area_id' => $area->getKey(), 'office_designated' => $pamoOffice->name,
+        'is_active' => true, 'is_approved' => true,
+    ]);
+    $pamo->assignRole(\Spatie\Permission\Models\Role::findOrCreate('no_role', 'web'));
+    $this->actingAs($pamo)->get(route('pamo-native-reports.index', 'bms'))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('reports.data.0.id', $completeId)
+        ->where('reports.data.0.has_verified_final_archive', true)
+        ->where('reports.data.0.mov_url', null)
+        ->where('reports.data.0.mov_available', false)
+        ->where('reports.data.0.can_edit_correction', false));
 
     $outOfScopeReader = finalArchiveActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
     $outOfScopeReader->revokePermissionTo('bms.update');
@@ -1843,6 +1927,13 @@ test('each ENGP workflow reaches Development History only after its verified Reg
         ->and($manifest->files->first()->document_archive_id)->toBe($verifiedObjectId)
         ->and($fixture['gateway']->uploadAttempts())->toBe($uploadsAfterArchive)
         ->and($archives->verifiedFinalArchiveRecordKeys($writer, $candidate))->toBe(['engp:'.$recordId]);
+
+    $this->get(route('engp-reports.index', [$workflowKey, 'year' => $fixture['report']->reporting_year]))
+        ->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('submissions.data.0.id', $recordId)
+            ->where('submissions.data.0.has_verified_final_archive', true)
+            ->where('submissions.data.0.mov', null)
+            ->where('submissions.data.0.mov_external_url', null));
 
     $this->actingAs($writer)->get($historyDetail)
         ->assertRedirect(route('final-archives.index', ['source' => 'engp', 'record' => $recordId]));

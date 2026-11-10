@@ -547,7 +547,9 @@ export default function Index({
     const dispatchSubmitInFlight = useRef(false);
     const movSubmissionInFlight = useRef(false);
     const [movSubmissionBusy, setMovSubmissionBusy] = useState(false);
-    const [showFullDetails, setShowFullDetails] = useState(false);
+    const [showFullDetails, setShowFullDetails] = useState(
+        trackingContext.open_details === true && details !== null,
+    );
     const [expandFullTimeline, setExpandFullTimeline] = useState(false);
     useEffect(() => {
         setExpandFullTimeline(false);

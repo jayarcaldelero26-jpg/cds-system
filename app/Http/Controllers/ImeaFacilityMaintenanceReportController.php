@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\ImeaFacilityMaintenanceReport;
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
@@ -40,7 +42,8 @@ class ImeaFacilityMaintenanceReportController extends Controller
             })
             ->when($request->filled('protected_area_id'), fn ($query) => $query->where('protected_area_id', $request->integer('protected_area_id')))
             ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', $request->input('quarter')))
-            ->latest('id')->paginate(10)->withQueryString()->through(fn ($report) => $this->data($report));
+            ->latest('id')->paginate(10)->withQueryString();
+        $reports = app(FinalDocumentArchiveService::class)->presentModuleReportPage('imea-maintenance', $reports, $this->data(...));
 
         return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']), ...app(SubmissionFormScopeService::class)->options($request->user()), 'filters' => $request->only(['search', 'protected_area_id', 'quarter'])]);
     }
@@ -98,5 +101,5 @@ class ImeaFacilityMaintenanceReportController extends Controller
     {
         return ['protected_area_id' => ['required', 'exists:protected_areas,id'], 'target_office' => ['required', 'string', 'max:255'], 'activity_name' => ['required', 'string', 'max:255'], 'document_type' => ['required', 'in:Final Report,Progress Report'], 'quarter' => ['required', 'in:Quarter 1,Quarter 2,Quarter 3,Quarter 4'], 'date_conducted' => ['required', 'date'], 'date_accomplished' => ['required', 'date'], 'mov' => [$requireMov ? 'required' : 'nullable', 'file', 'mimes:pdf,jpg,jpeg,png,doc,docx', 'max:20480'], 'remarks' => ['nullable', 'string']];
     }
-    private function data(ImeaFacilityMaintenanceReport $report): array { return [...collect($report->toArray())->except(['mov_file_path', 'mov_file_name', 'mov_mime_type', 'mov_size'])->all(), 'protected_area_name' => $report->protectedArea?->name, 'mov' => $report->mov_file_path ? $this->attachments->descriptor('imea-maintenance', $report, 'mov') : null]; }
+    private function data(ImeaFacilityMaintenanceReport $report, bool $archived): array { return [...collect($report->toArray())->except(['mov_file_path', 'mov_file_name', 'mov_mime_type', 'mov_size'])->all(), 'protected_area_name' => $report->protectedArea?->name, 'mov' => ! $archived && $report->mov_file_path ? $this->attachments->descriptor('imea-maintenance', $report, 'mov') : null]; }
 }

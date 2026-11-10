@@ -54,7 +54,7 @@ export default function Index(props) {
 function Tracker({ kind, rows = {}, totals, protectedAreas = [], targetOffices = [], protectedAreasByOffice = {}, filters = {} }) {
   const revenue = kind === 'revenue';const { auth = {} } = usePage().props;const canCreate = Boolean(auth.canCreateTechnicalReports),canUpdate = Boolean(auth.canUpdateTechnicalReports),canDelete = Boolean(auth.canDeleteTechnicalReports);
   const records = rows.data || [];const [selected, setSelected] = useState(null),[modal, setModal] = useState(null),[deleting, setDeleting] = useState(null),[preview, setPreview] = useState(null);
-  const selectedIsMutable = Boolean(selected && !selected.is_historical
+  const selectedIsMutable = Boolean(selected && !selected.has_verified_final_archive && !selected.is_historical
     && String(selected.submission_status ?? '').toLowerCase() !== 'completed');
   const empty = revenue ? { protected_area_id: '', target_office: '', document_type: '', reporting_month: new Date().getMonth() + 1, reporting_year: new Date().getFullYear(), total_collected: '', mov: null, remarks: '' } : { protected_area_id: '', target_office: '', activity_name: '', document_type: '', date_conducted: '', date_accomplished: '', mov: null, remarks: '' };
   const form = useForm(empty);
@@ -91,6 +91,7 @@ function Tracker({ kind, rows = {}, totals, protectedAreas = [], targetOffices =
           open={modal === 'details' && Boolean(selected)}
           title={revenue ? 'Revenue Collection Details' : 'Management of IPAF Details'}
           subtitle={selected?.protected_area_name || ''}
+          reportData={selected}
           onClose={close}
           canEdit={canUpdate && selectedIsMutable}
           canDelete={canDelete && selectedIsMutable}
@@ -102,7 +103,7 @@ function Tracker({ kind, rows = {}, totals, protectedAreas = [], targetOffices =
             { label: 'Timeliness', render: () => <Badge value={selected.timeliness} /> },
             { label: 'Submission Status', render: () => <Badge value={selected.submission_status} /> },
           ]} />}
-          attachments={selected && (selected.mov
+          attachments={selected && !selected.has_verified_final_archive && (selected.mov
             ? <FilePreviewPanel file={selected.mov} title="Report Attachment / MOV" heightClass="h-[420px]" />
             : <CrudSection title="Attachment / MOV">
                 <p className="text-xs font-semibold text-amber-700 dark:text-amber-300">Not Yet Submitted / Missing</p>

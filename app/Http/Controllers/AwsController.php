@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\Aws;
 use App\Models\AwsObservation;
 use App\Models\ProtectedArea;
@@ -180,8 +182,11 @@ class AwsController extends Controller
         $summaryRows = $this->monthlySummary->summarizePeriod($request->user(), $summaryMode, $summaryPeriod, $summaryProtectedAreaId);
 
 
+        $reports = $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString();
+        $reports = app(FinalDocumentArchiveService::class)->presentModuleReportPage('aws', $reports, $this->reportData(...));
+
         return Inertia::render('AWS/Aws', [
-            'awsRecords'     => $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString()->through(fn (Aws $report) => $this->reportData($report)),
+            'awsRecords'     => $reports,
             'rawRecords'     => $rawPaginator->through(fn ($record) => $this->rawData($record)),
             'chartRecords'   => $chartData,
             'protectedAreas' => $this->awsScope->options($request->user()),
@@ -966,7 +971,7 @@ class AwsController extends Controller
         abort_unless((int) ceil($start->month / 3) === $quarter && (int) ceil($end->month / 3) === $quarter, 422, 'The monitoring period must fall within the selected quarter.');
     }
 
-    private function reportData(Aws $report): array
+    private function reportData(Aws $report, bool $archived): array
     {
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($report);
 
@@ -982,7 +987,7 @@ class AwsController extends Controller
             'date_endorsed_regional' => $report->date_endorsed_regional?->toDateString(),
             'submission_origin' => $directPenro ? 'PENRO' : 'CENRO',
             'cenro_release_applicable' => ! $directPenro,
-            'report_file' => $this->attachments->descriptor('aws', $report, 'report_file'),
+            'report_file' => $archived ? null : $this->attachments->descriptor('aws', $report, 'report_file'),
         ];
     }
 

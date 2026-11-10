@@ -33,10 +33,13 @@ final class NotificationController extends Controller
             ->whereIn('data->type', self::BELL_NOTIFICATION_TYPES)
             ->latest()
             ->limit(8)
-            ->get()
-            ->map(fn (DatabaseNotification $notification) => $this->present($notification));
+            ->get();
+        $canViewTracking = $items->isNotEmpty() && $request->user()->can('submission-tracking.view');
 
-        return response()->json(['unread_count' => $unreadCount, 'notifications' => $items->values()]);
+        return response()->json([
+            'unread_count' => $unreadCount,
+            'notifications' => $items->map(fn (DatabaseNotification $notification) => $this->present($notification, $canViewTracking))->values(),
+        ]);
     }
 
     public function markRead(Request $request, DatabaseNotification $notification): JsonResponse|RedirectResponse
@@ -71,7 +74,7 @@ final class NotificationController extends Controller
     /** @return \Illuminate\Support\Collection<int, array<string, mixed>> */
     private function items(Request $request, string $filter)
     {
-        return $request->user()->notifications()->latest()->get()
+        $items = $request->user()->notifications()->latest()->get()
             ->filter(function (DatabaseNotification $notification) use ($filter): bool {
                 $category = $notification->data['category'] ?? '';
                 return match ($filter) {
@@ -81,8 +84,10 @@ final class NotificationController extends Controller
                     'submission_updates' => $category === 'submission_updates',
                     default => true,
                 };
-            })
-            ->map(fn (DatabaseNotification $notification) => $this->present($notification));
+            });
+        $canViewTracking = $items->isNotEmpty() && $request->user()->can('submission-tracking.view');
+
+        return $items->map(fn (DatabaseNotification $notification) => $this->present($notification, $canViewTracking));
     }
 
     /** @return \Illuminate\Support\Collection<int, DatabaseNotification> */
@@ -94,12 +99,12 @@ final class NotificationController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function present(DatabaseNotification $notification): array
+    private function present(DatabaseNotification $notification, bool $canViewTracking): array
     {
         $data = $notification->data;
         $url = $data['url'] ?? null;
         if (EdatsInAppNotificationService::isBellAlert($data)) {
-            $url = EdatsInAppNotificationService::actionUrl($data, request()->user());
+            $url = EdatsInAppNotificationService::actionUrl($data, $canViewTracking);
         }
 
         return [

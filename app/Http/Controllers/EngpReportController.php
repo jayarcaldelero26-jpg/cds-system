@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\EngpReportSubmission;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Attachments\CurrentDocumentReplacementService;
@@ -50,7 +52,9 @@ class EngpReportController extends Controller
                 $search = trim((string) $request->input('search'));
                 $q->where(fn ($inner) => $inner->where('office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('section_name', 'like', "%{$search}%"));
             });
-        $rows = $query->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString()->through(fn (EngpReportSubmission $row) => $this->data($row));
+        $rows = $query->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString();
+        $archives = app(FinalDocumentArchiveService::class);
+        $rows = $archives->presentModuleReportPage('engp', $rows, $this->data(...));
         $existingYears = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())
             ->select('reporting_year')->distinct()->pluck('reporting_year')->all();
         $years = $this->workflows->availableYears($existingYears, $year);
@@ -61,6 +65,10 @@ class EngpReportController extends Controller
             ->filter(fn (string $office): bool => $this->organization->canUseDevelopmentOffice($request->user(), $office))
             ->values()
             ->all();
+
+        $summaryRows = $workflow ? collect() : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())
+            ->with(['releaseEvents', 'documentRoutingEvents'])
+            ->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get();
 
         return Inertia::render('Engp/Index', [
             'workflow' => $workflow,
@@ -75,7 +83,7 @@ class EngpReportController extends Controller
             'targetOffices' => collect(app(SubmissionFormScopeService::class)->officeOptions($request->user()))->filter(fn (array $office): bool => in_array($office['name'], $offices, true))->values()->all(),
             'filters' => [...$request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']), 'year' => $year],
             'summary' => $workflow ? null : $this->summary($year, $request->user()),
-            'summaryRows' => $workflow ? [] : $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year)->where('workflow_key', '!=', 'weekly_accomplishment')->latest('id')->get()->map(fn (EngpReportSubmission $row) => $this->data($row))->values(),
+            'summaryRows' => $archives->presentModuleReports('engp', $summaryRows, $this->data(...))->values(),
         ]);
     }
 
@@ -264,22 +272,26 @@ class EngpReportController extends Controller
             ->first();
     }
 
-    private function data(EngpReportSubmission $record): array
+    private function data(EngpReportSubmission $record, bool $archived): array
     {
         $historical = $this->historicalEvidence->forRecord($record);
         $displayRecord = $historical['record'] ?? $record;
         if ($historical) $displayRecord->setAppends([]);
         $data = collect($displayRecord->toArray())->except(['mov_file_path'])->all();
-        $externalUrl = $this->safeExternalUrl($record->mov_external_url);
+        $externalUrl = $archived ? null : $this->safeExternalUrl($record->mov_external_url);
+        if ($archived) {
+            $data['mov_external_url'] = null;
+            $data['mov_file_name'] = null;
+        }
         $monitoringStatus = $historical
             ? null
             : $this->monitoringStatuses->resolve($record->deadline_submission?->toDateString(), $record->date_received_penro?->toDateString());
         $releaseEvents = $record->releaseEvents->map(fn ($event) => ['period_component' => $event->period_component, 'component_label' => $event->component_label, 'date_report_released_cenro' => $event->date_report_released_cenro?->toDateString()])->values();
         $routeRelease = EngpRoutingMilestonePresenter::cenroRelease($record->documentRoutingEvents);
         $recordedReleaseDate = $releaseEvents->pluck('date_report_released_cenro')->filter()->sort()->last() ?? $routeRelease['date'];
-        $mov = $record->mov_file_path
+        $mov = $archived ? null : ($record->mov_file_path
             ? $this->attachments->descriptor('engp-report', $record, 'mov')
-            : ($externalUrl ? ['name' => 'External MOV reference', 'mime_type' => null, 'type' => null, 'size' => null, 'url' => $externalUrl, 'external' => true] : null);
+            : ($externalUrl ? ['name' => 'External MOV reference', 'mime_type' => null, 'type' => null, 'size' => null, 'url' => $externalUrl, 'external' => true] : null));
         return [...$data,
             'workflow_label' => $record->workflow()['label'] ?? 'ENGP Report',
             'monitoring_status_key' => $historical['monitoring_status_key'] ?? $monitoringStatus['key'],
@@ -298,7 +310,7 @@ class EngpReportController extends Controller
             'timeliness_rating' => $historical['timeliness'] ?? $record->timeliness_rating,
             'submission_status' => $historical['submission_status'] ?? $record->submission_status,
             'release_events' => $releaseEvents,
-            'mov_status' => $mov ? 'Recorded' : 'Not yet recorded',
+            'mov_status' => $archived ? 'Archived' : ($mov ? 'Recorded' : 'Not yet recorded'),
             'mov' => $mov,
             ...($historical ? ['historical_evidence' => $historical['historical_evidence']] : []),
         ];

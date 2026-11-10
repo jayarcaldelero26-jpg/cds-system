@@ -35,9 +35,9 @@ final class EdatsInAppNotificationService
      * Bell alerts are operational reminders. Resolve them to the authorized
      * tracking workspace instead of persisting a privileged admin page URL.
      */
-    public static function actionUrl(array $data, User $user): string
+    public static function actionUrl(array $data, bool $canViewTracking): string
     {
-        if (! $user->can('reports.view')) {
+        if (! $canViewTracking) {
             return route('dashboard');
         }
 
@@ -59,6 +59,7 @@ final class EdatsInAppNotificationService
                 'view' => $view,
                 'source' => $source,
                 'source_id' => $sourceId,
+                'open_details' => 1,
             ], static fn (mixed $value): bool => $value !== null))
             : route('submission-tracking.index');
     }
@@ -216,7 +217,10 @@ final class EdatsInAppNotificationService
         foreach ($this->recipients($report) as $user) {
             $exists = $user->notifications()->get()->contains(fn ($notification): bool => ($notification->data['dedup_key'] ?? null) === $payload['dedup_key']);
             if (! $exists) {
-                $user->notify(new EdatsInAppNotification([...$payload, 'url' => self::actionUrl($payload, $user)]));
+                $user->notify(new EdatsInAppNotification([
+                    ...$payload,
+                    'url' => self::actionUrl($payload, $user->can('submission-tracking.view')),
+                ]));
             }
         }
     }

@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\Archive\FinalDocumentArchiveService;
+
 use App\Models\ProtectedArea;
 use App\Services\Attachments\ProtectedAttachmentService;
 use App\Services\Attachments\CurrentDocumentReplacementService;
@@ -59,8 +61,9 @@ abstract class StandardAReportSubmissionController extends Controller
             })
             ->latest('id')
             ->paginate(10)
-            ->withQueryString()
-            ->through(fn (Model $submission) => $this->submissionData($submission));
+            ->withQueryString();
+        $source = $this->routePrefix === 'bams.report-submissions' ? 'bams' : 'imea';
+        $submissions = app(FinalDocumentArchiveService::class)->presentModuleReportPage($source, $submissions, $this->submissionData(...));
 
         return Inertia::render($this->page, [
             'submissions' => $submissions,
@@ -177,11 +180,11 @@ abstract class StandardAReportSubmissionController extends Controller
     }
 
 
-    private function submissionData(Model $submission): array
+    private function submissionData(Model $submission, bool $archived): array
     {
         $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
-        $data['mov'] = $this->attachments->descriptor($this->attachmentSource(), $submission, 'mov');
-        $data['mov_url'] = $submission->mov_file_path ? $this->attachments->url($this->attachmentSource(), $submission, 'mov') : null;
+        $data['mov'] = $archived ? null : $this->attachments->descriptor($this->attachmentSource(), $submission, 'mov');
+        $data['mov_url'] = ! $archived && $submission->mov_file_path ? $this->attachments->url($this->attachmentSource(), $submission, 'mov') : null;
         $directPenro = app(ProtectedAreaRoutingPolicy::class)->isDirectPenro($submission);
         $data['submission_origin'] = $directPenro ? 'PENRO' : 'CENRO';
         $data['cenro_release_applicable'] = ! $directPenro;

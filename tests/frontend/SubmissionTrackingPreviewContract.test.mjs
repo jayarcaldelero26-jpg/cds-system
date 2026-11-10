@@ -93,7 +93,17 @@ async function component(name, { stubAuthenticatedLayout = false, hooks = React 
                 if (id === '\0pdfjs-ssr-shim') return 'export const GlobalWorkerOptions = {}; export const getDocument = () => { throw new Error("PDF rendering is unavailable in this markup fixture"); };';
                 if (id === '\0pdfjs-worker-ssr-shim') return 'export default "/pdfjs-worker-fixture.mjs";';
                 if (id === '\0inertia-ssr-shim') {
-                    return 'import React from "react"; export const Head = () => null; export const Link = ({ href, children, ...props }) => React.createElement("a", { ...props, href }, children); export const router = { get(...args) { globalThis.__trackingRouterCalls?.push(args); } }; export const usePage = () => ({ props: {} }); export const useForm = (data = {}) => ({ data, processing: false, errors: {}, setData() {}, reset() {}, clearErrors() {}, post() {} });';
+                    return `
+                        import React from "react";
+                        export { http } from "@inertiajs/core";
+                        export const Head = () => null;
+                        export const Link = ({ href, children, ...props }) => React.createElement("a", { ...props, href }, children);
+                        export const router = { get(...args) { globalThis.__trackingRouterCalls?.push(args); } };
+                        export const usePage = () => ({ props: {} });
+                        export const useForm = (data = {}) => ({
+                            data, processing: false, errors: {}, setData() {}, reset() {}, clearErrors() {}, post() {},
+                        });
+                    `;
                 }
                 if (/\.(png|jpe?g|svg|webp|gif)$/.test(id)) return 'export default "test-image";';
             },
@@ -109,6 +119,8 @@ async function component(name, { stubAuthenticatedLayout = false, hooks = React 
 }
 
 const Preview = await component('DocumentPreviewDialog');
+const CrudDetailsModal = await component('Crud/CrudDetailsModal');
+const ipafPageSource = readFileSync(resolve('resources/js/Pages/Ipaf/Index.jsx'), 'utf8');
 const PdfViewer = await component('PdfDocumentViewer');
 const PambProgress = await component('PambMovProgress');
 const PambActions = await component('PambMovActions');
@@ -128,6 +140,26 @@ const DetailsJourneyPage = await component('Pages/SubmissionTracking/Index', {
 });
 const FinalArchivesPage = await component('Pages/SubmissionTracking/Archives', { stubAuthenticatedLayout: true });
 const SidebarDetails = SubmissionTrackingPage.SubmissionDetailsPanel;
+
+test('verified archived module details omit the attachment empty state while unsubmitted reports keep it', () => {
+    const renderDetails = reportData => renderToStaticMarkup(React.createElement(
+        CrudDetailsModal,
+        { open: true, report: true, reportData, title: 'BMS Report Details', onClose() {} },
+        React.createElement('div', null, 'Verified report details'),
+    ));
+
+    const archived = renderDetails({ has_verified_final_archive: true });
+    assert.match(archived, /Verified report details/);
+    assert.doesNotMatch(archived, /Attachment \/ MOV|No MOV \/ attachment has been submitted\./);
+
+    const unsubmitted = renderDetails({ has_verified_final_archive: false });
+    assert.match(unsubmitted, /Attachment \/ MOV/);
+    assert.match(unsubmitted, /No MOV \/ attachment has been submitted\./);
+});
+
+test('IPAF detail modal receives the selected report archive state', () => {
+    assert.match(ipafPageSource, /<CrudDetailsModal[\s\S]*?reportData=\{selected\}/);
+});
 const TrackingProgressCard = SubmissionTrackingPage.SubmissionTrackingDetailsProgressCard;
 const OfficialReportFileSection = await component('OfficialReportFileSection');
 const FinalArchiveActions = await component('FinalArchiveRecordActions');
@@ -267,6 +299,46 @@ test('standard current-document and PAMO official-file actions pass their select
     pamoButton.props.onClick();
     assert.equal(opened[1], pamoRow, 'PAMO For Action/Sent/Completed retain the exact selected official report row');
     assert.equal(opened[1].current_document, pamoRow.current_document);
+});
+
+test('a notification link opens Full Details for its selected report only', () => {
+    const previousRoute = globalThis.route;
+    globalThis.route = name => name;
+    const report = {
+        source: 'revenue', source_id: 8, module: 'Revenue Collection',
+        reporting_period: 'October 2026', target_office: 'CENRO Baganga',
+    };
+    const renderDetails = (trackingContext) => {
+        detailsJourneyHooks.beginRender();
+        const page = DetailsJourneyPage.default({
+            workspaceQueues: { incoming: [report], outgoing: [], history: [] },
+            filters: {}, filterOptions: {},
+            trackingContext: { view: 'incoming', ...trackingContext },
+            pagination: { current_page: 1, per_page: 25, has_more: false },
+        });
+        return findElement(page, element => element.type?.name === 'CrudDetailsModal' && element.props.title === 'Submission Details');
+    };
+
+    try {
+        detailsJourneyHooks.reset();
+        const linked = { selected_record: report, open_details: true };
+        const modal = renderDetails(linked);
+        assert.equal(modal.props.open, true);
+        const expandedContext = findElement(React.createElement(React.Fragment, null, modal.props.children),
+            element => element.props?.expanded === true && element.props?.row?.source);
+        assert.equal(expandedContext.props.row, report);
+        modal.props.onClose();
+        assert.equal(renderDetails(linked).props.open, false);
+
+        detailsJourneyHooks.reset();
+        assert.equal(renderDetails({ selected_record: report }).props.open, false);
+        detailsJourneyHooks.reset();
+        assert.equal(renderDetails({ selected_record: null, open_details: true }).props.open, false);
+    } finally {
+        if (previousRoute === undefined) delete globalThis.route;
+        else globalThis.route = previousRoute;
+        detailsJourneyHooks.reset();
+    }
 });
 
 test('selected report View Full Details opens the complete source-bound details while Preview remains separate', () => {

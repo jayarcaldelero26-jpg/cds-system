@@ -54,6 +54,7 @@ class SubmissionTrackingController extends Controller
             $trackingRecords = LocalNavigationTrace::measure($request, 'st_selected_projection', fn () => $this->tracking->records($filters, null, false));
             $selectedRecord = LocalNavigationTrace::measure($request, 'st_selected_match', fn () => $trackingRecords->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId));
         }
+        $openDetails = $selectedRecord !== null && $request->boolean('open_details');
         // Workspace queues must span the complete authorized filtered set.
         // The snapshot is intentionally paginated for the tracking table, so
         // using it here can hide an actionable record that is outside page 1.
@@ -86,6 +87,7 @@ class SubmissionTrackingController extends Controller
                     'view' => 'history', ...$filters, 'page' => $lastPage,
                     'source' => $selectedRecord['source'] ?? null,
                     'source_id' => $selectedRecord['source_id'] ?? null,
+                    'open_details' => $openDetails ? 1 : null,
                     'focus_source' => $focusSource,
                     'focus_id' => $focusId,
                 ], static fn (mixed $value): bool => $value !== null && $value !== ''));
@@ -140,6 +142,7 @@ class SubmissionTrackingController extends Controller
             'selected_record' => $selectedRecord,
             'selected_source' => $selectedSource ?: null,
             'selected_id' => $selectedId > 0 ? $selectedId : null,
+            'open_details' => $openDetails,
         ]);
         $response = LocalNavigationTrace::measure($request, 'st_response_build', fn () => Inertia::render('SubmissionTracking/Index', [
             'workspaceQueues' => $workspaceQueues,
