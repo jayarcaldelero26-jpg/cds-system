@@ -30,6 +30,7 @@ function createPageRuntime() {
             || dependencies.some((value, position) => !Object.is(value, previous.dependencies[position]));
         if (changed) pending.push({ index, callback, dependencies });
     };
+    runtime.useLayoutEffect = runtime.useEffect;
     runtime.useCallback = (callback, dependencies) => {
         const [memoized, setMemoized] = runtime.useState(() => ({ callback, dependencies }));
         if (!dependencies || dependencies.length !== memoized.dependencies?.length

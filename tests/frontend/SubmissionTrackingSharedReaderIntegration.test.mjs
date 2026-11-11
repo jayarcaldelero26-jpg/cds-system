@@ -144,7 +144,8 @@ test('standard and PAMO current files share one protected reader and keep select
     const expandButton = findElement(detailsTree, element => element.props['aria-label'] === 'Expand reader');
     expandButton.props.onClick();
     const expandedTree = previewTree(Preview, { open: true, row: standardRow, accountKey: 42, onClose() { closeCount += 1; } }, hooks);
-    assert.match(findElement(expandedTree, element => element.type === 'section' && element.props.role === 'dialog').props.className, /h-\[calc\(100dvh_-_var\(--reader-bottom-obstruction\)\)\]/);
+    assert.equal(expandedTree.props.placement, 'fullscreen');
+    assert.match(expandedTree.props.panelClassName, /h-\[calc\(100dvh_-_var\(--reader-bottom-obstruction\)\)\]/);
     assert.equal(globalThis.__sharedReaderCalls.length, 1, 'tabs and expand do not fetch the selected file again');
 
     const documentOnlyTree = previewTree(Preview, {

@@ -40,6 +40,7 @@ import OfficialReportFileSection from "@/Components/SubmissionTracking/OfficialR
 import RoutingAttachmentField from "@/Components/SubmissionTracking/RoutingAttachmentField";
 import PremiumTimePicker from "@/Components/PremiumTimePicker";
 import { Link, router, useForm, usePage } from "@inertiajs/react";
+import { createCoalescedPartialReload } from "@/Utils/liveRefreshRuntime.mjs";
 import { startAuthentication } from "@simplewebauthn/browser";
 import TimelinessBadge, {
     isTimelinessValue,
@@ -524,6 +525,12 @@ export default function Index({
     );
     const isGlobalMonitoring = Boolean(trackingContext.is_global_user);
     const routeTab = trackingContext.view || "incoming";
+    const selectedReportUnavailable = Boolean(
+        trackingContext.open_details === true
+        && trackingContext.selected_source
+        && Number(trackingContext.selected_id) > 0
+        && !trackingContext.selected_record,
+    );
     const [tab, setTab] = useState(routeTab);
     const [previousRouteTab, setPreviousRouteTab] = useState(routeTab);
     if (routeTab !== previousRouteTab) {
@@ -542,13 +549,17 @@ export default function Index({
     const [details, setDetails] = useState(
         trackingContext.selected_record || null,
     );
+    const detailsRef = useRef(details);
+    detailsRef.current = details;
+    const [incomingSelectionKey, setIncomingSelectionKey] = useState(null);
+    const [incomingActionNotice, setIncomingActionNotice] = useState('');
     const [reviewHistoryRecord, setReviewHistoryRecord] = useState(null);
     const lastLinkedKey = useRef(submissionKey(trackingContext.selected_record));
     const dispatchSubmitInFlight = useRef(false);
     const movSubmissionInFlight = useRef(false);
     const [movSubmissionBusy, setMovSubmissionBusy] = useState(false);
     const [showFullDetails, setShowFullDetails] = useState(
-        trackingContext.open_details === true && details !== null,
+        trackingContext.open_details === true,
     );
     const [expandFullTimeline, setExpandFullTimeline] = useState(false);
     useEffect(() => {
@@ -559,6 +570,18 @@ export default function Index({
         if (expandTimeline) setExpandFullTimeline(true);
         requestAnimationFrame(() => document.querySelector(selector)?.scrollIntoView({ behavior: "smooth", block: "start" }));
     };
+
+    useEffect(() => {
+        const reload = createCoalescedPartialReload(router, ["workspaceQueues", "trackingContext", "pagination"]);
+        const handleRefresh = event => {
+            if (event.detail?.scope === "all" || event.detail?.scope === "tracking") reload.request();
+        };
+        window.addEventListener("cds:live-refresh", handleRefresh);
+        return () => {
+            window.removeEventListener("cds:live-refresh", handleRefresh);
+            reload.dispose();
+        };
+    }, []);
     const form = useForm({
         date: localDateInputValue(),
         stage: "",
@@ -1120,8 +1143,8 @@ export default function Index({
         return () => window.clearTimeout(timer);
     }, [search]);
     const visibleDetails = useMemo(
-        () => refreshSubmissionSelection(details, rows, trackingContext.selected_record, true, submissionKey(trackingContext.selected_record) !== lastLinkedKey.current),
-        [rows, details, trackingContext.selected_record],
+        () => selectedReportUnavailable ? null : refreshSubmissionSelection(details, rows, trackingContext.selected_record, true, submissionKey(trackingContext.selected_record) !== lastLinkedKey.current),
+        [rows, details, trackingContext.selected_record, selectedReportUnavailable],
     );
     const detailsCustody = custodyContext(details);
     const statusContext = visibleDetails?.canonical_custody_applicable ? null : visibleDetails?.routing_summary?.status_context;
@@ -1130,6 +1153,18 @@ export default function Index({
         const authorizedRows = Object.values(workspaceQueues).flat();
         const linkChanged = submissionKey(linked) !== lastLinkedKey.current;
         lastLinkedKey.current = submissionKey(linked);
+        if (selectedReportUnavailable) {
+            setDetails(null);
+            setShowFullDetails(true);
+            setSelected(null);
+            setPreviewRow(null);
+            setReviewHistoryRecord(null);
+            setCorrection(null);
+            setOverride(null);
+            setRoutingStage(null);
+            setReviewing(null);
+            return;
+        }
         if (details && !refreshSubmissionSelection(details, rows, linked, false)) setShowFullDetails(false);
         setDetails((previous) => refreshSubmissionSelection(previous, rows, linked, true, linkChanged));
         setPreviewRow((previous) => refreshSubmissionSelection(previous, authorizedRows, linked, false));
@@ -1140,7 +1175,67 @@ export default function Index({
             return fresh;
         });
         if (!rows.length && !linked) setShowFullDetails(false);
-    }, [rows, workspaceQueues, trackingContext.selected_record]);
+    }, [rows, workspaceQueues, trackingContext.selected_record, selectedReportUnavailable]);
+
+    useEffect(() => {
+        if (tab !== 'incoming' || !incomingSelectionKey) return undefined;
+        const separator = incomingSelectionKey.lastIndexOf(':');
+        const source = incomingSelectionKey.slice(0, separator);
+        const sourceId = incomingSelectionKey.slice(separator + 1);
+        const controller = new AbortController();
+
+        fetch(route('submission-tracking.incoming-status', [source, sourceId]), {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+        }).then(response => response.ok ? response.json() : null).then(payload => {
+            if (!payload || payload.eligible || incomingSelectionKey !== `${source}:${sourceId}`) return;
+            setIncomingActionNotice('This report no longer needs your action.');
+            setIncomingSelectionKey(null);
+            setDetails(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setShowFullDetails(previous => submissionKey(detailsRef.current) === incomingSelectionKey ? false : previous);
+            setSelected(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setPreviewRow(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setReviewHistoryRecord(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setCorrection(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setOverride(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setReviewing(previous => submissionKey(previous) === incomingSelectionKey ? null : previous);
+            setRoutingStage(previous => submissionKey(detailsRef.current) === incomingSelectionKey ? null : previous);
+        }).catch(() => {});
+
+        return () => controller.abort();
+    }, [tab, incomingSelectionKey, workspaceQueues]);
+
+    const selectTrackingRow = row => {
+        setIncomingActionNotice('');
+        setIncomingSelectionKey(tab === 'incoming' ? submissionKey(row) : null);
+        setDetails(row);
+    };
+
+    const openFullDetails = row => {
+        if (!row) return;
+        setDetails(row);
+        setShowFullDetails(true);
+        const params = Object.fromEntries(new URLSearchParams(window.location.search).entries());
+        router.get(route("submission-tracking.index"), {
+            ...params,
+            view: tab,
+            source: row.source,
+            source_id: row.source_id,
+            open_details: 1,
+        }, { preserveState: true, preserveScroll: true, replace: true, only: ["trackingContext"] });
+    };
+
+    const closeFullDetails = () => {
+        setShowFullDetails(false);
+        const params = Object.fromEntries(new URLSearchParams(window.location.search).entries());
+        if (!params.open_details) return;
+        delete params.open_details;
+        router.get(route("submission-tracking.index"), params, {
+            preserveState: true, preserveScroll: true, replace: true, only: ["trackingContext"],
+        });
+    };
     const continueWithFreshIncomingRow = (target, page) => {
         if (!target) return;
         const freshIncomingRows = page?.props?.workspaceQueues?.incoming || [];
@@ -1465,6 +1560,7 @@ export default function Index({
             <div className="submission-tracking-page">
                 <PageHeader title={tabLabel} description={queueHelper} />
                 <div className="mt-4 space-y-4 sm:mt-5">
+                    {(trackingContext.notification_action === 'stale_incoming' || incomingActionNotice || pageProps.flash?.status === 'This report no longer needs your action.') && <div role="status" className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/35 dark:text-amber-100"><span>This report no longer needs your action.</span></div>}
                     {tab === "incoming" && <IncomingActionFilters
                         tabs={incomingActionTabs}
                         labels={incomingActionLabels}
@@ -1534,7 +1630,7 @@ export default function Index({
                                           ]
                                         : []
                                 }
-                                onRowClick={setDetails}
+                                onRowClick={selectTrackingRow}
                                 emptyTitle={
                                     tab === "history"
                                         ? pamoWorkspace ? "No completed reports found." : "No completed submissions found."
@@ -1584,8 +1680,7 @@ export default function Index({
                                     setSelected(visibleDetails);
                                 }}
                                 onViewFullDetails={() => {
-                                    setDetails(visibleDetails);
-                                    setShowFullDetails(true);
+                                    openFullDetails(visibleDetails);
                                 }}
                             />
                         </div>
@@ -1594,20 +1689,21 @@ export default function Index({
             </div>
             <CrudDetailsModal
                 compact
-                open={Boolean(showFullDetails && details)}
-                title={pamoWorkspace ? "Report Details" : "Submission Details"}
-                subtitle={pamoWorkspace ? "Current report information and routing status" : "Report identity, custody, and routing history"}
-                onClose={() => setShowFullDetails(false)}
-                attachments={pamoWorkspace && details ? <OfficialReportFileSection row={details} onPreview={setPreviewRow} /> : null}
+                open={Boolean(showFullDetails && (details || selectedReportUnavailable))}
+                title={selectedReportUnavailable ? "Submission Details" : pamoWorkspace ? "Report Details" : "Submission Details"}
+                subtitle={selectedReportUnavailable ? "Access to this report is no longer available." : pamoWorkspace ? "Current report information and routing status" : "Report identity, custody, and routing history"}
+                onClose={closeFullDetails}
+                attachments={!selectedReportUnavailable && pamoWorkspace && details ? <OfficialReportFileSection row={details} onPreview={setPreviewRow} /> : null}
                 closeOnEscape={!reviewHistoryRecord}
                 busyOverlay={movSubmissionBusy ? <PamoReportPendingAnimation intent="review" /> : null}
                 busyOverlayPresentation="success-sized"
-                footerActions={<>
+                footerActions={selectedReportUnavailable ? null : <>
                     {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="warning" onClick={() => openCorrection(details)} className="rounded-xl px-3 py-2 text-xs">Correct routing</Button>}
                     <Button type="button" size="compact" variant="cancel" onClick={() => setReviewHistoryRecord(details)} className="rounded-xl px-3 py-2 text-xs">Review history</Button>
                     <Button type="button" size="compact" variant="cancel" onClick={() => scrollDetailsTo(details?.pamb_routing_applicable && !details?.canonical_custody_applicable ? "#pamb-routing-timeline-stages" : "#document-routing-timeline-stages", true)} className="rounded-xl px-3 py-2 text-xs">Full timeline</Button>
                 </>}
             >
+                {selectedReportUnavailable ? <p role="status" className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-6 text-sm leading-6 text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">This report is no longer available in your current workspace. Its details and actions have been removed.</p> : <>
                 {details && (
                     <section className="cds-card-surface rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900" aria-label="Report identity and context">
                         <h2 className="mb-3 text-sm font-extrabold text-gray-900 dark:text-white">Report Identity and Context</h2>
@@ -1779,10 +1875,11 @@ export default function Index({
                         }}
                     />
                 )}
+                </>}
             </CrudDetailsModal>
             <CrudDetailsModal
                 compact
-                open={Boolean(reviewHistoryRecord)}
+                open={Boolean(!selectedReportUnavailable && reviewHistoryRecord)}
                 title="Review History"
                 subtitle={reviewHistoryRecord ? `${reviewHistoryRecord.activity || reviewHistoryRecord.activity_name || "Activity unavailable"} · ${reviewHistoryRecord.module || "Report"} · ${reviewHistoryRecord.protected_area || "Protected area unavailable"}` : ""}
                 onClose={() => setReviewHistoryRecord(null)}
@@ -1790,7 +1887,7 @@ export default function Index({
                 {reviewHistoryRecord && <SubmissionReviewHistory row={reviewHistoryRecord} />}
             </CrudDetailsModal>
             <CrudFormModal
-                open={Boolean(selected)}
+                open={Boolean(!selectedReportUnavailable && selected)}
                 mode="edit"
                 title={selectedActionLabel}
                 subtitle={
@@ -1898,7 +1995,7 @@ export default function Index({
                 </CrudSection>
             </CrudFormModal>
             <CrudFormModal
-                open={Boolean(override)}
+                open={Boolean(!selectedReportUnavailable && override)}
                 mode="edit"
                 title="Administrative Override"
                 subtitle="You are performing a currently valid workflow action as an emergency administrative override. Your identity, reason, and passkey verification will be recorded."
@@ -1967,7 +2064,7 @@ export default function Index({
                 )}
             </CrudFormModal>
             <CrudFormModal
-                open={Boolean(routingStage)}
+                open={Boolean(!selectedReportUnavailable && routingStage)}
                 mode="edit"
                 title={standardActionLabel(
                     routingStage?.action_label ||
@@ -2056,7 +2153,7 @@ export default function Index({
                 </CrudSection>
             </CrudFormModal>
             <CrudFormModal
-                open={Boolean(reviewing)}
+                open={Boolean(!selectedReportUnavailable && reviewing)}
                 mode="edit"
                 title={
                     reviewForm.data.decision === "needs_correction"
@@ -2120,7 +2217,7 @@ export default function Index({
                 </CrudSection>
             </CrudFormModal>
             <CrudFormModal
-                open={Boolean(correction)}
+                open={Boolean(!selectedReportUnavailable && correction)}
                 mode="edit"
                 title="Correct Routing Record"
                 subtitle="Administrative correction. Every changed date is retained in the audit trail."
@@ -2321,7 +2418,7 @@ export default function Index({
                 </CrudSection>
             </CrudFormModal>
             <DocumentPreviewDialog
-                open={Boolean(previewRow)}
+                open={Boolean(!selectedReportUnavailable && previewRow)}
                 row={previewRow}
                 accountKey={pageProps.auth?.user?.id}
                 presentation="document-only"

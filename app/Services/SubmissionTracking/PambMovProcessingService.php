@@ -202,6 +202,7 @@ final class PambMovProcessingService
             'event_key' => self::MOV_UPLOADED,
             'recorded_by' => $actor->id,
         ]);
+        $this->publishAuthorizedTrackingRefresh($submission, $actor);
     }
 
     public function submit(ConservationReportSubmission $submission, User $actor): void
@@ -210,7 +211,8 @@ final class PambMovProcessingService
         abort_unless($this->access->canPerformForSubmission($actor, 'submit', $submission), 403);
         if (! $submission->mov_file_path) throw ValidationException::withMessages(['mov' => 'Upload the MOV/report before submitting it for review.']);
 
-        DB::transaction(function () use ($submission, $actor): void {
+        $changed = false;
+        DB::transaction(function () use ($submission, $actor, &$changed): void {
             $locked = ConservationReportSubmission::query()->with('protectedArea')->lockForUpdate()->findOrFail($submission->id);
             $status = $this->status($locked);
 
@@ -223,6 +225,7 @@ final class PambMovProcessingService
             $isResubmission = $locked->movReviewEvents()->where('event_key', self::NEEDS_CORRECTION)->exists();
             $eventKey = $isResubmission ? self::RESUBMITTED_FOR_REVIEW : self::SUBMITTED_FOR_REVIEW;
             $locked->update(['mov_processing_status' => self::SUBMITTED_FOR_REVIEW, 'mov_submitted_at' => now(), 'mov_submitted_by' => $actor->id, 'mov_reviewed_at' => null, 'mov_reviewed_by' => null, 'mov_review_remarks' => null, 'updated_by' => $actor->id]);
+            $changed = true;
             $locked->movReviewEvents()->create(['event_key' => $eventKey, 'recorded_by' => $actor->id]);
             $direct = $this->isDirectRoute($locked);
             $this->auditLogs->record(
@@ -236,6 +239,7 @@ final class PambMovProcessingService
                 $actor->id,
             );
         });
+        if ($changed) $this->publishAuthorizedTrackingRefresh($submission, $actor);
     }
 
     public function review(ConservationReportSubmission $submission, User $actor, string $decision, ?string $remarks = null, ?callable $createCorrectionReturn = null): ?DocumentRoutingEvent
@@ -249,7 +253,8 @@ final class PambMovProcessingService
         }
 
         $returnEvent = null;
-        DB::transaction(function () use ($submission, $actor, $decision, $remarks, $createCorrectionReturn, &$returnEvent): void {
+        $changed = false;
+        DB::transaction(function () use ($submission, $actor, $decision, $remarks, $createCorrectionReturn, &$returnEvent, &$changed): void {
             $locked = ConservationReportSubmission::query()->with('protectedArea')->lockForUpdate()->findOrFail($submission->id);
             $this->assertScoped($locked, $actor);
             abort_unless($this->access->canPerformForSubmission($actor, 'review', $locked), 403);
@@ -259,6 +264,7 @@ final class PambMovProcessingService
 
             $cleanRemarks = $remarks ? trim($remarks) : null;
             $locked->update(['mov_processing_status' => $decision, 'mov_reviewed_at' => now(), 'mov_reviewed_by' => $actor->id, 'mov_review_remarks' => $cleanRemarks, 'updated_by' => $actor->id]);
+            $changed = true;
             $locked->movReviewEvents()->create(['event_key' => $decision, 'remarks' => $cleanRemarks, 'recorded_by' => $actor->id]);
             $this->auditLogs->record(
                 'submission_tracking',
@@ -281,7 +287,25 @@ final class PambMovProcessingService
             }
         });
 
+        if ($changed) $this->publishAuthorizedTrackingRefresh($submission, $actor);
+
         return $returnEvent;
+    }
+
+    private function publishAuthorizedTrackingRefresh(ConservationReportSubmission $submission, User $actor): void
+    {
+        $publisher = app(\App\Services\LiveRefreshPublisher::class);
+        $publisher->afterCommit([(int) $actor->getKey()], ['tracking']);
+        $publisher->afterCommitUsing(function () use ($submission, $actor): array {
+            $fresh = ConservationReportSubmission::query()->with('protectedArea')->find($submission->getKey());
+            if (! $fresh) return [];
+
+            return User::query()->where('is_active', true)->where('is_approved', true)->get()
+                ->filter(fn (User $viewer): bool => (int) $viewer->getKey() !== (int) $actor->getKey()
+                    && $this->access->canView($viewer, $fresh))
+                ->map(static fn (User $viewer): int => (int) $viewer->getKey())
+                ->values()->all();
+        }, ['tracking']);
     }
 
     /** @return array<string, mixed> */

@@ -75,5 +75,5 @@ test('layer registration shares scroll locking until the final dialog exits', ()
     assert.equal(activeModalLayerCount(), 0);
     assert.equal(first.documentObject.body.style.overflow, 'scroll');
     assert.equal(typeof useModalMotion, 'function');
-    assert.equal(MODAL_MOTION_DURATION, 240);
+    assert.equal(MODAL_MOTION_DURATION, 300);
 });

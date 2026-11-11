@@ -2,6 +2,8 @@
 
 use App\Domain\Modules\ProgramArea;
 use App\Models\ConservationReportSubmission;
+use App\Models\DocumentRoutingEvent;
+use App\Models\PambRoutingEvent;
 use App\Models\EngpReportSubmission;
 use App\Models\BmsReportSubmission;
 use App\Models\BamsReportSubmission;
@@ -16,9 +18,11 @@ use App\Models\OrganizationalOffice;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\User;
+use App\Events\LiveRefreshRequested;
 use App\Notifications\EdatsInAppNotification;
 use App\Services\Notifications\EdatsInAppNotificationService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\SubmissionTracking\IncomingUnreadCountService;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\Compliance\OverdueReportService;
@@ -27,6 +31,7 @@ use App\Services\Conservation\ConservationReportWorkflowRegistry;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 
@@ -55,27 +60,33 @@ test('unread count, read state, and mark all as read are user-specific', functio
     expect($this->user->fresh()->unreadNotifications()->count())->toBe(0);
 });
 
-test('shared notification bell reads the capped unread alert collection once per page request', function (): void {
+test('shared notification bell returns the full unread alert count and a capped list', function (): void {
     for ($index = 1; $index <= 10; $index++) {
         $this->user->notify(new EdatsInAppNotification(notificationPayload('shared-bell-'.$index)));
     }
 
-    $bellQueries = 0;
-    DB::listen(function (QueryExecuted $query) use (&$bellQueries): void {
+    $bellCountQueries = 0;
+    $bellListQueries = 0;
+    DB::listen(function (QueryExecuted $query) use (&$bellCountQueries, &$bellListQueries): void {
         $sql = strtolower($query->sql);
-        if (str_contains($sql, 'from "notifications"')
-            && str_contains($sql, '"read_at" is null')
-            && str_contains($sql, 'order by "created_at" desc')) {
-            $bellQueries++;
+        if (! str_contains($sql, 'from "notifications"') || ! str_contains($sql, '"read_at" is null')) {
+            return;
+        }
+
+        if (str_contains($sql, 'count(')) {
+            $bellCountQueries++;
+        } elseif (str_contains($sql, 'order by "created_at" desc')) {
+            $bellListQueries++;
         }
     });
 
     $response = $this->actingAs($this->user)->get(route('notifications.index'))->assertOk();
     $props = $response->inertiaProps();
 
-    expect(data_get($props, 'notificationBell.unread_count'))->toBe(8)
+    expect(data_get($props, 'notificationBell.unread_count'))->toBe(10)
         ->and(data_get($props, 'notificationBell.notifications'))->toHaveCount(8)
-        ->and($bellQueries)->toBe(1);
+        ->and($bellCountQueries)->toBe(1)
+        ->and($bellListQueries)->toBe(1);
 });
 
 test('authenticated user can mark their own notification as read', function () {
@@ -198,7 +209,7 @@ test('workflow notification URLs select the exact supported source record safely
 
 test('recent workflow notifications preserve the intended Tracking tab and selected source record', function (): void {
     foreach ([
-        ['view' => 'incoming', 'source' => 'engp', 'source_id' => 71],
+        ['view' => 'incoming', 'source' => 'engp', 'source_id' => 71, 'arrival_event_id' => 101],
         ['view' => 'outgoing', 'source' => 'conservation', 'source_id' => 72],
     ] as $index => $target) {
         $this->user->notify(new EdatsInAppNotification([
@@ -210,6 +221,7 @@ test('recent workflow notifications preserve the intended Tracking tab and selec
             'category' => 'submission_updates',
             'source_type' => $target['source'],
             'source_id' => $target['source_id'],
+            ...($target['view'] === 'incoming' ? ['arrival_event_id' => $target['arrival_event_id']] : []),
             'url' => route('submission-tracking.index', $target),
         ]));
     }
@@ -227,11 +239,106 @@ test('recent workflow notifications preserve the intended Tracking tab and selec
                 'source' => $notification->data['source_type'],
                 'source_id' => (string) $notification->data['source_id'],
                 'open_details' => '1',
+                ...($notification->data['source_id'] === 71 ? ['arrival_event_id' => '101'] : []),
             ]);
     }
 });
 
-test('a scoped CENRO chief can open a revenue notification without Reports permission', function (): void {
+test('a stale Incoming notification is marked read and returns to the queue without selecting its report', function (): void {
+    $focal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    foreach ([$focal, $chief] as $user) {
+        foreach (['technical-reports.update', 'submission-tracking.view'] as $permission) {
+            $user->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+        }
+    }
+    $report = notificationEngpReport($focal, ['office' => 'CENRO Mati']);
+    $routing = app(DocumentRoutingTransitionService::class);
+    $arrival = $routing->transition($report, 'engp', 'forward_to_cenro_chief', $focal->getKey());
+    $notification = $chief->notifications()->where('data->arrival_event_id', $arrival->getKey())->firstOrFail();
+
+    $routing->transition($report, 'engp', 'receive_at_cenro_chief', $chief->getKey());
+    $routing->transition($report, 'engp', 'forward_to_cenro_records', $chief->getKey());
+
+    $this->actingAs($chief)->get(route('notifications.index'))->assertOk()->assertInertia(fn ($page) => $page
+        ->where('notifications.0.id', $notification->id)
+        ->where('notifications.0.current_state', 'No longer in Incoming')
+        ->where('notificationBell.notifications.0.id', $notification->id)
+        ->where('notificationBell.notifications.0.current_state', 'No longer in Incoming'));
+
+    $this->patch(route('notifications.read', $notification))
+        ->assertRedirect(route('submission-tracking.index', ['view' => 'incoming']))
+        ->assertSessionHas('status', 'This report no longer needs your action.')
+        ->assertSessionHas('notification_action', 'stale_incoming');
+
+    expect($notification->fresh()->read_at)->not->toBeNull();
+    $this->get(route('submission-tracking.index', ['view' => 'incoming']))
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('SubmissionTracking/Index')
+            ->where('trackingContext.view', 'incoming')
+            ->where('trackingContext.selected_record', null)
+            ->where('trackingContext.open_details', false)
+            ->where('trackingContext.notification_action', 'stale_incoming'));
+
+    $this->get(route('notifications.index'))->assertOk()->assertInertia(fn ($page) => $page
+        ->where('notifications.0.id', $notification->id)
+        ->where('notifications.0.current_state', 'No longer in Incoming'));
+});
+
+test('a handoff between marking a notice read and opening its details is rechecked on the destination request', function (): void {
+    $focal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    foreach ([$focal, $chief] as $user) {
+        foreach (['technical-reports.update', 'submission-tracking.view'] as $permission) {
+            $user->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+        }
+    }
+    $report = notificationEngpReport($focal, ['office' => 'CENRO Mati']);
+    $routing = app(DocumentRoutingTransitionService::class);
+    $arrival = $routing->transition($report, 'engp', 'forward_to_cenro_chief', $focal->getKey());
+    $notification = $chief->notifications()->where('data->arrival_event_id', $arrival->getKey())->firstOrFail();
+    $destination = EdatsInAppNotificationService::actionUrl($notification->data, true);
+
+    $this->actingAs($chief)->from(route('notifications.index'))
+        ->patch(route('notifications.read', $notification))
+        ->assertRedirect(route('notifications.index'));
+    $routing->transition($report, 'engp', 'receive_at_cenro_chief', $chief->getKey());
+    $routing->transition($report, 'engp', 'forward_to_cenro_records', $chief->getKey());
+
+    $this->get($destination)
+        ->assertRedirect(route('submission-tracking.index', ['view' => 'incoming', 'page' => 1]))
+        ->assertSessionHas('notification_action', 'stale_incoming');
+    $this->get(route('submission-tracking.index', ['view' => 'incoming']))
+        ->assertInertia(fn ($page) => $page
+            ->where('trackingContext.selected_record', null)
+            ->where('trackingContext.open_details', false));
+});
+
+test('Incoming notification resolution ignores list filters when checking its current queue handoff', function (): void {
+    $focal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    foreach ([$focal, $chief] as $user) {
+        foreach (['technical-reports.update', 'submission-tracking.view'] as $permission) {
+            $user->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+        }
+    }
+    $report = notificationEngpReport($focal, ['office' => 'CENRO Mati']);
+    $arrival = app(DocumentRoutingTransitionService::class)->transition($report, 'engp', 'forward_to_cenro_chief', $focal->getKey());
+    $notification = $chief->notifications()->where('data->arrival_event_id', $arrival->getKey())->firstOrFail();
+    $destination = EdatsInAppNotificationService::actionUrl($notification->data, true);
+    $destination .= '&module=Not+the+report+module';
+
+    $this->actingAs($chief)->get($destination)
+        ->assertOk()
+        ->assertInertia(fn ($page) => $page
+            ->component('SubmissionTracking/Index')
+            ->where('trackingContext.selected_record.source', 'engp')
+            ->where('trackingContext.selected_record.source_id', $report->getKey())
+            ->where('trackingContext.open_details', true));
+});
+
+test('a scoped CENRO chief can open an authorized read-only revenue notification without Reports permission', function (): void {
     $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga', permission: false);
     $otherChief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati', permission: false);
     $area = notificationProtectedArea('Revenue notification scope', $chief);
@@ -250,7 +357,9 @@ test('a scoped CENRO chief can open a revenue notification without Reports permi
         'reporting_year' => 2026,
         'total_collected' => '100.00',
     ]);
-    $target = ['view' => 'incoming', 'source' => 'revenue', 'source_id' => $report->id];
+    // This fixture has no live routing handoff, so its notice must remain a
+    // read-only destination instead of claiming the report is actionable.
+    $target = ['view' => 'outgoing', 'source' => 'revenue', 'source_id' => $report->id];
     $payload = [
         ...notificationPayload('scoped-revenue'),
         'type' => EdatsInAppNotificationService::WORKFLOW,
@@ -275,8 +384,14 @@ test('a scoped CENRO chief can open a revenue notification without Reports permi
         ->where('trackingContext.selected_record.source', 'revenue')
         ->where('trackingContext.selected_record.source_id', $report->id));
 
+    $filteredLink = route('submission-tracking.index', [...$target, 'open_details' => 1, 'search' => 'no-matching-report']);
+    $this->get($filteredLink)->assertOk()->assertInertia(fn ($page) => $page
+        ->where('filters.search', 'no-matching-report')
+        ->where('trackingContext.selected_record.source', 'revenue')
+        ->where('trackingContext.selected_record.source_id', $report->id));
+
     $this->actingAs($otherChief)->get($link)->assertOk()->assertInertia(fn ($page) => $page
-        ->where('trackingContext.open_details', false)
+        ->where('trackingContext.open_details', true)
         ->where('trackingContext.selected_record', null));
     expect(EdatsInAppNotificationService::actionUrl($payload, User::factory()->create()->can('submission-tracking.view')))
         ->toBe(route('dashboard'));
@@ -482,6 +597,241 @@ test('workflow handoffs notify only the next accountable office and receipt retu
 
     expect($focal->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toContain('Submission Received')
         ->and($focal->fresh()->notifications()->where('data->title', 'Submission Received')->first()->data['url'])->toContain('view=outgoing');
+});
+
+test('location-qualified CENRO focal handoffs notify the assigned CENRO instead of PENRO focal users', function (): void {
+    $sender = notificationScopedUser(OrganizationalAccessService::PAMO, 'PAMO Baganga');
+    $assignedFocal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $assignedPeer = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $unrelatedFocal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $penroFocal = notificationScopedUser(OrganizationalAccessService::PENRO_FOCAL, 'PENRO Davao Oriental');
+    $area = notificationProtectedArea('Location-qualified CENRO notification PA', $sender);
+    $report = notificationConservationReport($area, $sender, ['target_office' => 'CENRO Baganga']);
+    $event = new DocumentRoutingEvent([
+        'source_type' => 'conservation',
+        'source_id' => $report->getKey(),
+        'event_key' => 'forwarded',
+        'from_stage' => 'pamo_origin',
+        'to_stage' => 'transit_to_cenro_focal',
+        'from_office' => 'PAMO Baganga',
+        'to_office' => 'CENRO Baganga CDS Focal Person',
+        'recorded_by' => $sender->getKey(),
+        'metadata' => ['action_key' => 'forward_from_pamo_to_cenro_focal'],
+    ]);
+    $event->setAttribute('id', 1);
+
+    app(EdatsInAppNotificationService::class)->notifyGenericTransition(
+        $report,
+        'conservation',
+        $event,
+        ['to_office' => $event->to_office],
+    );
+
+    expect($assignedFocal->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toBe(['Submission Forwarded'])
+        ->and($assignedPeer->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toBe(['Submission Forwarded'])
+        ->and($unrelatedFocal->fresh()->notifications()->count())->toBe(0)
+        ->and($penroFocal->fresh()->notifications()->count())->toBe(0)
+        ->and($this->user->fresh()->notifications()->count())->toBe(0);
+});
+
+test('CENRO and PENRO workflow notices include active exact-guard Super Admins once per event', function (): void {
+    $sender = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $penroRecords = notificationScopedUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $superAdminRole = Role::findOrCreate('Super Admin', 'web');
+    $overlappingRecipient = notificationScopedUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $overlappingRecipient->assignRole($superAdminRole);
+    $superAdmin = User::factory()->create(['section' => 'CDS']);
+    $superAdmin->assignRole($superAdminRole);
+    $inactiveSuperAdmin = User::factory()->create(['section' => 'CDS', 'is_active' => false]);
+    $inactiveSuperAdmin->assignRole($superAdminRole);
+    $cdsAdmin = User::factory()->create(['section' => 'CDS']);
+    $cdsAdmin->assignRole(Role::findOrCreate('CDS Admin', 'web'));
+    $wrongGuard = User::factory()->create(['section' => 'CDS']);
+    $apiRole = Role::findOrCreate('Super Admin', 'api');
+    DB::table(config('permission.table_names.model_has_roles'))->insert([
+        'role_id' => $apiRole->getKey(),
+        'model_type' => User::class,
+        'model_id' => $wrongGuard->getKey(),
+    ]);
+
+    $report = notificationEngpReport($sender, ['office' => 'CENRO Baganga']);
+    $event = new DocumentRoutingEvent([
+        'source_type' => 'engp',
+        'source_id' => $report->getKey(),
+        'event_key' => 'forwarded',
+        'from_stage' => 'preparation',
+        'to_stage' => 'transit_penro_records',
+        'from_office' => 'CENRO Baganga CDS Focal Person',
+        'to_office' => 'PENRO Records Unit',
+        'recorded_by' => $sender->getKey(),
+        'metadata' => ['action_key' => 'forward_to_penro_records'],
+    ]);
+    $event->setAttribute('id', 780);
+    $service = app(EdatsInAppNotificationService::class);
+
+    $affected = $service->notifyGenericTransition($report, 'engp', $event, ['to_office' => 'PENRO Records Unit']);
+    $service->notifyGenericTransition($report, 'engp', $event, ['to_office' => 'PENRO Records Unit']);
+
+    $notification = $superAdmin->fresh()->notifications()->firstOrFail();
+    expect($penroRecords->fresh()->notifications()->count())->toBe(1)
+        ->and($overlappingRecipient->fresh()->notifications()->count())->toBe(1)
+        ->and($superAdmin->fresh()->notifications()->count())->toBe(1)
+        ->and($inactiveSuperAdmin->fresh()->notifications()->count())->toBe(0)
+        ->and($cdsAdmin->fresh()->notifications()->count())->toBe(0)
+        ->and($wrongGuard->fresh()->notifications()->count())->toBe(0)
+        ->and($affected)->toContain((int) $superAdmin->getKey())
+        ->and($notification->data['arrival_event_id'])->toBe(780)
+        ->and($notification->data['arrival_category'])->toBe(OrganizationalAccessService::PENRO_RECORDS)
+        ->and($notification->data['from_office'])->toBe('CENRO Baganga CDS Focal Person')
+        ->and($notification->data['source_id'])->toBe($report->getKey())
+        ->and($notification->data['office'])->toBe('PENRO Records Unit');
+
+    $this->actingAs($superAdmin)->get(route('notifications.index'))->assertOk()->assertInertia(fn ($page) => $page
+        ->where('incomingUnreadCount', 1));
+    expect(app(IncomingUnreadCountService::class)->countFor($superAdmin))->toBe(1);
+
+    $notification->markAsRead();
+    expect($overlappingRecipient->fresh()->unreadNotifications()->count())->toBe(1);
+});
+
+test('correction notice targets the eligible report originator and excludes the correcting actor and PAMO peers', function (): void {
+    $originator = notificationScopedUser(OrganizationalAccessService::PAMO, 'PAMO Baganga');
+    $area = notificationProtectedArea('Correction recipient PA', $originator);
+    $originator->update(['protected_area_id' => $area->getKey()]);
+    $pamoPeer = notificationScopedUser(OrganizationalAccessService::PAMO, 'PAMO Baganga', $area->getKey());
+    $cenroActor = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga');
+    $report = notificationConservationReport($area, $originator, ['target_office' => 'CENRO Baganga']);
+    $event = new DocumentRoutingEvent([
+        'source_type' => 'conservation', 'source_id' => $report->getKey(),
+        'event_key' => 'returned_for_correction', 'from_stage' => 'cenro_chief',
+        'to_stage' => 'pamo_origin', 'from_office' => 'CENRO Baganga CDS Chief',
+        'to_office' => 'PAMO Baganga', 'recorded_by' => $cenroActor->getKey(),
+        'metadata' => ['action_key' => 'return_to_pamo_for_correction'],
+    ]);
+    $event->setAttribute('id', 9501);
+
+    $affected = app(EdatsInAppNotificationService::class)->notifyGenericTransition(
+        $report, 'conservation', $event, ['to_office' => 'PAMO Baganga'],
+    );
+
+    expect($originator->fresh()->notifications()->get()->pluck('data')->pluck('title')->all())->toBe(['Correction Required'])
+        ->and($pamoPeer->fresh()->notifications()->count())->toBe(0)
+        ->and($cenroActor->fresh()->notifications()->count())->toBe(0)
+        ->and($affected)->toContain((int) $cenroActor->getKey(), (int) $originator->getKey());
+});
+
+test('ordinary destination recipients exclude the action actor while a Super Admin actor still gets one global copy', function (): void {
+    $superAdminRole = Role::findOrCreate('Super Admin', 'web');
+    $actor = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
+    $actor->assignRole($superAdminRole);
+    $destinationPeer = notificationScopedUser(OrganizationalAccessService::PENRO_RECORDS, 'PENRO Davao Oriental');
+    $report = notificationEngpReport($actor, ['office' => 'CENRO Baganga']);
+    $event = new DocumentRoutingEvent([
+        'source_type' => 'engp', 'source_id' => $report->getKey(), 'event_key' => 'forwarded',
+        'from_stage' => 'preparation', 'to_stage' => 'transit_penro_records',
+        'from_office' => 'CENRO Baganga CDS Focal Person', 'to_office' => 'PENRO Records Unit',
+        'recorded_by' => $actor->getKey(), 'metadata' => ['action_key' => 'forward_to_penro_records'],
+    ]);
+    $event->setAttribute('id', 9502);
+
+    app(EdatsInAppNotificationService::class)->notifyGenericTransition($report, 'engp', $event, ['to_office' => 'PENRO Records Unit']);
+
+    expect($destinationPeer->fresh()->notifications()->count())->toBe(1)
+        ->and($actor->fresh()->notifications()->count())->toBe(1)
+        ->and($actor->fresh()->notifications()->first()->data['arrival_category'])->toBe(OrganizationalAccessService::PENRO_RECORDS);
+});
+
+test('PAMB routing notices include active Super Admins and the after-commit audience contains them', function (): void {
+    Event::fake([LiveRefreshRequested::class]);
+    $actor = notificationScopedUser(OrganizationalAccessService::PAMO, 'PAMO Baganga');
+    $penroRecords = notificationScopedUser(OrganizationalAccessService::OFFICE_PENRO, 'Office of the PENRO');
+    $superAdmin = User::factory()->create(['section' => 'CDS']);
+    $superAdmin->assignRole(Role::findOrCreate('Super Admin', 'web'));
+    $area = notificationProtectedArea('PAMB Super Admin notification PA', $actor);
+    $report = notificationConservationReport($area, $actor, ['target_office' => 'PENRO Davao Oriental']);
+    $event = new PambRoutingEvent([
+        'conservation_report_submission_id' => $report->getKey(),
+        'workflow_key' => $report->workflow_key,
+        'stage_key' => 'forwarded_records_to_penro',
+        'recorded_by' => $actor->getKey(),
+    ]);
+    $event->setAttribute('id', 881);
+
+    $affected = app(EdatsInAppNotificationService::class)->notifyPambTransition($report, $event, 'forwarded_records_to_penro');
+    app(\App\Services\LiveRefreshPublisher::class)->afterCommit($affected, ['notifications', 'tracking']);
+
+    expect($penroRecords->fresh()->notifications()->count())->toBe(1)
+        ->and($superAdmin->fresh()->notifications()->count())->toBe(1)
+        ->and($superAdmin->fresh()->notifications()->first()->data['arrival_event_id'])->toBe(881)
+        ->and($superAdmin->fresh()->notifications()->first()->data['office'])->toBe('Office of the PENRO')
+        ->and($affected)->toContain((int) $superAdmin->getKey());
+    Event::assertDispatched(LiveRefreshRequested::class, fn (LiveRefreshRequested $refresh): bool =>
+        $refresh->recipientId === (int) $superAdmin->getKey() && $refresh->scope === 'notifications'
+    );
+    Event::assertDispatched(LiveRefreshRequested::class, fn (LiveRefreshRequested $refresh): bool =>
+        $refresh->recipientId === (int) $superAdmin->getKey() && $refresh->scope === 'tracking'
+    );
+});
+
+test('Incoming unread count follows the authorized queue and the newest arrival read state', function (): void {
+    $focal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    foreach ([$focal, $chief] as $user) {
+        $user->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+    }
+    $report = notificationEngpReport($focal, ['office' => 'CENRO Mati']);
+    $event = app(DocumentRoutingTransitionService::class)->transition($report, 'engp', 'forward_to_cenro_chief', $focal->getKey());
+    $notification = $chief->notifications()->where('data->arrival_event_id', $event->getKey())->firstOrFail();
+
+    $this->actingAs($chief);
+    expect(app(IncomingUnreadCountService::class)->countFor($chief))->toBe(1);
+    $this->get(route('notifications.index'))->assertOk()->assertInertia(fn ($page) => $page
+        ->where('incomingUnreadCount', 1));
+    $this->patch(route('notifications.read', $notification))->assertRedirect();
+    expect($notification->fresh()->read_at)->not->toBeNull()
+        ->and(app(IncomingUnreadCountService::class)->countFor($chief))->toBe(0);
+
+    $routing = app(DocumentRoutingTransitionService::class);
+    $routing->transition($report, 'engp', 'receive_at_cenro_chief', $chief->getKey());
+    $routing->transition($report, 'engp', 'return_to_cenro_focal', $chief->getKey(), 'Please correct the report.');
+    $routing->transition($report, 'engp', 'receive_correction', $focal->getKey());
+    $nextArrival = $routing->transition($report, 'engp', 'forward_to_cenro_chief', $focal->getKey());
+    $nextNotification = $chief->notifications()->where('data->arrival_event_id', $nextArrival->getKey())->firstOrFail();
+    expect(app(IncomingUnreadCountService::class)->countFor($chief))->toBe(1);
+
+    $routing->transition($report, 'engp', 'receive_at_cenro_chief', $chief->getKey());
+    $routing->transition($report, 'engp', 'return_to_cenro_focal', $chief->getKey(), 'Please correct the report again.');
+    expect($nextNotification->fresh()->read_at)->toBeNull()
+        ->and(app(IncomingUnreadCountService::class)->countFor($chief))->toBe(0);
+});
+
+test('canonical routing refreshes the sender and authorized receiving office after commit only', function (): void {
+    Event::fake([LiveRefreshRequested::class]);
+    $focal = notificationScopedUser(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $chief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Mati');
+    $unrelatedChief = notificationScopedUser(OrganizationalAccessService::CENRO_CHIEF, 'CENRO Baganga');
+    foreach ([$focal, $chief, $unrelatedChief] as $viewer) {
+        $viewer->givePermissionTo(Permission::findOrCreate('technical-reports.update', 'web'));
+    }
+    $report = notificationEngpReport($focal, ['office' => 'CENRO Mati']);
+
+    DB::beginTransaction();
+    app(DocumentRoutingTransitionService::class)->transition($report, 'engp', 'forward_to_cenro_chief', $focal->getKey());
+
+    Event::assertNotDispatched(LiveRefreshRequested::class);
+    DB::commit();
+
+    Event::assertDispatchedTimes(LiveRefreshRequested::class, 4);
+    foreach ([$focal, $chief] as $viewer) {
+        foreach (['notifications', 'tracking'] as $scope) {
+            Event::assertDispatched(LiveRefreshRequested::class, fn (LiveRefreshRequested $event): bool =>
+                $event->recipientId === (int) $viewer->getKey() && $event->scope === $scope
+            );
+        }
+    }
+    Event::assertNotDispatched(LiveRefreshRequested::class, fn (LiveRefreshRequested $event): bool =>
+        $event->recipientId === (int) $unrelatedChief->getKey()
+    );
 });
 
 test('deadline notifications respect ENGP office scope while retaining province-wide PENRO visibility', function (): void {

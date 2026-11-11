@@ -299,10 +299,22 @@ final class PambRoutingTimelineService
         }
 
         $event = $event->load('recordedBy');
+        $recipientIds = [$userId];
         try {
-            $this->notifications->notifyPambTransition($report, $event, $baseStage);
+            $recipientIds = array_merge($recipientIds, $this->notifications->notifyPambTransition($report, $event, $baseStage));
         } catch (\Throwable $exception) {
             report($exception);
+        }
+
+        $scopes = ['notifications', 'tracking'];
+        $publisher = app(\App\Services\LiveRefreshPublisher::class);
+        $publisher->afterCommit($recipientIds, $scopes);
+        if ($baseStage === self::RELEASED_TO_REGIONAL) {
+            $publisher->afterCommitUsing(
+                fn (): array => app(\App\Services\Archive\FinalDocumentArchiveService::class)
+                    ->eligibleArchiveViewerIds('conservation', (int) $report->getKey()),
+                ['archives'],
+            );
         }
         return $event;
     }

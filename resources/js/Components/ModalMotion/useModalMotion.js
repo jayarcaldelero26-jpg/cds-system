@@ -2,8 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { registerModalLayer } from './modalLayer.mjs';
 import { focusInitialModalTarget } from './initialFocus.mjs';
 import { restoreModalFocusTarget } from './focusReturn.mjs';
+import { MODAL_MOTION_PRESETS } from './presets.mjs';
 
-export const MODAL_MOTION_DURATION = 240;
+export const MODAL_MOTION_DURATION = 300;
+export const MODAL_MOTION_EXIT_DURATION = 145;
+export const MODAL_BACKDROP_EXIT_DURATION = 240;
 
 export function useModalMotion(open, {
     onClose,
@@ -14,7 +17,7 @@ export function useModalMotion(open, {
     returnFocusTarget = null,
     closeOnEscape = true,
     suspendKeyboardHandling = false,
-    motion = 'soft',
+    motion = MODAL_MOTION_PRESETS.content,
 } = {}) {
     const duration = motion === 'none' ? 0 : MODAL_MOTION_DURATION;
     const [present, setPresent] = useState(Boolean(open));
@@ -67,7 +70,9 @@ export function useModalMotion(open, {
                 finishExit(token);
             } else {
                 setMotionPhase('closing');
-                timer = window.setTimeout(() => finishExit(token), duration + 80);
+                // The panel leaves quickly, while the backdrop is allowed to
+                // finish its slower fade before the dialog layer is removed.
+                timer = window.setTimeout(() => finishExit(token), MODAL_BACKDROP_EXIT_DURATION + 40);
             }
         } else {
             setMotionPhase('closed');
@@ -123,10 +128,9 @@ export function useModalMotion(open, {
         restoreModalFocusTarget(previous, document, callback => callback());
     }, []);
 
-    const onTransitionEnd = event => {
-        if (event.target !== panelRef?.current || event.propertyName !== 'transform') return;
-        if (phaseRef.current === 'closing') finishExit(generationRef.current);
-    };
+    // The backdrop owns the exit lifecycle. A shorter panel transition must
+    // never unmount the layer before the backdrop fade has completed.
+    const onTransitionEnd = () => {};
 
     const displayedPhase = open && (phase === 'closed' || phase === 'closing') ? 'entering' : phase;
     return { present: present || Boolean(open), phase: displayedPhase, onTransitionEnd };

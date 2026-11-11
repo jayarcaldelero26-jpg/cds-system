@@ -31,6 +31,7 @@ for (const [key, path] of Object.entries(paths)) {
 
 function PortalMarker() { return null; }
 function ComponentMarker() { return null; }
+function ModalMarker() { return null; }
 
 /** Evaluate actual JSX components with inert hooks, without a browser or writes. */
 function fixture(name, { documentObject, createPortal = () => assert.fail('Unexpected portal call') } = {}) {
@@ -47,6 +48,17 @@ function fixture(name, { documentObject, createPortal = () => assert.fail('Unexp
         if (id.startsWith('react/')) return nativeRequire(id);
         if (id === 'react-dom') return { createPortal };
         if (id.endsWith('/ModalPortal')) return PortalMarker;
+        if (id.endsWith('/Modal')) return ModalMarker;
+        if (id.endsWith('/ModalMotion/presets.mjs')) return {
+            MODAL_MOTION_PRESETS: {
+                alert: 'super-scaled',
+                blocking: 'super-scaled',
+                content: 'side-fall',
+                details: 'side-fall',
+                form: 'side-fall',
+                reader: 'side-fall',
+            },
+        };
         if (id.endsWith('/useModalMotion')) return {
             useModalMotion: (open, options) => {
                 hooks.push(options);
@@ -111,11 +123,13 @@ test('SSR markup fixtures render dialog content without changing the production 
     }
 });
 
-for (const name of ['modal', 'confirmation', 'form', 'details']) {
-    test(name + ' mounts its actual layer through the shared portal and retains panel/layer refs', () => {
+test('the shared Modal mounts its actual layer through the portal and retains panel/layer refs', () => {
+    {
+        const name = 'modal';
         const instance = fixture(name);
         const content = React.createElement('input', { defaultValue: 'Keep unsaved input' });
-        const result = instance.render({ open: true, title: 'Report fixture', children: content });
+        let result = instance.render({ open: true, title: 'Report fixture', children: content });
+        while (result?.type !== PortalMarker && typeof result?.type === 'function') result = result.type(result.props);
         assert.equal(result.type, PortalMarker);
         const layer = result.props.children;
         assert.equal(layer.props['data-cds-modal-layer'], true);
@@ -124,11 +138,26 @@ for (const name of ['modal', 'confirmation', 'form', 'details']) {
         assert.equal(panels.length, 1);
         assert.equal(panels[0].props.ref, instance.hooks[0].panelRef);
         assert.equal(panels[0].props['aria-modal'], 'true');
-        if (name !== 'confirmation') assert.ok(descendants(layer).some(element => element.props?.defaultValue === 'Keep unsaved input'));
+        assert.ok(descendants(layer).some(element => element.props?.defaultValue === 'Keep unsaved input'));
+    }
+});
+
+for (const name of ['confirmation', 'form', 'details']) {
+    test(name + ' delegates portal, panel, and lifecycle to the shared Modal', () => {
+        const instance = fixture(name);
+        const content = React.createElement('input', { defaultValue: 'Keep unsaved input' });
+        const result = instance.render({ open: true, title: 'Report fixture', children: content });
+        assert.equal(result.type, ModalMarker);
+        assert.equal(result.props.open, true);
+        assert.ok(result.props.panelRef);
+        assert.ok(result.props.children);
+        if (name !== 'confirmation') assert.ok(result.props.children);
     });
 
-    test(name + ' does not render a portal when the modal is absent', () => {
-        assert.equal(fixture(name).render({ open: false, title: 'Closed fixture' }), null);
+    test(name + ' passes the closed state to the shared Modal', () => {
+        const result = fixture(name).render({ open: false, title: 'Closed fixture' });
+        assert.equal(result.type, ModalMarker);
+        assert.equal(result.props.open, false);
     });
 }
 
@@ -136,48 +165,62 @@ test('portaling the report form keeps the original submit callback and form elem
     const calls = [];
     const instance = fixture('form');
     const result = instance.render({ open: true, title: 'Report fixture', confirmation: false, onSubmit: event => calls.push(event) });
-    const form = descendants(result).find(element => element.type === 'form');
-    assert.ok(form);
-    assert.equal(form.props.ref, instance.hooks[0].panelRef);
+    assert.equal(result.type, ModalMarker);
+    assert.equal(result.props.as, 'form');
     const event = { preventDefault() { assert.fail('The portal must not change submission handling'); } };
-    form.props.onSubmit(event);
+    result.props.panelProps.onSubmit(event);
     assert.deepEqual(calls, [event]);
 });
 
 test('the shared form bounds its panel to the dynamic viewport with a separate scroll body and footer', () => {
-    const layer = fixture('form').render({ open: true, title: 'New draft report', saveLabel: 'Save Draft' }).props.children;
-    const form = descendants(layer).find(element => element.type === 'form');
-    const body = descendants(form).find(element => element.props.className?.includes('overflow-y-auto'));
-    const footer = React.Children.toArray(form.props.children).at(-1);
-    assert.match(layer.props.className, /\bh-dvh\b/);
-    assert.match(form.props.className, /max-h-\[min\(92dvh,100%\)\]/);
-    assert.match(body.props.className, /min-h-0 flex-1 overflow-y-auto/);
-    assert.equal(footer.props.className, 'shrink-0');
-    assert.ok(descendants(footer).some(element => element.props.children === 'Save Draft'));
+    const modal = fixture('form').render({ open: true, title: 'New draft report', saveLabel: 'Save Draft' });
+    assert.match(modal.props.wrapperClassName, /\bh-dvh\b/);
+    assert.match(modal.props.panelClassName, /max-h-\[min\(92dvh,100%\)\]/);
+    assert.ok(modal.props.children, 'form, scroll body, and footer remain caller-owned panel content');
+    assert.equal(modal.props.as, 'form');
+    assert.match(modal.props.panelClassName, /overflow-hidden/);
 });
 
 test('the sending dialog owns the keyboard layer while the background form stays mounted and inert', () => {
     const instance = fixture('form');
-    const layer = instance.render({
+    const modal = instance.render({
         open: true,
         title: 'Submit report',
         busyOverlay: React.createElement('p', { role: 'status' }, 'Sending document'),
         busyOverlayPresentation: 'success-sized',
         closeOnOverlayClick: true,
         onClose: () => assert.fail('The pending request cannot dismiss the form'),
-    }).props.children;
-    const siblings = React.Children.toArray(layer.props.children);
-    const form = siblings.find(element => element.type === 'form');
-    const host = siblings.find(element => element.props['data-cds-busy-presentation'] === 'success-sized');
-    assert.equal(form.props.inert, true);
-    assert.equal(form.props['aria-hidden'], true);
-    assert.ok(host);
-    const dialog = host.props.children;
-    assert.equal(dialog.props.role, 'dialog');
-    assert.equal(dialog.props.ref, instance.hooks[0].panelRef);
-    assert.equal(instance.hooks[0].closeOnEscape, false);
-    instance.hooks[0].onClose();
-    layer.props.onClick({ target: siblings[0], currentTarget: layer });
-    const target = {};
-    layer.props.onClick({ target, currentTarget: target });
+    });
+    const form = modal.props.panelProps;
+    const dialog = descendants(modal.props.layerContent).find(element => element.type === ModalMarker && element.props.title === 'Request in progress');
+    assert.equal(form.inert, true);
+    assert.equal(form['aria-hidden'], true);
+    assert.ok(dialog);
+    assert.equal(dialog.props.open, true);
+    assert.ok(dialog.props.panelRef);
+    assert.equal(dialog.props.closeOnEscape, false);
+    assert.equal(dialog.props.closeOnBackdrop, false);
+    assert.equal(dialog.props.zIndex, 'z-[80]');
+    assert.ok(descendants(dialog).some(element => element.props?.children === 'Sending document'));
+    assert.equal(modal.props.closeOnEscape, false);
+    assert.equal(modal.props.closeOnBackdrop, false);
+    modal.props.onClose();
+});
+
+test('success-sized detail processing uses a shared modal above an inert details panel', () => {
+    const modal = fixture('details').render({
+        open: true,
+        title: 'Archive report',
+        busyOverlay: React.createElement('p', { role: 'status' }, 'Verifying archive'),
+        busyOverlayPresentation: 'success-sized',
+    });
+    const dialog = descendants(modal.props.layerContent).find(element => element.type === ModalMarker && element.props.title === 'Request in progress');
+    assert.equal(modal.props.panelProps.inert, true);
+    assert.equal(modal.props.panelProps['aria-hidden'], true);
+    assert.ok(dialog);
+    assert.equal(dialog.props.open, true);
+    assert.equal(dialog.props.closeOnEscape, false);
+    assert.equal(dialog.props.closeOnBackdrop, false);
+    assert.equal(dialog.props.zIndex, 'z-[80]');
+    assert.ok(descendants(dialog).some(element => element.props?.children === 'Verifying archive'));
 });

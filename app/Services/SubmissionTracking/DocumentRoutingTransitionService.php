@@ -482,12 +482,25 @@ final class DocumentRoutingTransitionService
 
     private function notifyTransition(EloquentModel $record, string $sourceKey, DocumentRoutingEvent $event): void
     {
+        $recipientIds = [(int) $event->recorded_by];
         try {
-            app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, [
+            $recipientIds = array_merge($recipientIds, app(EdatsInAppNotificationService::class)->notifyGenericTransition($record, $sourceKey, $event, [
                 'key' => data_get($event->metadata, 'action_key'), 'event_key' => $event->event_key, 'to_office' => $event->to_office,
-            ]);
+            ]));
         } catch (\Throwable $exception) {
             report($exception);
+        }
+
+        $scopes = ['notifications', 'tracking'];
+        $publisher = app(\App\Services\LiveRefreshPublisher::class);
+        $publisher->afterCommit($recipientIds, $scopes);
+
+        if ($event->to_stage === DocumentRoutingProfileRegistry::RELEASED_REGIONAL) {
+            $publisher->afterCommitUsing(
+                fn (): array => app(\App\Services\Archive\FinalDocumentArchiveService::class)
+                    ->eligibleArchiveViewerIds($sourceKey, (int) $record->getKey()),
+                ['archives'],
+            );
         }
     }
 

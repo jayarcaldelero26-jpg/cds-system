@@ -145,7 +145,8 @@ test("shared modal, confirmation, export, and PAMB action controls retain their 
     assert.match(spatialLayers, /variant="danger" onClick=\{\(\) => setLayerToDelete\(layer\)\}/);
     assert.ok(notifications.includes('<UtilityIconButton'));
     assert.ok(notifications.includes('aria-label="Notifications"'));
-    assert.match(notifications, /onClear=\{\(\) => request\('\/notifications\/clear', 'POST'\)\}/);
+    assert.match(notifications, /const clearNotifications = \(\) => router\.post\('\/notifications\/clear', \{\}, \{/);
+    assert.match(notifications, /onClear=\{clearNotifications\}/);
     assert.doesNotMatch(notifications, /<Button[^>]*Clear Notifications/);
     assert.match(notifications, /onClick=\{\(\) => onOpen\(notification\)\}/);
     assert.doesNotMatch(imea, /<button\b/);

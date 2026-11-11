@@ -4,6 +4,8 @@ import UtilityIconButton from '@/Components/UtilityIconButton';
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import NavigationHighlight from '@/Components/NavigationHighlight';
 import { useThemeMotion } from '@/Utils/useThemeMotion.js';
+import { useLiveRefresh } from '@/Utils/useLiveRefresh.js';
+import { createCoalescedPartialReload } from '@/Utils/liveRefreshRuntime.mjs';
 import GlobalSearch from '../Components/GlobalSearch';
 import FlashSuccessDialog from '../Components/FlashSuccessDialog';
 import Tooltip from '../Components/Tooltip';
@@ -191,7 +193,7 @@ function MenuIcon({ name, active = false, muted = false }) {
     return <span className={`flex h-7 w-7 shrink-0 items-center justify-center ${active ? 'opacity-95' : muted ? 'opacity-35' : 'opacity-55'}`}><Icon name={name} /></span>;
 }
 
-function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], moduleNavigationCatalog = null, pamoNativeModuleNavigation = [], pendingUrl = null }) {
+function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNavigation = [], moduleNavigationCatalog = null, pamoNativeModuleNavigation = [], pendingUrl = null, incomingUnreadCount = 0 }) {
     const { url, props = {} } = usePage();
     const safeAuth = auth || {};
     const userSection = auth?.user?.section || 'CDS';
@@ -304,6 +306,7 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         }
 
         const isTrackingViewLink = child.href?.startsWith('/submission-tracking?view=');
+        const isIncomingLink = child.href === '/submission-tracking?view=incoming';
         const childCommon = `cds-navigation-link ${engpContext ? 'flex w-full items-start gap-2.5 rounded-lg px-3 py-2 text-xs font-semibold transition' : 'block w-full rounded-xl px-4 py-2.5 text-xs font-semibold transition'} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-green-950 ${
             isChildActive ? isTrackingViewLink ? 'cds-submission-tracking-nav-tab cds-tab-active border-l-2 border-green-200 shadow-md' : 'cds-tab-active border-l-2 border-green-200 shadow-md' : 'text-green-100 hover:bg-white/10 hover:text-white hover:-translate-y-px'
         }`;
@@ -337,8 +340,9 @@ function Sidebar({ open, onClose, auth, engpIacGeneratorUrl, genericModuleNaviga
         );
 
         return (
-            <Link key={child.label} href={child.href} onClick={onClose} className={childCommon} aria-current={isChildActive ? 'page' : undefined}>
+            <Link key={child.label} href={child.href} onClick={onClose} className={`${childCommon} ${isIncomingLink ? 'flex items-center justify-between' : ''}`} aria-current={isChildActive ? 'page' : undefined}>
                 <span className="min-w-0 flex-1 whitespace-normal">{child.label}</span>
+                {isIncomingLink && Number(incomingUnreadCount) > 0 && <span aria-label={`${Number(incomingUnreadCount)} new incoming ${Number(incomingUnreadCount) === 1 ? 'report' : 'reports'}`} className="ml-2 inline-flex min-h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-bold leading-5 text-white">{Number(incomingUnreadCount)}</span>}
             </Link>
         );
     });
@@ -440,7 +444,24 @@ export function AuthenticatedShell({ children }) {
     const page = usePage();
     const currentPageUrl = useRef(page.url);
     currentPageUrl.current = page.url;
-    const { auth, engpIacGeneratorUrl, notificationBell, genericModuleNavigation, moduleNavigationCatalog, pamoNativeModuleNavigation, demoDataNotice } = page.props;
+    const { auth, engpIacGeneratorUrl, notificationBell, incomingUnreadCount = 0, genericModuleNavigation, moduleNavigationCatalog, pamoNativeModuleNavigation, demoDataNotice } = page.props;
+    useLiveRefresh(auth?.user?.id);
+
+    useEffect(() => {
+        if (!auth?.user?.id) return undefined;
+        const reloadIncomingCount = createCoalescedPartialReload(router, ['incomingUnreadCount'], { showProgress: false });
+        const handleLiveRefresh = event => {
+            if (['notifications', 'tracking', 'all'].includes(event.detail?.scope)) reloadIncomingCount.request();
+        };
+        const handleNotificationUpdate = () => reloadIncomingCount.request();
+        window.addEventListener('cds:live-refresh', handleLiveRefresh);
+        window.addEventListener('cds:notifications-updated', handleNotificationUpdate);
+        return () => {
+            window.removeEventListener('cds:live-refresh', handleLiveRefresh);
+            window.removeEventListener('cds:notifications-updated', handleNotificationUpdate);
+            reloadIncomingCount.dispose();
+        };
+    }, [auth?.user?.id]);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [profileOpen, setProfileOpen] = useState(false);
     const { darkMode, toggleTheme } = useThemeMotion();
@@ -499,7 +520,7 @@ export function AuthenticatedShell({ children }) {
         <>
             <FlashSuccessDialog />
             <div className="min-h-screen bg-gray-100 dark:bg-gray-950">
-                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} moduleNavigationCatalog={moduleNavigationCatalog} pamoNativeModuleNavigation={pamoNativeModuleNavigation} pendingUrl={pendingNavigation?.href ?? null} />
+                <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} auth={auth} engpIacGeneratorUrl={engpIacGeneratorUrl} genericModuleNavigation={genericModuleNavigation} moduleNavigationCatalog={moduleNavigationCatalog} pamoNativeModuleNavigation={pamoNativeModuleNavigation} pendingUrl={pendingNavigation?.href ?? null} incomingUnreadCount={incomingUnreadCount} />
                 <div className="lg:pl-72">
                     <header className="sticky top-0 z-30 flex h-20 items-center gap-3 border-b border-gray-200 bg-white px-4 shadow-sm dark:border-gray-700 dark:bg-gray-900 sm:px-6 lg:px-8">
                         <button type="button" onClick={() => setSidebarOpen(true)} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-600 dark:text-gray-300 dark:hover:bg-gray-800 lg:hidden" aria-label="Open navigation" aria-controls="cds-main-sidebar" aria-expanded={sidebarOpen}>

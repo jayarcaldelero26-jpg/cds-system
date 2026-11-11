@@ -1,20 +1,11 @@
 import { useRef } from 'react';
-import ModalPortal from '@/Components/ModalPortal';
 import Button from '@/Components/Button';
-import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import Modal from '@/Components/Modal';
+import { MODAL_MOTION_PRESETS } from '@/Components/ModalMotion/presets.mjs';
 
 export default function SuccessDialog({ open, message, title = 'Success', onClose }) {
     const buttonRef = useRef(null);
-    const dialogRef = useRef(null);
-    const { present, phase, onTransitionEnd } = useModalMotion(open, {
-        onClose,
-        panelRef: dialogRef,
-        layerRef: dialogRef,
-        initialFocusSelector: '#success-dialog-ok',
-    });
-    if (!present) return null;
-
-    return <ModalPortal><div className="cds-modal-motion-backdrop fixed inset-0 z-[100] flex items-center justify-center bg-gray-950/45 p-4" data-motion-state={phase} role="presentation" onMouseDown={event => open && event.target === event.currentTarget && onClose?.()}>
+    return <Modal open={open} title={title} motion={MODAL_MOTION_PRESETS.alert} onClose={onClose} closeOnBackdrop initialFocusSelector="#success-dialog-ok" zIndex="z-[100]" wrapperClassName="p-4" backdropClassName="bg-gray-950/45" panelClassName="w-full max-w-[390px] rounded-lg bg-white px-7 py-6 text-center shadow-xl dark:bg-gray-900" labelledBy="success-dialog-title" describedBy="success-dialog-message">
         <style>{`
             @keyframes success-ring-clockwise {
                 0% { opacity: 0; transform: rotate(0) scale(.9); }
@@ -57,7 +48,6 @@ export default function SuccessDialog({ open, message, title = 'Success', onClos
                 .success-final-stroke { stroke-dashoffset: 0; }
             }
         `}</style>
-        <div ref={dialogRef} onTransitionEnd={onTransitionEnd} data-motion-state={phase} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="success-dialog-title" aria-describedby="success-dialog-message" className="cds-modal-motion-panel w-full max-w-[390px] rounded-lg bg-white px-7 py-6 text-center shadow-xl dark:bg-gray-900">
             <div className="mx-auto flex h-36 w-36 items-center justify-center rounded-full bg-green-50 dark:bg-green-950/40">
                 <svg className="h-[140px] w-[140px] overflow-visible text-green-600 dark:text-green-400" viewBox="0 0 140 140" fill="none" aria-hidden="true">
                     <circle className="success-ring success-ring-outer" cx="70" cy="70" r="57" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"/>
@@ -70,6 +60,5 @@ export default function SuccessDialog({ open, message, title = 'Success', onClos
             <h2 id="success-dialog-title" className="mt-3.5 text-2xl font-medium leading-tight text-gray-800 dark:text-gray-100">{title}</h2>
             <p id="success-dialog-message" className="mx-auto mt-2 max-w-xs break-words text-[15px] font-normal leading-6 text-gray-500 dark:text-gray-400">{message}</p>
             <Button ref={buttonRef} id="success-dialog-ok" type="button" onClick={onClose} className="mt-5 min-w-20 rounded-md px-5 py-2 text-[13px] font-medium leading-4">OK</Button>
-        </div>
-    </div></ModalPortal>;
+    </Modal>;
 }

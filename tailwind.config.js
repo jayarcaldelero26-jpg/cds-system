@@ -1,4 +1,3 @@
-import defaultTheme from 'tailwindcss/defaultTheme';
 import forms from '@tailwindcss/forms';
 
 /** @type {import('tailwindcss').Config} */
@@ -25,7 +24,7 @@ export default {
                 },
             },
             fontFamily: {
-                sans: ['Figtree', ...defaultTheme.fontFamily.sans],
+                sans: ['Geist Sans Variable', 'ui-sans-serif', 'system-ui', 'sans-serif'],
             },
             borderRadius: {
                 ui: '0.625rem',

@@ -1,7 +1,7 @@
 import { Icon } from '@iconify/react';
-import { createPortal } from 'react-dom';
 import { useLayoutEffect, useRef, useState } from 'react';
-import { useModalMotion } from '@/Components/ModalMotion/useModalMotion';
+import Modal from '@/Components/Modal';
+import { MODAL_MOTION_PRESETS } from '@/Components/ModalMotion/presets.mjs';
 import { fixedBottomOverlayInset } from '@/Utils/fixedBottomOverlayInset.mjs';
 
 export default function SubmissionTrackingReaderDialog({
@@ -26,19 +26,12 @@ export default function SubmissionTrackingReaderDialog({
     const panelRef = useRef(null);
     const overlayRef = useRef(null);
     const [bottomObstruction, setBottomObstruction] = useState(0);
-    const { present, phase, onTransitionEnd } = useModalMotion(open, {
-        onClose,
-        panelRef,
-        layerRef: overlayRef,
-        initialFocusSelector,
-        closeOnEscape,
-    });
-
     useLayoutEffect(() => {
-        if (!present || !avoidBottomDebugbar || typeof document === 'undefined') {
+        if (!avoidBottomDebugbar || typeof document === 'undefined') {
             setBottomObstruction(0);
             return undefined;
         }
+        if (!open) return undefined;
 
         const toolbar = document.querySelector('.phpdebugbar');
         if (!toolbar || !panelRef.current) {
@@ -75,9 +68,7 @@ export default function SubmissionTrackingReaderDialog({
             mutationObserver?.disconnect();
             window.removeEventListener('resize', measure);
         };
-    }, [present, avoidBottomDebugbar, expanded]);
-
-    if (!present || typeof document === 'undefined') return null;
+    }, [open, avoidBottomDebugbar, expanded]);
 
     const panelSizing = expanded
         ? 'h-[calc(100dvh_-_var(--reader-bottom-obstruction))] max-h-[calc(100dvh_-_var(--reader-bottom-obstruction))] w-screen max-w-none rounded-none'
@@ -87,8 +78,7 @@ export default function SubmissionTrackingReaderDialog({
         ...(avoidBottomDebugbar ? { bottom: `${bottomObstruction}px` } : {}),
     };
 
-    return createPortal(<div ref={overlayRef} style={overlayStyle} data-cds-modal-layer data-motion-state={phase} className={`cds-modal-motion-backdrop fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/65 backdrop-blur-sm ${expanded ? 'p-0' : 'p-2 sm:p-4'}`} role="presentation">
-        <section ref={panelRef} onTransitionEnd={onTransitionEnd} role="dialog" aria-modal="true" aria-label={title || 'Document reader'} tabIndex={-1} data-motion-state={phase} className={`cds-modal-motion-panel relative flex min-h-0 flex-col overflow-hidden border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 ${panelSizing}`}>
+    return <Modal open={open} title={title || 'Document reader'} motion={MODAL_MOTION_PRESETS.reader} onClose={onClose} closeOnEscape={closeOnEscape} initialFocusSelector={initialFocusSelector} panelRef={panelRef} layerRef={overlayRef} placement={expanded ? 'fullscreen' : 'center'} zIndex="z-[70]" backdropStyle={overlayStyle} wrapperClassName={expanded ? 'p-0' : 'p-2 sm:p-4'} backdropClassName="bg-slate-950/65 backdrop-blur-sm" panelClassName={`relative flex min-h-0 flex-col overflow-hidden border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900 ${panelSizing}`} panelProps={{ inert: contentInert || undefined, 'aria-hidden': contentInert || undefined }} ariaLabel={title || 'Document reader'}>
             <div inert={contentInert || undefined} aria-hidden={contentInert || undefined} className="flex min-h-0 flex-1 flex-col">
                 <header className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 px-3 py-2.5 sm:px-4 dark:border-slate-700">
                     <div className="min-w-0 flex-1">
@@ -114,6 +104,5 @@ export default function SubmissionTrackingReaderDialog({
                 </div>)}
             </div>
             {busyOverlay}
-        </section>
-    </div>, document.body);
+    </Modal>;
 }

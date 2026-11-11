@@ -49,7 +49,17 @@ final class SubmissionTrackingService
     /** @return Collection<int, array<string, mixed>> */
     public function records(array $filters = [], ?int $limitPerSource = null, bool $assignTrackingNumbers = false): Collection
     {
+        $selectedSource = $filters['_selected_source'] ?? null;
+        $selectedId = filter_var($filters['_selected_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $selectedIds = collect($filters['_selected_ids'] ?? [])
+            ->map(fn (mixed $id): int|false => filter_var($id, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]))
+            ->filter(fn (int|false $id): bool => $id !== false)
+            ->unique()->values();
+        unset($filters['_selected_source'], $filters['_selected_id'], $filters['_selected_ids']);
         $sources = $this->sources();
+        if (is_string($selectedSource) && $selectedSource !== '' && ($selectedId !== false || $selectedIds->isNotEmpty())) {
+            $sources = isset($sources[$selectedSource]) ? [$selectedSource => $sources[$selectedSource]] : [];
+        }
         if (($filters['program'] ?? null) === 'conservation') {
             unset($sources['engp']);
         } elseif (($filters['program'] ?? null) === 'engp') {
@@ -57,8 +67,10 @@ final class SubmissionTrackingService
         }
 
         $loaded = LocalNavigationTrace::measureCurrent('st_source_load', fn () => collect($sources)
-            ->flatMap(function (array $source, string $key) use ($filters, $limitPerSource) {
+            ->flatMap(function (array $source, string $key) use ($filters, $limitPerSource, $selectedSource, $selectedId, $selectedIds) {
                 $query = $this->sourceQuery($key, $source, $filters, true);
+                if ($selectedSource === $key && $selectedId !== false) $query->whereKey($selectedId);
+                elseif ($selectedSource === $key && $selectedIds->isNotEmpty()) $query->whereKey($selectedIds->all());
                 if ($limitPerSource !== null) $query->limit(max(1, $limitPerSource));
                 return $query->get()->map(fn (Model $record) => ['record' => $record, 'key' => $key, 'source' => $source]);
             }));
@@ -111,6 +123,16 @@ final class SubmissionTrackingService
         } finally {
             $this->genericRouting->clearPrimedRoutingPositions();
         }
+    }
+
+    /** Return one selected report only when it survives the current user's normal source scope. */
+    public function authorizedRecord(string $sourceKey, int $sourceId): ?array
+    {
+        if ($sourceId < 1 || ! $this->source($sourceKey)) return null;
+
+        return $this->records(['_selected_source' => $sourceKey, '_selected_id' => $sourceId], null, false)
+            ->first(fn (array $row): bool => ($row['source'] ?? null) === $sourceKey
+                && (int) ($row['source_id'] ?? 0) === $sourceId);
     }
 
     /** Lightweight bounded search for global-search consumers. */
@@ -886,6 +908,19 @@ final class SubmissionTrackingService
         } catch (\Throwable $exception) {
             report($exception);
         }
+
+        if ($canonicalEvent) {
+            $publisher = app(\App\Services\LiveRefreshPublisher::class);
+            $publisher->afterCommit([$userId], ['tracking']);
+            if ($stage === self::REGIONAL_ENDORSEMENT) {
+                $publisher->afterCommitUsing(
+                    fn (): array => app(\App\Services\Archive\FinalDocumentArchiveService::class)
+                        ->eligibleArchiveViewerIds($sourceKey, (int) $record->getKey()),
+                    ['archives'],
+                );
+            }
+        }
+
         return $canonicalEvent;
     }
 
@@ -919,6 +954,16 @@ final class SubmissionTrackingService
                 report($exception);
             }
         });
+
+        $publisher = app(\App\Services\LiveRefreshPublisher::class);
+        $publisher->afterCommit([$userId], ['tracking']);
+        if ($stage === self::REGIONAL_ENDORSEMENT) {
+            $publisher->afterCommitUsing(
+                fn (): array => app(\App\Services\Archive\FinalDocumentArchiveService::class)
+                    ->eligibleArchiveViewerIds('conservation', (int) $record->getKey()),
+                ['archives'],
+            );
+        }
     }
     public function recordInternalRouting(string $sourceKey, int $id, string $stageKey, string $occurredAt, ?int $userId = null, ?string $remarks = null): \App\Models\PambRoutingEvent|DocumentRoutingEvent
     {

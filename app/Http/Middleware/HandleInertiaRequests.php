@@ -8,6 +8,7 @@ use App\Services\Notifications\EdatsInAppNotificationService;
 use App\Services\Archive\FinalDocumentArchiveService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\Authorization\OrganizationalAccessService;
+use App\Services\SubmissionTracking\IncomingUnreadCountService;
 use App\Support\LocalNavigationTrace;
 use Closure;
 use Illuminate\Http\Request;
@@ -330,15 +331,32 @@ class HandleInertiaRequests extends Middleware
                     ])->values()->all();
             }),
             'engpIacGeneratorUrl' => $engpIacGeneratorUrl,
+            'incomingUnreadCount' => fn () => LocalNavigationTrace::measure($request, 'shared_incoming_unread_count', fn () => $user && $organization->canViewSubmissionTracking($user)
+                ? app(IncomingUnreadCountService::class)->countFor($user)
+                : 0),
             'notificationBell' => fn () => LocalNavigationTrace::measure($request, 'shared_notification_bell', fn () => $user && Schema::hasTable('notifications') ? (function () use ($user): array {
-                $notifications = $user->unreadNotifications()->latest()->get()
-                    ->filter(fn ($notification): bool => EdatsInAppNotificationService::isBellAlert($notification->data))
-                    ->take(8);
+                $initializedAt = now()->format('Y-m-d\\TH:i:s.uP');
+                $unreadAlerts = $user->unreadNotifications()->whereIn('data->type', [
+                    EdatsInAppNotificationService::DUE_SOON,
+                    EdatsInAppNotificationService::OVERDUE,
+                    EdatsInAppNotificationService::WORKFLOW,
+                ]);
+                $unreadCount = (clone $unreadAlerts)->count();
+                $notifications = $unreadAlerts->latest()->limit(8)->get();
                 $canViewTracking = $notifications->isNotEmpty() && $user->can('submission-tracking.view');
+                $incomingTargets = [];
+                foreach ($notifications as $notification) {
+                    $target = EdatsInAppNotificationService::incomingActionTarget($notification->data ?? [], $canViewTracking);
+                    if ($target !== null) $incomingTargets[(string) $notification->id] = $target;
+                }
+                $incomingStatuses = $incomingTargets !== []
+                    ? app(IncomingUnreadCountService::class)->incomingActionStatuses($user, $incomingTargets)
+                    : [];
 
                 return [
-                    'unread_count' => $notifications->count(),
-                    'notifications' => $notifications->map(fn ($notification): array => [
+                    'unread_count' => $unreadCount,
+                    'initialized_at' => $initializedAt,
+                    'notifications' => $notifications->take(8)->map(fn ($notification): array => [
                         'id' => $notification->id,
                         'title' => $notification->data['title'] ?? 'System notification',
                         'message' => $notification->data['message'] ?? '',
@@ -347,9 +365,13 @@ class HandleInertiaRequests extends Middleware
                         'source_label' => $notification->data['source_label'] ?? 'Report',
                         'office' => $notification->data['office'] ?? null,
                         'protected_area' => $notification->data['protected_area'] ?? null,
+                        'current_state' => isset($incomingTargets[(string) $notification->id])
+                            && ! ($incomingStatuses[(string) $notification->id] ?? false)
+                                ? 'No longer in Incoming'
+                                : null,
                         'url' => EdatsInAppNotificationService::actionUrl($notification->data, $canViewTracking),
                         'read_at' => $notification->read_at?->toIso8601String(),
-                        'created_at' => $notification->created_at?->toIso8601String(),
+                        'created_at' => $notification->created_at?->format('Y-m-d\\TH:i:s.uP'),
                     ]),
                 ];
             })() : ['unread_count' => 0, 'notifications' => []]),

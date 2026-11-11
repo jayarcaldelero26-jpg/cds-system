@@ -1,6 +1,8 @@
 import { Icon } from '@iconify/react';
 import { useEffect, useRef, useState } from 'react';
 import { formatManila } from '@/Utils/dateFormatters';
+import Modal from '@/Components/Modal';
+import { MODAL_MOTION_PRESETS } from '@/Components/ModalMotion/presets.mjs';
 import FilePreviewPanel from '@/Components/Crud/FilePreviewPanel';
 import FloatingSelect from '@/Components/Form/FloatingSelect';
 import FinalArchiveRecordActions from './FinalArchiveRecordActions';
@@ -192,9 +194,23 @@ export default function FinalArchiveReader({
             </li>)}
         </ol> : <p className="text-sm text-slate-500 dark:text-slate-400">No history is available for this report.</p>}
     </div>;
-    const busyOverlay = retrying && <div ref={busyRef} className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" data-cds-busy-presentation="success-sized">
-        <div className="flex min-h-[320px] w-full max-w-[390px] flex-col justify-center rounded-lg bg-white px-7 py-6 text-center shadow-xl dark:bg-slate-900"><PamoReportPendingAnimation intent="retry" /></div>
-    </div>;
+    const busyOverlay = <Modal
+        open={retrying}
+        title="Request in progress"
+        ariaLabel="Request in progress"
+        motion={MODAL_MOTION_PRESETS.blocking}
+        onClose={() => {}}
+        closeOnEscape={false}
+        closeOnBackdrop={false}
+        initialFocusSelector="[data-cds-busy-status]"
+        panelRef={busyRef}
+        zIndex="z-[80]"
+        wrapperClassName="p-4"
+        backdropClassName="bg-slate-950/45"
+        panelClassName="flex min-h-[min(320px,100%)] w-full max-w-[390px] flex-col justify-center-safe overflow-y-auto rounded-lg bg-white px-7 py-6 text-center shadow-xl dark:bg-slate-900"
+    >
+        <PamoReportPendingAnimation intent="retry" />
+    </Modal>;
 
     return <SubmissionTrackingReaderDialog
         open={open}

@@ -88,6 +88,7 @@ Route::middleware('auth')->group(function () {
         ->where('attachment', '[A-Za-z0-9_-]+')
         ->name('attachments.show');
     Route::get('submission-tracking', [SubmissionTrackingController::class, 'index'])->middleware('can:submission-tracking.view')->name('submission-tracking.index');
+    Route::get('submission-tracking/{source}/{record}/incoming-status', [SubmissionTrackingController::class, 'incomingStatus'])->whereNumber('record')->middleware('can:submission-tracking.view')->name('submission-tracking.incoming-status');
     Route::get('submission-tracking/archives', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'index'])->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.index');
     Route::post('submission-tracking/archives/{source}/{record}/receipt', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'receive'])->whereNumber('record')->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.receipts.store');
     Route::post('submission-tracking/archives/{source}/{record}/archive', [\App\Http\Controllers\FinalDocumentArchiveController::class, 'archive'])->whereNumber('record')->middleware(['can:submission-tracking.view', 'can:final-archives.view'])->name('final-archives.store');

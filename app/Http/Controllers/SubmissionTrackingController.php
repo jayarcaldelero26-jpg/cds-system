@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\ProtectedArea;
 use App\Services\Archive\FinalDocumentArchiveService;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
+use App\Services\SubmissionTracking\IncomingUnreadCountService;
 use App\Services\SubmissionTracking\PambMovProcessingService;
 use App\Services\SubmissionTracking\PambSubmissionAccessService;
 use App\Services\Authorization\OrganizationalAccessService;
@@ -18,6 +19,7 @@ use App\Services\SubmissionTracking\RoutingTransitionLifecycle;
 use App\Support\LocalNavigationTrace;
 use App\Services\SubmissionTracking\SubmissionStorageStatusPresenter;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\DB;
@@ -45,6 +47,26 @@ class SubmissionTrackingController extends Controller
         $pagination = LocalNavigationTrace::measure($request, 'st_pagination', fn () => $this->tracking->pagination($trackingFilters, $page, 25));
         $selectedSource = $request->string('source')->toString();
         $selectedId = $request->integer('source_id');
+        $openDetails = $request->boolean('open_details')
+            && $selectedId > 0
+            && $this->tracking->source($selectedSource) !== null;
+        $arrivalEventId = filter_var($request->query('arrival_event_id'), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $arrivalEventId = $arrivalEventId === false ? null : (int) $arrivalEventId;
+        if ($view === 'incoming'
+            && $selectedId > 0
+            && $this->tracking->source($selectedSource) !== null
+            && ! app(IncomingUnreadCountService::class)->isCurrentIncomingAction(
+                $request->user(),
+                $selectedSource,
+                $selectedId,
+                $arrivalEventId,
+            )) {
+            return redirect()->route('submission-tracking.index', array_filter([
+                'view' => 'incoming', ...$filters, 'page' => $page,
+            ], static fn (mixed $value): bool => $value !== null && $value !== ''))
+                ->with('status', 'This report no longer needs your action.')
+                ->with('notification_action', 'stale_incoming');
+        }
         $trackingRecords = null;
         $selectedRecord = null;
         if (filled($selectedSource) && $selectedId > 0) {
@@ -53,8 +75,14 @@ class SubmissionTrackingController extends Controller
             // here duplicated the largest part of an action's redirect GET.
             $trackingRecords = LocalNavigationTrace::measure($request, 'st_selected_projection', fn () => $this->tracking->records($filters, null, false));
             $selectedRecord = LocalNavigationTrace::measure($request, 'st_selected_match', fn () => $trackingRecords->first(fn (array $row): bool => ($row['source'] ?? null) === $selectedSource && (int) ($row['source_id'] ?? 0) === $selectedId));
+
+            // Keep an authorized report selected if a live status change moves
+            // it outside the current filters. The unfiltered projection still
+            // applies the same server-side user and report scopes.
+            if ($selectedRecord === null && $openDetails) {
+                $selectedRecord = LocalNavigationTrace::measure($request, 'st_selected_unfiltered_match', fn () => $this->tracking->authorizedRecord($selectedSource, $selectedId));
+            }
         }
-        $openDetails = $selectedRecord !== null && $request->boolean('open_details');
         // Workspace queues must span the complete authorized filtered set.
         // The snapshot is intentionally paginated for the tracking table, so
         // using it here can hide an actionable record that is outside page 1.
@@ -143,6 +171,7 @@ class SubmissionTrackingController extends Controller
             'selected_source' => $selectedSource ?: null,
             'selected_id' => $selectedId > 0 ? $selectedId : null,
             'open_details' => $openDetails,
+            'notification_action' => $request->session()->get('notification_action'),
         ]);
         $response = LocalNavigationTrace::measure($request, 'st_response_build', fn () => Inertia::render('SubmissionTracking/Index', [
             'workspaceQueues' => $workspaceQueues,
@@ -155,6 +184,19 @@ class SubmissionTrackingController extends Controller
         ]));
 
         return $response;
+    }
+
+    public function incomingStatus(Request $request, string $source, int $record): JsonResponse
+    {
+        abort_unless($this->tracking->source($source) !== null, 404);
+
+        return response()->json([
+            'eligible' => app(IncomingUnreadCountService::class)->isCurrentIncomingAction(
+                $request->user(),
+                $source,
+                $record,
+            ),
+        ]);
     }
 
     public function transition(Request $request, string $source, int $record, string $stage): RedirectResponse
