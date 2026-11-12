@@ -34,6 +34,7 @@ import {
     shouldPollFinalArchiveStatus,
 } from '@/Utils/finalArchiveStatusPolling.mjs';
 import PamoReportPendingAnimation from '@/Components/PamoReportPendingAnimation';
+import { createCoalescedPartialReload } from '@/Utils/liveRefreshRuntime.mjs';
 
 const emptyPaginator = { data: [], links: [], total: 0 };
 const paginationQueryParams = () => {
@@ -82,6 +83,18 @@ export default function Archives({ archives = emptyPaginator, awaitingArchive = 
     const selectedManifestIsProcessing = shouldPollFinalArchiveStatus(selected?.latest_manifest);
 
     useEffect(() => registerFinalArchivePageGuard(route('final-archives.index')), []);
+
+    useEffect(() => {
+        const reload = createCoalescedPartialReload(router, ['archives', 'awaitingArchive', 'awaitingReceipt', 'selected', 'filterOptions']);
+        const handleRefresh = event => {
+            if (event.detail?.scope === 'all' || event.detail?.scope === 'archives') reload.request();
+        };
+        window.addEventListener('cds:live-refresh', handleRefresh);
+        return () => {
+            window.removeEventListener('cds:live-refresh', handleRefresh);
+            reload.dispose();
+        };
+    }, []);
 
     useEffect(() => {
         setSearch(filters.search || '');

@@ -35,17 +35,18 @@ class ImeaFacilityMaintenanceReportController extends Controller
         if ($request->filled('protected_area_id')) {
             $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
         }
-        $reports = $this->organization->scopeProtectedAreaQuery(ImeaFacilityMaintenanceReport::query()->with('protectedArea:id,name'), $request->user())
+        $reportQuery = $this->organization->scopeProtectedAreaQuery(ImeaFacilityMaintenanceReport::query()->with('protectedArea:id,name'), $request->user())
             ->when($request->filled('search'), function ($query) use ($request): void {
                 $search = trim((string) $request->input('search'));
                 $query->where(fn ($query) => $query->where('target_office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('document_type', 'like', "%{$search}%")->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%")));
             })
             ->when($request->filled('protected_area_id'), fn ($query) => $query->where('protected_area_id', $request->integer('protected_area_id')))
-            ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', $request->input('quarter')))
-            ->latest('id')->paginate(10)->withQueryString();
+            ->when($request->filled('quarter'), fn ($query) => $query->where('quarter', $request->input('quarter')));
+        $archiveTabs = app(FinalDocumentArchiveService::class)->applyModuleArchiveTab('imea-maintenance', $reportQuery, $request->input('archive_tab'));
+        $reports = $reportQuery->latest('id')->paginate(10)->withQueryString();
         $reports = app(FinalDocumentArchiveService::class)->presentModuleReportPage('imea-maintenance', $reports, $this->data(...));
 
-        return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']), ...app(SubmissionFormScopeService::class)->options($request->user()), 'filters' => $request->only(['search', 'protected_area_id', 'quarter'])]);
+        return Inertia::render('Imea/MaintenanceReports', ['reports' => $reports, 'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']), ...app(SubmissionFormScopeService::class)->options($request->user()), 'filters' => $request->only(['search', 'protected_area_id', 'quarter', 'archive_tab']), 'archiveTabCounts' => $archiveTabs['counts']]);
     }
 
     public function store(Request $request): RedirectResponse { return $this->persist($request, new ImeaFacilityMaintenanceReport); }

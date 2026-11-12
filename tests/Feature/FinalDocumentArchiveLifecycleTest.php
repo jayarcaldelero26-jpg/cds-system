@@ -528,8 +528,27 @@ test('each remaining generic source releases, receives, archives its returned se
         ->assertInertia(fn (Assert $page) => $page->where('selected.source', $source)
             ->where('selected.latest_manifest.status', 'ARCHIVED'));
 
+    $tabKey = match ($source) {
+        'ipaf-management' => 'management_archive_tab',
+        'revenue' => 'revenue_archive_tab',
+        default => 'archive_tab',
+    };
+    $tabCountsPath = match ($source) {
+        'ipaf-management' => 'archiveTabCounts.management',
+        'revenue' => 'archiveTabCounts.revenue',
+        default => 'archiveTabCounts',
+    };
+    $archivedUrl = $url.(str_contains($url, '?') ? '&' : '?').$tabKey.'=archived';
     $this->get($url)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where($reportProp.'.data', [])
+        ->where($reportProp.'.total', 0)
+        ->where($tabCountsPath.'.ongoing', 0)
+        ->where($tabCountsPath.'.archived', 1));
+    $this->get($archivedUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where($row.'.id', $report->getKey())
+        ->where($reportProp.'.total', 1)
+        ->where($tabCountsPath.'.ongoing', 0)
+        ->where($tabCountsPath.'.archived', 1)
         ->where($row.'.has_verified_final_archive', true)
         ->where($row.'.'.$fileProp, null));
 
@@ -571,6 +590,8 @@ test('legacy Regular PAMB release evidence supports separate receipt and final a
     $this->actingAs($moduleViewer)->get($moduleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('submissions.data.0.id', $report->getKey())
         ->where('submissions.data.0.has_verified_final_archive', false)
+        ->where('archiveTabCounts.ongoing', 1)
+        ->where('archiveTabCounts.archived', 0)
         ->where('submissions.data.0.mov_url', fn ($url) => is_string($url) && $url !== ''));
 
     $gateway = $fixture['gateway'];
@@ -586,6 +607,7 @@ test('legacy Regular PAMB release evidence supports separate receipt and final a
 
     $this->get($moduleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('submissions.data.0.has_verified_final_archive', false)
+        ->where('archiveTabCounts.ongoing', 1)
         ->where('submissions.data.0.mov_url', fn ($url) => is_string($url) && $url !== ''));
 
     $result = app(FinalDocumentArchiveService::class)->createOrRetryManifest(
@@ -599,7 +621,16 @@ test('legacy Regular PAMB release evidence supports separate receipt and final a
         ->and(\App\Models\DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->getKey())->count())->toBe($eventsBefore);
 
     $this->get($moduleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('submissions.data', [])
+        ->where('submissions.total', 0)
+        ->where('archiveTabCounts.ongoing', 0)
+        ->where('archiveTabCounts.archived', 1));
+    $archivedModuleUrl = route('conservation-reports.index', ['workflow' => 'regular_pamb', 'archive_tab' => 'archived']);
+    $this->get($archivedModuleUrl)->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('submissions.data.0.id', $report->getKey())
+        ->where('submissions.total', 1)
+        ->where('archiveTabCounts.ongoing', 0)
+        ->where('archiveTabCounts.archived', 1)
         ->where('submissions.data.0.has_verified_final_archive', true)
         ->where('submissions.data.0.mov', null)
         ->where('submissions.data.0.mov_url', null)
@@ -669,6 +700,8 @@ test('PAMO no_role readers retain only their assigned PA Conservation visibility
         'is_active' => true, 'is_approved' => true,
     ]);
     $reader->assignRole(\Spatie\Permission\Models\Role::findOrCreate('no_role', 'web'));
+    $archivePermission = \Spatie\Permission\Models\Permission::findOrCreate('final-archives.view', 'web');
+    $reader->givePermissionTo($archivePermission);
 
     $archives = app(FinalDocumentArchiveService::class);
     $source = app(SubmissionTrackingService::class)->source('conservation');
@@ -686,8 +719,12 @@ test('PAMO no_role readers retain only their assigned PA Conservation visibility
         'is_active' => true, 'is_approved' => true,
     ]);
     $foreign->assignRole(\Spatie\Permission\Models\Role::findOrCreate('no_role', 'web'));
+    $foreign->givePermissionTo($archivePermission);
     expect(fn () => $archives->context($foreign, 'conservation', (int) $record->getKey()))
         ->toThrow(HttpException::class);
+    $eligibleViewerIds = $archives->eligibleArchiveViewerIds('conservation', (int) $record->getKey());
+    expect($eligibleViewerIds)->toContain((int) $reader->getKey());
+    expect($eligibleViewerIds)->not->toContain((int) $foreign->getKey());
 });
 
 test('final-return archive folders resolve a direct MHRWS report under its authoritative PENRO office', function (): void {
@@ -1810,12 +1847,17 @@ test('Submission Tracking exposes the record archive link only for a scoped veri
         ->and($archives->verifiedFinalArchiveRecordKeys($writer, $completeCandidate))->toBe(['bms:'.$completeId]);
 
     $writer->givePermissionTo(Permission::findOrCreate('bms.view', 'web'));
-    $this->get(route('bms.index', ['tracker' => 1]))->assertOk()->assertInertia(fn (Assert $page) => $page
+    $this->get(route('bms.index', ['tracker' => 1, 'archive_tab' => 'archived']))->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('reportSubmissions.data.0.id', $completeId)
         ->where('reportSubmissions.data.0.has_verified_final_archive', true)
         ->where('reportSubmissions.data.0.mov_url', null)
-        ->where('reportSubmissions.data.1.id', $sourceId)
-        ->where('reportSubmissions.data.1.has_verified_final_archive', false));
+        ->where('reportSubmissions.total', 1)
+        ->where('archiveTabCounts.ongoing', 1)
+        ->where('archiveTabCounts.archived', 1));
+    $this->get(route('bms.index', ['tracker' => 1, 'archive_tab' => 'ongoing']))->assertOk()->assertInertia(fn (Assert $page) => $page
+        ->where('reportSubmissions.data.0.id', $sourceId)
+        ->where('reportSubmissions.data.0.has_verified_final_archive', false)
+        ->where('reportSubmissions.total', 1));
 
     $this->actingAs($writer)->get(route('submission-tracking.index', ['view' => 'history', 'source' => 'bms', 'source_id' => $completeId]))
         ->assertRedirect(route('final-archives.index', ['source' => 'bms', 'record' => $completeId]))
@@ -1849,12 +1891,14 @@ test('Submission Tracking exposes the record archive link only for a scoped veri
         'is_active' => true, 'is_approved' => true,
     ]);
     $pamo->assignRole(\Spatie\Permission\Models\Role::findOrCreate('no_role', 'web'));
-    $this->actingAs($pamo)->get(route('pamo-native-reports.index', 'bms'))->assertOk()->assertInertia(fn (Assert $page) => $page
+    $this->actingAs($pamo)->get(route('pamo-native-reports.index', ['workflow' => 'bms', 'archive_tab' => 'archived']))->assertOk()->assertInertia(fn (Assert $page) => $page
         ->where('reports.data.0.id', $completeId)
         ->where('reports.data.0.has_verified_final_archive', true)
         ->where('reports.data.0.mov_url', null)
         ->where('reports.data.0.mov_available', false)
-        ->where('reports.data.0.can_edit_correction', false));
+        ->where('reports.data.0.can_edit_correction', false)
+        ->where('archiveTabCounts.ongoing', 0)
+        ->where('archiveTabCounts.archived', 1));
 
     $outOfScopeReader = finalArchiveActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Baganga');
     $outOfScopeReader->revokePermissionTo('bms.update');
@@ -1928,9 +1972,12 @@ test('each ENGP workflow reaches Development History only after its verified Reg
         ->and($fixture['gateway']->uploadAttempts())->toBe($uploadsAfterArchive)
         ->and($archives->verifiedFinalArchiveRecordKeys($writer, $candidate))->toBe(['engp:'.$recordId]);
 
-    $this->get(route('engp-reports.index', [$workflowKey, 'year' => $fixture['report']->reporting_year]))
+    $this->get(route('engp-reports.index', [$workflowKey, 'year' => $fixture['report']->reporting_year, 'archive_tab' => 'archived']))
         ->assertOk()->assertInertia(fn (Assert $page) => $page
             ->where('submissions.data.0.id', $recordId)
+            ->where('submissions.total', 1)
+            ->where('archiveTabCounts.ongoing', 0)
+            ->where('archiveTabCounts.archived', 1)
             ->where('submissions.data.0.has_verified_final_archive', true)
             ->where('submissions.data.0.mov', null)
             ->where('submissions.data.0.mov_external_url', null));

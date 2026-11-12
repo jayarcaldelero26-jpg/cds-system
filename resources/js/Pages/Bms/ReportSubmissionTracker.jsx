@@ -26,6 +26,7 @@ import HistoricalRecordBadge from '@/Components/HistoricalRecordBadge';
 import RecordTypeBadge from '@/Components/RecordTypeBadge';
 import OperationalStatus from '@/Components/OperationalStatus';
 import AwsSubmissionFields from '@/Components/Reports/AwsSubmissionFields';
+import ReportArchiveTabs from '@/Components/ReportArchiveTabs';
 import PamoSavedDraftsTable from '@/Components/PamoSavedDraftsTable';
 const emptyReport = { protected_area_id: '', target_office: '', activity_name: '', document_type: '', semester: '1st Semester', quarter: '', monitoring_period_start: '', monitoring_period_end: '', date_conducted: '', date_conducted_ranges: [], date_accomplished: '', mov: null, remarks: '' };
 const badgeClass = (value) => ({ 'Pending': 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200', 'Pending Submission by CENRO': 'bg-blue-600 text-white', 'Pending Receipt by PENRO': 'bg-blue-600 text-white', 'Pending Regional Endorsement': 'bg-blue-600 text-white', 'Completed': 'bg-green-600 text-white', 'Historical evidence incomplete': 'bg-amber-100 text-amber-900 dark:bg-amber-950/50 dark:text-amber-200', 'Missing historical evidence': 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200', 'Ongoing Preparation at CENRO Level': 'bg-blue-600 text-white', 'Report Not Yet Submitted': 'bg-red-600 text-white', 'Report Submitted': 'bg-green-600 text-white', 'No Activity Conducted': 'bg-gray-500 text-white', 'No Data': 'bg-gray-500 text-white' })[value] || 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200';
@@ -109,7 +110,7 @@ function HistoricalOriginalDates({ report }) {
   </div>;
 }
 
-export default function ReportSubmissionTracker({ submissions, protectedAreas, protectedAreasByOffice = {}, filters, moduleLabel = 'BMS', historicalSource = null, submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov', dateConductedRangesEnabled = false, pamoDrafts = [], pamoWorkspace = undefined }) {
+export default function ReportSubmissionTracker({ submissions, protectedAreas, protectedAreasByOffice = {}, filters, moduleLabel = 'BMS', historicalSource = null, submissionRoutes, filterPrefix = 'report_', permissions = null, workflowConfig = null, targetOffices = [], attachmentField = 'mov', dateConductedRangesEnabled = false, pamoDrafts = [], pamoWorkspace = undefined, archiveTabCounts = null, archiveQueryKey = 'archive_tab' }) {
   if (!submissionRoutes || typeof submissionRoutes.store !== 'string' || typeof submissionRoutes.index !== 'string' || typeof submissionRoutes.update !== 'function' || typeof submissionRoutes.destroy !== 'function' || typeof submissionRoutes.mov !== 'function') {
     throw new Error(`${moduleLabel} ReportSubmissionTracker requires store, index, update, destroy, and MOV routes.`);
   }
@@ -296,6 +297,7 @@ export default function ReportSubmissionTracker({ submissions, protectedAreas, p
 
         {pamoWorkspace === false && <p role="status" className="text-xs text-amber-800 dark:text-amber-300">Drafts are temporarily unavailable. Contact an administrator.</p>}
 
+        {archiveTabCounts && <ReportArchiveTabs counts={archiveTabCounts} queryKey={archiveQueryKey} />}
         <CrudTable compactEmpty={true} title={rows.length > 0 ? `${moduleLabel} Report` : undefined} subtitle={rows.length > 0 ? `${submissions?.total ?? rows.length} report submission${(submissions?.total ?? rows.length) === 1 ? '' : 's'}` : undefined} helperText={rows.length > 0 ? 'Click any row to view full details' : undefined} caption={`${moduleLabel} report submission tracker`} columns={columns} rows={rows} rowKey="id" onRowClick={openDetails} emptyTitle="No report submissions found" emptyDescription={`No ${moduleLabel} report submissions match the selected filters.`} pagination={rows.length > 0 ? pagination : null} />
         {pamoWorkspace === true && <PamoSavedDraftsTable drafts={pamoDrafts} workflow={workflowConfig} onRowClick={draft => pamoDraftRef.current?.openDraft(draft)} />}
         {pamoWorkspace === true && <PamoPambDraftWorkspace ref={pamoDraftRef} workflow={workflowConfig} drafts={pamoDrafts} assignedProtectedArea={protectedAreas?.[0]} />}

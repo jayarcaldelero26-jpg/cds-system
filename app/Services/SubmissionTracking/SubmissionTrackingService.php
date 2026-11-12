@@ -47,7 +47,7 @@ final class SubmissionTrackingService
     public function __construct(private readonly ConservationReportWorkflowRegistry $workflows, private readonly EngpReportWorkflowRegistry $engpWorkflows, private readonly ProtectedAreaRoutingPolicy $routingPolicy, private readonly RoutingPositionSnapshotService $routePositions, private readonly PambRoutingTimelineService $pambRouting, private readonly PambMovProcessingService $pambMov, private readonly PambSubmissionAccessService $pambAccess, private readonly ProtectedAttachmentService $attachments, private readonly RoutingAttachmentService $routingAttachments, private readonly RoutingStatusPresenter $statusPresenter, private readonly AuditLogService $auditLogs, private readonly ModuleMetadataResolver $moduleResolver, private readonly OrganizationalAccessService $organization, private readonly DocumentRoutingTransitionService $genericRouting, private readonly ReportTrackingNumberService $trackingNumbers) {}
 
     /** @return Collection<int, array<string, mixed>> */
-    public function records(array $filters = [], ?int $limitPerSource = null, bool $assignTrackingNumbers = false): Collection
+    public function records(array $filters = [], ?int $limitPerSource = null): Collection
     {
         $selectedSource = $filters['_selected_source'] ?? null;
         $selectedId = filter_var($filters['_selected_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -76,11 +76,9 @@ final class SubmissionTrackingService
             }));
         LocalNavigationTrace::incrementCurrent('source_rows_loaded', $loaded->count());
 
-        [$trackingNumbers, $correctionCounts] = LocalNavigationTrace::measureCurrent('st_metadata', function () use ($loaded, $assignTrackingNumbers) {
+        [$trackingNumbers, $correctionCounts] = LocalNavigationTrace::measureCurrent('st_metadata', function () use ($loaded) {
             $this->moduleResolver->prime($loaded->pluck('record'));
-            $trackingNumbers = $assignTrackingNumbers
-                ? $this->trackingNumbers->ensureFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]))
-                : $this->trackingNumbers->existingFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]));
+            $trackingNumbers = $this->trackingNumbers->existingFor($loaded->map(fn (array $item): array => ['record' => $item['record'], 'key' => $item['key']]));
             return [$trackingNumbers, $this->correctionCounts($loaded)];
         });
 
@@ -895,13 +893,18 @@ final class SubmissionTrackingService
             $changes['updated_by'] = $userId;
         }
         $actionAt = CarbonImmutable::now(BusinessCalendarService::TIMEZONE);
-        $canonicalEvent = DB::transaction(function () use ($record, $changes, $stage, $value, $userId, $actionAt): ?PambRoutingEvent {
+        $canonicalEvent = DB::transaction(function () use ($record, $changes, $stage, $value, $userId, $actionAt, $sourceKey): ?PambRoutingEvent {
             $record->update($changes);
-            if (! $record instanceof ConservationReportSubmission || ! $this->pambRouting->applies($record)) return null;
+            if (! $record instanceof ConservationReportSubmission || ! $this->pambRouting->applies($record)) {
+                app(ReportTrackingNumberService::class)->ensureFor(collect([['record' => $record, 'key' => $sourceKey]]));
+                return null;
+            }
 
             // Receipt at PENRO Records is its own custody milestone. Forwarding
             // to the Office of the PENRO remains a separately authorized action.
-            return $this->pambRouting->recordCanonical($record, $stage, $value, $userId, $actionAt);
+            $event = $this->pambRouting->recordCanonical($record, $stage, $value, $userId, $actionAt);
+            app(ReportTrackingNumberService::class)->ensureFor(collect([['record' => $record, 'key' => $sourceKey]]));
+            return $event;
         });
         try {
             $this->auditTransition($sourceKey, $record, $source, $stage, $value, $userId);

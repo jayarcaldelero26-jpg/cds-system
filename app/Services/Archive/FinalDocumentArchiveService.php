@@ -24,6 +24,7 @@ use App\Services\SubmissionTracking\SubmissionTrackingService;
 use App\Support\ArchiveRequestTrace;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Collection;
 use Illuminate\Http\UploadedFile;
@@ -127,7 +128,7 @@ final class FinalDocumentArchiveService
         $physical = $this->physicalReceiptTime($physicalReceivedAt);
         $this->assertReceiptTimeAfterRelease($physical, $release);
 
-        return DB::transaction(function () use ($actor, $source, $recordId, $definition, $record, $release, $physical): FinalDocumentReceipt {
+        $receipt = DB::transaction(function () use ($actor, $source, $recordId, $definition, $record, $release, $physical): FinalDocumentReceipt {
             $locked = $record->newQuery()->lockForUpdate()->findOrFail($recordId);
             $this->assertFinalReceiptWriter($actor, $locked, $source);
             $currentRelease = $this->releaseEvidence($locked, $source);
@@ -159,6 +160,18 @@ final class FinalDocumentArchiveService
                 'recorded_at' => CarbonImmutable::now(config('app.timezone')),
             ]);
         }, 3);
+
+        if ($receipt->wasRecentlyCreated) {
+            app(\App\Services\LiveRefreshPublisher::class)->afterCommitUsing(
+                fn (): array => array_merge(
+                    [(int) $actor->getKey()],
+                    $this->eligibleArchiveViewerIds($source, $recordId),
+                ),
+                ['archives', 'tracking'],
+            );
+        }
+
+        return $receipt;
     }
 
     /** One request records a new physical receipt and submits its complete signed set. */
@@ -454,6 +467,46 @@ final class FinalDocumentArchiveService
         return $page->setCollection($this->presentModuleReports($source, $page->getCollection(), $present));
     }
 
+    /**
+     * Apply the same verified-final-archive predicate used by module details
+     * before pagination, and return counts for the current user-scoped query.
+     * The caller must provide the already authorized and filtered module query.
+     *
+     * @return array{active:string,counts:array{ongoing:int,archived:int}}
+     */
+    public function applyModuleArchiveTab(string $source, Builder $query, ?string $requestedTab): array
+    {
+        $active = $requestedTab === 'archived' ? 'archived' : 'ongoing';
+        $total = (clone $query)->count();
+        if (! $this->availability->schemaReady() || ! in_array($source, $this->sourceContracts->sourceKeys(), true)) {
+            if ($active === 'archived') $query->whereRaw('1 = 0');
+            return ['active' => $active, 'counts' => ['ongoing' => $total, 'archived' => 0]];
+        }
+        $model = $query->getModel();
+        $keyName = $model->getKeyName();
+        $qualifiedKey = $model->qualifyColumn($keyName);
+        $receiptIds = FinalDocumentReceipt::query()
+            ->select('source_id')
+            ->where('source_type', $source);
+        $candidateRecords = (clone $query)
+            ->whereIn($qualifiedKey, $receiptIds)
+            ->get([$keyName]);
+        $verifiedKeys = $this->verifiedModuleArchiveRecordKeys($source, $candidateRecords);
+        $verifiedIds = collect($verifiedKeys)
+            ->map(fn (string $identity): int => (int) substr($identity, strlen($source) + 1))
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()->values()->all();
+
+        if ($active === 'archived') {
+            $query->whereIn($qualifiedKey, $verifiedIds);
+        } elseif ($verifiedIds !== []) {
+            $query->whereNotIn($qualifiedKey, $verifiedIds);
+        }
+
+        $archived = count($verifiedIds);
+        return ['active' => $active, 'counts' => ['ongoing' => max(0, $total - $archived), 'archived' => $archived]];
+    }
+
     /** Present only records already scoped to the viewer by the module. */
     public function presentModuleReports(string $source, Collection $records, callable $present): Collection
     {
@@ -680,6 +733,34 @@ final class FinalDocumentArchiveService
         return false;
     }
 
+    /**
+     * Resolve only accounts that can open this exact report in Final Archives.
+     * This is a read-only policy check and never contacts the archive provider.
+     *
+     * @return list<int>
+     */
+    public function eligibleArchiveViewerIds(string $source, int $recordId): array
+    {
+        $viewerIds = [];
+
+        foreach (User::query()->where('is_active', true)->where('is_approved', true)->get() as $viewer) {
+            if (! $viewer->can('final-archives.view') || ! $this->canBrowse($viewer)) continue;
+
+            try {
+                $this->authorizedRecord($viewer, $source, $recordId, false);
+                $viewerIds[] = (int) $viewer->getKey();
+            } catch (Throwable $exception) {
+                if (! $exception instanceof \Illuminate\Auth\Access\AuthorizationException
+                    && ! $exception instanceof \Symfony\Component\HttpKernel\Exception\HttpExceptionInterface
+                    && ! $exception instanceof \Illuminate\Database\Eloquent\ModelNotFoundException) {
+                    throw $exception;
+                }
+            }
+        }
+
+        return array_values(array_unique($viewerIds));
+    }
+
     /** @return list<string> */
     public function sourceKeys(): array
     {
@@ -904,6 +985,13 @@ final class FinalDocumentArchiveService
                 );
                 $current->forceFill(['archive_status' => 'ARCHIVED', 'finalized_at' => now(), 'claim_token' => null, 'claimed_at' => null, 'last_error' => null])->saveOrFail();
             }, 3);
+            app(\App\Services\LiveRefreshPublisher::class)->afterCommitUsing(
+                fn (): array => array_merge(
+                    [(int) $actor->getKey()],
+                    $this->eligibleArchiveViewerIds((string) $manifest->source_type, (int) $manifest->source_id),
+                ),
+                ['archives', 'tracking'],
+            );
             $this->logArchivePhase('manifest_finalization', $finalizationStartedAt, $verifiedPartCount, $verifiedByteCount);
 
             return ['status' => 'archived', 'manifest_id' => $manifestId];

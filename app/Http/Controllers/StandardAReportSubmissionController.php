@@ -48,7 +48,8 @@ abstract class StandardAReportSubmissionController extends Controller
         if ($request->filled('protected_area_id')) {
             $this->organization->assertCanAccessProtectedArea($request->user(), $request->input('protected_area_id'));
         }
-        $submissions = $this->organization->scopeProtectedAreaQuery($model::query(), $request->user())
+        $source = $this->routePrefix === 'bams.report-submissions' ? 'bams' : 'imea';
+        $submissionQuery = $this->organization->scopeProtectedAreaQuery($model::query(), $request->user())
             ->with('protectedArea:id,name,short_name')
             ->when($request->filled('protected_area_id'), fn ($query) => $query->where('protected_area_id', $request->integer('protected_area_id')))
             ->when($request->filled('semester'), fn ($query) => $query->where('semester', $request->input('semester')))
@@ -58,18 +59,17 @@ abstract class StandardAReportSubmissionController extends Controller
                     ->orWhere('activity_name', 'like', "%{$search}%")
                     ->orWhere('document_type', 'like', "%{$search}%")
                     ->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%")));
-            })
-            ->latest('id')
-            ->paginate(10)
-            ->withQueryString();
-        $source = $this->routePrefix === 'bams.report-submissions' ? 'bams' : 'imea';
+            });
+        $archiveTabs = app(FinalDocumentArchiveService::class)->applyModuleArchiveTab($source, $submissionQuery, $request->input('archive_tab'));
+        $submissions = $submissionQuery->latest('id')->paginate(10)->withQueryString();
         $submissions = app(FinalDocumentArchiveService::class)->presentModuleReportPage($source, $submissions, $this->submissionData(...));
 
         return Inertia::render($this->page, [
             'submissions' => $submissions,
             'protectedAreas' => $this->organization->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name']),
             ...app(SubmissionFormScopeService::class)->options($request->user()),
-            'filters' => $request->only(['protected_area_id', 'semester', 'search']),
+            'filters' => $request->only(['protected_area_id', 'semester', 'search', 'archive_tab']),
+            'archiveTabCounts' => $archiveTabs['counts'],
             'moduleLabel' => $this->label,
             'routePrefix' => $this->routePrefix,
             'dateConductedRangesEnabled' => $this->dateConductedRangesEnabled,

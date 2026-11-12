@@ -14,7 +14,7 @@ import AwsGraph from './AwsGraph';
 import AwsReportSubmissionTracker from './AwsReportSubmissionTracker';
 import AwsMonthlySummary from './AwsMonthlySummary';
 
-export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], organizationalOffices = [], targetOffices = [], protectedAreasByOffice = {}, dataOnly = false, filters = {}, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
+export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [], protectedAreas = [], organizationalOffices = [], targetOffices = [], protectedAreasByOffice = {}, dataOnly = false, filters = {}, archiveTabCounts = null, monthlySummary = [], monthlyFilters = {}, monthlyYearOptions = [], monthlyMonthOptions = [] }) {
   const { auth = {} } = usePage().props;
 
   // Keep report/form links working. The old raw-data link now opens the
@@ -253,7 +253,7 @@ export default function Aws({ awsRecords = [], rawRecords = [], chartRecords = [
           } />
 
                 {/* REPORTS TABLE TAB */}
-                {!dataOnly && activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} organizationalOffices={organizationalOffices} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} filters={filters} />}
+                {!dataOnly && activeTab === 'reports' && <AwsReportSubmissionTracker records={records} pagination={pagination} protectedAreas={protectedAreas} organizationalOffices={organizationalOffices} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} filters={filters} archiveTabCounts={archiveTabCounts} />}
                 {false && activeTab === 'reports' &&
         <div className="space-y-4">
                         {records.length > 0 ?

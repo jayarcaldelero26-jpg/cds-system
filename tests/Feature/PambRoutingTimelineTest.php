@@ -323,7 +323,11 @@ test('normal routing endpoint ignores client timestamp and records actor once', 
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
     CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-08-10 14:30:00', BusinessCalendarService::TIMEZONE));
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => false,
+    ]);
     Storage::fake('local');
     $path = 'conservation-report-movs/pamb-routed-current.pdf';
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'date_received_penro' => '2026-08-05', 'mov_file_path' => $path, 'mov_file_name' => 'current.pdf']);
@@ -346,7 +350,11 @@ test('normal routing endpoint ignores client timestamp and records actor once', 
 test('PENRO Records receipt and Office forwarding are distinct and archive at forwarding', function (): void {
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => false,
+    ]);
     Storage::fake('local');
     $path = 'conservation-report-movs/receipt-current.pdf';
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'mov_file_path' => $path, 'mov_file_name' => 'unrelated-upload-name.pdf']);
@@ -357,6 +365,10 @@ test('PENRO Records receipt and Office forwarding are distinct and archive at fo
     $this->actingAs($this->user)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
         'stage' => SubmissionTrackingService::PENRO_RECEIPT, 'date' => '2026-08-05',
     ])->assertSessionHasNoErrors();
+
+    expect(\App\Models\ReportTrackingReference::query()
+        ->where('source_type', 'conservation')->where('source_id', $report->getKey())->value('tracking_number'))
+        ->toBeString()->not->toBe('');
 
     $events = DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $report->id)->orderBy('id')->get();
     expect($events->pluck('metadata.action_key')->all())->toBe(['receive_at_penro_records'])
@@ -379,7 +391,11 @@ test('PENRO Records receipt and Office forwarding are distinct and archive at fo
 
 test('disabled PAMB forwarding archive checkpoint blocks the forward without undoing receipt', function (): void {
     $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
-    config(['services.google_drive_archive.enabled' => false, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => false,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => false,
+    ]);
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04']);
 
     $this->actingAs($this->user)->post(route('submission-tracking.transition', ['conservation', $report->id, SubmissionTrackingService::PENRO_RECEIPT]), [
@@ -433,6 +449,7 @@ test('enabled final return lifecycle retires the legacy PAMB dispatch checkpoint
 });
 
 test('PAMB checkpoint lifecycle rejects a missing routing actor', function (): void {
+    config(['services.document_archive.final_return_archive_enabled' => false]);
     $report = timelinePambReport($this);
 
     expect(fn () => app(CompletedReportArchiveHook::class)->afterPambTransition(
@@ -443,7 +460,11 @@ test('PAMB checkpoint lifecycle rejects a missing routing actor', function (): v
 test('failed PAMB forwarding archive upload leaves the receipt committed and blocks the forward', function (): void {
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
     $this->user->update(['section' => 'PENRO_RECORDS', 'unit_assignment' => 'conservation', 'office_designated' => 'PENRO Davao Oriental']);
-    config(['services.google_drive_archive.enabled' => true, 'services.document_archive.driver' => 'fake']);
+    config([
+        'services.google_drive_archive.enabled' => true,
+        'services.document_archive.driver' => 'fake',
+        'services.document_archive.final_return_archive_enabled' => false,
+    ]);
     Storage::fake('local');
     $path = 'conservation-report-movs/failed-receipt-current.pdf';
     $report = timelinePambReport($this, ['date_report_released_cenro' => '2026-08-04', 'mov_file_path' => $path]);

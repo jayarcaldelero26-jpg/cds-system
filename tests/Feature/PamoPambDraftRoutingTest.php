@@ -6,6 +6,7 @@ use App\Models\FinalDocumentArchiveManifest;
 use App\Models\DocumentRoutingEvent;
 use App\Models\OrganizationalOffice;
 use App\Models\PamoPambDraft;
+use App\Models\ReportTrackingReference;
 use App\Models\ProtectedArea;
 use App\Models\ProtectedAreaOfficeAssignment;
 use App\Models\SubmissionRoutingSnapshot;
@@ -719,6 +720,8 @@ test('all seven native adapters promote into their own source rows with protecte
             ...($workflow === 'ipaf_management' ? ['activity_name' => $managementActivity] : []),
         ])->assertRedirect()->assertSessionHasNoErrors();
         $draft = PamoPambDraft::query()->where('start_idempotency_key', $token)->firstOrFail();
+        expect(ReportTrackingReference::query()->where('source_type', $sourceKey)
+            ->where('source_id', $draft->getAttribute($linkColumn))->exists())->toBeFalse();
         if ($workflow === 'ipaf_management') {
             expect($draft->report_payload['activity_name'])->toBe($managementActivity);
         }
@@ -767,10 +770,12 @@ test('all seven native adapters promote into their own source rows with protecte
         ]))->toThrow(\Illuminate\Database\QueryException::class);
 
         $event = DocumentRoutingEvent::query()->where('source_type', $sourceKey)->where('source_id', $recordId)->firstOrFail();
+        $trackingReference = ReportTrackingReference::query()->where('source_type', $sourceKey)->where('source_id', $recordId)->first();
         $snapshotId = (int) SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('id');
         expect($event->event_key)->toBe('forwarded')
             ->and($event->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_PAMO_CENRO_FOCAL)
-            ->and(SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('origin_kind'))->toBe('pamo_pamb');
+            ->and(SubmissionRoutingSnapshot::query()->where('source_key', $sourceKey)->where('source_id', $recordId)->value('origin_kind'))->toBe('pamo_pamb')
+            ->and($trackingReference)->not->toBeNull();
 
         $this->actingAs($pamo)->get(route('pamo-native-reports.index', $workflow))
             ->assertOk()->assertInertia(fn ($page) => $page

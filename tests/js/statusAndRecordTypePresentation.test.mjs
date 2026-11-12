@@ -37,7 +37,8 @@ test('compact pending status keeps its full accessible context outside the amber
     assert.equal(caption.badge, 'Pending');
     assert.equal(caption.context.includes('Pending Submission by CENRO'), false);
     assert.match(statusComponent, /role="group" aria-label=\{`\$\{presentation\.context\}; status Pending`\}/);
-    assert.match(statusComponent, /block break-words text-xs font-semibold leading-4 text-gray-700 dark:text-gray-200[\s\S]*\{presentation\.context\}/);
+    assert.match(statusComponent, /contextClassName = 'block break-words text-xs font-semibold leading-4 text-gray-700 dark:text-gray-200'/);
+    assert.match(statusComponent, /<span className=\{contextClassName\}>\{presentation\.context\}<\/span>/);
     assert.match(statusComponent, /aria-label=\{`\$\{presentation\.context\}: Pending`\}/);
     assert.match(statusComponent, /ring-amber-200[\s\S]*>Pending</);
 });
@@ -69,14 +70,25 @@ test('Incoming stage and deadline badges keep the routing action and deadline pr
     const deadlineStart = trackingPage.indexOf('key: "deadline_submission"');
     const deadlineEnd = trackingPage.indexOf('key: "open"', deadlineStart);
     const deadlineCell = trackingPage.slice(deadlineStart, deadlineEnd);
+    const officeStart = trackingPage.indexOf('key: "office_area"');
+    const officeEnd = trackingPage.indexOf('key: "activity"', officeStart);
+    const officeCell = trackingPage.slice(officeStart, officeEnd);
+    const officeAreaComponentStart = trackingPage.indexOf('const OfficeAreaCell');
+    const officeAreaComponentEnd = trackingPage.indexOf('const responsibleCategoryFor', officeAreaComponentStart);
+    const officeAreaComponent = trackingPage.slice(officeAreaComponentStart, officeAreaComponentEnd);
     const complianceValue = trackingPage.indexOf('routing.compliance_status || row.timeliness');
     const complianceDetail = trackingPage.slice(complianceValue - 180, complianceValue + 180);
 
-    assert.match(trackingPage, /const Badge = \(\{ value \}\) => <OperationalStatus value=\{value\}/);
+    assert.match(trackingPage, /const Badge = \(\{ value, contextClassName \}\) => <OperationalStatus value=\{value\} contextClassName=\{contextClassName\}/);
     assert.match(trackingPage, /label: "Current Status"[\s\S]*<Badge value=\{compactStatusFor\(row\)\} \/>/);
     assert.match(trackingPage, /label: "Required Action"[\s\S]*\{requiredActionFor\(row\)\}/);
     assert.match(deadlineCell, /\{plainDate\(row\.deadline_submission\) \|\|/);
-    assert.match(deadlineCell, /<Badge value=\{routingFor\(row\)\.compliance_status\} \/>/);
+    assert.match(deadlineCell, /<Badge value=\{routingFor\(row\)\.compliance_status\} contextClassName="block break-words text-\[11px\] text-gray-500 dark:text-gray-400" \/>/);
+    assert.match(officeCell, /render: \(row\) => <OfficeAreaCell row=\{row\} \/>/);
+    assert.match(officeAreaComponent, /break-words text-\[11px\] text-gray-500/);
+    assert.doesNotMatch(officeAreaComponent, /break-words text-\[11px\] font-semibold/);
+    assert.match(deadlineCell, /text-\[11px\] text-gray-500/);
+    assert.doesNotMatch(deadlineCell, /contextClassName="[^"]*font-semibold/);
     assert.ok(complianceValue >= 0, 'detail Compliance keeps the canonical compliance/timeliness value');
     assert.match(complianceDetail, /<Badge[\s\S]*value=\{/);
     assert.match(trackingPage, /routingFor\(row\)\.actions\?\.\[0\]\?\.action_label \|\| nextActionFor\(row\)/);

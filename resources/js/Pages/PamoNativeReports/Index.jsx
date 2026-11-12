@@ -11,14 +11,17 @@ import CrudDetailsModal from '@/Components/Crud/CrudDetailsModal';
 import LaravelPaginationLinks from '@/Components/Crud/LaravelPaginationLinks';
 import PamoPambDraftWorkspace from '@/Components/PamoPambDraftWorkspace';
 import { formatReportDate, formatReportValue } from '@/Utils/dateFormatters';
+import ReportArchiveTabs from '@/Components/ReportArchiveTabs';
+import { createKeyedActionFlight } from '@/Utils/keyedActionFlight.mjs';
 
-export default function Index({ workflow, reports, pamoDrafts = [], assignedProtectedArea, pamoContext = null, filters = {}, pamoWorkspace = false }) {
+export default function Index({ workflow, reports, pamoDrafts = [], assignedProtectedArea, pamoContext = null, filters = {}, pamoWorkspace = false, archiveTabCounts = null }) {
     const page = usePage();
     const draftWorkspace = useRef(null);
+    const resubmissionInFlight = useRef(createKeyedActionFlight());
     const [archivedReportId, setArchivedReportId] = useState(null);
     const [search, setSearch] = useState(filters.search || '');
     const [pendingResubmission, setPendingResubmission] = useState(null);
-    const [resubmitting, setResubmitting] = useState(false);
+    const [resubmittingKey, setResubmittingKey] = useState(null);
     const [resubmissionError, setResubmissionError] = useState('');
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -33,19 +36,34 @@ export default function Index({ workflow, reports, pamoDrafts = [], assignedProt
 
     const rows = reports?.data || [];
     const archivedReport = rows.find(row => row.id === archivedReportId && row.has_verified_final_archive);
+    const pendingActionKey = pendingResubmission
+        ? `${workflow.source}:${pendingResubmission.id}:${pendingResubmission.resubmit_action || 'resubmit'}`
+        : null;
+    const resubmitting = pendingActionKey !== null && resubmittingKey === pendingActionKey;
     const confirmResubmission = () => {
         const row = pendingResubmission;
-        if (!row || resubmitting) return;
+        if (!row) return;
+        const actionKey = `${workflow.source}:${row.id}:${row.resubmit_action || 'resubmit'}`;
+        if (!resubmissionInFlight.current.begin(actionKey)) return;
         setResubmissionError('');
-        setResubmitting(true);
-        router.post(route('submission-tracking.transition', [workflow.source, row.id, row.resubmit_action]), { stage: row.resubmit_action }, {
-            preserveScroll: true,
-            onSuccess: () => setPendingResubmission(null),
-            onError: () => setResubmissionError('The corrected copy could not be resubmitted. Your report remains available; review it and try again.'),
-            onHttpException: () => setResubmissionError('The server could not resubmit this corrected copy. Your report remains available; review it and try again.'),
-            onNetworkError: () => setResubmissionError('The request did not reach the server. Your report remains available; check the connection and try again.'),
-            onFinish: () => setResubmitting(false),
-        });
+        setResubmittingKey(actionKey);
+        const finish = () => {
+            resubmissionInFlight.current.finish(actionKey);
+            setResubmittingKey(current => current === actionKey ? null : current);
+        };
+        try {
+            router.post(route('submission-tracking.transition', [workflow.source, row.id, row.resubmit_action]), { stage: row.resubmit_action }, {
+                preserveScroll: true,
+                onSuccess: () => setPendingResubmission(null),
+                onError: () => setResubmissionError('The corrected copy could not be resubmitted. Your report remains available; review it and try again.'),
+                onHttpException: () => setResubmissionError('The server could not resubmit this corrected copy. Your report remains available; review it and try again.'),
+                onNetworkError: () => setResubmissionError('The request did not reach the server. Your report remains available; check the connection and try again.'),
+                onFinish: finish,
+            });
+        } catch {
+            setResubmissionError('The corrected copy could not be resubmitted. Your report remains available; review it and try again.');
+            finish();
+        }
     };
     const period = row => row.reporting_period || row.document_type || (row.reporting_month ? `${row.reporting_month}/${row.reporting_year}` : row.semester || row.quarter || row.report_period_type || 'Not provided');
     const reportDetailsColumns = [
@@ -78,6 +96,7 @@ export default function Index({ workflow, reports, pamoDrafts = [], assignedProt
             {pamoWorkspace && workflow?.is_active !== false && <Button type="button" size="compact" variant="primary" className="h-10 shrink-0 rounded-xl px-5 text-xs" onClick={() => draftWorkspace.current?.startNew()}>New draft</Button>}
         </div>
         <div className="mt-4">
+            {archiveTabCounts && <ReportArchiveTabs counts={archiveTabCounts} />}
             <CrudTable compactEmpty title={`${workflow.label} reports`} subtitle={`${reports?.total ?? rows.length} report${(reports?.total ?? rows.length) === 1 ? '' : 's'}`} helperText={rows.length ? 'Open a row to view tracking or archived report details.' : undefined} caption={`${workflow.label} report submissions`} columns={columns} rows={rows} rowKey="id" onRowClick={row => {
                 if (row.has_verified_final_archive) setArchivedReportId(row.id);
                 else router.visit(row.source_url);

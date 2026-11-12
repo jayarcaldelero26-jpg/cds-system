@@ -52,8 +52,10 @@ class EngpReportController extends Controller
                 $search = trim((string) $request->input('search'));
                 $q->where(fn ($inner) => $inner->where('office', 'like', "%{$search}%")->orWhere('activity_name', 'like', "%{$search}%")->orWhere('section_name', 'like', "%{$search}%"));
             });
-        $rows = $query->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year)->latest('id')->paginate(15)->withQueryString();
         $archives = app(FinalDocumentArchiveService::class);
+        $query->with(['releaseEvents', 'documentRoutingEvents'])->where('reporting_year', $year);
+        $archiveTabs = $archives->applyModuleArchiveTab('engp', $query, $request->input('archive_tab'));
+        $rows = $query->latest('id')->paginate(15)->withQueryString();
         $rows = $archives->presentModuleReportPage('engp', $rows, $this->data(...));
         $existingYears = $this->organization->scopeDevelopmentQuery(EngpReportSubmission::query(), $request->user())
             ->select('reporting_year')->distinct()->pluck('reporting_year')->all();
@@ -81,7 +83,8 @@ class EngpReportController extends Controller
             'years' => $years,
             'offices' => $offices,
             'targetOffices' => collect(app(SubmissionFormScopeService::class)->officeOptions($request->user()))->filter(fn (array $office): bool => in_array($office['name'], $offices, true))->values()->all(),
-            'filters' => [...$request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search']), 'year' => $year],
+            'filters' => [...$request->only(['workflow', 'office', 'year', 'period_key', 'status', 'search', 'archive_tab']), 'year' => $year],
+            'archiveTabCounts' => $archiveTabs['counts'],
             'summary' => $workflow ? null : $this->summary($year, $request->user()),
             'summaryRows' => $archives->presentModuleReports('engp', $summaryRows, $this->data(...))->values(),
         ]);

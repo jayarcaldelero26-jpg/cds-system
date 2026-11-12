@@ -25,6 +25,7 @@ import CorrectionReferenceAttachment from "@/Components/SubmissionTracking/Corre
 import PamoReportPendingAnimation from "@/Components/PamoReportPendingAnimation";
 import { archiveCheckpointPendingNotice } from "@/Utils/archiveCheckpointNotice";
 import { custodyContext, movPrerequisiteFor, nextSubmissionAction, presentCurrentRoutingStatus, refreshSubmissionSelection, submissionKey } from "@/Utils/submissionDetailContext";
+import { createKeyedActionFlight } from "@/Utils/keyedActionFlight.mjs";
 import SubmissionReviewHistory from "@/Components/SubmissionTracking/SubmissionReviewHistory";
 import SubmissionTrackingProgress from "@/Components/SubmissionTracking/SubmissionTrackingProgress";
 import {
@@ -166,7 +167,7 @@ const badgeTone = (value) => {
         return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-200 dark:ring-emerald-900";
     return "bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700";
 };
-const Badge = ({ value }) => <OperationalStatus value={value} renderStatus={(status) =>
+const Badge = ({ value, contextClassName }) => <OperationalStatus value={value} contextClassName={contextClassName} renderStatus={(status) =>
     isTimelinessValue(status) ? (
         <TimelinessBadge value={status} />
     ) : (
@@ -556,8 +557,10 @@ export default function Index({
     const [reviewHistoryRecord, setReviewHistoryRecord] = useState(null);
     const lastLinkedKey = useRef(submissionKey(trackingContext.selected_record));
     const dispatchSubmitInFlight = useRef(false);
-    const movSubmissionInFlight = useRef(false);
-    const [movSubmissionBusy, setMovSubmissionBusy] = useState(false);
+    const routingActionInFlight = useRef(createKeyedActionFlight());
+    const [routingActionBusyKeys, setRoutingActionBusyKeys] = useState(() => new Set());
+    const movSubmissionInFlight = useRef(createKeyedActionFlight());
+    const [movSubmissionBusyKeys, setMovSubmissionBusyKeys] = useState(() => new Set());
     const [showFullDetails, setShowFullDetails] = useState(
         trackingContext.open_details === true,
     );
@@ -610,22 +613,28 @@ export default function Index({
     const [overrideError, setOverrideError] = useState("");
     const [reviewing, setReviewing] = useState(null);
     const submitMovForReview = (row, options = {}) => {
-        if (movSubmissionInFlight.current) return false;
-        movSubmissionInFlight.current = true;
-        setMovSubmissionBusy(true);
+        const actionKey = `${submissionKey(row) || 'report'}:mov-submit`;
+        if (!movSubmissionInFlight.current.begin(actionKey)) return false;
+        setMovSubmissionBusyKeys(new Set(movSubmissionInFlight.current.values()));
         const originalFinish = options.onFinish;
-        return router.post(
-            route("submission-tracking.mov.submit-review", [row.source, row.source_id]),
-            {}, {
-                preserveScroll: true,
-                ...options,
-                onFinish: visit => {
-                    movSubmissionInFlight.current = false;
-                    setMovSubmissionBusy(false);
-                    originalFinish?.(visit);
+        const finish = visit => {
+            movSubmissionInFlight.current.finish(actionKey);
+            setMovSubmissionBusyKeys(new Set(movSubmissionInFlight.current.values()));
+            originalFinish?.(visit);
+        };
+        try {
+            return router.post(
+                route("submission-tracking.mov.submit-review", [row.source, row.source_id]),
+                {}, {
+                    preserveScroll: true,
+                    ...options,
+                    onFinish: finish,
                 },
-            },
-        );
+            );
+        } catch {
+            finish();
+            return false;
+        }
     };
     const reviewMov = (row, decision) => {
         reviewForm.setData({ decision, remarks: "", attachment: null });
@@ -747,6 +756,11 @@ export default function Index({
             (form.data.stage === "penro_receipt" &&
                 item.key === "receive_at_penro_records"),
     );
+    const selectedRoutingActionKey = selected && form.data.stage
+        ? `${submissionKey(selected) || 'report'}:${form.data.stage}`
+        : '';
+    const selectedRoutingActionPending = Boolean(selectedRoutingActionKey)
+        && routingActionBusyKeys.has(selectedRoutingActionKey);
     const canReplaceSelectedDocument = genericAction
         ? genericAction.can_replace_document === true
         : selected?.routing?.document_update_capabilities?.[form.data.stage] === true;
@@ -767,13 +781,20 @@ export default function Index({
           }
         : null;
     const archiveCheckpointPending = archiveCheckpointPendingNotice(
-        form.processing,
+        selectedRoutingActionPending,
         selected?.source,
         form.data.stage,
     );
     const selectedActionLabel = standardActionLabel(
         genericAction?.action_label || form.data.stage || action[0],
     );
+    const selectedActionPendingLabel = selectedRoutingActionPending
+        ? genericAction?.key === 'receive_correction'
+            ? 'Receiving…'
+            : /resubmit\s+corrected\s+copy/i.test(String(genericAction?.action_label || genericAction?.label || ''))
+                ? 'Submitting…'
+                : selectedActionLabel
+        : selectedActionLabel;
     const columns = useMemo(
         () =>
             tab === "history"
@@ -1080,7 +1101,7 @@ export default function Index({
                                         {plainDate(row.deadline_submission) || "Not recorded"}
                                     </p>
                                     {routingFor(row).compliance_status && (
-                                        <p className="mt-1"><Badge value={routingFor(row).compliance_status} /></p>
+                                        <p className="mt-1"><Badge value={routingFor(row).compliance_status} contextClassName="block break-words text-[11px] text-gray-500 dark:text-gray-400" /></p>
                                     )}
                                 </div>
                             ),
@@ -1257,19 +1278,31 @@ export default function Index({
     const submit = (event) => {
         event.preventDefault();
         const stage = form.data.stage;
+        const record = selected;
+        const flightKey = `${submissionKey(record) || 'report'}:${stage}`;
         if (!beginInitialPenroDispatch(dispatchSubmitInFlight, stage)) return;
+        if (!routingActionInFlight.current.begin(flightKey)) {
+            finishInitialPenroDispatch(dispatchSubmitInFlight, stage);
+            return;
+        }
+        setRoutingActionBusyKeys(new Set(routingActionInFlight.current.values()));
+        const finishRoutingAction = () => {
+            routingActionInFlight.current.finish(flightKey);
+            setRoutingActionBusyKeys(new Set(routingActionInFlight.current.values()));
+            finishInitialPenroDispatch(dispatchSubmitInFlight, stage);
+        };
         if (
             genericAction?.remarks_required &&
             !String(form.data.remarks || "").trim()
         ) {
-            finishInitialPenroDispatch(dispatchSubmitInFlight, stage);
+            finishRoutingAction();
             form.setError("remarks", "Correction remarks are required.");
             return;
         }
-        const continuationTarget = selected
-            ? { source: selected.source, source_id: selected.source_id }
+        const continuationTarget = record
+            ? { source: record.source, source_id: record.source_id }
             : null;
-        const tracesArchiveDispatch = selected?.source === "conservation"
+        const tracesArchiveDispatch = record?.source === "conservation"
             && form.data.stage === "dispatch_penro_records_to_cds_focal";
         const traceId = tracesArchiveDispatch ? createArchiveTraceId() : null;
         const traceStartedAt = traceId ? performance.now() : null;
@@ -1281,28 +1314,33 @@ export default function Index({
             if (!(typeof File !== "undefined" && next.official_document instanceof File)) delete next.official_document;
             return next;
         });
-        form.post(
-            route("submission-tracking.transition", [
-                selected.source,
-                selected.source_id,
-                form.data.stage,
-            ]),
-            {
-                preserveScroll: true,
-                forceFormData: true,
-                ...(traceId ? { headers: { "X-CDS-Trace-ID": traceId } } : {}),
-                onFinish: () => finishInitialPenroDispatch(dispatchSubmitInFlight, stage),
-                onSuccess: (page) => {
-                    continueWithFreshIncomingRow(continuationTarget, page);
-                    setSelected(null);
-                    form.reset();
-                    if (localPerfOptIn) finishArchiveTrace(traceId, traceStartedAt);
+        try {
+            form.post(
+                route("submission-tracking.transition", [
+                    record.source,
+                    record.source_id,
+                    form.data.stage,
+                ]),
+                {
+                    preserveScroll: true,
+                    forceFormData: true,
+                    ...(traceId ? { headers: { "X-CDS-Trace-ID": traceId } } : {}),
+                    onFinish: finishRoutingAction,
+                    onSuccess: (page) => {
+                        continueWithFreshIncomingRow(continuationTarget, page);
+                        setSelected(null);
+                        form.reset();
+                        if (localPerfOptIn) finishArchiveTrace(traceId, traceStartedAt);
+                    },
+                    onError: () => {
+                        if (localPerfOptIn) finishArchiveTrace(traceId, traceStartedAt);
+                    },
                 },
-                onError: () => {
-                    if (localPerfOptIn) finishArchiveTrace(traceId, traceStartedAt);
-                },
-            },
-        );
+            );
+        } catch (error) {
+            finishRoutingAction();
+            throw error;
+        }
     };
     const submitReview = (event) => {
         event.preventDefault();
@@ -1695,7 +1733,7 @@ export default function Index({
                 onClose={closeFullDetails}
                 attachments={!selectedReportUnavailable && pamoWorkspace && details ? <OfficialReportFileSection row={details} onPreview={setPreviewRow} /> : null}
                 closeOnEscape={!reviewHistoryRecord}
-                busyOverlay={movSubmissionBusy ? <PamoReportPendingAnimation intent="review" /> : null}
+                busyOverlay={details && movSubmissionBusyKeys.has(`${submissionKey(details) || 'report'}:mov-submit`) ? <PamoReportPendingAnimation intent="review" /> : null}
                 busyOverlayPresentation="success-sized"
                 footerActions={selectedReportUnavailable ? null : <>
                     {canCorrectSubmissionRouting && details && <Button type="button" size="compact" variant="warning" onClick={() => openCorrection(details)} className="rounded-xl px-3 py-2 text-xs">Correct routing</Button>}
@@ -1897,12 +1935,12 @@ export default function Index({
                 }
                 onClose={closeSelectedAction}
                 onSubmit={submit}
-                processing={form.processing}
-                busyOverlay={form.processing ? <PamoReportPendingAnimation intent={typeof File !== "undefined" && form.data.official_document instanceof File ? "update" : "send"} /> : null}
+                processing={selectedRoutingActionPending}
+                busyOverlay={selectedRoutingActionPending ? <PamoReportPendingAnimation intent={typeof File !== "undefined" && form.data.official_document instanceof File ? "update" : "send"} /> : null}
                 busyOverlayPresentation="success-sized"
                 errors={Object.fromEntries(Object.entries(form.errors).filter(([key]) => key !== "archive"))}
                 systemNotice={archiveCheckpointPending || archiveCheckpointNotice}
-                saveLabel={selectedActionLabel}
+                saveLabel={selectedActionPendingLabel}
                 saveVariant={genericAction?.correction ? "warning" : "primary"}
                 maxWidth="max-w-xl"
             >
@@ -1913,8 +1951,8 @@ export default function Index({
                             file={form.data.official_document}
                             onChange={(value) => form.setData("official_document", value instanceof File ? value : null)}
                         error={form.errors.official_document}
-                        disabled={form.processing}
-                        processing={form.processing}
+                        disabled={selectedRoutingActionPending}
+                        processing={selectedRoutingActionPending}
                         uploadProgress={form.progress}
                             officialDocumentMode={true}
                             canReplaceDocument={canReplaceSelectedDocument}
@@ -1924,8 +1962,8 @@ export default function Index({
                         file={form.data.attachment}
                         onChange={(value) => form.setData("attachment", value instanceof File ? value : null)}
                         error={form.errors.attachment}
-                        disabled={form.processing}
-                        processing={form.processing}
+                        disabled={selectedRoutingActionPending}
+                        processing={selectedRoutingActionPending}
                         uploadProgress={form.progress}
                     />
                 </CrudSection>

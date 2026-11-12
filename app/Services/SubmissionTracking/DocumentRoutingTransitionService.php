@@ -436,6 +436,12 @@ final class DocumentRoutingTransitionService
             ]);
 
             $this->syncCompatibilityMilestone($locked, $sourceKey, $action['key']);
+            // The first successful routing transition is the submission
+            // boundary. Keep reference allocation inside this transaction so
+            // failed or rolled-back routing attempts cannot leave a number.
+            app(\App\Services\Reports\ReportTrackingNumberService::class)->ensureFor(collect([
+                ['record' => $locked, 'key' => $sourceKey],
+            ]));
             return $event->load('recordedBy:id,name,section');
         });
         if (! $this->checkpointPolicy->isCheckpoint($actionKey, (string) $event->from_stage, (string) $event->to_stage)) {

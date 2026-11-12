@@ -1,7 +1,7 @@
 import { usePage } from '@inertiajs/react';
 import ReportSubmissionTracker from '@/Pages/Bms/ReportSubmissionTracker';
 
-export default function AwsReportSubmissionTracker({ records = [], pagination, protectedAreas = [], organizationalOffices = [], targetOffices = [], protectedAreasByOffice = {}, filters = {} }) {
+export default function AwsReportSubmissionTracker({ records = [], pagination, protectedAreas = [], organizationalOffices = [], targetOffices = [], protectedAreasByOffice = {}, filters = {}, archiveTabCounts = null }) {
     const { auth = {} } = usePage().props;
 
     return <ReportSubmissionTracker
@@ -10,6 +10,7 @@ export default function AwsReportSubmissionTracker({ records = [], pagination, p
         targetOffices={targetOffices}
         protectedAreasByOffice={protectedAreasByOffice}
         filters={filters}
+        archiveTabCounts={archiveTabCounts}
         moduleLabel="Automated Weather Station"
         historicalSource="aws"
         submissionRoutes={{

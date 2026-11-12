@@ -42,7 +42,7 @@ class ConservationReportSubmissionController extends Controller
         $workflowConfig = $this->workflow($workflow);
         $configuredGenericFlow = ($workflowConfig['configured_generic_flow'] ?? false) === true;
         $config = [...$workflowConfig, 'date_conducted_ranges_enabled' => $this->dateConductedRanges->supportsWorkflow($workflow), 'activity_required' => true, 'document_type_required' => $configuredGenericFlow, 'period_required' => $configuredGenericFlow, 'date_conducted_required' => $meetingWorkflow, 'date_accomplished_required' => ! $meetingWorkflow];
-        $submissions = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
+        $submissionQuery = $this->pambAccess->scopeQuery(ConservationReportSubmission::query(), $request->user())
             ->where('workflow_key', $workflow)
             ->with(['protectedArea:id,name,short_name', 'movReviewEvents.recordedBy'])
             ->when($request->filled('protected_area_id'), fn ($query) => $query->where('protected_area_id', $request->integer('protected_area_id')))
@@ -54,8 +54,9 @@ class ConservationReportSubmissionController extends Controller
                     ->orWhere('activity_name', 'like', "%{$search}%")
                     ->orWhere('document_type', 'like', "%{$search}%")
                     ->orWhereHas('protectedArea', fn ($query) => $query->where('name', 'like', "%{$search}%")));
-            })
-            ->latest('id')->paginate(10)->withQueryString();
+            });
+        $archiveTabs = app(FinalDocumentArchiveService::class)->applyModuleArchiveTab('conservation', $submissionQuery, $request->input('archive_tab'));
+        $submissions = $submissionQuery->latest('id')->paginate(10)->withQueryString();
         $submissions = app(FinalDocumentArchiveService::class)->presentModuleReportPage('conservation', $submissions,
             fn (ConservationReportSubmission $submission, bool $archived) => $this->submissionData($submission, $request->user(), $archived),
         );
@@ -72,7 +73,8 @@ class ConservationReportSubmissionController extends Controller
                 ? ProtectedArea::query()->whereKey($request->user()->protected_area_id)->orderBy('name')->get(['id', 'name', 'short_name'])
                 : app(OrganizationalAccessService::class)->scopeProtectedAreaQuery(ProtectedArea::query(), $request->user(), 'id')->orderBy('name')->get(['id', 'name', 'short_name']),
             ...$formScope,
-            'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type']),
+            'filters' => $request->only(['search', 'protected_area_id', 'reporting_period', 'document_type', 'archive_tab']),
+            'archiveTabCounts' => $archiveTabs['counts'],
             ...$pamoDraftProps,
         ]);
 

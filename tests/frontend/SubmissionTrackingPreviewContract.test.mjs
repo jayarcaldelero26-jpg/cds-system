@@ -95,7 +95,6 @@ async function component(name, { stubAuthenticatedLayout = false, hooks = React 
                 if (id === '\0inertia-ssr-shim') {
                     return `
                         import React from "react";
-                        export { http } from "@inertiajs/core";
                         export const Head = () => null;
                         export const Link = ({ href, children, ...props }) => React.createElement("a", { ...props, href }, children);
                         export const router = { get(...args) { globalThis.__trackingRouterCalls?.push(args); } };
@@ -121,6 +120,7 @@ async function component(name, { stubAuthenticatedLayout = false, hooks = React 
 const Preview = await component('DocumentPreviewDialog');
 const CrudDetailsModal = await component('Crud/CrudDetailsModal');
 const ipafPageSource = readFileSync(resolve('resources/js/Pages/Ipaf/Index.jsx'), 'utf8');
+const engpPageSource = readFileSync(resolve('resources/js/Pages/Engp/Index.jsx'), 'utf8');
 const PdfViewer = await component('PdfDocumentViewer');
 const PambProgress = await component('PambMovProgress');
 const PambActions = await component('PambMovActions');
@@ -157,6 +157,12 @@ test('verified archived module details omit the attachment empty state while uns
     assert.match(unsubmitted, /No MOV \/ attachment has been submitted\./);
 });
 
+test('ENGP module details omit the full attachment section for verified final archives', () => {
+    assert.match(engpPageSource, /attachments=\{selected && !selected\.has_verified_final_archive && selected\.mov \?/);
+    assert.match(engpPageSource, /has_verified_final_archive/);
+    assert.match(engpPageSource, /<Details record=\{selected\} \/>/);
+});
+
 test('IPAF detail modal receives the selected report archive state', () => {
     assert.match(ipafPageSource, /<CrudDetailsModal[\s\S]*?reportData=\{selected\}/);
 });
@@ -174,6 +180,8 @@ const UserManagement = await component('Pages/Admin/Users/Index');
 const appStyles = readFileSync(resolve('resources/css/app.css'), 'utf8');
 const previewDialogSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/DocumentPreviewDialog.jsx'), 'utf8');
 const sharedReaderSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/SubmissionTrackingReaderDialog.jsx'), 'utf8');
+const sharedModalSource = readFileSync(resolve('resources/js/Components/Modal.jsx'), 'utf8');
+const modalPortalSource = readFileSync(resolve('resources/js/Components/ModalPortal.jsx'), 'utf8');
 const pdfViewerSource = readFileSync(resolve('resources/js/Components/SubmissionTracking/PdfDocumentViewer.jsx'), 'utf8');
 const submissionTrackingSource = readFileSync(resolve('resources/js/Pages/SubmissionTracking/Index.jsx'), 'utf8');
 const render = row => renderToStaticMarkup(React.createElement(Preview, { open: true, row }));
@@ -303,7 +311,9 @@ test('standard current-document and PAMO official-file actions pass their select
 
 test('a notification link opens Full Details for its selected report only', () => {
     const previousRoute = globalThis.route;
+    const previousWindow = globalThis.window;
     globalThis.route = name => name;
+    globalThis.window = { location: { search: '' } };
     const report = {
         source: 'revenue', source_id: 8, module: 'Revenue Collection',
         reporting_period: 'October 2026', target_office: 'CENRO Baganga',
@@ -333,17 +343,24 @@ test('a notification link opens Full Details for its selected report only', () =
         detailsJourneyHooks.reset();
         assert.equal(renderDetails({ selected_record: report }).props.open, false);
         detailsJourneyHooks.reset();
-        assert.equal(renderDetails({ selected_record: null, open_details: true }).props.open, false);
+        const unavailable = renderDetails({ selected_record: null, selected_source: 'revenue', selected_id: 8, open_details: true });
+        assert.equal(unavailable.props.open, true);
+        assert.equal(unavailable.props.footerActions, null);
+        assert.match(renderToStaticMarkup(unavailable.props.children), /This report is no longer available in your current workspace/);
     } finally {
         if (previousRoute === undefined) delete globalThis.route;
         else globalThis.route = previousRoute;
+        if (previousWindow === undefined) delete globalThis.window;
+        else globalThis.window = previousWindow;
         detailsJourneyHooks.reset();
     }
 });
 
 test('selected report View Full Details opens the complete source-bound details while Preview remains separate', () => {
     const previousRoute = globalThis.route;
+    const previousWindow = globalThis.window;
     globalThis.route = name => name;
+    globalThis.window = { location: { search: '' } };
 
     const standardWithoutPreview = {
         source: 'bms', source_id: 8, tracking_number: 'BMS-8',
@@ -474,6 +491,8 @@ test('selected report View Full Details opens the complete source-bound details 
     } finally {
         if (previousRoute === undefined) delete globalThis.route;
         else globalThis.route = previousRoute;
+        if (previousWindow === undefined) delete globalThis.window;
+        else globalThis.window = previousWindow;
         detailsJourneyHooks.reset();
     }
 });
@@ -677,12 +696,13 @@ function capturedRouteRow(officeEnabled, tsdEnabled, version = 4) {
 }
 
 test('supported protected previews wait for a validated response before embedding a blob URL', () => {
-    // This SSR fixture has no DOM. The dialog intentionally renders through a portal,
-    // so verify its source contract here and its response handling in the unit suite.
+    // The SSR fixture provides a portal shim. Before the protected request resolves,
+    // the reader must show its loading state and must not embed an unvalidated URL.
     assert.equal(typeof document, 'undefined');
     for (const mime_type of ['application/pdf', 'image/jpeg', 'image/png']) {
         const markup = render({ current_document: { name: 'synthetic', mime_type, can_preview: true, preview_url: '/attachments/aws-report/1/report?preview=1' }, mov_url: '/overview' });
-        assert.equal(markup, '');
+        assert.match(markup, /Loading document preview/);
+        assert.doesNotMatch(markup, /blob:|<iframe|src="\/attachments\/aws-report/);
         assert.equal(inlinePreviewType(mime_type), mime_type);
     }
     assert.match(previewDialogSource, /if \(!open \|\| !url \|\| !inline \|\| !canPreview\)/);
@@ -693,10 +713,10 @@ test('supported protected previews wait for a validated response before embeddin
     assert.match(previewDialogSource, /<PdfDocumentViewer[\s\S]*?blob=\{current\.blob\}/);
     assert.match(previewDialogSource, /<img src=\{current\.url\}/);
     assert.match(previewDialogSource, /downloadUrl=\{canDownload \? downloadUrl : null\}/);
-    assert.match(sharedReaderSource, /if \(!present \|\| typeof document === 'undefined'\) return null;/);
-    assert.match(sharedReaderSource, /return createPortal\(/);
-    assert.match(sharedReaderSource, /useModalMotion\(open/);
-    assert.match(sharedReaderSource, /data-cds-modal-layer/);
+    assert.match(modalPortalSource, /if \(typeof document === 'undefined' \|\| !document\.body\) return null;/);
+    assert.match(modalPortalSource, /return createPortal\(/);
+    assert.match(sharedModalSource, /useModalMotion\(open/);
+    assert.match(sharedModalSource, /data-cds-modal-layer/);
     assert.doesNotMatch(previewDialogSource, /<iframe/);
 });
 
@@ -730,7 +750,8 @@ test('unsupported and unverified MIME stay download-only, even with a PDF filena
     assert.equal(typeof document, 'undefined');
     for (const mime_type of [null, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']) {
         const markup = render({ current_document: { name: 'looks-like.pdf', mime_type, can_preview: true, preview_url: '/attachments/source/1/mov?preview=1', download_url: '/attachments/source/1/mov?download=1' } });
-        assert.equal(markup, '');
+        assert.match(markup, /Download current copy/);
+        assert.doesNotMatch(markup, /blob:|<iframe|<img/);
         assert.equal(inlinePreviewType(mime_type), null);
     }
     assert.match(previewDialogSource, /This document type cannot be previewed in the browser\./);
@@ -744,7 +765,8 @@ test('unsupported and unverified MIME stay download-only, even with a PDF filena
 test('missing current descriptor cannot revive other document URLs', () => {
     assert.equal(typeof document, 'undefined');
     const markup = render({ current_document: { can_preview: true }, mov_url: '/overview', effective_document: { url: '/archive' }, mov_attachment: { url: '/history', mime_type: 'application/pdf' } });
-    assert.equal(markup, '');
+    assert.match(markup, /No MOV\/report attachment is available for this submission/);
+    assert.doesNotMatch(markup, /\/overview|\/archive|\/history|blob:|<iframe/);
     assert.match(previewDialogSource, /: !url \? <p[^>]*>No MOV\/report attachment is available for this submission\./);
     assert.match(previewDialogSource, /const attachment = attachmentOverride \|\| row\?\.current_document;/);
     assert.doesNotMatch(previewDialogSource, /row\?\.(?:mov_url|effective_document|mov_attachment)/);
@@ -1432,12 +1454,13 @@ test('notification rows render readable light and dark text, focus styling, and 
         onClear: () => calls.push('clear'),
         state: {
             unread_count: 1,
-            notifications: [{ id: 8, title: 'Correction received', message: 'Returned by CENRO Records', created_at: '2026-10-03T00:00:00Z', severity: 'danger', url: '/submission-tracking' }],
+            notifications: [{ id: 8, title: 'Correction received', message: 'Returned by CENRO Records', created_at: '2026-10-03T00:00:00Z', severity: 'danger', current_state: 'No longer in Incoming', url: '/submission-tracking' }],
         },
     };
     const markup = renderToStaticMarkup(React.createElement(NotificationPanel, props));
     assert.match(markup, /text-gray-900 dark:text-white[^>]*>Correction received/);
     assert.match(markup, /text-gray-700 dark:text-gray-200[^>]*>Returned by CENRO Records/);
+    assert.match(markup, /No longer in Incoming/);
     assert.match(markup, /text-gray-500 dark:text-gray-400/);
     assert.match(markup, /focus-visible:ring-2/);
     assert.match(markup, /Clear Notifications/);

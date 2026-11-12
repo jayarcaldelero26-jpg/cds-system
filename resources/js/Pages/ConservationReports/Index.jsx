@@ -1,7 +1,7 @@
 import { usePage } from '@inertiajs/react';
 import StandardAReportSubmissionTracker from '@/Components/StandardAReportSubmissionTracker';
 
-export default function Index({ workflow, submissions, protectedAreas, protectedAreasByOffice = {}, targetOffices = [], filters = {}, pamoDrafts = [], pamoWorkspace }) {
+export default function Index({ workflow, submissions, protectedAreas, protectedAreasByOffice = {}, targetOffices = [], filters = {}, pamoDrafts = [], pamoWorkspace, archiveTabCounts = null }) {
     const { auth = {} } = usePage().props;
 
     return <>
@@ -17,6 +17,7 @@ export default function Index({ workflow, submissions, protectedAreas, protected
             workflowConfig={workflow}
             pamoDrafts={pamoDrafts}
             pamoWorkspace={pamoWorkspace}
+            archiveTabCounts={archiveTabCounts}
             permissions={{
                 create: pamoWorkspace === undefined && Boolean(auth.canCreateTechnicalReports),
                 update: pamoWorkspace === true || (pamoWorkspace === undefined && Boolean(auth.canUpdateTechnicalReports)),

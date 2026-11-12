@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /** Assigns stable, human-readable references to actual report records only. */
 final class ReportTrackingNumberService
@@ -155,26 +156,62 @@ final class ReportTrackingNumberService
 
     public function backfill(bool $dryRun = false): array
     {
-        $counts = ['scanned' => 0, 'created' => 0, 'skipped' => 0];
+        $counts = ['scanned' => 0, 'eligible' => 0, 'created' => 0, 'skipped' => 0];
         foreach ($this->sourceModels() as $sourceType => $modelClass) {
             $query = $modelClass::query();
             if (in_array(SoftDeletes::class, class_uses_recursive($modelClass), true)) $query->withTrashed();
             $query->chunkById(250, function (Collection $records) use (&$counts, $sourceType, $dryRun): void {
                 $counts['scanned'] += $records->count();
-                $items = $records->map(fn (Model $record): array => ['record' => $record, 'key' => $sourceType]);
+                $submittedIds = $this->submittedIds($sourceType, $records);
+                $eligibleRecords = $records->filter(fn (Model $record): bool => ! $this->isRetired($record)
+                    && $submittedIds->contains((int) $record->getKey()))->values();
+                $counts['eligible'] += $eligibleRecords->count();
+                if ($eligibleRecords->isEmpty()) return;
+
+                $existingIds = ReportTrackingReference::query()
+                    ->where('source_type', $sourceType)
+                    ->whereIn('source_id', $eligibleRecords->modelKeys())
+                    ->pluck('source_id')->map(fn (mixed $id): int => (int) $id)->all();
+                $missingRecords = $eligibleRecords->reject(fn (Model $record): bool => in_array((int) $record->getKey(), $existingIds, true))->values();
                 if ($dryRun) {
-                    $counts['created'] += $items->filter(fn (array $item): bool => ! ReportTrackingReference::query()->where('source_type', $sourceType)->where('source_id', $item['record']->getKey())->exists())->count();
+                    $counts['created'] += $missingRecords->count();
                     return;
                 }
-                $before = ReportTrackingReference::query()->where('source_type', $sourceType)->whereIn('source_id', $records->modelKeys())->count();
+                if ($missingRecords->isEmpty()) return;
+                $items = $missingRecords->map(fn (Model $record): array => ['record' => $record, 'key' => $sourceType]);
+                $before = ReportTrackingReference::query()->where('source_type', $sourceType)->whereIn('source_id', $missingRecords->modelKeys())->count();
                 $this->ensureFor($items);
-                $after = ReportTrackingReference::query()->where('source_type', $sourceType)->whereIn('source_id', $records->modelKeys())->count();
+                $after = ReportTrackingReference::query()->where('source_type', $sourceType)->whereIn('source_id', $missingRecords->modelKeys())->count();
                 $counts['created'] += max(0, $after - $before);
             });
         }
 
         $counts['skipped'] = max(0, $counts['scanned'] - $counts['created']);
         return $counts;
+    }
+
+    /** @param Collection<int,Model> $records @return Collection<int,int> */
+    private function submittedIds(string $sourceType, Collection $records): Collection
+    {
+        $ids = $records->modelKeys();
+        if ($ids === []) return collect();
+
+        $submitted = collect();
+        if (Schema::hasTable('document_routing_events')) {
+            $submitted = $submitted->merge(DB::table('document_routing_events')
+                ->where('source_type', $sourceType)->whereIn('source_id', $ids)->distinct()->pluck('source_id'));
+        }
+        if ($sourceType === 'conservation' && Schema::hasTable('pamb_routing_events')) {
+            $submitted = $submitted->merge(DB::table('pamb_routing_events')
+                ->whereIn('conservation_report_submission_id', $ids)->distinct()->pluck('conservation_report_submission_id'));
+        }
+
+        $legacyMilestoneIds = $records->filter(fn (Model $record): bool => collect([
+            'date_report_released_cenro', 'date_received_penro', 'date_endorsed_regional',
+        ])->contains(fn (string $field): bool => filled($record->getAttribute($field)))
+        )->modelKeys();
+
+        return $submitted->merge($legacyMilestoneIds)->map(fn (mixed $id): int => (int) $id)->unique()->values();
     }
 
     public function domain(string $sourceType): string

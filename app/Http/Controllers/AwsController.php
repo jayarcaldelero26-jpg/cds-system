@@ -182,6 +182,7 @@ class AwsController extends Controller
         $summaryRows = $this->monthlySummary->summarizePeriod($request->user(), $summaryMode, $summaryPeriod, $summaryProtectedAreaId);
 
 
+        $archiveTabs = app(FinalDocumentArchiveService::class)->applyModuleArchiveTab('aws', $reportsQuery, $request->input('archive_tab'));
         $reports = $reportsQuery->paginate(15, ['*'], 'reports_page')->withQueryString();
         $reports = app(FinalDocumentArchiveService::class)->presentModuleReportPage('aws', $reports, $this->reportData(...));
 
@@ -194,7 +195,8 @@ class AwsController extends Controller
             ...app(SubmissionFormScopeService::class)->options($request->user()),
             'dataOnly' => $request->boolean('aws_data'),
             'allProtectedAreasMode' => $summaryProtectedAreaId === null,
-            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'reporting_period', 'quarter', 'report_document_type', 'report_year', 'report_quarter', 'report_office', 'report_status', 'graph_start_date', 'graph_end_date', 'graph_range']),
+            'filters'        => $request->only(['protected_area_id', 'report_search', 'report_semester', 'reporting_period', 'quarter', 'report_document_type', 'report_year', 'report_quarter', 'report_office', 'report_status', 'graph_start_date', 'graph_end_date', 'graph_range', 'archive_tab']),
+            'archiveTabCounts' => $archiveTabs['counts'],
             'monthlySummary' => $summaryRows->values()->all(),
             'monthlyFilters' => [
                 'mode' => $summaryMode,

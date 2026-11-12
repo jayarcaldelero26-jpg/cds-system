@@ -51,8 +51,10 @@ final class PamoNativeReportsController extends Controller
                 }
             });
         }
+        $archives = app(FinalDocumentArchiveService::class);
+        $archiveTabs = $archives->applyModuleArchiveTab($source['source'], $query, $request->input('archive_tab'));
         $reports = $query->latest('id')->paginate(15)->withQueryString();
-        $reports = app(FinalDocumentArchiveService::class)->presentModuleReportPage($source['source'], $reports,
+        $reports = $archives->presentModuleReportPage($source['source'], $reports,
             fn (Model $record, bool $archived): array => $this->reportRow($record, $workflow, $source, $actor, $archived),
         );
 
@@ -96,7 +98,8 @@ final class PamoNativeReportsController extends Controller
                 'protected_area' => $assignedArea->name,
                 'target_office' => $facts['target_office'],
             ],
-            'filters' => $request->only(['search']),
+            'filters' => $request->only(['search', 'archive_tab']),
+            'archiveTabCounts' => $archiveTabs['counts'],
             'pamoWorkspace' => true,
         ]);
     }

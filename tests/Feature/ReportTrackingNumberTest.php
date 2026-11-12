@@ -16,10 +16,7 @@ use App\Models\User;
 use App\Services\Reports\ReportTrackingNumberService;
 use App\Services\Reports\ReportTrackingReferenceLifecycle;
 use App\Services\SubmissionTracking\SubmissionTrackingService;
-use Illuminate\Support\Collection;
 use Spatie\Permission\Models\Permission;
-
-uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
 beforeEach(function (): void {
     $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
@@ -60,13 +57,25 @@ test('tracking identity is idempotent and sequences reset by domain and reportin
         ->and(ReportTrackingReference::count())->toBe(3);
 });
 
-test('historical backfill is idempotent and supports dry run', function (): void {
-    ConservationReportSubmission::create(['workflow_key' => 'homestay', 'activity_name' => 'Legacy', 'date_accomplished' => '2026-01-01']);
+test('historical backfill previews only submitted records and leaves drafts unnumbered', function (): void {
+    $draft = ConservationReportSubmission::create(['workflow_key' => 'homestay', 'activity_name' => 'Unsubmitted draft', 'date_accomplished' => '2026-01-01']);
+    $submitted = ConservationReportSubmission::create([
+        'workflow_key' => 'homestay', 'activity_name' => 'Submitted legacy record', 'date_accomplished' => '2026-01-01',
+        'date_received_penro' => '2026-01-05',
+    ]);
     $service = app(ReportTrackingNumberService::class);
 
-    expect($service->backfill(true)['created'])->toBe(1)->and(ReportTrackingReference::count())->toBe(0);
-    expect($service->backfill(false)['created'])->toBe(1)->and($service->backfill(false)['created'])->toBe(0);
-    expect(ReportTrackingReference::count())->toBe(1);
+    $preview = $service->backfill(true);
+    expect($preview['scanned'])->toBe(2)
+        ->and($preview['eligible'])->toBe(1)
+        ->and($preview['created'])->toBe(1)
+        ->and(ReportTrackingReference::count())->toBe(0);
+
+    $firstRun = $service->backfill(false);
+    expect($firstRun['created'])->toBe(1)
+        ->and($service->backfill(false)['created'])->toBe(0)
+        ->and(ReportTrackingReference::query()->where('source_type', 'conservation')->where('source_id', $submitted->id)->exists())->toBeTrue()
+        ->and(ReportTrackingReference::query()->where('source_type', 'conservation')->where('source_id', $draft->id)->exists())->toBeFalse();
 });
 
 test('existing historical EDATS references are preserved unchanged', function (): void {
@@ -170,11 +179,62 @@ test('Submission Tracking exposes the stable reference without changing routing 
     ]);
 
     $this->actingAs($user);
-    $row = app(SubmissionTrackingService::class)->records(['program' => 'conservation'], null, true)->firstWhere('source_id', $report->id);
+    app(ReportTrackingNumberService::class)->ensureFor(collect([trackingCandidate($report, 'conservation')]));
+    $row = app(SubmissionTrackingService::class)->records(['program' => 'conservation'])->firstWhere('source_id', $report->id);
 
     expect($row['tracking_number'])->toBe('2026-CDS-000001')
         ->and($row['submission_status'])->toBe('Pending Submission by CENRO')
         ->and($report->fresh()->date_received_penro)->toBeNull();
+});
+
+test('first successful generic conservation routing assigns its reference atomically while reads and rollback stay unnumbered', function (): void {
+    $this->seed(\Database\Seeders\ModuleDefinitionSeeder::class);
+    $focal = User::factory()->create([
+        'section' => \App\Services\Authorization\OrganizationalAccessService::CENRO_FOCAL,
+        'unit_assignment' => 'conservation',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    foreach (['reports.view', 'technical-reports.update'] as $ability) {
+        $focal->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+    $draft = ConservationReportSubmission::create([
+        'workflow_key' => 'homestay', 'target_office' => 'CENRO Baganga', 'activity_name' => 'Tracking reference fixture',
+        'document_type' => 'Final Report', 'date_accomplished' => '2026-08-01', 'created_by' => $focal->id, 'updated_by' => $focal->id,
+    ]);
+    $tracking = app(ReportTrackingNumberService::class);
+
+    $this->actingAs($focal);
+    app(SubmissionTrackingService::class)->records(['program' => 'conservation']);
+    expect(ReportTrackingReference::query()->where('source_type', 'conservation')->where('source_id', $draft->id)->exists())->toBeFalse();
+
+    try {
+        \Illuminate\Support\Facades\DB::transaction(function () use ($draft, $focal): void {
+            app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+                ->transition($draft, 'conservation', 'forward_to_cenro_chief', $focal->id);
+            throw new RuntimeException('Roll back the routed submission fixture.');
+        });
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toBe('Roll back the routed submission fixture.');
+    }
+
+    expect(ReportTrackingReference::query()->where('source_type', 'conservation')->where('source_id', $draft->id)->exists())->toBeFalse()
+        ->and(\App\Models\DocumentRoutingEvent::query()->where('source_type', 'conservation')->where('source_id', $draft->id)->exists())->toBeFalse();
+
+    app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->transition($draft->fresh(), 'conservation', 'forward_to_cenro_chief', $focal->id);
+    $first = ReportTrackingReference::query()->where('source_type', 'conservation')->where('source_id', $draft->id)->firstOrFail();
+    $chief = User::factory()->create([
+        'section' => \App\Services\Authorization\OrganizationalAccessService::CENRO_CHIEF,
+        'unit_assignment' => 'conservation',
+        'office_designated' => 'CENRO Baganga',
+    ]);
+    foreach (['reports.view', 'technical-reports.update'] as $ability) {
+        $chief->givePermissionTo(Permission::findOrCreate($ability, 'web'));
+    }
+    app(\App\Services\SubmissionTracking\DocumentRoutingTransitionService::class)
+        ->transition($draft->fresh(), 'conservation', 'receive_at_cenro_chief', $chief->id);
+    expect($tracking->existingFor(collect([trackingCandidate($draft->fresh(), 'conservation')]))['conservation:'.$draft->id])->toBe($first->tracking_number)
+        ->and(ReportTrackingReference::query()->where('source_type', 'conservation')->where('source_id', $draft->id)->count())->toBe(1);
 });
 
 test('Submission Tracking page presentation does not allocate missing references', function (): void {

@@ -215,7 +215,8 @@ test('HTTP custody correction and resubmission cycles remain source-scoped acros
 
             $selectedResponse = test()->actingAs($focal)->get(route('submission-tracking.index', [
                 'source' => $source, 'source_id' => $recordId, 'view' => 'incoming',
-            ]))->assertOk();
+            ]));
+            expect($selectedResponse->status(), "Incoming selection status for {$source}")->toBe(200);
             $selected = data_get($selectedResponse->inertiaProps(), 'trackingContext.selected_record');
             $incoming = collect(data_get($selectedResponse->inertiaProps(), 'workspaceQueues.incoming', []));
             expect(data_get($selected, 'source'))->toBe($source)
@@ -230,7 +231,7 @@ test('HTTP custody correction and resubmission cycles remain source-scoped acros
                 && data_get($notification->toArray($focal), 'title') === 'Correction Required');
 
             $oldActorResponse = test()->actingAs($chief)->get(route('submission-tracking.index', [
-                'source' => $source, 'source_id' => $recordId, 'view' => 'incoming',
+                'source' => $source, 'source_id' => $recordId, 'view' => 'history',
             ]))->assertOk();
             expect(data_get($oldActorResponse->inertiaProps(), 'trackingContext.selected_record.routing.actions'))->toBeEmpty();
 

@@ -46,7 +46,7 @@ test('current routing status names the accountable document holder and keeps the
             responsible_user_category: 'PENRO_RECORDS',
         },
     };
-    assert.equal(presentCurrentRoutingStatus(row, row.routing.current_status), 'At PENRO Records Unit');
+    assert.equal(presentCurrentRoutingStatus(row, row.routing.current_status), 'PENRO Records Unit');
     assert.equal(custodyContext(row).office, 'PENRO Davao Oriental');
     assert.equal(presentCurrentRoutingStatus(row, 'Awaiting Receipt by Office of the PENRO'), 'Awaiting Receipt by Office of the PENRO');
 
@@ -58,7 +58,7 @@ test('current routing status names the accountable document holder and keeps the
             responsible_user_category: 'PAMO',
         },
     };
-    assert.equal(presentCurrentRoutingStatus(pamo, pamo.routing.current_status), 'At PAMO-MHRWS');
+    assert.equal(presentCurrentRoutingStatus(pamo, pamo.routing.current_status), 'PAMO-MHRWS');
 });
 
 test('PAMO route context keeps captured origin, protected area, and receiving/current office separate', () => {

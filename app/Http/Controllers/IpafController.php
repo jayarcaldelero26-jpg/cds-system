@@ -48,12 +48,14 @@ class IpafController extends Controller
             ->when($request->filled('revenue_month'), fn ($q) => $q->where('reporting_month', $request->integer('revenue_month')))
             ->when($request->filled('revenue_year'), fn ($q) => $q->where('reporting_year', $request->integer('revenue_year')));
         $totalCollected = IpafRevenueCollection::normalizeMoney((string) (clone $revenueQuery)->sum('total_collected'));
+        $archives = app(FinalDocumentArchiveService::class);
+        $revenueTabs = $archives->applyModuleArchiveTab('revenue', $revenueQuery, $request->input('revenue_archive_tab'));
         $revenues = (clone $revenueQuery)->latest('id')->paginate(10, ['*'], 'revenue_page')->withQueryString();
         $management = $this->organization->scopeProtectedAreaQuery(IpafManagementReport::query(), $request->user())->with('protectedArea:id,name,short_name')
             ->when($request->filled('management_search'), fn ($q) => $this->search($q, (string) $request->input('management_search')))
-            ->when($request->filled('management_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->integer('management_protected_area_id')))
-            ->latest('id')->paginate(10, ['*'], 'management_page')->withQueryString();
-        $archives = app(FinalDocumentArchiveService::class);
+            ->when($request->filled('management_protected_area_id'), fn ($q) => $q->where('protected_area_id', $request->integer('management_protected_area_id')));
+        $managementTabs = $archives->applyModuleArchiveTab('ipaf-management', $management, $request->input('management_archive_tab'));
+        $management = $management->latest('id')->paginate(10, ['*'], 'management_page')->withQueryString();
         $revenues = $archives->presentModuleReportPage('revenue', $revenues, $this->data(...));
         $management = $archives->presentModuleReportPage('ipaf-management', $management, $this->data(...));
         $quarterly = $this->quarterlyRevenueSummary($request, $protectedAreas);
@@ -62,7 +64,8 @@ class IpafController extends Controller
             'managementReports' => $management,
             'protectedAreas' => $protectedAreas,
             ...app(SubmissionFormScopeService::class)->options($request->user()),
-            'filters' => $request->only(['ipaf_tab', 'revenue_search', 'revenue_protected_area_id', 'revenue_month', 'revenue_year', 'management_search', 'management_protected_area_id', 'summary_year', 'summary_quarter', 'summary_protected_area_id', 'accounting_year', 'accounting_protected_area_id', 'analysis_year', 'analysis_protected_area_id']),
+            'filters' => $request->only(['ipaf_tab', 'revenue_search', 'revenue_protected_area_id', 'revenue_month', 'revenue_year', 'revenue_archive_tab', 'management_search', 'management_protected_area_id', 'management_archive_tab', 'summary_year', 'summary_quarter', 'summary_protected_area_id', 'accounting_year', 'accounting_protected_area_id', 'analysis_year', 'analysis_protected_area_id']),
+            'archiveTabCounts' => ['revenue' => $revenueTabs['counts'], 'management' => $managementTabs['counts']],
             'revenueTotals' => ['total_collected' => $totalCollected, ...IpafRevenueCollection::split($totalCollected)],
             ...$quarterly,
         ]);

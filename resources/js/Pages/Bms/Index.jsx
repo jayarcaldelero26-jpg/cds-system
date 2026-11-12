@@ -107,7 +107,7 @@ const calculateTrendStatus = (points) => {
   return { slope, status };
 };
 
-export default function Index({ auth, bmsRecords, protectedAreas, targetOffices = [], protectedAreasByOffice = {}, filters, spatialLayers = [], annexHeaderMetadata, reportSubmissions, reportFilters, bmsThreats = [], initialTab }) {
+export default function Index({ auth, bmsRecords, protectedAreas, targetOffices = [], protectedAreasByOffice = {}, filters, spatialLayers = [], annexHeaderMetadata, reportSubmissions, reportFilters, archiveTabCounts = null, bmsThreats = [], initialTab }) {
   const canCreateBms = Boolean(auth?.canCreateBms);
   const canUpdateBms = Boolean(auth?.canUpdateBms);
   const canDeleteBms = Boolean(auth?.canDeleteBms);
@@ -789,7 +789,7 @@ export default function Index({ auth, bmsRecords, protectedAreas, targetOffices 
                     </div>                    )}
 
                     {activeTab === 'report-tracker' &&
-          <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} filters={reportFilters} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} workflowConfig={{ document_type_required: false, period_required: true, date_accomplished_required: true }} dateConductedRangesEnabled={true} />
+          <ReportSubmissionTracker submissions={reportSubmissions} protectedAreas={protectedAreas} targetOffices={targetOffices} protectedAreasByOffice={protectedAreasByOffice} filters={reportFilters} archiveTabCounts={archiveTabCounts} submissionRoutes={{ store: route('bms.report-submissions.store'), update: (id) => route('bms.report-submissions.update', id), destroy: (id) => route('bms.report-submissions.destroy', id), mov: (report) => report.mov_url, index: route('bms.index') }} workflowConfig={{ document_type_required: false, period_required: true, date_accomplished_required: true }} dateConductedRangesEnabled={true} />
           }
 
                     {/* TAB 1: SPECIES RECORDS VIEW */}

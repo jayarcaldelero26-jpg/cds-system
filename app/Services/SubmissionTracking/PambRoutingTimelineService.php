@@ -272,6 +272,10 @@ final class PambRoutingTimelineService
                 ]);
             }
 
+            app(\App\Services\Reports\ReportTrackingNumberService::class)->ensureFor(collect([
+                ['record' => $persistReport, 'key' => 'conservation'],
+            ]));
+
             return $created;
         });
 

@@ -92,15 +92,15 @@ class BmsController extends Controller
             return $data;
         })->values();
 
-        $reportSubmissions = $this->organization->scopeProtectedAreaQuery(BmsReportSubmission::with('protectedArea:id,name,short_name'), $request->user())
+        $reportSubmissionQuery = $this->organization->scopeProtectedAreaQuery(BmsReportSubmission::with('protectedArea:id,name,short_name'), $request->user())
             ->when($request->filled('report_protected_area_id'), function ($q) use ($request): void {
                 $this->organization->assertCanAccessProtectedArea($request->user(), $request->report_protected_area_id);
                 $q->where('protected_area_id', $request->report_protected_area_id);
             })
             ->when($request->filled('report_semester'), fn ($q) => $q->where('semester', $request->report_semester))
-            ->latest('id')
-            ->paginate(10, ['*'], 'report_page')
-            ->withQueryString();
+            ;
+        $archiveTabs = app(FinalDocumentArchiveService::class)->applyModuleArchiveTab('bms', $reportSubmissionQuery, $request->input('archive_tab'));
+        $reportSubmissions = $reportSubmissionQuery->latest('id')->paginate(10, ['*'], 'report_page')->withQueryString();
         $reportSubmissions = app(FinalDocumentArchiveService::class)->presentModuleReportPage('bms', $reportSubmissions,
             function (BmsReportSubmission $submission, bool $archived) use ($attachmentService): array {
                 $data = collect($submission->toArray())->except(['mov_file_path', 'mov_file_name'])->all();
@@ -124,7 +124,8 @@ class BmsController extends Controller
             'spatialLayers' => $spatialLayers,
             'annexHeaderMetadata' => $trackerOnly ? null : $this->annexHeaderFor($request),
             'reportSubmissions' => $reportSubmissions,
-            'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker']),
+            'reportFilters' => $request->only(['report_protected_area_id', 'report_semester', 'tracker', 'archive_tab']),
+            'archiveTabCounts' => $archiveTabs['counts'],
             'bmsThreats' => $trackerOnly ? collect() : $this->organization->scopeProtectedAreaQuery(BmsThreat::with('protectedArea:id,name,short_name'), $request->user())->latest('date')->latest('id')->get(),
             'initialTab' => $request->input('tab') === 'semestral' ? 'semestral' : null,
         ]);

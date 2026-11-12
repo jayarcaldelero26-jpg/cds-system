@@ -16,8 +16,6 @@ use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
 use Spatie\Permission\Models\Permission;
 
-uses(RefreshDatabase::class);
-
 function detailsProjectionActor(string $category, string $office): User
 {
     $user = User::factory()->create([

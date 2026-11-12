@@ -200,6 +200,7 @@ test('every ENGP workflow keeps direct origin, correction receipt, MOV replaceme
         ->and($report->activity_name)->toBe($workflow['activity'])
         ->and($report->document_type)->toBe($workflow['document'])
         ->and($report->deadline_submission?->toDateString())->toBe($period['deadline'])
+        ->and(ReportTrackingReference::query()->where('source_type', 'engp')->where('source_id', $report->getKey())->exists())->toBeFalse()
         ->and(Storage::disk('local')->exists($oldPath))->toBeTrue();
     $transition = function (User $actor, string $action) use ($report): void {
         test()->actingAs($actor)
@@ -210,6 +211,8 @@ test('every ENGP workflow keeps direct origin, correction receipt, MOV replaceme
     };
 
     $transition($focal, 'forward_to_cenro_chief');
+    $trackingNumberAfterFirstSubmission = ReportTrackingReference::query()
+        ->where('source_type', 'engp')->where('source_id', $report->getKey())->value('tracking_number');
     $transition($chief, 'receive_at_cenro_chief');
     $transition($chief, 'return_to_cenro_focal');
 
@@ -267,6 +270,8 @@ test('every ENGP workflow keeps direct origin, correction receipt, MOV replaceme
         'forwarded', 'received', 'returned_for_correction', 'correction_received', 'forwarded',
     ])
         ->and($events->last()->to_stage)->toBe(DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)
+        ->and($trackingNumberAfterFirstSubmission)->toBeString()->not->toBe('')
+        ->and(ReportTrackingReference::query()->where('source_type', 'engp')->where('source_id', $report->getKey())->value('tracking_number'))->toBe($trackingNumberAfterFirstSubmission)
         ->and(EngpReportSubmission::query()->whereKey($report->id)->count())->toBe(1);
 
     $nextQueueResponse = $this->actingAs($chief)->get(route('submission-tracking.index', [

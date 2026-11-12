@@ -12,6 +12,7 @@ use App\Services\SubmissionTracking\DocumentRoutingProfileRegistry;
 use App\Services\SubmissionTracking\DocumentRoutingTransitionService;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -70,6 +71,36 @@ test('reused canonical facts stay record and event scoped while action authoriza
     expect($afterStaleFacts['stage'])->toBe(DocumentRoutingProfileRegistry::TRANSIT_CENRO_CHIEF)
         ->and(collect($afterStaleFacts['allowed_actions'])->pluck('key')->all())->toBe(['receive_at_cenro_chief'])
         ->and(DocumentRoutingEvent::query()->count())->toBe(1);
+});
+
+test('the first successful generic submission assigns its reference in the same transaction', function (): void {
+    $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = routingReport('First tracked BMS submission PA');
+    $service = app(DocumentRoutingTransitionService::class);
+
+    expect(\App\Models\ReportTrackingReference::query()->where('source_type', 'bms')->where('source_id', $report->getKey())->exists())->toBeFalse();
+    performRouting($service, $report, 'forward_to_cenro_chief', $focal);
+
+    expect(\App\Models\ReportTrackingReference::query()->where('source_type', 'bms')->where('source_id', $report->getKey())->value('tracking_number'))
+        ->toBeString()->not->toBe('');
+});
+
+test('a rolled-back routing attempt also rolls back its tracking reference', function (): void {
+    $focal = routingActor(OrganizationalAccessService::CENRO_FOCAL, 'CENRO Mati');
+    $report = routingReport('Rolled back tracking submission PA');
+    $service = app(DocumentRoutingTransitionService::class);
+
+    try {
+        DB::transaction(function () use ($service, $report, $focal): void {
+            performRouting($service, $report, 'forward_to_cenro_chief', $focal);
+            throw new RuntimeException('fixture outer route rollback');
+        });
+    } catch (RuntimeException $exception) {
+        expect($exception->getMessage())->toBe('fixture outer route rollback');
+    }
+
+    expect(DocumentRoutingEvent::query()->where('source_type', 'bms')->where('source_id', $report->getKey())->count())->toBe(0)
+        ->and(\App\Models\ReportTrackingReference::query()->where('source_type', 'bms')->where('source_id', $report->getKey())->count())->toBe(0);
 });
 
 test('a correction marker requires a real return event while genuine correction history stays visible', function (): void {

@@ -230,7 +230,7 @@ test("shared modal footer and timeline controls keep existing guarded action han
     assert.match(modal, /\{footerActions\}/);
     assert.match(page, /canCorrectSubmissionRouting && details && <Button[^>]*onClick=\{\(\) => openCorrection\(details\)\}/);
     assert.match(page, /onClick=\{\(\) => setReviewHistoryRecord\(details\)\}/);
-    assert.match(page, /open=\{Boolean\(reviewHistoryRecord\)\}/);
+    assert.match(page, /open=\{Boolean\(!selectedReportUnavailable && reviewHistoryRecord\)\}/);
     assert.match(page, /onClose=\{\(\) => setReviewHistoryRecord\(null\)\}/);
     assert.match(page, /closeOnEscape=\{!reviewHistoryRecord\}/);
     assert.match(page, /Full timeline/);

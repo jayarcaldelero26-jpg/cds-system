@@ -30,7 +30,28 @@ abstract class TestCase extends BaseTestCase
         $this->assertIsArray($main);
         $this->assertSame('', (string) ($main['file'] ?? ''));
 
+        $migrationPath = $this->verifiedIsolatedMigrationPath();
+        if ($migrationPath !== null) {
+            $this->app->useDatabasePath(dirname($migrationPath));
+        }
+
         return parent::setUpTraits();
+    }
+
+    protected function verifiedIsolatedMigrationPath(): ?string
+    {
+        $migrationPath = getenv('CDS_TEST_MIGRATIONS_PATH');
+        if (! is_string($migrationPath) || $migrationPath === '') return null;
+
+        $resolvedMigrationPath = realpath($migrationPath);
+        $temporaryRoot = realpath(sys_get_temp_dir());
+        $expectedPrefix = strtolower(rtrim((string) $temporaryRoot, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'cds-smart-migrations-without-sep9-');
+
+        $this->assertNotFalse($resolvedMigrationPath, 'The optional isolated test migration path must exist.');
+        $this->assertStringStartsWith($expectedPrefix, strtolower((string) $resolvedMigrationPath));
+        $this->assertFileDoesNotExist($resolvedMigrationPath.DIRECTORY_SEPARATOR.'2026_09_09_010000_remove_report_reconciliation_and_completeness_metadata.php');
+
+        return (string) $resolvedMigrationPath;
     }
 
     protected function setUp(): void
